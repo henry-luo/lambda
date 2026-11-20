@@ -465,7 +465,6 @@ static const EventHandlerAttribute EVENT_HANDLER_ATTRS[] = {
 typedef struct JsScriptTaskCollection {
     ArrayList* scripts;
     ArrayList* onload_handlers;
-    ArrayList* generated_sources;
     int total_script_elements;
     int inline_scripts;
     int external_scripts;
@@ -616,17 +615,6 @@ static void extract_script_text(Element* script_elem, StrBuf* buf) {
             }
         }
     }
-}
-
-static void append_browser_global_sync(StrBuf* buf) {
-    strbuf_append_str(buf,
-        "\nif (typeof window !== 'undefined') {\n"
-        "  if (typeof window.jQuery !== 'undefined') jQuery = window.jQuery;\n"
-        "  if (typeof window.$ !== 'undefined') $ = window.$;\n"
-        "  else if (typeof jQuery !== 'undefined') $ = jQuery;\n"
-        "  if (typeof jQuery !== 'undefined' && typeof window.jQuery === 'undefined') window.jQuery = jQuery;\n"
-        "  if (typeof $ !== 'undefined' && typeof window.$ === 'undefined') window.$ = $;\n"
-        "}\n");
 }
 
 static char* resolve_wpt_absolute_script_path(const char* src, Url* base_url) {
@@ -1094,11 +1082,9 @@ static bool script_task_collection_init(JsScriptTaskCollection* collection) {
     memset(collection, 0, sizeof(JsScriptTaskCollection));
     collection->scripts = arraylist_new(8);
     collection->onload_handlers = arraylist_new(1);
-    collection->generated_sources = arraylist_new(4);
-    if (!collection->scripts || !collection->onload_handlers || !collection->generated_sources) {
+    if (!collection->scripts || !collection->onload_handlers) {
         script_task_list_free(collection->scripts);
         script_task_list_free(collection->onload_handlers);
-        if (collection->generated_sources) arraylist_free(collection->generated_sources);
         memset(collection, 0, sizeof(JsScriptTaskCollection));
         return false;
     }
@@ -1133,12 +1119,6 @@ static void script_task_collection_free(JsScriptTaskCollection* collection) {
     if (!collection) return;
     script_task_list_free(collection->scripts);
     script_task_list_free(collection->onload_handlers);
-    if (collection->generated_sources) {
-        for (int i = 0; i < collection->generated_sources->length; i++) {
-            strbuf_free((StrBuf*)arraylist_get(collection->generated_sources, i));
-        }
-        arraylist_free(collection->generated_sources);
-    }
     memset(collection, 0, sizeof(JsScriptTaskCollection));
 }
 
@@ -1181,12 +1161,6 @@ static char* script_source_from_strbuf(StrBuf* buf) {
     return mem_strndup(buf->str, buf->length, MEM_CAT_JS_RUNTIME);
 }
 
-static bool script_task_collection_retain_strbuf(JsScriptTaskCollection* collection,
-                                                 StrBuf* source) {
-    if (!collection || !collection->generated_sources || !source) return false;
-    return arraylist_append(collection->generated_sources, source);
-}
-
 static bool is_js_identifier_start_char(char ch) {
     return (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
         ch == '_' || ch == '$';
@@ -1194,61 +1168,6 @@ static bool is_js_identifier_start_char(char ch) {
 
 static bool is_js_identifier_part_char(char ch) {
     return is_js_identifier_start_char(ch) || (ch >= '0' && ch <= '9');
-}
-
-static bool is_js_identifier_boundary(char ch) {
-    return ch == '\0' || !is_js_identifier_part_char(ch);
-}
-
-static void append_classic_script_window_function_exports(const char* source, StrBuf* script_buf) {
-    if (!source || !script_buf) return;
-
-    StrBuf* export_buf = strbuf_new_cap(256);
-    const char* cursor = source;
-    while ((cursor = strstr(cursor, "function")) != nullptr) {
-        char before = cursor == source ? '\0' : cursor[-1];
-        if (!is_js_identifier_boundary(before)) {
-            cursor += 8;
-            continue;
-        }
-        const char* p = cursor + 8;
-        if (!is_js_identifier_boundary(*p) && *p != '*' &&
-            *p != ' ' && *p != '\t' && *p != '\n' && *p != '\r') {
-            cursor += 8;
-            continue;
-        }
-        p = str_skip_ascii_space(p);
-        if (*p == '*') {
-            p++;
-            p = str_skip_ascii_space(p);
-        }
-        if (!is_js_identifier_start_char(*p)) {
-            cursor += 8;
-            continue;
-        }
-        const char* name_start = p;
-        p++;
-        while (is_js_identifier_part_char(*p)) p++;
-        const char* after_name = str_skip_ascii_space(p);
-        if (!after_name || *after_name != '(') {
-            cursor = p;
-            continue;
-        }
-
-        strbuf_append_str(export_buf, "\nif (typeof ");
-        strbuf_append_str_n(export_buf, name_start, (size_t)(p - name_start));
-        strbuf_append_str(export_buf, " === 'function') { window.");
-        strbuf_append_str_n(export_buf, name_start, (size_t)(p - name_start));
-        strbuf_append_str(export_buf, " = ");
-        strbuf_append_str_n(export_buf, name_start, (size_t)(p - name_start));
-        strbuf_append_str(export_buf, "; }\n");
-        cursor = p;
-    }
-
-    if (export_buf->length > 0) {
-        strbuf_append_str_n(script_buf, export_buf->str, export_buf->length);
-    }
-    strbuf_free(export_buf);
 }
 
 static void append_body_onload_source(const char* onload, StrBuf* onload_buf) {
@@ -1640,12 +1559,7 @@ static void collect_scripts_recursive(Element* elem, JsScriptTaskCollection* col
 
         StrBuf* inline_buf = strbuf_new_cap(256);
         extract_script_text(elem, inline_buf);
-        // WPT inline scripts often perform visual DOM setup before calling
-        // test()/promise_test(); the built-in harness stubs suppress assertion
-        // callbacks, but top-level setup must still run for browser parity.
-        if (task->kind == JS_SCRIPT_TASK_CLASSIC && inline_buf->str && inline_buf->length > 0) {
-            append_classic_script_window_function_exports(inline_buf->str, inline_buf);
-        }
+        // the realm's declaration instantiation owns exports; keep author source unchanged.
         task->source = script_source_from_strbuf(inline_buf);
         task->source_len = inline_buf->length;
         collection->inline_scripts++;
@@ -1750,8 +1664,8 @@ static bool script_eval_context_activate(Runtime* runtime) {
         return false;
     }
     // Recovery clears heap-bound transient state after a script fault. Every
-    // following task, including the browser-global sync, still needs the
-    // document realm's Input owner before it can install properties.
+    // following task still needs the document realm's Input owner before
+    // it can install properties.
     return js_runtime_state_ensure_input(task_context);
 }
 
@@ -1882,29 +1796,6 @@ static void script_runner_report_result(Item result, const char* phase_name, con
               filename ? filename : "<unknown>",
               message[0] ? ": " : "",
               message[0] ? message : "");
-}
-
-static bool execute_browser_global_sync(Runtime* runtime, JsPreambleState* preamble,
-                                        JsScriptTaskCollection* collection) {
-    StrBuf* sync_buf = strbuf_new_cap(256);
-    append_browser_global_sync(sync_buf);
-    size_t sync_len = sync_buf->length;
-    // Generated sync snippets can install functions/listeners that outlive this
-    // call; keep the StrBuf wrapper and source alive until script teardown.
-    if (!script_task_collection_retain_strbuf(collection, sync_buf)) {
-        strbuf_free(sync_buf);
-        log_error("execute_document_scripts: failed to retain browser global sync source");
-        return false;
-    }
-    uint64_t result_home = 0;
-    Item result = execute_js_source_with_preamble(runtime, preamble, sync_buf->str,
-                                                 sync_len, "<browser-global-sync>", true, &result_home);
-    if (item_is_error(result)) {
-        script_runner_report_result(result, "global-sync", "<browser-global-sync>");
-        log_error("execute_document_scripts: browser global sync failed");
-        return false;
-    }
-    return true;
 }
 
 static DomElement* script_task_element(DomDocument* document, JsScriptTask* task) {
@@ -2055,7 +1946,6 @@ static void prepare_connected_inline_script(DomElement* script, StrBuf** source_
     if (!source->length) return;
     state->script_already_started = true;
     if (script_runner_module_scripts_enabled() && dom_element_attribute_value_ns(script, "", "nomodule")) return;
-    append_classic_script_window_function_exports(source->str, source);
     JsScriptTask task = {};
     task.kind = JS_SCRIPT_TASK_CLASSIC;
     task.inline_script = script;
@@ -2073,9 +1963,7 @@ static void prepare_connected_inline_script(DomElement* script, StrBuf** source_
 
 static bool execute_script_task_queue(Runtime* runtime, ArrayList* queue,
                                       JsPreambleState* preamble,
-                                      const char* phase_name,
-                                      JsScriptTaskCollection* collection) {
-    bool fatal_error = false;
+                                      const char* phase_name) {
     if (!queue) return true;
     size_t accepted_source_bytes = 0;
     size_t total_compile_limit = script_total_compile_limit_bytes();
@@ -2192,14 +2080,12 @@ static bool execute_script_task_queue(Runtime* runtime, ArrayList* queue,
                           phase_name ? phase_name : "scheduled", filename);
             }
         }
-        if (!execute_browser_global_sync(runtime, preamble, collection)) {
-            fatal_error = true;
-        }
+        // classic bindings already share the realm; task boundaries must not inspect author globals.
         Item microtask_result = js_microtask_flush_result();
         script_runner_report_result(microtask_result, phase_name, filename);
         task->executed = true;
     }
-    return !fatal_error;
+    return true;
 }
 
 struct DocumentWriteScripts {
@@ -2224,7 +2110,7 @@ static void execute_document_written_scripts(void* context, DomElement* element)
     if (script_scheduler_queues_init(&queues)) {
         if (script_scheduler_enqueue(doc, &written, &queues)) {
             execute_script_task_queue(writer->runtime, queues.post_dom, writer->preamble,
-                "document-write", writer->collection);
+                "document-write");
             // scheduled written scripts share the document's lifecycle queues and source owner.
             for (int i = 0; i < written.scripts->length; i++) {
                 JsScriptTask* task = (JsScriptTask*)written.scripts->data[i];
@@ -2475,7 +2361,7 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
 
     phase_start_us = timing ? time_now_us() : 0;
     if (!execute_script_task_queue(
-            runtime, queues.post_dom, preamble, "post-dom", collection)) {
+            runtime, queues.post_dom, preamble, "post-dom")) {
         any_error = true;
     }
     if (timing) timing->user_scripts_us += time_now_us() - phase_start_us;
@@ -2491,7 +2377,7 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
 
     phase_start_us = timing ? time_now_us() : 0;
     if (!execute_script_task_queue(
-            runtime, queues.defer, preamble, "defer", collection)) {
+            runtime, queues.defer, preamble, "defer")) {
         any_error = true;
     }
     if (timing) timing->user_scripts_us += time_now_us() - phase_start_us;
@@ -2508,7 +2394,7 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
     // model, but ready async tasks still run before the window load boundary.
     phase_start_us = timing ? time_now_us() : 0;
     if (!execute_script_task_queue(
-            runtime, queues.async_ready, preamble, "async-ready", collection)) {
+            runtime, queues.async_ready, preamble, "async-ready")) {
         any_error = true;
     }
     if (timing) timing->async_scripts_us += time_now_us() - phase_start_us;

@@ -585,6 +585,34 @@ TEST(JsCallableDefinitions, SharesAstDefinitionWithoutSharingCaptures) {
     runtime_cleanup(&runtime);
 }
 
+TEST(JsCallableDefinitions, FieldMetadataKeepsCaptureAndInitializationOrder) {
+    const char* backends[] = {"ast", "mir"};
+    for (const char* backend_name : backends) {
+        JsExecutionBackendScope backend(backend_name);
+        Runtime runtime = {};
+        runtime_init(&runtime);
+        const char source[] =
+            "var hits=[]; function make(seed) { return class { "
+            "value=(hits.push('value'+seed),seed); "
+            "static token=(hits.push('static'+seed),seed*2); "
+            "static { hits.push('block'+seed); this.after=this.token+1; } "
+            "}; } var A=make(3), B=make(7); var a=new A(), b=new B(); "
+            "[hits.join(','),a.value,b.value,A.after,B.after];";
+        {
+            RootFrame roots(1);
+            Rooted<Item> result(roots, transpile_js_to_mir(&runtime, source,
+                "field-metadata-captures.js", NULL));
+            ASSERT_FALSE(item_is_error(result.get())) << backend_name;
+            EXPECT_EQ(js_strict_equal(js_elements_get_int(result.get(), 0),
+                js_make_string("static3,block3,static7,block7,value3,value7")).item, b2it(true));
+            const double expected[] = {3, 7, 7, 15};
+            for (int i = 0; i < 4; i++) EXPECT_EQ(js_strict_equal(
+                js_elements_get_int(result.get(), i + 1), flt2it(expected[i])).item, b2it(true));
+        }
+        runtime_cleanup(&runtime);
+    }
+}
+
 TEST(JsCallableDefinitions, CachesParameterShapeAndFormalLength) {
     Runtime runtime = {};
     runtime_init(&runtime);

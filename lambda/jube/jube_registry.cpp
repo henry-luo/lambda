@@ -1073,6 +1073,7 @@ static const JubeHostScriptAPI jube_host_script_api = {
     jube_host_well_known_symbol,
     js_get_iterator_proto,
     js_webidl_string_pairs_from_init,
+    js_url_search_params_update,
 };
 
 extern "C" Item js_formdata_collect_form_entries(void* form_elem, void* submitter_elem);

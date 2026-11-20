@@ -18,6 +18,7 @@
 #include "../dom/dom_xhr.h"
 #include "js_error_codes.h"
 #include "../jube/jube_node_permission.h"
+#include "../module/node_core/node_url.hpp"
 #include "js_property_attrs.h"
 #include "js_host_hooks.h"
 #include "js_props.h"
@@ -63,7 +64,6 @@
 extern "C" Item js_proxy_trap_set_with_receiver(Item proxy, Item key, Item value, Item receiver);
 extern "C" void js_async_hooks_after_gc(void);
 extern "C" Item js_global_url_search_params_new(Item init);
-Item node_url_search_params_prototype(void);
 static bool js_activate_url_primitives(void);
 static Item js_install_url_constructor(Item global);
 extern "C" Item js_func_get_custom_proto(Item func);
@@ -17440,7 +17440,6 @@ extern "C" Item js_symbol_well_known(Item name) {
 // URL Constructor — wraps lib/url.c
 // =============================================================================
 
-extern "C" Item js_url_search_params_new(Item init);
 
 // URL globals are installed before node-core; initialize their shared host
 // primitives without turning on the optional Node compatibility namespace.
@@ -17509,14 +17508,90 @@ static Item js_url_field_get(Item callee, Item receiver, Item*, int, uint64_t*) 
     return js_elements_get_int(record, index);
 }
 
+static constexpr size_t JS_URL_SEARCH_INDEX = 9;
+static constexpr size_t JS_URL_PARAMS_INDEX = js_url_field_count - 1;
+static Item js_url_record_from_native(const Url* url, Item params);
+
+static Item js_url_replace_query_or_href(Item receiver, size_t index, Item input, bool refresh_params) {
+    RootFrame roots(6);
+    Rooted<Item> owner(roots, receiver), text(roots, input);
+    Rooted<Item> record(roots, js_url_record(owner.get())), replacement(roots, ItemNull);
+    Rooted<Item> params(roots, ItemNull), key(roots, ItemNull);
+    JS_RETURN_IF_ERROR(record.get());
+    params.set(js_elements_get_int(record.get(), JS_URL_PARAMS_INDEX));
+    char* value = js_url_string_to_cstr(it2s(text.get()));
+    if (!value) return ItemError;
+    Url* parsed = nullptr;
+    if (index == 0) parsed = url_parse(value);
+    else {
+        parsed = url_parse(it2s(js_elements_get_int(record.get(), 0))->chars);
+        if (parsed) {
+            const char* query = value[0] == '?' ? value + 1 : value;
+            uint8_t keep[256];
+            // the URL query set preserves escapes, while form serialization comes from URLSearchParams.
+            for (size_t ch = 0; ch < sizeof(keep); ++ch)
+                keep[ch] = ch > 0x20 && ch < 0x7f && ch != '"' && ch != '#' && ch != '<' && ch != '>' &&
+                    !(ch == '\'' && url_scheme_is_special(parsed->scheme));
+            char* encoded = url_encode_with_table(query, strlen(query), keep);
+            StrBuf* search = strbuf_new();
+            if (!encoded || !search) {
+                if (encoded) mem_free(encoded);
+                if (search) strbuf_free(search);
+                url_destroy(parsed); mem_free(value); return ItemError;
+            }
+            if (value[0]) strbuf_append_char(search, '?');
+            strbuf_append_str(search, encoded);
+            mem_free(encoded);
+            UrlError status = url_set_search(parsed, search->str);
+            strbuf_free(search);
+            String* href = status == URL_OK ? url_construct_href(parsed) : nullptr;
+            Url* updated = href ? url_parse(href->chars) : nullptr;
+            if (href) mem_free(href);
+            url_destroy(parsed);
+            parsed = updated;
+        }
+    }
+    mem_free(value);
+    if (!parsed || !parsed->is_valid) {
+        if (parsed) url_destroy(parsed);
+        return js_throw_type_error("Invalid URL");
+    }
+    replacement.set(js_url_record_from_native(parsed, params.get()));
+    if (item_is_error(replacement.get())) { url_destroy(parsed); return replacement.get(); }
+    key.set({.item = s2it(mvp_lmd_internal_name(LMD_INTERNAL_URL))});
+    Item result = js_private_property_set(owner.get(), key.get(), replacement.get(), 0);
+    if (!item_is_error(result) && refresh_params) {
+        const char* search = url_get_search(parsed);
+        result = node_url_search_params_replace_query(params.get(), search ? search : "",
+            search ? (int)strlen(search) : 0);
+    }
+    url_destroy(parsed);
+    return item_is_error(result) ? result : make_js_undefined();
+}
+
+Item js_url_search_params_update(Item params_item) {
+    RootFrame roots(4);
+    Rooted<Item> params(roots, params_item), owner(roots, ItemNull), query(roots, ItemNull);
+    Rooted<Item> key(roots, {.item = s2it(mvp_lmd_internal_name(LMD_INTERNAL_URL))});
+    Item found = ItemNull;
+    if (js_ordinary_get_own(params.get(), key.get(), params.get(), &found) != JS_OWN_READY)
+        return make_js_undefined();
+    owner.set(found);
+    if (!js_object_has_class(owner.get(), JS_CLASS_URL)) return make_js_undefined();
+    query.set(node_url_search_params_string(params.get()));
+    JS_RETURN_IF_ERROR(query.get());
+    return js_url_replace_query_or_href(owner.get(), JS_URL_SEARCH_INDEX, query.get(), false);
+}
+
 static Item js_url_field_set(Item callee, Item receiver, Item* args, int argc, uint64_t*) {
     size_t index = js_fn_native((JsFunction*)callee.function)->target.bits;
-    RootFrame roots(2);
-    if (!roots.valid()) return ItemError;
-    Rooted<Item> record(roots, js_url_record(receiver));
+    RootFrame roots(3);
+    Rooted<Item> owner(roots, receiver), record(roots, js_url_record(receiver));
     JS_RETURN_IF_ERROR(record.get());
     Rooted<Item> value(roots, js_to_string(argc ? args[0] : make_js_undefined()));
     JS_RETURN_IF_ERROR(value.get());
+    if (index == 0 || index == JS_URL_SEARCH_INDEX)
+        return js_url_replace_query_or_href(owner.get(), index, value.get(), true);
     JS_RETURN_IF_ERROR(js_elements_set_int(record.get(), index, value.get()));
     return make_js_undefined();
 }
@@ -17546,34 +17621,40 @@ static Item js_install_url_constructor(Item global) {
     return constructor.get();
 }
 
+static Item js_url_record_from_native(const Url* url, Item existing_params) {
+    RootFrame roots(3);
+    Rooted<Item> record(roots, js_array_new(0)), params(roots, existing_params), value(roots, ItemNull);
+    for (size_t index = 0; index < js_url_field_count; ++index) {
+        const JsUrlField* field = &js_url_fields[index];
+        const char* text = field->get ? field->get(url) : url_get_search(url);
+        value.set(text ? js_name_item(text, strlen(text)) : ItemEmptyString);
+        if (!field->get) {
+            if (params.get().item == ITEM_NULL) params.set(js_url_search_params_new(value.get()));
+            value.set(params.get());
+        }
+        JS_RETURN_IF_ERROR(value.get());
+        JS_RETURN_IF_ERROR(js_array_push(record.get(), value.get()));
+    }
+    return record.get();
+}
+
 static Item js_url_to_object(Url* url) {
     if (!url || !url->is_valid) {
         if (url) url_destroy(url);
-        // a normal null completion lets [[Construct]] fabricate an uninitialized URL.
         return js_throw_type_error("Invalid URL");
     }
-    if (!js_activate_url_primitives()) {
-        log_error("js_url_to_object: shared URL primitive initialization failed");
-        url_destroy(url);
-        return ItemError;
-    }
-    RootFrame roots(1);
-    if (!roots.valid()) { url_destroy(url); return ItemError; }
-    Rooted<Item> record(roots, js_array_new(0));
-    // native URL getters read a branded, private record even after public fields
-    // are shadowed or frozen; prototype descriptor discovery uses the same data.
-    NameRef key = mvp_lmd_internal_name(LMD_INTERNAL_URL);
-    Item status = key ? js_status_ok() : ItemError;
-    for (size_t index = 0; index < js_url_field_count && !item_is_error(status); index++) {
-        const JsUrlField* field = &js_url_fields[index];
-        const char* text = field->get ? field->get(url) : url_get_search(url);
-        Item value = text ? js_name_item(text, strlen(text)) : ItemEmptyString;
-        if (!field->get) value = js_url_search_params_new(value);
-        status = item_is_error(value) ? value : js_array_push(record.get(), value);
-    }
+    if (!js_activate_url_primitives()) { url_destroy(url); return ItemError; }
+    RootFrame roots(4);
+    Rooted<Item> record(roots, js_url_record_from_native(url, ItemNull));
     url_destroy(url);
-    return item_is_error(status) ? status : js_native_private_array_object(
-        JS_CLASS_URL, Item{.item = s2it(key)}, record.get(), ItemNull);
+    JS_RETURN_IF_ERROR(record.get());
+    Rooted<Item> key(roots, {.item = s2it(mvp_lmd_internal_name(LMD_INTERNAL_URL))});
+    Rooted<Item> object(roots, js_native_private_array_object(JS_CLASS_URL, key.get(), record.get(), ItemNull));
+    JS_RETURN_IF_ERROR(object.get());
+    Rooted<Item> params(roots, js_elements_get_int(record.get(), JS_URL_PARAMS_INDEX));
+    // the live parameter object retains its URL owner through an unforgeable, traced private edge.
+    JS_RETURN_IF_ERROR(js_private_field_define(params.get(), key.get(), object.get()));
+    return object.get();
 }
 
 extern "C" Item js_url_construct(Item input) {
@@ -17648,26 +17729,34 @@ static Item js_readable_stream_pipe_writer_call(Item writer, const char* method,
     return js_call_function(function, writer, args, arg_count);
 }
 
+enum JsReadableStreamSlot {
+    JS_READ_REQUESTS, JS_READ_REQUEST_INDEX, JS_READ_STARTED, JS_READ_PULLING,
+    JS_READ_PULL_AGAIN, JS_READ_ERRORED, JS_READ_ERROR, JS_READ_CONTROLLER,
+    JS_READ_SLOT_COUNT
+};
+
+static Item js_readable_stream_state(Item stream) {
+    return js_native_private_array_state(stream, JS_CLASS_READABLE_STREAM,
+        JS_READ_SLOT_COUNT, "Illegal ReadableStream receiver");
+}
+
+static Item js_readable_stream_pull_if_needed(Item stream);
+static Item js_readable_stream_drain_reads(Item stream);
+
 static Item js_readable_stream_controller_enqueue(Item env_item, Item chunk) {
     JS_ENV_OR_UNDEFINED(env, env_item);
-    RootFrame roots(3);
-    Rooted<Item> stream_root(roots, env[0]);
-    Rooted<Item> chunk_root(roots, chunk);
-    Rooted<Item> writer_root(roots, ItemNull);
-    Item chunks = js_get_key_cstr(stream_root.get(), "__chunks__");
-    if (get_type_id(chunks) != LMD_TYPE_ARRAY) {
-        chunks = js_array_new(0);
-        js_set_key_cstr(stream_root.get(), "__chunks__", chunks);
-    }
-    Item appended = js_array_push(chunks, chunk_root.get());
-    if (item_is_error(appended)) return appended;
+    RootFrame roots(4);
+    Rooted<Item> stream_root(roots, env[0]), chunk_root(roots, chunk);
+    Rooted<Item> writer_root(roots, ItemNull), chunks(roots, ItemNull);
+    chunks.set(js_get_key_cstr(stream_root.get(), "__chunks__"));
+    JS_RETURN_IF_ERROR(js_array_push(chunks.get(), chunk_root.get()));
+    JS_RETURN_IF_ERROR(js_readable_stream_drain_reads(stream_root.get()));
     writer_root.set(js_get_key_cstr(stream_root.get(), "__pipe_writer__"));
     if (js_is_callable(js_get_key_cstr(writer_root.get(), "write"))) {
         Item args[] = {chunk_root.get()};
-        Item write_result = js_readable_stream_pipe_writer_call(writer_root.get(), "write", args, 1);
-        if (item_is_error(write_result)) return write_result;
+        JS_RETURN_IF_ERROR(js_readable_stream_pipe_writer_call(writer_root.get(), "write", args, 1));
     }
-    return make_js_undefined();
+    return js_readable_stream_pull_if_needed(stream_root.get());
 }
 
 static Item js_readable_stream_controller_close(Item env_item) {
@@ -17676,12 +17765,25 @@ static Item js_readable_stream_controller_close(Item env_item) {
     Rooted<Item> stream_root(roots, env[0]);
     Rooted<Item> writer_root(roots,
         js_get_key_cstr(stream_root.get(), "__pipe_writer__"));
-    js_set_key_cstr(stream_root.get(), "__closed__", (Item){.item = b2it(true)});
+    JS_RETURN_IF_ERROR(js_set_key_cstr(stream_root.get(), "__closed__", (Item){.item = b2it(true)}));
+    JS_RETURN_IF_ERROR(js_readable_stream_drain_reads(stream_root.get()));
     if (js_is_callable(js_get_key_cstr(writer_root.get(), "close"))) {
-        Item close_result = js_readable_stream_pipe_writer_call(writer_root.get(), "close", NULL, 0);
-        if (item_is_error(close_result)) return close_result;
+        JS_RETURN_IF_ERROR(js_readable_stream_pipe_writer_call(writer_root.get(), "close", NULL, 0));
     }
     return make_js_undefined();
+}
+
+static Item js_readable_stream_controller_error(Item env_item, Item reason) {
+    JS_ENV_OR_UNDEFINED(env, env_item);
+    RootFrame roots(3);
+    Rooted<Item> stream(roots, env[0]), error(roots, reason);
+    Rooted<Item> state(roots, js_readable_stream_state(stream.get()));
+    JS_RETURN_IF_ERROR(state.get());
+    if (js_is_truthy(js_elements_get_int(state.get(), JS_READ_ERRORED)) ||
+            js_is_truthy(js_get_key_cstr(stream.get(), "__closed__"))) return make_js_undefined();
+    JS_RETURN_IF_ERROR(js_elements_set_int(state.get(), JS_READ_ERROR, error.get()));
+    JS_RETURN_IF_ERROR(js_elements_set_int(state.get(), JS_READ_ERRORED, (Item){.item = ITEM_TRUE}));
+    return js_readable_stream_drain_reads(stream.get());
 }
 
 static Item js_readable_stream_error_with_code(const char* name, const char* code, const char* message) {
@@ -17746,68 +17848,124 @@ static Item js_readable_stream_make_byob_request(Item stream, Item view) {
     return request;
 }
 
-static Item js_readable_stream_reader_read(Item env_item, Item view) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return js_promise_resolve(make_js_undefined());
+static Item js_readable_stream_drain_reads(Item stream) {
     RootFrame roots(7);
-    Rooted<Item> stream_root(roots, env[0]), view_root(roots, view);
-    Rooted<Item> chunks_root(roots, ItemNull), result_root(roots, ItemNull);
-    Rooted<Item> controller_root(roots, ItemNull), method_root(roots, ItemNull), source_root(roots, ItemNull);
-    Item stream = stream_root.get();
-    bool is_byob = js_web_stream_item_is_true(env[1]);
+    Rooted<Item> owner(roots, stream), state(roots, js_readable_stream_state(owner.get()));
+    JS_RETURN_IF_ERROR(state.get());
+    Rooted<Item> requests(roots, js_elements_get_int(state.get(), JS_READ_REQUESTS));
+    Rooted<Item> chunks(roots, js_get_key_cstr(owner.get(), "__chunks__"));
+    Rooted<Item> request(roots, ItemNull), result(roots, ItemNull), value(roots, ItemNull);
+    int64_t pending = it2i(js_elements_get_int(state.get(), JS_READ_REQUEST_INDEX));
+    int64_t index = it2i(js_get_key_cstr(owner.get(), "__read_index__"));
+    bool closed = js_is_truthy(js_get_key_cstr(owner.get(), "__closed__"));
+    bool failed = js_is_truthy(js_elements_get_int(state.get(), JS_READ_ERRORED));
+    while (pending < js_array_length(requests.get())) {
+        bool has_chunk = index < js_array_length(chunks.get());
+        if (!failed && !has_chunk && !closed) break;
+        request.set(js_elements_get_int(requests.get(), pending++));
+        JS_RETURN_IF_ERROR(js_elements_set_int(state.get(), JS_READ_REQUEST_INDEX, (Item){.item = i2it(pending)}));
+        JS_RETURN_IF_ERROR(js_elements_set_int(requests.get(), pending - 1, ItemNull));
+        if (failed) {
+            js_promise_reject_existing(js_elements_get_int(request.get(), 0),
+                js_elements_get_int(state.get(), JS_READ_ERROR));
+            continue;
+        }
+        result.set(js_new_object());
+        value.set(has_chunk ? js_elements_get_int(chunks.get(), index) : make_js_undefined());
+        JS_RETURN_IF_ERROR(js_set_key_cstr(result.get(), "value", value.get()));
+        JS_RETURN_IF_ERROR(js_set_key_cstr(result.get(), "done", (Item){.item = b2it(!has_chunk)}));
+        if (has_chunk) {
+            JS_RETURN_IF_ERROR(js_elements_set_int(chunks.get(), index++, ItemNull));
+            JS_RETURN_IF_ERROR(js_set_key_cstr(owner.get(), "__read_index__", (Item){.item = i2it(index)}));
+        } else if (js_is_truthy(js_elements_get_int(request.get(), 2))) {
+            js_readable_stream_detach_byob_view(js_elements_get_int(request.get(), 1));
+        }
+        js_promise_fulfill_existing(js_elements_get_int(request.get(), 0), result.get());
+    }
+    if (pending == js_array_length(requests.get())) {
+        requests.set(js_array_new(0));
+        JS_RETURN_IF_ERROR(js_elements_set_int(state.get(), JS_READ_REQUESTS, requests.get()));
+        JS_RETURN_IF_ERROR(js_elements_set_int(state.get(), JS_READ_REQUEST_INDEX, (Item){.item = i2it(0)}));
+    }
+    return make_js_undefined();
+}
 
-    if (is_byob && js_is_typed_array(view) && js_typed_array_byte_length(view) == 0) {
+static Item js_readable_stream_algorithm_fulfilled(Item env_item, Item) {
+    JS_ENV_OR_UNDEFINED(env, env_item);
+    RootFrame roots(2);
+    Rooted<Item> stream(roots, env[0]), state(roots, js_readable_stream_state(stream.get()));
+    JS_RETURN_IF_ERROR(state.get());
+    bool start = js_is_truthy(env[1]);
+    bool again = start || js_is_truthy(js_elements_get_int(state.get(), JS_READ_PULL_AGAIN));
+    JS_RETURN_IF_ERROR(js_elements_set_int(state.get(), start ? JS_READ_STARTED : JS_READ_PULLING,
+        (Item){.item = b2it(start)}));
+    JS_RETURN_IF_ERROR(js_elements_set_int(state.get(), JS_READ_PULL_AGAIN, (Item){.item = ITEM_FALSE}));
+    return again ? js_readable_stream_pull_if_needed(stream.get()) : make_js_undefined();
+}
+
+static Item js_readable_stream_observe_algorithm(Item stream, Item completion, bool start) {
+    RootFrame roots(4);
+    Rooted<Item> owner(roots, stream), promise(roots, js_promise_from_completion(completion));
+    JS_RETURN_IF_ERROR(promise.get());
+    Item* env = js_alloc_env2(owner.get(), (Item){.item = b2it(start)});
+    if (!env) return ItemError;
+    Rooted<Item> fulfilled(roots, js_new_native_closure(js_readable_stream_algorithm_fulfilled, 1, env, 2));
+    JS_RETURN_IF_ERROR(fulfilled.get());
+    Rooted<Item> rejected(roots, js_new_native_closure(js_readable_stream_controller_error, 1, env, 2));
+    JS_RETURN_IF_ERROR(rejected.get());
+    return js_promise_observe(promise.get(), fulfilled.get(), rejected.get(), ItemNull)
+        ? make_js_undefined() : ItemError;
+}
+
+static Item js_readable_stream_pull_if_needed(Item stream) {
+    RootFrame roots(6);
+    Rooted<Item> owner(roots, stream), state(roots, js_readable_stream_state(owner.get()));
+    JS_RETURN_IF_ERROR(state.get());
+    Rooted<Item> requests(roots, js_elements_get_int(state.get(), JS_READ_REQUESTS));
+    if (!js_is_truthy(js_elements_get_int(state.get(), JS_READ_STARTED)) ||
+            js_is_truthy(js_elements_get_int(state.get(), JS_READ_ERRORED)) ||
+            js_is_truthy(js_get_key_cstr(owner.get(), "__closed__")) ||
+            it2i(js_elements_get_int(state.get(), JS_READ_REQUEST_INDEX)) >= js_array_length(requests.get()))
+        return make_js_undefined();
+    if (js_is_truthy(js_elements_get_int(state.get(), JS_READ_PULLING))) {
+        JS_RETURN_IF_ERROR(js_elements_set_int(state.get(), JS_READ_PULL_AGAIN, (Item){.item = ITEM_TRUE}));
+        return make_js_undefined();
+    }
+    Rooted<Item> method(roots, js_get_key_cstr(owner.get(), "__pull__"));
+    if (!js_is_callable(method.get())) return make_js_undefined();
+    JS_RETURN_IF_ERROR(js_elements_set_int(state.get(), JS_READ_PULLING, (Item){.item = ITEM_TRUE}));
+    Rooted<Item> controller(roots, js_elements_get_int(state.get(), JS_READ_CONTROLLER));
+    Rooted<Item> source(roots, js_get_key_cstr(owner.get(), "__source__"));
+    Item argument = controller.get();
+    // the pending request survives the async pull; queue emptiness is not EOF.
+    Item completion = js_call_function(method.get(), source.get(), &argument, 1);
+    return js_readable_stream_observe_algorithm(owner.get(), completion, false);
+}
+
+static Item js_readable_stream_reader_read(Item env_item, Item view) {
+    JS_ENV_OR_UNDEFINED(env, env_item);
+    RootFrame roots(6);
+    Rooted<Item> stream(roots, env[0]), view_root(roots, view);
+    bool byob = js_is_truthy(env[1]);
+    if (byob && js_is_typed_array(view_root.get()) && js_typed_array_byte_length(view_root.get()) == 0)
         return js_promise_reject(js_readable_stream_error_with_code("TypeError",
             "ERR_INVALID_STATE", "Invalid state: View has zero byteLength"));
+    Rooted<Item> state(roots, js_readable_stream_state(stream.get()));
+    JS_RETURN_IF_ERROR(state.get());
+    Rooted<Item> promise(roots, js_promise_create_pending()), request(roots, js_array_new(0));
+    JS_RETURN_IF_ERROR(promise.get());
+    JS_RETURN_IF_ERROR(js_array_push(request.get(), promise.get()));
+    JS_RETURN_IF_ERROR(js_array_push(request.get(), view_root.get()));
+    JS_RETURN_IF_ERROR(js_array_push(request.get(), (Item){.item = b2it(byob)}));
+    JS_RETURN_IF_ERROR(js_array_push(js_elements_get_int(state.get(), JS_READ_REQUESTS), request.get()));
+    if (byob) {
+        Rooted<Item> controller(roots, js_elements_get_int(state.get(), JS_READ_CONTROLLER));
+        request.set(js_readable_stream_make_byob_request(stream.get(), view_root.get()));
+        JS_RETURN_IF_ERROR(js_set_key_cstr(controller.get(), "byobRequest", request.get()));
     }
-
-    Item chunks = js_get_key_cstr(stream, "__chunks__");
-    chunks_root.set(chunks);
-    int64_t index = 0;
-    Item index_item = js_get_key_cstr(stream, "__read_index__");
-    if (get_type_id(index_item) == LMD_TYPE_INT) index = it2i(index_item);
-
-    Item result = js_new_object();
-    result_root.set(result);
-    int64_t len = get_type_id(chunks) == LMD_TYPE_ARRAY ? js_array_length(chunks) : 0;
-    if (index < len) {
-        js_set_key_cstr(result, "value", js_elements_get_int(chunks, index));
-        js_set_key_cstr(result, "done", (Item){.item = b2it(false)});
-        js_set_key_cstr(stream, "__read_index__", (Item){.item = i2it(index + 1)});
-    } else {
-        Item pull_fn = js_get_key_cstr(stream, "__pull__");
-        method_root.set(pull_fn);
-        if (js_is_callable(pull_fn) &&
-            !js_web_stream_item_is_true(js_get_key_cstr(stream, "__closed__"))) {
-            Item controller = js_new_object();
-            controller_root.set(controller);
-            Item* controller_env = js_alloc_env2(stream, view);
-            // publish a closure owner before any later allocation can collect its environment.
-            source_root.set(js_new_native_closure(js_readable_stream_controller_enqueue, 1, controller_env, 2));
-            js_set_key_cstr(controller, "enqueue", source_root.get());
-            source_root.set(js_new_native_closure(js_readable_stream_controller_close, 0, controller_env, 2));
-            js_set_key_cstr(controller, "close", source_root.get());
-            js_set_key_cstr(controller, "byobRequest", js_readable_stream_make_byob_request(stream, view));
-            JS_ASSIGN_OR_RETURN(pull_result, js_call_function(pull_fn,
-                js_get_key_cstr(stream, "__source__"), &controller, 1));
-            chunks = js_get_key_cstr(stream, "__chunks__");
-            chunks_root.set(chunks);
-            len = get_type_id(chunks) == LMD_TYPE_ARRAY ? js_array_length(chunks) : 0;
-            if (index < len) {
-                js_set_key_cstr(result, "value", js_elements_get_int(chunks, index));
-                js_set_key_cstr(result, "done", (Item){.item = b2it(false)});
-                js_set_key_cstr(stream, "__read_index__", (Item){.item = i2it(index + 1)});
-                return js_promise_resolve(result);
-            }
-        }
-        if (is_byob && js_is_typed_array(view) &&
-            js_web_stream_item_is_true(js_get_key_cstr(stream, "__closed__"))) {
-            js_readable_stream_detach_byob_view(view);
-        }
-        js_set_key_cstr(result, "value", make_js_undefined());
-        js_set_key_cstr(result, "done", (Item){.item = b2it(true)});
-    }
-    return js_promise_resolve(result);
+    JS_RETURN_IF_ERROR(js_readable_stream_drain_reads(stream.get()));
+    JS_RETURN_IF_ERROR(js_readable_stream_pull_if_needed(stream.get()));
+    return promise.get();
 }
 
 static Item js_readable_stream_get_reader_stub(Item options) {
@@ -17886,32 +18044,55 @@ static Item js_readable_stream_pipe_through(Item transform) {
 }
 
 extern "C" Item js_readable_stream_new(Item underlying_source) {
-    RootFrame roots(4);
-    Rooted<Item> obj_root(roots, js_new_object_with_class(JS_CLASS_READABLE_STREAM));
-    Rooted<Item> get_reader_root(roots,
-        js_new_native_function(js_readable_stream_get_reader_stub));
-    Rooted<Item> pipe_to_root(roots, js_new_native_function(js_readable_stream_pipe_to));
-    Rooted<Item> pipe_through_root(roots,
-        js_new_native_function(js_readable_stream_pipe_through));
-    js_set_key_cstr(obj_root.get(), "__chunks__", js_array_new(0));
-    js_set_key_cstr(obj_root.get(), "__closed__", (Item){.item = b2it(false)});
-    js_set_key_cstr(obj_root.get(), "__read_index__", (Item){.item = i2it(0)});
-    Item get_reader_key = js_name_item("getReader");
-    js_set_key_default(obj_root.get(), get_reader_key, get_reader_root.get());
-    js_set_key_cstr(obj_root.get(), "pipeTo", pipe_to_root.get());
-    js_set_key_cstr(obj_root.get(), "pipeThrough", pipe_through_root.get());
-    js_set_key_cstr(obj_root.get(), "__source__", underlying_source);
-    js_set_key_cstr(obj_root.get(), "__pull__", js_get_key_cstr(underlying_source, "pull"));
-
-    Item start_fn = js_get_key_cstr(underlying_source, "start");
-    if (js_is_callable(start_fn)) {
-        Item* env = js_alloc_env1(obj_root.get());
-        Item controller = js_new_object();
-        js_set_key_cstr(controller, "enqueue", js_new_native_closure(js_readable_stream_controller_enqueue, 1, env, 1));
-        js_set_key_cstr(controller, "close", js_new_native_closure(js_readable_stream_controller_close, 0, env, 1));
-        js_call_function(start_fn, underlying_source, &controller, 1);
+    RootFrame roots(7);
+    Rooted<Item> source(roots, underlying_source);
+    Rooted<Item> obj(roots, js_new_object_with_class(JS_CLASS_READABLE_STREAM));
+    Rooted<Item> state(roots, js_array_new(0)), controller(roots, js_new_object());
+    Rooted<Item> method(roots, ItemNull), key(roots,
+        {.item = s2it(mvp_lmd_internal_name(LMD_INTERNAL_READABLE_STREAM))});
+    Rooted<Item> completion(roots, ItemNull);
+    for (int slot = 0; slot < JS_READ_SLOT_COUNT; slot++)
+        JS_RETURN_IF_ERROR(js_array_push(state.get(), ItemNull));
+    JS_RETURN_IF_ERROR(js_elements_set_int(state.get(), JS_READ_REQUESTS, js_array_new(0)));
+    JS_RETURN_IF_ERROR(js_elements_set_int(state.get(), JS_READ_REQUEST_INDEX, (Item){.item = i2it(0)}));
+    JS_RETURN_IF_ERROR(js_elements_set_int(state.get(), JS_READ_CONTROLLER, controller.get()));
+    JS_RETURN_IF_ERROR(js_private_field_define(obj.get(), key.get(), state.get()));
+    JS_RETURN_IF_ERROR(js_set_key_cstr(obj.get(), "__chunks__", js_array_new(0)));
+    JS_RETURN_IF_ERROR(js_set_key_cstr(obj.get(), "__closed__", (Item){.item = ITEM_FALSE}));
+    JS_RETURN_IF_ERROR(js_set_key_cstr(obj.get(), "__read_index__", (Item){.item = i2it(0)}));
+    static const struct {const char* name; Item (*body)(Item);} methods[] = {
+        {"getReader", js_readable_stream_get_reader_stub}, {"pipeTo", js_readable_stream_pipe_to},
+        {"pipeThrough", js_readable_stream_pipe_through}
+    };
+    for (const auto& entry : methods) {
+        method.set(js_new_native_function(entry.body));
+        JS_RETURN_IF_ERROR(js_set_key_cstr(obj.get(), entry.name, method.get()));
     }
-    return obj_root.get();
+    JS_RETURN_IF_ERROR(js_set_key_cstr(obj.get(), "__source__", source.get()));
+    method.set(js_get_key_cstr(source.get(), "pull"));
+    JS_RETURN_IF_ERROR(method.get());
+    JS_RETURN_IF_ERROR(js_set_key_cstr(obj.get(), "__pull__", method.get()));
+    Item* env = js_alloc_env1(obj.get());
+    if (!env) return ItemError;
+    static const struct {const char* name; Item (*body)(Item, Item);} callbacks[] = {
+        {"enqueue", js_readable_stream_controller_enqueue}, {"error", js_readable_stream_controller_error}
+    };
+    // the first published closure owns the environment across later allocations.
+    for (const auto& entry : callbacks) {
+        method.set(js_new_native_closure(entry.body, 1, env, 1));
+        JS_RETURN_IF_ERROR(js_set_key_cstr(controller.get(), entry.name, method.get()));
+    }
+    method.set(js_new_native_closure(js_readable_stream_controller_close, 0, env, 1));
+    JS_RETURN_IF_ERROR(js_set_key_cstr(controller.get(), "close", method.get()));
+    method.set(js_get_key_cstr(source.get(), "start"));
+    JS_RETURN_IF_ERROR(method.get());
+    if (js_is_callable(method.get())) {
+        Item argument = controller.get();
+        completion.set(js_call_function(method.get(), source.get(), &argument, 1));
+        JS_RETURN_IF_ERROR(completion.get());
+    }
+    JS_RETURN_IF_ERROR(js_readable_stream_observe_algorithm(obj.get(), completion.get(), true));
+    return obj.get();
 }
 
 static Item js_writable_stream_writer_write(Item env_item, Item chunk) {

@@ -997,7 +997,7 @@ static void js_runtime_state_visit_root_vectors(JsRuntimeState* state,
     if (!state || !visit) return;
     visit(&state->clipboard, &state->clipboard.blob_prototype, 8,
         "clipboard prototypes and drag session", data);
-    visit(&state->dom, &state->dom.implementation, 12,
+    visit(&state->dom, &state->dom.implementation, 13,
         "DOM singleton wrappers", data);
     visit(&state->performance, &state->performance.object, 10,
         "Performance timing buffers and interfaces", data);
@@ -1924,17 +1924,17 @@ static Item js_error_prepare_stack_trace_with_trace(Item error_obj, StackFrame* 
     return js_to_string(prepared);
 }
 
-extern "C" Item js_error_materialize_stack(Item error_obj) {
+extern "C" Item js_error_materialize_stack_for(Item error_obj, Item display_obj) {
     LambdaError* error = js_error_from_value(error_obj);
     if (!error) return make_js_undefined();
     if (error->js_stack_item) return (Item){.item = error->js_stack_item};
 
-    RootFrame roots(6);
-    Rooted<Item> error_root(roots, error_obj);
+    RootFrame roots(7);
+    Rooted<Item> error_root(roots, error_obj), display_root(roots, display_obj);
     // Error property reads can allocate and move the unified carrier; read
     // through the rooted object so the raw-stack owner is never invalidated.
-    Rooted<Item> name_root(roots, js_get_key_cstr(error_root.get(), "name"));
-    Rooted<Item> message_root(roots, js_get_key_cstr(error_root.get(), "message"));
+    Rooted<Item> name_root(roots, js_get_key_cstr(display_root.get(), "name"));
+    Rooted<Item> message_root(roots, js_get_key_cstr(display_root.get(), "message"));
     Rooted<Item> prepared_root(roots, (Item){.item = ITEM_JS_UNDEFINED});
     Rooted<Item> native_root(roots, (Item){.item = ITEM_JS_UNDEFINED});
     Rooted<Item> stack_root(roots, (Item){.item = ITEM_JS_UNDEFINED});
@@ -1951,7 +1951,7 @@ extern "C" Item js_error_materialize_stack(Item error_obj) {
     }
     StackFrame* trace = error ? error->stack_trace : NULL;
     if (trace) {
-        prepared_root.set(js_error_prepare_stack_trace_with_trace(error_root.get(), trace));
+        prepared_root.set(js_error_prepare_stack_trace_with_trace(display_root.get(), trace));
         native_root.set(js_error_stack_string_from_trace(name_root.get(), message_root.get(), trace));
     }
     stack_root.set(prepared_root.get().item != ITEM_JS_UNDEFINED ? prepared_root.get() :
@@ -1965,6 +1965,10 @@ extern "C" Item js_error_materialize_stack(Item error_obj) {
         error->js_own_flags |= JS_ERROR_OWN_STACK;
     }
     return stack_root.get();
+}
+
+extern "C" Item js_error_materialize_stack(Item error_obj) {
+    return js_error_materialize_stack_for(error_obj, error_obj);
 }
 
 

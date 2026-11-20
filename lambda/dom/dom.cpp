@@ -1169,6 +1169,8 @@ static void dom_remove_popup_visibility(DomElement* element, void*) {
     if (was_modal && element->doc) dom_recheck_focus_in(element->doc->root);
 }
 
+static void dom_node_iterators_pre_remove(DomNode* child);
+
 static inline void dom_pre_remove(DomNode* child, bool record_mutation = true,
                                   bool release_external = true) {
     if (child && dom_node_is_connected(child)) {
@@ -1176,6 +1178,7 @@ static inline void dom_pre_remove(DomNode* child, bool record_mutation = true,
         dom_note_selected_content_mutation(child, false);
         dom_custom_element_tree_changed(child, false);
     }
+    dom_node_iterators_pre_remove(child);
     DocState* st = dom_state_for_nodes(child, child ? child->parent : nullptr);
     radiant_dom_pre_remove_state(st, child);
     if (child && js_document_active_element &&
@@ -1424,6 +1427,7 @@ extern "C" void dom_batch_reset() {
     js_runtime_state.dom.media_poll_function = ItemNull;
     js_runtime_state.dom.media_poll_timer = ItemNull;
     js_runtime_state.dom.media_poll_running = false;
+    js_runtime_state.dom.node_iterators = ItemNull;
     _js_current_document = nullptr;
     dom_events_reset();
     js_xhr_reset();
@@ -3269,12 +3273,58 @@ static Item dom_document_cookie_value(DomDocument* document) {
     return result;
 }
 
+static DomElement* dom_document_title_element(DomDocument* document, bool create) {
+    DomElement* root = document ? document->root.get() : nullptr;
+    if (!root) return nullptr;
+    bool svg = root->tag() == MARKUP_NAME_SVG &&
+        strcmp(dom_element_namespace_uri(root), "http://www.w3.org/2000/svg") == 0;
+    DomElement* parent = svg ? root : nullptr;
+    for (DomNode* node = root; node; node = dom_source_next_in_tree(root, node)) {
+        if (!node->is_element()) continue;
+        DomElement* element = node->as_element();
+        if (svg) {
+            if (node->parent == root && element->tag() == MARKUP_NAME_TITLE &&
+                strcmp(dom_element_namespace_uri(element), dom_element_namespace_uri(root)) == 0)
+                return element;
+        } else {
+            if (dom_element_is_html_tag(element, MARKUP_NAME_TITLE)) return element;
+            if (!parent && node->parent == root && dom_element_is_html_tag(root, MARKUP_NAME_HTML) &&
+                dom_element_is_html_tag(element, MARKUP_NAME_HEAD)) parent = element;
+        }
+    }
+    if (!create || !parent) return nullptr;
+    DomElement* title = (DomElement*)dom_create_backed_element_ns_bridge(
+        document, "title", dom_element_namespace_uri(parent));
+    if (!title) return nullptr;
+    RootFrame roots(2);
+    Rooted<Item> child(roots, dom_wrap_element(title)),
+        reference(roots, svg && parent->first_child
+            ? dom_wrap_element(parent->first_child) : ItemNull);
+    Item inserted = dom_insert_before_bridge(parent, child.get(), reference.get());
+    return item_is_error(inserted) ? nullptr : title;
+}
+
+static bool dom_replace_text_content(DomElement* element, const char* text);
+
+static Item dom_document_set_title(DomDocument* document, Item value) {
+    RootFrame roots(2);
+    Rooted<Item> original(roots, value), text(roots, js_to_string(original.get()));
+    if (item_is_error(text.get())) return text.get();
+    // title is document-owned text, not a realm-wide cached reflection value.
+    DomElement* title = dom_document_title_element(document, true);
+    if (title && !dom_replace_text_content(title, fn_to_cstr(text.get()))) return ItemError;
+    return original.get();
+}
+
 // Dispatch property set on the document proxy object.
 // NOTE: Must use map_put directly instead of dom_realm_set to avoid
 // infinite recursion (dom_realm_set dispatches back here for DOM resources).
 extern "C" Item dom_document_proxy_set_property(Item prop_name, Item value) {
     const char* prop = fn_to_cstr(prop_name);
     if (prop) {
+        if (strcmp(prop, "title") == 0)
+            return dom_document_set_title(_js_current_document ? _js_current_document
+                : _js_main_document, value);
         if (strcmp(prop, "href") == 0 || strcmp(prop, "location") == 0 ||
             strcmp(prop, "hash") == 0 || strcmp(prop, "search") == 0 ||
             strcmp(prop, "pathname") == 0) {
@@ -3282,8 +3332,7 @@ extern "C" Item dom_document_proxy_set_property(Item prop_name, Item value) {
             // machine; this prevents URL reflection and traversal from diverging.
             return js_history_set_location(value, strcmp(prop, "hash") == 0);
         }
-        Item* cached = strcmp(prop, "title") == 0 ? &js_document_title_value :
-            strcmp(prop, "defaultView") == 0 ? &js_document_default_view :
+        Item* cached = strcmp(prop, "defaultView") == 0 ? &js_document_default_view :
             strcmp(prop, "fonts") == 0 ? &js_document_fonts_value : nullptr;
         if (cached) {
             // host writes can precede wrapper creation; register before publishing into its root range.
@@ -4428,7 +4477,7 @@ extern "C" Item dom_image_constructor_body(Item callee, Item this_value,
 
 // Public: create an empty foreign XML/generic document. qualified_name may be
 // null (no document element) or a tag to use as the root.
-extern "C" Item js_create_foreign_xml_doc(const char* qualified_name) {
+static Item dom_create_foreign_xml_doc(const char* qualified_name, const char* namespace_uri) {
     Input* input = _js_current_document ? _js_current_document->input : nullptr;
     if (!input) return ItemNull;
     DomDocument* fd = dom_document_create(input);
@@ -4439,13 +4488,16 @@ extern "C" Item js_create_foreign_xml_doc(const char* qualified_name) {
     fd->js.implicit_doctype = false;
     fd->xml_document = true;
     if (qualified_name && *qualified_name) {
-        MarkBuilder builder(input);
-        Item item = builder.element(qualified_name).final();
-        Element* e = item.element;
-        DomElement* root = dom_element_create(fd, qualified_name, e);
+        // share createElementNS identity so the root retains its namespace and prefix.
+        DomElement* root = (DomElement*)dom_create_backed_element_ns_bridge(fd,
+            qualified_name, namespace_uri);
         fd->root = lam::up(root);
     }
     return wrap_foreign_doc(fd);
+}
+
+extern "C" Item js_create_foreign_xml_doc(const char* qualified_name) {
+    return dom_create_foreign_xml_doc(qualified_name, nullptr);
 }
 
 // Public: create a DocumentType node. Doctype shares the DomComment storage
@@ -4492,10 +4544,9 @@ static Item dom_impl_create_html_document_method(Item title) {
 }
 
 static Item dom_impl_create_document_method(Item namespace_uri, Item qualified_name, Item doctype) {
-    (void)namespace_uri;
     (void)doctype;
     const char* qualified_text = fn_to_cstr(qualified_name);
-    return js_create_foreign_xml_doc(qualified_text);
+    return dom_create_foreign_xml_doc(qualified_text, fn_to_cstr(namespace_uri));
 }
 
 static Item dom_impl_create_document_type_method(Item name, Item public_id, Item system_id) {
@@ -6585,11 +6636,11 @@ static Item dom_create_document_fragment(DomDocument* doc) {
     return fragment ? dom_wrap_element(fragment) : ItemNull;
 }
 
-static const char* JS_TREE_WALKER_ROOT = "__lambda_tree_walker_root";
+static const char* JS_TRAVERSAL_ROOT = "__lambda_tree_walker_root";
 static const char* JS_TREE_WALKER_CURRENT = "currentNode";
 static const char* JS_TREE_WALKER_WHAT_TO_SHOW = "whatToShow";
-static const char* JS_TREE_WALKER_FILTER = "__lambda_tree_walker_filter";
-static const char* JS_TREE_WALKER_ACTIVE = "__lambda_tree_walker_active";
+static const char* JS_TRAVERSAL_FILTER = "__lambda_tree_walker_filter";
+static const char* JS_TRAVERSAL_ACTIVE = "__lambda_tree_walker_active";
 
 enum JsDomTreeWalkerStep {
     JS_TREE_WALKER_STEP_NEXT_NODE = 0,
@@ -6597,26 +6648,26 @@ enum JsDomTreeWalkerStep {
     JS_TREE_WALKER_STEP_NEXT_SIBLING,
 };
 
-static uint32_t dom_tree_walker_node_mask(DomNode* node) {
+static uint32_t dom_traversal_node_mask(DomNode* node) {
     if (!node) return 0;
     uint32_t node_type = node->is_text() ? 3u : (uint32_t)node->node_type;
     if (node_type == 0 || node_type > 32) return 0;
     return 1u << (node_type - 1u);
 }
-static Item dom_tree_walker_filter(Item walker, DomNode* node, uint32_t what_to_show) {
+static Item dom_traversal_filter(Item walker, DomNode* node, uint32_t what_to_show) {
     RootFrame roots(5);
     Rooted<Item> walker_root(roots, walker);
     Rooted<Item> filter_root(roots, ItemNull), method_root(roots, ItemNull);
     Rooted<Item> node_root(roots, ItemNull), result_root(roots, ItemNull);
-    if (js_is_truthy(dom_realm_get_name(walker_root.get(), JS_TREE_WALKER_ACTIVE)))
-        return dom_raise_named("InvalidStateError", "TreeWalker filter is already active");
-    if (!(dom_tree_walker_node_mask(node) & what_to_show)) return {.item = i2it(3)};
-    filter_root.set(dom_realm_get_name(walker_root.get(), JS_TREE_WALKER_FILTER));
+    if (js_is_truthy(dom_realm_get_name(walker_root.get(), JS_TRAVERSAL_ACTIVE)))
+        return dom_raise_named("InvalidStateError", "NodeFilter is already active");
+    if (!(dom_traversal_node_mask(node) & what_to_show)) return {.item = i2it(3)};
+    filter_root.set(dom_realm_get_name(walker_root.get(), JS_TRAVERSAL_FILTER));
     if (filter_root.get().item == ITEM_NULL || is_js_undefined(filter_root.get()))
         return {.item = i2it(1)};
     // the walker retains its callback; precise roots protect callback/getter allocations (D6.3.3).
     node_root.set(dom_wrap_element(node));
-    dom_realm_set_name(walker_root.get(), JS_TREE_WALKER_ACTIVE, {.item = ITEM_TRUE});
+    dom_realm_set_name(walker_root.get(), JS_TRAVERSAL_ACTIVE, {.item = ITEM_TRUE});
     bool function_filter = dom_realm_is_callable(filter_root.get());
     method_root.set(function_filter ? filter_root.get()
         : dom_realm_get_name(filter_root.get(), "acceptNode"));
@@ -6632,18 +6683,18 @@ static Item dom_tree_walker_filter(Item walker, DomNode* node, uint32_t what_to_
             result_root.set({.item = i2it((uint16_t)js_to_int32(it2d(result_root.get())))});
     }
     // exceptions must not leave later traversal permanently reentrant.
-    dom_realm_set_name(walker_root.get(), JS_TREE_WALKER_ACTIVE, {.item = ITEM_FALSE});
+    dom_realm_set_name(walker_root.get(), JS_TRAVERSAL_ACTIVE, {.item = ITEM_FALSE});
     return result_root.get();
 }
 
-static DomNode* dom_tree_walker_first_child_raw(DomNode* node) {
+static DomNode* dom_traversal_first_child_raw(DomNode* node) {
     if (!node || !node->is_element()) return nullptr;
     return dom_first_script_visible_child(node->as_element());
 }
 
-static DomNode* dom_tree_walker_next_raw(DomNode* root, DomNode* current) {
+static DomNode* dom_traversal_next_raw(DomNode* root, DomNode* current) {
     if (!root || !current) return nullptr;
-    DomNode* child = dom_tree_walker_first_child_raw(current);
+    DomNode* child = dom_traversal_first_child_raw(current);
     if (child) return child;
     return dom_next_after_subtree(root, current);
 }
@@ -6654,13 +6705,13 @@ static Item dom_tree_walker_find_forward(Item walker, DomNode* boundary,
     Rooted<Item> walker_root(roots, walker), result_root(roots, ItemNull), node_root(roots, ItemNull);
     for (DomNode* node = first; node;) {
         node_root.set(dom_wrap_element(node));
-        result_root.set(dom_tree_walker_filter(walker_root.get(), node, what_to_show));
+        result_root.set(dom_traversal_filter(walker_root.get(), node, what_to_show));
         if (item_is_error(result_root.get())) return result_root.get();
         int64_t result = it2i(result_root.get());
         if (result == 1) return node_root.get();
         // reject prunes a subtree; skip only hides its own node (DOM Traversal §6).
         node = result == 2 ? dom_next_after_subtree(boundary, node)
-            : dom_tree_walker_next_raw(boundary, node);
+            : dom_traversal_next_raw(boundary, node);
     }
     return ItemNull;
 }
@@ -6673,7 +6724,7 @@ static Item dom_tree_walker_advance(Item walker_item, JsDomTreeWalkerStep step) 
         current_root, ItemNull, node_root, ItemNull);
     // node wrappers lease their native owners and may move while another
     // property getter collects; retain both until traversal finishes (D6.3.5).
-    root_root.set(dom_realm_get_name(walker_root.get(), JS_TREE_WALKER_ROOT));
+    root_root.set(dom_realm_get_name(walker_root.get(), JS_TRAVERSAL_ROOT));
     current_root.set(dom_realm_get_name(walker_root.get(), JS_TREE_WALKER_CURRENT));
     DomNode* root = (DomNode*)dom_unwrap_element(root_root.get());
     DomNode* current = (DomNode*)dom_unwrap_element(current_root.get());
@@ -6691,7 +6742,7 @@ static Item dom_tree_walker_advance(Item walker_item, JsDomTreeWalkerStep step) 
             if (node_root.get().item != ITEM_NULL) break;
             node = parent;
             if (node == root) break;
-            node_root.set(dom_tree_walker_filter(walker_root.get(), node, what_to_show));
+            node_root.set(dom_traversal_filter(walker_root.get(), node, what_to_show));
             if (item_is_error(node_root.get())) return node_root.get();
             bool visible_parent = it2i(node_root.get()) == 1;
             node_root.set(ItemNull);
@@ -6700,7 +6751,7 @@ static Item dom_tree_walker_advance(Item walker_item, JsDomTreeWalkerStep step) 
     } else {
         DomNode* boundary = step == JS_TREE_WALKER_STEP_FIRST_CHILD ? current : root;
         DomNode* first = step == JS_TREE_WALKER_STEP_FIRST_CHILD
-            ? dom_tree_walker_first_child_raw(current) : dom_tree_walker_next_raw(root, current);
+            ? dom_traversal_first_child_raw(current) : dom_traversal_next_raw(root, current);
         node_root.set(dom_tree_walker_find_forward(walker_root.get(), boundary, first, what_to_show));
     }
     if (item_is_error(node_root.get()) || node_root.get().item == ITEM_NULL) return node_root.get();
@@ -6724,7 +6775,7 @@ static Item dom_tree_walker_filter_get(void) {
     Item receiver = dom_realm_receiver();
     if (!dom_realm_object_has_class(receiver, JS_CLASS_TREE_WALKER))
         return dom_realm_throw_type_error("Illegal TreeWalker receiver");
-    return dom_realm_get_name(receiver, JS_TREE_WALKER_FILTER);
+    return dom_realm_get_name(receiver, JS_TRAVERSAL_FILTER);
 }
 
 extern "C" void dom_tree_walker_install_interface(Item prototype) {
@@ -6750,12 +6801,12 @@ extern "C" Item dom_create_tree_walker_filtered_bridge(Item root_item, Item what
     if (walker_root.get().item == ItemNull.item) return ItemNull;
     uint32_t what_to_show = is_js_undefined(what_to_show_item)
         ? UINT32_MAX : dom_to_u32(what_to_show_item);
-    dom_realm_set_name(walker_root.get(), JS_TREE_WALKER_ROOT, root_root.get());
+    dom_realm_set_name(walker_root.get(), JS_TRAVERSAL_ROOT, root_root.get());
     dom_realm_set_name(walker_root.get(), JS_TREE_WALKER_CURRENT, root_root.get());
     dom_realm_set_name(walker_root.get(), JS_TREE_WALKER_WHAT_TO_SHOW,
                     (Item){.item = i2it((int64_t)what_to_show)});
-    dom_realm_set_name(walker_root.get(), JS_TREE_WALKER_FILTER, filter_root.get());
-    dom_realm_set_name(walker_root.get(), JS_TREE_WALKER_ACTIVE, {.item = ITEM_FALSE});
+    dom_realm_set_name(walker_root.get(), JS_TRAVERSAL_FILTER, filter_root.get());
+    dom_realm_set_name(walker_root.get(), JS_TRAVERSAL_ACTIVE, {.item = ITEM_FALSE});
     // captured prototype methods operate on the actual native walker receiver;
     // per-instance bound callbacks hid the WebIDL surface (D3.4.7, D7.2.2).
     dom_bind_interface_prototype(dom_realm_global(), walker_root.get(), "TreeWalker");
@@ -6765,6 +6816,207 @@ extern "C" Item dom_create_tree_walker_filtered_bridge(Item root_item, Item what
 extern "C" Item dom_create_tree_walker_bridge(Item root_item, Item what_to_show_item) {
     // preserve the published two-argument catalog slot; filtering appends its own entry.
     return dom_create_tree_walker_filtered_bridge(root_item, what_to_show_item, ItemNull);
+}
+
+
+static const char* JS_ITERATOR_REFERENCE = "__lambda_iterator_reference";
+static const char* JS_ITERATOR_BEFORE = "__lambda_iterator_before";
+static const char* JS_ITERATOR_CANDIDATE = "__lambda_iterator_candidate";
+static const char* JS_ITERATOR_CANDIDATE_BEFORE = "__lambda_iterator_candidate_before";
+static const char* JS_ITERATOR_MASK = "__lambda_iterator_mask";
+
+static DomNode* dom_traversal_previous_raw(DomNode* root, DomNode* node) {
+    if (!node || node == root) return nullptr;
+    DomNode* previous = dom_prev_script_visible_sibling(node);
+    if (!previous) return node->parent;
+    while (previous->is_element()) {
+        DomNode* last = dom_last_script_visible_child(previous->as_element());
+        if (!last) break;
+        previous = last;
+    }
+    return previous;
+}
+
+static void dom_iterator_set_pointer(Item iterator, const char* node_key,
+        const char* before_key, Item node, bool before) {
+    JS_ROOTS(roots, held, iterator, wrapped, node);
+    dom_realm_set_name(held.get(), node_key, wrapped.get());
+    dom_realm_set_name(held.get(), before_key, {.item = b2it(before)});
+}
+
+static void dom_iterator_adjust_pointer(Item iterator, DomNode* root,
+        DomNode* removed, const char* node_key, const char* before_key) {
+    JS_ROOTS(roots, held, iterator, reference, dom_realm_get_name(iterator, node_key));
+    DomNode* node = (DomNode*)dom_unwrap_element(reference.get());
+    if (!node || !dom_node_contains(removed, node) || dom_node_contains(removed, root)) return;
+    bool before = js_is_truthy(dom_realm_get_name(held.get(), before_key));
+    DomNode* next = before ? dom_next_after_subtree(root, removed) : nullptr;
+    reference.set(dom_wrap_element(next ? next : dom_traversal_previous_raw(root, removed)));
+    dom_iterator_set_pointer(held.get(), node_key, before_key, reference.get(), next != nullptr);
+}
+
+static Item dom_node_iterator_state(Item iterator) {
+    if (!dom_realm_object_has_class(iterator, JS_CLASS_NODE_ITERATOR))
+        return dom_realm_throw_type_error("Illegal NodeIterator receiver");
+    JS_ROOTS(roots, owner, iterator, registry, js_runtime_state.dom.node_iterators);
+    return js_collection_method(registry.get().array->items[0], 1, owner.get(), ItemNull);
+}
+
+static void dom_node_iterators_pre_remove(DomNode* child) {
+    if (!child || !child->parent || !js_active_runtime_state ||
+            get_type_id(js_runtime_state.dom.node_iterators) != LMD_TYPE_ARRAY) return;
+    JS_ROOTS(roots, registry, js_runtime_state.dom.node_iterators,
+        iterator, ItemNull, state, ItemNull, root_wrapper, ItemNull);
+    // weak entries preserve live cursors without retaining abandoned iterators (D6.3.3).
+    int64_t kept = 1;
+    for (int64_t i = 1; i < registry.get().array->length; ++i) {
+        iterator.set(js_weakref_deref(registry.get().array->items[i]));
+        if (is_js_undefined(iterator.get())) continue;
+        registry.get().array->items[kept++] = registry.get().array->items[i];
+        state.set(dom_node_iterator_state(iterator.get()));
+        root_wrapper.set(dom_realm_get_name(state.get(), JS_TRAVERSAL_ROOT));
+        DomNode* root = (DomNode*)dom_unwrap_element(root_wrapper.get());
+        if (!root) continue;
+        dom_iterator_adjust_pointer(state.get(), root, child,
+            JS_ITERATOR_REFERENCE, JS_ITERATOR_BEFORE);
+        // a filter can remove its own candidate before returning (DOM Traversal §6.1).
+        dom_iterator_adjust_pointer(state.get(), root, child,
+            JS_ITERATOR_CANDIDATE, JS_ITERATOR_CANDIDATE_BEFORE);
+    }
+    for (int64_t i = kept; i < registry.get().array->length; ++i)
+        registry.get().array->items[i] = ItemNull;
+    registry.get().array->length = kept;
+}
+
+static Item dom_node_iterator_advance(bool forward) {
+    Item receiver = dom_realm_receiver();
+    if (!dom_realm_object_has_class(receiver, JS_CLASS_NODE_ITERATOR))
+        return dom_realm_throw_type_error("Illegal NodeIterator receiver");
+    JS_ROOTS(roots, owner, receiver, iterator, dom_node_iterator_state(receiver), root_wrapper, ItemNull,
+        candidate, ItemNull, result, ItemNull, filtered, ItemNull);
+    if (js_is_truthy(dom_realm_get_name(iterator.get(), JS_TRAVERSAL_ACTIVE)))
+        return dom_raise_named("InvalidStateError", "NodeFilter is already active");
+    root_wrapper.set(dom_realm_get_name(iterator.get(), JS_TRAVERSAL_ROOT));
+    candidate.set(dom_realm_get_name(iterator.get(), JS_ITERATOR_REFERENCE));
+    bool before = js_is_truthy(dom_realm_get_name(iterator.get(), JS_ITERATOR_BEFORE));
+    dom_iterator_set_pointer(iterator.get(), JS_ITERATOR_CANDIDATE,
+        JS_ITERATOR_CANDIDATE_BEFORE, candidate.get(), before);
+    uint32_t mask = dom_to_u32(dom_realm_get_name(iterator.get(), JS_ITERATOR_MASK));
+    DomNode* root = (DomNode*)dom_unwrap_element(root_wrapper.get());
+    while (true) {
+        candidate.set(dom_realm_get_name(iterator.get(), JS_ITERATOR_CANDIDATE));
+        DomNode* node = (DomNode*)dom_unwrap_element(candidate.get());
+        before = js_is_truthy(dom_realm_get_name(iterator.get(), JS_ITERATOR_CANDIDATE_BEFORE));
+        if (before != forward) {
+            node = forward ? dom_traversal_next_raw(root, node) : dom_traversal_previous_raw(root, node);
+            if (!node) break;
+            candidate.set(dom_wrap_element(node));
+        }
+        dom_iterator_set_pointer(iterator.get(), JS_ITERATOR_CANDIDATE,
+            JS_ITERATOR_CANDIDATE_BEFORE, candidate.get(), !forward);
+        filtered.set(dom_traversal_filter(iterator.get(), node, mask));
+        if (item_is_error(filtered.get())) { result.set(filtered.get()); break; }
+        // reject and skip both continue through descendants for NodeIterator.
+        if (it2i(filtered.get()) == 1) {
+            result.set(candidate.get());
+            candidate.set(dom_realm_get_name(iterator.get(), JS_ITERATOR_CANDIDATE));
+            before = js_is_truthy(dom_realm_get_name(iterator.get(), JS_ITERATOR_CANDIDATE_BEFORE));
+            dom_iterator_set_pointer(iterator.get(), JS_ITERATOR_REFERENCE,
+                JS_ITERATOR_BEFORE, candidate.get(), before);
+            break;
+        }
+    }
+    dom_realm_set_name(iterator.get(), JS_ITERATOR_CANDIDATE, ItemNull);
+    return result.get();
+}
+
+static Item dom_node_iterator_next() { return dom_node_iterator_advance(true); }
+static Item dom_node_iterator_previous() { return dom_node_iterator_advance(false); }
+static Item dom_node_iterator_detach() {
+    if (!dom_realm_object_has_class(dom_realm_receiver(), JS_CLASS_NODE_ITERATOR))
+        return dom_realm_throw_type_error("Illegal NodeIterator receiver");
+    return make_js_undefined();
+}
+
+static Item dom_node_iterator_property(const char* key) {
+    Item receiver = dom_realm_receiver();
+    JS_ROOTS(roots, owner, receiver, state, dom_node_iterator_state(receiver));
+    return item_is_error(state.get()) ? state.get() : dom_realm_get_name(state.get(), key);
+}
+#define DOM_ITERATOR_GETTER(name, key) \
+static Item dom_node_iterator_get_##name() { return dom_node_iterator_property(key); }
+DOM_ITERATOR_GETTER(root, JS_TRAVERSAL_ROOT)
+DOM_ITERATOR_GETTER(reference, JS_ITERATOR_REFERENCE)
+DOM_ITERATOR_GETTER(before, JS_ITERATOR_BEFORE)
+DOM_ITERATOR_GETTER(mask, JS_ITERATOR_MASK)
+DOM_ITERATOR_GETTER(filter, JS_TRAVERSAL_FILTER)
+#undef DOM_ITERATOR_GETTER
+
+extern "C" void dom_node_iterator_install_interface(Item prototype) {
+    JS_ROOTS(roots, held, prototype, getter, ItemNull, key, ItemNull);
+    struct Getter { const char* name; DomRealmFn0 function; } getters[] = {
+        {"root", dom_node_iterator_get_root}, {"referenceNode", dom_node_iterator_get_reference},
+        {"pointerBeforeReferenceNode", dom_node_iterator_get_before},
+        {"whatToShow", dom_node_iterator_get_mask}, {"filter", dom_node_iterator_get_filter}
+    };
+    for (const auto& entry : getters) {
+        getter.set(dom_realm_new_function(entry.function));
+        key.set(js_string_key(entry.name));
+        dom_realm_install_accessor(held.get(), key.get(), getter.get(), ItemNull, 0);
+    }
+    dom_realm_install_method(held.get(), "nextNode", dom_node_iterator_next);
+    dom_realm_install_method(held.get(), "previousNode", dom_node_iterator_previous);
+    dom_realm_install_method(held.get(), "detach", dom_node_iterator_detach);
+}
+
+static Item dom_document_create_node_iterator(Item root_item, Item mask_item, Item filter_item) {
+    Item receiver = dom_realm_receiver();
+    DomNode* document_node = (DomNode*)dom_unwrap_element(receiver);
+    if ((!document_node || document_node->node_type != DOM_NODE_DOCUMENT) &&
+            !js_document_proxy_doc_from_item(receiver))
+        return dom_realm_throw_type_error("Illegal Document receiver");
+    if (!dom_unwrap_element(root_item)) return dom_realm_throw_type_error("NodeIterator root must be a Node");
+    if (!js_root_vector_ensure_registered(&js_runtime_state.dom)) return ItemError;
+    JS_ROOTS(roots, root, root_item, filter, filter_item, mask, mask_item,
+        iterator, ItemNull, weak, ItemNull, state, ItemNull, registry, ItemNull);
+    if (is_js_undefined(filter.get())) filter.set(ItemNull);
+    uint32_t what = UINT32_MAX;
+    if (!is_js_undefined(mask.get())) {
+        mask.set(js_to_number(mask.get()));
+        if (item_is_error(mask.get())) return mask.get();
+        what = (uint32_t)js_to_int32(it2d(mask.get()));
+    }
+    if (filter.get().item != ITEM_NULL && !js_is_object_value(filter.get()))
+        return dom_realm_throw_type_error("NodeFilter must be an object");
+    iterator.set(dom_realm_new_object_of_class(JS_CLASS_NODE_ITERATOR));
+    if (iterator.get().item == ITEM_NULL) return ItemError;
+    state.set(js_new_object());
+    dom_realm_set_name(state.get(), JS_TRAVERSAL_ROOT, root.get());
+    dom_realm_set_name(state.get(), JS_TRAVERSAL_FILTER, filter.get());
+    dom_realm_set_name(state.get(), JS_TRAVERSAL_ACTIVE, {.item = ITEM_FALSE});
+    dom_realm_set_name(state.get(), JS_ITERATOR_MASK, {.item = i2it((int64_t)what)});
+    dom_iterator_set_pointer(state.get(), JS_ITERATOR_REFERENCE, JS_ITERATOR_BEFORE, root.get(), true);
+    dom_realm_set_name(state.get(), JS_ITERATOR_CANDIDATE, ItemNull);
+    dom_bind_interface_prototype(dom_realm_global(), iterator.get(), "NodeIterator");
+    if (get_type_id(js_runtime_state.dom.node_iterators) != LMD_TYPE_ARRAY) {
+        registry.set(js_array_new(0));
+        if (item_is_error(registry.get())) return registry.get();
+        weak.set(js_weakmap_new());
+        if (item_is_error(weak.get())) return weak.get();
+        JS_RETURN_IF_ERROR(js_array_push(registry.get(), weak.get()));
+        js_runtime_state.dom.node_iterators = registry.get();
+    }
+    // cursor slots stay in an ephemeron value, outside author-visible properties.
+    JS_RETURN_IF_ERROR(js_collection_method(js_runtime_state.dom.node_iterators.array->items[0],
+        0, iterator.get(), state.get()));
+    weak.set(js_weakref_new(iterator.get()));
+    if (item_is_error(weak.get())) return weak.get();
+    Item pushed = js_array_push(js_runtime_state.dom.node_iterators, weak.get());
+    return item_is_error(pushed) ? pushed : iterator.get();
+}
+
+extern "C" void dom_document_install_traversal_interface(Item prototype) {
+    dom_realm_install_method(prototype, "createNodeIterator", dom_document_create_node_iterator);
 }
 
 extern "C" Item dom_document_create_event_bridge(Item interface_name) {
@@ -7207,34 +7459,17 @@ static Item dom_document_get_property_for(DomDocument* doc_arg, Item prop_name) 
         return ItemNull;
     }
 
-    // title — text of first <title> element
+    // HTML title text is stripped and collapsed; the underlying node retains authored whitespace.
     if (prop_id == JS_DOM_PROP_TITLE) {
-        // search in <head> first
-        DomNode* child = root ? root->first_child : nullptr;
-        while (child) {
-            if (child->is_element()) {
-                DomElement* elem = child->as_element();
-                if (elem->tag_name && str_icmp_cstr(elem->tag_name, "head") == 0) {
-                    DomNode* hchild = elem->first_child;
-                    while (hchild) {
-                        if (hchild->is_element()) {
-                            DomElement* title_elem = hchild->as_element();
-                            if (title_elem->tag_name &&
-                                str_icmp_cstr(title_elem->tag_name, "title") == 0) {
-                                StrBuf* sb = strbuf_new_cap(64);
-                                dom_collect_text_content((DomNode*)title_elem, sb);
-                                String* result = heap_create_name(sb->str ? sb->str : "");
-                                strbuf_free(sb);
-                                return (Item){.item = s2it(result)};
-                            }
-                        }
-                        hchild = hchild->next_sibling;
-                    }
-                }
-            }
-            child = child->next_sibling;
-        }
-        return js_name_item("");
+        DomElement* title = dom_document_title_element(doc, false);
+        if (!title) return js_name_item("");
+        StrBuf* text = strbuf_new_cap(64);
+        dom_collect_text_content(title, text);
+        if (text->str) text->length = str_collapse_ascii_whitespace(
+            text->str, text->capacity, text->str, text->length, true);
+        String* result = heap_create_name(text->str ? text->str : "");
+        strbuf_free(text);
+        return (Item){.item = s2it(result)};
     }
 
     // v12: URL — full document URL as string
@@ -15142,6 +15377,8 @@ extern "C" Item dom_core_remove_attribute(Item n, Item name) {
     if (!elem) return ItemNull;
     const char* attr_name = fn_to_cstr(name);
     if (!attr_name) return ItemNull;
+    // absent attributes must not enqueue mutations or invalidate layout.
+    if (!elem->has_attribute(attr_name)) return ItemNull;
     const char* old_value = elem->get_attribute(attr_name);
     elem->remove_attribute(attr_name);
     dom_cssom_owner_attribute_changed(elem, attr_name);

@@ -21,8 +21,46 @@ let server, origin;
 before(async () => {
     server = http.createServer((request, response) => {
         const url = new URL(request.url, 'http://fixture.invalid');
-        requests.push({path: url.pathname, run: url.searchParams.get('run'), cookie: request.headers.cookie || ''});
+        requests.push({path: url.pathname, run: url.searchParams.get('run'), cookie: request.headers.cookie || '',
+            agent: request.headers['user-agent'] || '', query: url.search});
         response.setHeader('Cache-Control', 'no-store');
+        if (url.pathname === '/fetch-input-page') {
+            const run = url.searchParams.get('run');
+            response.setHeader('Content-Type', 'text/html');
+            response.end(`<!doctype html><script>
+                (async()=>{const mode=${JSON.stringify(run)},target=new URL('/profile-api-input?run='+mode,location.href);
+                let count=0,hint='',input=target;
+                if(mode==='live-params')target.searchParams.set('config',encodeURIComponent(JSON.stringify({x:'a+b c'})));
+                const marker=new Error('input conversion');
+                if(mode==='coercible'||mode==='coercion-error')input={ [Symbol.toPrimitive](value){
+                    count++;hint=value;if(mode==='coercion-error')throw marker;return target.href}};
+                if(mode.startsWith('long-'))input=target.href+'&padding='+'x'.repeat(4096)+'&tail=complete';
+                let sync=false,promise;try{promise=mode==='missing-input'?fetch():fetch(input)}catch(error){sync=true;promise=Promise.reject(error)}
+                try{const result=await promise;console.log('EXPORT_SESSION_RESULT',JSON.stringify({status:result.status,text:await result.text(),count,hint,sync,complete:mode==='live-params'?new URL(result.url).searchParams.get('config')===encodeURIComponent(JSON.stringify({x:'a+b c'})):!mode.startsWith('long-')||new URL(result.url).searchParams.get('tail')==='complete'}))}
+                catch(error){console.log('EXPORT_SESSION_RESULT',JSON.stringify({same:error===marker,name:error.name,count,hint,sync}))}
+                })();</script>`);
+            return;
+        }
+        if (url.pathname === '/profile-api-input' && url.searchParams.get('run') === 'long-redirect') {
+            response.writeHead(302,{Location:'/profile-api-final'+url.search}).end();
+            return;
+        }
+        if (url.pathname.startsWith('/profile-api-')) {
+            response.setHeader('Content-Type', 'text/plain');
+            response.end('ok');
+            return;
+        }
+        if (url.pathname === '/profile-page') {
+            response.setHeader('Content-Type', 'text/html');
+            response.end(`<!doctype html><img src="/profile-image.svg?run=identity"><script>
+                fetch('/profile-api-fetch?run=identity');
+                const asyncRequest=new XMLHttpRequest();
+                asyncRequest.open('GET','/profile-api-async?run=identity');asyncRequest.send();
+                const syncRequest=new XMLHttpRequest();
+                syncRequest.open('GET','/profile-api-sync?run=identity',false);syncRequest.send();
+                </script>`);
+            return;
+        }
         if (url.pathname === '/decode-image') {
             setTimeout(() => {
                 if (url.searchParams.get('run') === 'broken-header') {
@@ -116,6 +154,46 @@ async function render(run, route = '/page') {
 function sessionResults(output) {
     return [...output.matchAll(/EXPORT_SESSION_RESULT (\{[^\n]+\})/g)].map(match => JSON.parse(match[1]));
 }
+
+test('fetch and both XHR modes retain the document and resource HTTP identity', async () => {
+    await renderPage('identity', '/profile-page');
+    const paths=['/profile-page','/profile-image.svg','/profile-api-fetch','/profile-api-async','/profile-api-sync'];
+    const observed=Object.fromEntries(paths.map(route=>{
+        const record=requests.find(row=>row.run==='identity' && row.path===route);
+        assert(record,'missing request '+route);
+        return [route,record.agent];
+    }));
+    assert.notEqual(observed['/profile-page'],'');
+    assert.deepEqual(observed,Object.fromEntries(paths.map(route=>[route,observed['/profile-page']])));
+});
+
+for (const mode of ['url-object','coercible','long-url','long-redirect','live-params']) {
+    test('fetch input conversion reaches the wire intact: ' + mode, async () => {
+        const result=await render(mode,'/fetch-input-page');
+        assert.deepEqual(result,{status:200,text:'ok',count:mode==='coercible'?1:0,
+            hint:mode==='coercible'?'string':'',sync:false,complete:true});
+        const observed=requests.filter(row=>row.run===mode && row.path==='/profile-api-input');
+        assert.equal(observed.length,1);
+        if(mode==='live-params')assert.deepEqual(JSON.parse(decodeURIComponent(new URLSearchParams(observed[0].query).get('config'))),{x:'a+b c'});
+        if(mode.startsWith('long-')) {
+            const query=new URLSearchParams(observed[0].query);
+            assert.equal(query.get('padding'),'x'.repeat(4096));
+            assert.equal(query.get('tail'),'complete');
+        }
+    });
+}
+
+test('fetch input conversion rejects with the original exception asynchronously', async () => {
+    assert.deepEqual(await render('coercion-error','/fetch-input-page'),
+        {same:true,name:'Error',count:1,hint:'string',sync:false});
+    assert.equal(requests.filter(row=>row.run==='coercion-error'&&row.path==='/profile-api-input').length,0);
+});
+
+test('fetch requires an input without throwing synchronously', async () => {
+    assert.deepEqual(await render('missing-input','/fetch-input-page'),
+        {same:false,name:'TypeError',count:0,hint:'',sync:false});
+    assert.equal(requests.filter(row=>row.run==='missing-input'&&row.path==='/profile-api-input').length,0);
+});
 
 test('image decode waits for the admitted HTTP image at the load boundary', async () => {
     const result = await render('decode', '/decode-page');

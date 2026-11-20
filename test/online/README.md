@@ -101,6 +101,7 @@ node --test test/online/render_stylesheet.test.cjs
 node --test test/online/render_clip.test.cjs
 node --test test/online/render_observers.test.cjs test/online/render_observer_zero_area.test.cjs
 node --test test/online/render_dataset_metadata.test.cjs
+node --test test/online/render_error_stack.test.cjs test/online/render_document_title.test.cjs
 node --test test/online/render_grid.test.cjs
 node --test test/online/render_rem.test.cjs
 node --test test/online/render_grid_absolute.test.cjs
@@ -114,6 +115,11 @@ node --test test/online/render_video_first_frame.test.cjs
 node --test test/online/render_canvas_transform.test.cjs
 node --test test/online/render_html_controls.test.cjs
 node --test test/online/render_html_scripts.test.cjs
+node --test test/online/render_browser_globals.test.cjs
+node --test test/online/render_node_iterator.test.cjs
+node --test test/online/render_url_live.test.cjs
+node --test test/online/render_readable_stream.test.cjs
+node --test test/online/render_dialog_display.test.cjs
 node --test test/online/render_console_groups.test.cjs
 node --test test/online/render_svg_percentage_intrinsics.test.cjs
 node --test test/online/render_svg_comment.test.cjs
@@ -126,6 +132,7 @@ node --test test/online/render_intrinsic_image_basis.test.cjs
 node --test test/online/render_lab_colors.test.cjs
 node --test test/online/render_text_background_ancestor.test.cjs
 node --test test/online/render_intrinsic_motion_baseline.test.cjs
+node --test test/online/render_svg_image_motion.test.cjs
 ```
 
 The session tests exercise real Lambda HTTP rendering, layout and both batch
@@ -2477,3 +2484,202 @@ script-admission bounds (**JS13-L1**); no cap is raised. Inventory remains
 page clearance claimed. The other 1066 rows and browser references, URLs,
 thresholds and prior audits/reviews are preserved. See the
 [repair record](comparison/repairs.html#round-102). The goal remains active.
+
+
+Round one hundred three qualifies **RI-162** (isolated SVG CSS animation) and
+**RI-163** (CSS background image clock startup), plus the **RI-155** initial-image
+follow-up that shares resource discovery's inert-template boundary. Highnote's
+missing animated orb is restored: a same-origin 1000ms post-load before/after
+pair improves **25.47% to 2.56% error**, **90.25% to 3.53% changed area**.
+Two header buttons remain absent, while main navigation and hero content agree.
+
+The current release passes **39 focused image/resource tests, 27 UI assertions,
+six SVG exports and integer lint**. Earlier candidate evidence includes the
+foreignObject replays. No broad baseline is repeated. General CSS effect classes,
+font-relative animation, use-instance effects and PDF are not claimed qualified.
+AndOpen's three large shapes also render in both its unchanged markup reduction
+and current loaded page; its retained review is resolved as **revalidation**, not
+as a new SVG-image fix. Cookie UI and demonstration-frame differences remain.
+
+The severity-sorted report now has **115 high, zero critical, 952 low** (93
+automated / 22 manual high): one native-repair clearance and one revalidation.
+The other 1065 rows/references, catalog URLs, thresholds and prior audits/reviews
+are preserved. See the [repair evidence](comparison/repairs.html#round-103).
+The goal remains active.
+
+
+Round one hundred four fixes **LI-085**: shared URL requests retain the highest
+requested priority and promote queued work without restarting active transfers
+or changing resource limits/deadlines. All **13 focused native scheduler/cache
+tests and 21 HTTP resource checks pass**. No cold-media improvement or online
+clearance is attributed without page-level evidence. The finite readiness limit
+(**RI-061**) remains open. No broad baseline is repeated. All 1067 comparison
+rows and snapshot pairs are preserved; inventory remains **115 high, zero
+critical, 952 low**. See the [repair record](comparison/repairs.html#round-104).
+The goal remains active.
+
+
+Round one hundred five fixes **JS13-L18** by removing two nonstandard loader
+rewrites: library-specific global synchronization and source-text function
+exports. These manufactured aliases/window properties and invoked unrelated
+author accessors; the existing realm already owns global binding semantics.
+Five controls fail before repair. All **11 controls pass in AST and MIR**, the
+same eleven pass Chromium, and **37 related checks plus five lifecycle UI
+assertions pass**. No script budgets, deadlines or capture clocks change, and
+no broad baseline is repeated.
+
+Dropbox's current diagnostic still omits its hero and hits the existing
+**120-second JavaScript watchdog**; the remaining execution stall is unconfirmed.
+Its canonical pair and high review are preserved. All 1067 comparison rows and
+pairs remain unchanged: **115 high, zero critical, 952 low**. See the
+[loader repair and diagnostic](comparison/repairs.html#round-105).
+The goal remains active.
+
+
+Round one hundred six fixes **JS13-L19** (repeated whole-bundle initializer
+index publication) and **JS13-L20** (resource load propagation to Window).
+All **276 script/ownership tests**, the new load-path controls in native and
+Chromium, and existing exception/interruption controls pass. Dropbox no longer
+accumulates over 131,000 window load listeners; it completes in **8.28s** with
+unchanged limits and a 1000ms settling window. Its current PNG is nevertheless
+blank, so it stays high. The [current diagnostic pair](comparison/repairs.html#round-106)
+records this remaining failure without claiming a visual repair or replacing
+the canonical pair. All 1067 rows remain severity-sorted: **115 high, zero
+critical, 952 low**. Broad baselines were deferred; the goal remains active.
+
+
+Round one hundred seven isolates **JS13-L21**: Dropbox's DOMPurify sanitizer
+calls the missing `Document.createNodeIterator` on a parsed document. Direct
+main/parsed-document probes and the actual AST failure span confirm the gap;
+AST-only execution also fails. A complete live iterator is a new stateful DOM
+interface, so no TreeWalker alias or sanitizer bypass is introduced. The fresh
+WebKit Blog pair still lacks large PNGs; independent transfers remain incomplete
+after 15 seconds. Library of Congress currently serves a Cloudflare 403 challenge.
+No production runtime change or visual clearance is claimed. All temporary
+diagnostics are removed. The [evidence update](comparison/repairs.html#round-107)
+retains all 1067 canonical pairs and rows: **115 high, zero critical, 952 low**.
+The goal remains active.
+
+
+Round one hundred eight repairs **JS13-L22**: fetch and both XHR modes now
+reuse the document/resource HTTP client identity. The server-observed regression
+fails before and passes after; **all 15 focused HTTP session tests pass**.
+Aircall's current 1000ms post-load pair remains high (**37.89% error / 83.70%
+changed area**). Its native before/after pixels are identical: configuration and
+geolocation complete, but the appended external consent SDK reaches the existing
+dynamic-script preparation gap. No consent bypass or capture-budget change is
+introduced. Only Aircall's canonical pair is refreshed; its historical images
+and frame audit are retained. The other 1066 rows, catalog and review history
+remain unchanged. The severity-sorted inventory stays **115 high, zero critical,
+952 low**. See [repair evidence](comparison/repairs.html#round-108).
+The goal remains active.
+
+
+Round one hundred nine completes **JS13-L21**'s qualified NodeIterator surface.
+Dropbox's parsed-document sanitizer can now traverse and remove nodes, restoring
+its main heading, copy, action and product image. The implementation reuses
+TreeWalker's filter and existing weak collections, with separate bidirectional
+reference/candidate pointers and removal adjustment. No page workaround,
+sanitizer bypass or capture-budget change is introduced.
+
+**36 focused native tests and seven Chromium fixture groups pass**. All four
+native Node modules were rebuilt for the new traced realm root. Full traversal
+WPT conformance is not claimed; broad baselines were not repeated.
+
+Dropbox remains high: the fresh native pair shows a pale split hero while
+Chromium shows a blue centered hero (**42.59% error / 88.50% changed area**).
+Its remaining cause is unconfirmed; the repaired omission is distinguished from
+visual parity. Only its pair/row and retained manual review are refreshed, with
+historical images and prior audits preserved. The other 1066 rows are unchanged.
+Inventory remains **115 high, zero critical, 952 low** (94 automatic / 21
+additional manual). See [the repair evidence](comparison/repairs.html#round-109).
+The goal remains active.
+
+
+Round one hundred ten repairs **JS13-L23 / JS13-L24 / Input LI-086**.
+Fetch converts coercible string inputs and retains full URLs; URLSearchParams
+mutations and search/href replacement share a live query record; Input clears
+raw default ports when parsing. Existing serializers and scheme tables are
+reused with precise private ownership. Request-valued fetch and full URL/IDL
+conformance remain unqualified (**D8.4.4 / D9.1.3v2 / D6.3.3 / D9.5.4**).
+
+**27 focused AST tests, 12 MIR cases, five Chromium groups and 37 Input URL
+tests pass.** Coframe's exact SDK request now receives its project configuration
+(HTTP 200 / 692816 bytes instead of 400 / 53 bytes), and its watchers execute
+on the actual page. Broad baselines and capture policies are unchanged.
+
+Dropbox remains high: pale split native hero versus blue centered Chromium
+hero (**42.43% error / 88.47% changed area**). Native gRPC EOF errors remain
+unconfirmed leads. Only its pair, row and retained review are refreshed; the
+other 1066 rows and existing history remain intact. Inventory stays **115 high,
+zero critical, 952 low** (94 automatic / 21 additional manual). See
+[repair evidence](comparison/repairs.html#round-110). The goal remains active.
+
+
+Round one hundred eleven fixes **JS13-L25**'s pending default-read lifecycle.
+An empty queue no longer reports EOF while an asynchronous pull is producing
+its chunk. Private traced requests wait for enqueue, close or error; startup
+and pull completion serialize delivery (**D8.4.4 / D5.5.1 / D6.3.3**).
+
+**34 focused native checks, seven MIR stream cases and seven Chromium groups
+pass.** Full stream conformance remains unqualified. Node-module golden probes
+could not resolve assert/stream on either prior or current hosts and are not
+counted as passes. Broad baselines were not repeated.
+
+The fresh Dropbox run has **zero gRPC request/EOF failures**, versus eight
+previously. Its native PNG remains pixel-identical, so the large hero difference
+is still unresolved (**42.63% error / 88.46% changed area**). Only that pair,
+row and retained review are refreshed; all other 1066 rows and histories remain
+preserved. Inventory stays **115 high, zero critical, 952 low** (94 automatic /
+21 additional manual). See [repair evidence](comparison/repairs.html#round-111).
+The goal remains active.
+
+
+Round one hundred twelve fixes **RI-166/RI-167/RI-168**: CSS-wide display
+resets use the initial role, empty effect records do not create stacking
+contexts, and clip-path resets resolve before shape parsing. **81 focused PNG
+checks and 21 Chromium groups pass**, plus integer-cast lint. Getsafe's frozen
+cookie panel/backdrop return; its hero remains absent. Its current live PNG is
+blank on both prior and intermediate renderers with the same currency formatter
+exception (**JS10-L1**, locale/currency feature gap). No live clearance is claimed.
+All 1067 canonical rows/pairs, reviews, URLs, thresholds and audits are preserved:
+**115 high, zero critical, 952 low**. No baseline, admission or frame-policy
+changes. [Repair evidence](comparison/repairs.html#round-112). Goal remains active.
+
+
+Round one hundred thirteen fixes **JS13-L26**: removing an absent attribute
+no longer publishes mutation records, custom-element callbacks or layout
+invalidation. Present empty attributes retain their normal removal behavior.
+**13 focused native checks pass**; the ordinary-removal control fails before
+repair. Primer's absent-removal warnings drop from 14 to zero, but both live
+runs still hit the script watchdog and produce identical orange PNGs. Dock's
+current diagnostic hits the outer capture limit. No page is cleared and no
+performance improvement is claimed. All 1067 canonical rows/pairs, reviews,
+URLs, thresholds, manifest and audits are preserved: **115 high, zero critical,
+952 low**. Broad baselines are not repeated.
+[Repair evidence](comparison/repairs.html#round-113). Goal remains active.
+
+Round113 also records **RI-169**: cross-origin iframe exports lack a deferred
+network-navigation path. Limitless remains high; its local frozen diagnostic
+is not imported. The support matrix now states this limit.
+
+
+Round one hundred fourteen fixes **JS03-L3, JS13-L27 and JS13-L28**: nominal
+errors now have lazy native stacks, Document.title has a real DOM setter, and
+createDocument retains its root namespace. **17 final focused native controls,
+ten additional AST/MIR stack checks and ten Chromium groups pass.** Full
+baselines are not repeated. Temporary tracing is removed.
+
+**Pitch News leaves major review**, with its heading and article layout restored
+(2.48% mean error, 0.85% changed area). A current prior-renderer control at the
+same explicit 1000ms post-load origin remains blank with a fatal TypeError.
+Hera restores the blue background/logo but keeps a manual major headline
+omission; Comand restores its headline/card but keeps a major video omission.
+FramerAuth's current attempt times out; its prior canonical pair is retained.
+
+The three selected origins were previously unrecorded. Their fresh matched
+pairs and retained prior images are recorded in the frame audit; historical
+score movement includes the reference/frame refresh. The design-reference audit
+is unchanged. Other 1064 pairs/rows and unrelated review history remain intact.
+**114 high, zero critical, 953 low** (92 automatic plus 22 additional manual).
+[Repair evidence](comparison/repairs.html#round-114). Goal remains active.

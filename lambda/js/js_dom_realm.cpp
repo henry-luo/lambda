@@ -1383,6 +1383,12 @@ static void _publish_interface_records(const char* host, size_t length) {
 extern "C" void dom_install_collection_globals(void) {
     Item global = js_get_global_this();
     dom_install_interface_members(global, "TreeWalker", dom_tree_walker_install_interface);
+    dom_install_interface_members(global, "NodeIterator", dom_node_iterator_install_interface);
+    {
+        JS_ROOTS(roots, prototype, dom_install_interface_members(global, "Document",
+            dom_document_install_traversal_interface));
+        dom_set_interface_method_metadata(prototype.get(), "createNodeIterator", 1);
+    }
     {
         JS_ROOTS(roots, prototype_root, dom_install_interface_members(global,
             "DOMImplementation", dom_implementation_install_interface));

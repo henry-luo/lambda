@@ -4,6 +4,8 @@ const {renderFixtures, rgb} = require('./render_fixture.cjs');
 const render = renderFixtures('dataset-metadata');
 
 function writeExpression(mode) {
+    if(mode==='remove')return "box.removeAttribute('data-phase')";
+    if(mode==='remove-ns')return "box.removeAttributeNS(null,'data-phase')";
     return mode === 'dataset' ? 'box.dataset.phase=value'
         : "box.setAttribute('data-phase',value)";
 }
@@ -97,4 +99,38 @@ console.log('CUSTOM_METADATA',JSON.stringify({calls,widths,old:observer.takeReco
         assert.deepEqual(result.widths,Array.from({length:10},(_,i)=>110+i*10));
         assert.deepEqual(rgb(image,150,50),[255,0,0]);
     }
+});
+
+for(const mode of ['remove','remove-ns'])test('absent attribute removal has no mutation or reflow: '+mode,async()=>{
+    const env={...process.env,LAYOUT_PROFILE:'1'};
+    const baseline=await render(mode+'-single',source(mode,true,false,1),env);
+    const repeated=await render(mode+'-repeated',source(mode,true,false,10),env);
+    const match=/DATASET_RESULT (\{[^\n]+\})/.exec(repeated.log);
+    assert.ok(match,repeated.log);
+    const result=JSON.parse(match[1]);
+    assert.deepEqual(result.names,['data-phase']);
+    assert.deepEqual(result.old,['narrow']);
+    assert.deepEqual(result.widths,Array(10).fill(100));
+    const layouts=log=>(log.match(/\[LAYOUT_PROFILE\] retained-stage:/g)||[]).length;
+    assert.ok(layouts(baseline.log)>0,'layout profiling must be active');
+    assert.equal(layouts(repeated.log),layouts(baseline.log),'absent removals must retain geometry');
+});
+
+for(const mode of ['remove','remove-ns'])test('empty attribute removal notifies once: '+mode,async()=>{
+    const {log}=await render(mode+'-empty-custom',`<!doctype html><meta-probe id=box data-phase></meta-probe><script>
+let calls=[];
+customElements.define('meta-probe',class extends HTMLElement{
+    static get observedAttributes(){return ['data-phase']}
+    attributeChangedCallback(name,oldValue,newValue){calls.push([oldValue,newValue])}
+});
+calls=[];const box=document.getElementById('box');
+const observer=new MutationObserver(()=>{});
+observer.observe(box,{attributes:true,attributeOldValue:true});
+${writeExpression(mode)};${writeExpression(mode)};
+console.log('EMPTY_REMOVAL',JSON.stringify({calls,present:box.hasAttribute('data-phase'),
+    old:observer.takeRecords().map(r=>r.oldValue)}));
+</script>`);
+    const match=/EMPTY_REMOVAL (\{[^\n]+\})/.exec(log);
+    assert.ok(match,log);
+    assert.deepEqual(JSON.parse(match[1]),{calls:[['',null]],present:false,old:['']});
 });

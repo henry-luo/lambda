@@ -159,6 +159,7 @@ enum JsClass : uint8_t {
     JS_CLASS_TOGGLE_EVENT,
     JS_CLASS_PROGRESS_EVENT,
     JS_CLASS_COMMAND_EVENT,
+    JS_CLASS_NODE_ITERATOR,
     JS_CLASS__COUNT  // sentinel
 };
 
@@ -269,6 +270,7 @@ static inline JsClass js_class_from_name(const char* nm, int nl) {
             if (!strncmp(nm, "PassThrough", 11)) return JS_CLASS_PASS_THROUGH;
             break;
         case 12:
+            if (!strncmp(nm, "NodeIterator", 12)) return JS_CLASS_NODE_ITERATOR;
             if (!strncmp(nm, "StorageEvent", 12)) return JS_CLASS_STORAGE_EVENT;
             if (!strncmp(nm, "MessageEvent", 12)) return JS_CLASS_MESSAGE_EVENT;
             if (!strncmp(nm, "DOMException", 12)) return JS_CLASS_DOM_EXCEPTION;
@@ -436,6 +438,7 @@ static inline const char* js_class_to_name(JsClass cls) {
         case JS_CLASS_TOGGLE_EVENT: return "ToggleEvent";
         case JS_CLASS_PROGRESS_EVENT: return "ProgressEvent";
         case JS_CLASS_COMMAND_EVENT: return "CommandEvent";
+        case JS_CLASS_NODE_ITERATOR: return "NodeIterator";
         case JS_CLASS_SECURITY_POLICY_VIOLATION_EVENT: return "SecurityPolicyViolationEvent";
         case JS_CLASS_XML_HTTP_REQUEST: return "XMLHttpRequest";
         case JS_CLASS_TYPE_ERROR: return "TypeError";

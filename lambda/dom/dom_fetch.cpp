@@ -8,6 +8,7 @@
 #include "../js/js_runtime.h"
 #include "../js/js_headers.h"
 #include "../js/js_response.h"
+#include "../js/js_object_meta.h"
 #include "dom.h"
 #include "dom_xhr.h"
 #include "realm/dom_realm.h"
@@ -66,7 +67,7 @@ extern "C" void js_fetch_set_base_path(const char* dir_path) {
 typedef struct JsFetchWork {
     uv_work_t work;
     CURL*     easy;
-    char      url[2048];
+    char*     url; // owned through transfer completion, including redirected URLs
 
     // request options
     char*              method;   // owned, NULL → GET
@@ -250,6 +251,7 @@ static CookieJar* fetch_profile_cookie_jar(void) {
 static void fetch_work_destroy(JsFetchWork* fw) {
     if (!fw) return;
     cookie_jar_release(fw->cookie_jar);
+    if (fw->url) mem_free(fw->url);
     if (fw->method) mem_free(fw->method);
     if (fw->body) mem_free(fw->body);
     if (fw->req_headers) curl_slist_free_all(fw->req_headers);
@@ -328,6 +330,8 @@ static void fetch_work_cb(uv_work_t* req) {
     curl_easy_setopt(fw->easy, CURLOPT_TIMEOUT, 30L);
     curl_easy_setopt(fw->easy, CURLOPT_NOSIGNAL, 1L);  // thread-safe
     curl_easy_setopt(fw->easy, CURLOPT_ACCEPT_ENCODING, RADIANT_HTTP_ACCEPT_ENCODING);
+    // script requests must retain the document/resource client's HTTP identity.
+    curl_easy_setopt(fw->easy, CURLOPT_USERAGENT, RADIANT_HTTP_CLIENT_USER_AGENT);
     curl_use_host_trust_store(fw->easy);    // fetch() verifies by curl's default; same roots as everything else
     cookie_jar_import_curl(fw->cookie_jar, fw->easy);
 
@@ -358,7 +362,16 @@ static void fetch_work_cb(uv_work_t* req) {
         fw->redirected = redirects > 0;
         char* final_url = nullptr;
         curl_easy_getinfo(fw->easy, CURLINFO_EFFECTIVE_URL, &final_url);
-        if (final_url) snprintf(fw->url, sizeof(fw->url), "%s", final_url);
+        if (final_url) {
+            char* redirected_url = mem_strdup(final_url, MEM_CAT_JS_RUNTIME);
+            if (redirected_url) {
+                mem_free(fw->url);
+                fw->url = redirected_url;
+            } else {
+                fw->curl_error = (int)CURLE_OUT_OF_MEMORY;
+                str_copy(fw->error_msg, sizeof(fw->error_msg), "fetch: allocation failed", sizeof("fetch: allocation failed") - 1);
+            }
+        }
     }
 
     curl_easy_cleanup(fw->easy);
@@ -615,39 +628,44 @@ extern "C" Item js_fetch_with_initiator(Item url_item, Item options_item, const 
         return dom_realm_promise_reject(dom_realm_new_error(make_string_item(
             "fetch: no active execution context")));
     }
-    char url_buf[2048];
-    const char* url = js_item_to_cstr(url_root.get(), url_buf, sizeof(url_buf));
-    if (!url) {
-        return dom_realm_promise_reject(dom_realm_new_error_named_cstr("TypeError", "fetch: invalid URL"));
-    }
+    // request objects own a body; they must not use the string input conversion.
+    if (js_object_has_class(url_root.get(), JS_CLASS_REQUEST))
+        return dom_realm_promise_reject(dom_realm_new_error_named_cstr(
+            "TypeError", "fetch: Request inputs are not supported"));
+    Item converted = js_to_string(url_root.get());
+    if (item_is_error(converted))
+        return dom_realm_promise_reject(js_error_lane_payload(converted));
+    url_root.set(converted);
+
+    JsFetchWork* fw = (JsFetchWork*)mem_calloc(1, sizeof(JsFetchWork), MEM_CAT_JS_RUNTIME);
+    if (!fw) return dom_realm_promise_reject(dom_realm_new_error(make_string_item("fetch: allocation failed")));
+    FetchWorkOwner work_owner = {fw};
+    String* input = it2s(url_root.get());
+    // owned bytes survive option getters/collection and preserve the complete URL.
+    fw->url = mem_dup_n(input->chars, input->len, MEM_CAT_JS_RUNTIME);
+    if (!fw->url)
+        return dom_realm_promise_reject(dom_realm_new_error(make_string_item("fetch: allocation failed")));
 
     // Browser fetch resolves a relative request against the active document,
     // not the process working directory used by file-backed test documents.
-    char resolved_url[2048];
     DomDocument* document = (DomDocument*)dom_get_document();
     const char* document_url = document && document->url
         ? url_get_href(document->url) : nullptr;
     if (document_url && (strncmp(document_url, "http://", 7) == 0 ||
                          strncmp(document_url, "https://", 8) == 0)) {
-        char* absolute_url = dom_resolve_network_url(url, document_url);
-        if (!absolute_url || strlen(absolute_url) >= sizeof(resolved_url)) {
-            if (absolute_url) mem_free(absolute_url);
+        char* absolute_url = dom_resolve_network_url(fw->url, document_url);
+        if (!absolute_url)
             return dom_realm_promise_reject(dom_realm_new_error_named_cstr(
                 "TypeError", "fetch: invalid URL"));
-        }
-        snprintf(resolved_url, sizeof(resolved_url), "%s", absolute_url);
-        mem_free(absolute_url);
-        url = resolved_url;
+        mem_free(fw->url);
+        fw->url = absolute_url;
     }
-
+    const char* url = fw->url;
     if (document && !input_resource_policy_admits(document->resource_policy, url)) {
         return dom_realm_promise_reject(dom_realm_new_error_named_cstr(
             "TypeError", "fetch: resource blocked by document policy"));
     }
 
-    JsFetchWork* fw = (JsFetchWork*)mem_calloc(1, sizeof(JsFetchWork), MEM_CAT_JS_RUNTIME);
-    if (!fw) return dom_realm_promise_reject(dom_realm_new_error(make_string_item("fetch: allocation failed")));
-    FetchWorkOwner work_owner = {fw};
     Item options_status = fetch_apply_options(fw, options_root.get());
     if (item_is_error(options_status))
         return dom_realm_promise_reject(js_error_lane_payload(options_status));
@@ -731,7 +749,6 @@ extern "C" Item js_fetch_with_initiator(Item url_item, Item options_item, const 
         fclose(f);
 
         // Build a synthetic JsFetchWork so build_response_object can be reused.
-        snprintf(fw->url, sizeof(fw->url), "%s", url);
         fw->status_code = 200;
         fw->response = response;
         MimeDetector* detector = mime_detector_init();
@@ -776,7 +793,6 @@ extern "C" Item js_fetch_with_initiator(Item url_item, Item options_item, const 
         return dom_realm_promise_reject(dom_realm_new_error(make_string_item("fetch: allocation failed")));
     }
 
-    snprintf(fw->url, sizeof(fw->url), "%s", url);
     fw->cookie_jar = fetch_profile_cookie_jar();
     if (fw->cookie_jar && !cookie_jar_retain(fw->cookie_jar)) {
         fw->cookie_jar = NULL;

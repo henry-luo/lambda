@@ -2939,17 +2939,19 @@ static constexpr int DOM_EVENT_PATH_LIMIT = 128;
 // Only closed-tree flags are exposed to composedPath().
 static constexpr uint8_t DOM_EVENT_IN_SHADOW_TREE = 1 << 2;
 
-static int build_path(Item target, bool composed, void** path, bool* path_is_dom,
+static int build_path(Item target, const char* type, bool composed, void** path, bool* path_is_dom,
     uint8_t* flags, int max_path) {
     int count = 0;
     void* key = get_event_target_key(target);
+    // load has no Document-to-Window parent, including capture and synthetic bubbling.
+    const bool document_has_window_parent = strcmp(type, "load") != 0;
 
     // Non-element document/window targets use the same canonical keys as
     // addEventListener(), so dispatchEvent() finds listeners registered on
     // document/window even when the JS object is a proxy/wrapper.
     if (key == (void*)&_document_sentinel) {
         if (count < max_path) { path_is_dom[count] = false; path[count++] = (void*)&_document_sentinel; }
-        if (count < max_path) { path_is_dom[count] = false; path[count++] = (void*)&_window_sentinel; }
+        if (document_has_window_parent && count < max_path) { path_is_dom[count] = false; path[count++] = (void*)&_window_sentinel; }
         return count;
     }
     if (key == (void*)&_window_sentinel) {
@@ -3003,7 +3005,7 @@ static int build_path(Item target, bool composed, void** path, bool* path_is_dom
 
     // add document and window sentinels at the end (root of propagation)
     if (reached_document && count < max_path) { path_is_dom[count] = false; path[count++] = (void*)&_document_sentinel; }
-    if (reached_document && count < max_path) { path_is_dom[count] = false; path[count++] = (void*)&_window_sentinel; }
+    if (reached_document && document_has_window_parent && count < max_path) { path_is_dom[count] = false; path[count++] = (void*)&_window_sentinel; }
 
     return count;
 }
@@ -3280,7 +3282,7 @@ Item dom_dispatch_event(Item elem_item, Item event_item) {
     // metadata with each path entry instead of reinterpreting a DomNode pointer
     // as a generic EventTarget container during bubbling.
     bool composed = js_is_truthy(event_get_item(event_item, "composed"));
-    int path_len = build_path(elem_item, composed, path, path_is_dom, path_flags, DOM_EVENT_PATH_LIMIT);
+    int path_len = build_path(elem_item, type, composed, path, path_is_dom, path_flags, DOM_EVENT_PATH_LIMIT);
     related_target_root.set(event_get_item(event_item, "relatedTarget"));
     DomNode* related = (DomNode*)dom_unwrap_element(related_target_root.get());
     DomElement* related_shadow = dom_shadow_root(related);

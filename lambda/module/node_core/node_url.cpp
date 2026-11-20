@@ -1138,64 +1138,103 @@ static Item parse_query_entries(const char* qs, int qs_len) {
     return entries;
 }
 
+// publish list/cache changes before notifying an associated URL; native roots survive coercion callbacks.
+static Item node_url_search_params_finish(Item self, Item entries, bool replace_list, bool notify_owner) {
+    JubeScopedRoots roots(node_url_host, 3);
+    uint64_t* self_root = roots.slot(self);
+    uint64_t* entries_root = roots.slot(entries);
+    uint64_t* key_root = roots.slot(ItemNull);
+    if (!self_root || !entries_root || !key_root) return ItemError;
+    if (replace_list) {
+        *key_root = make_string_item("__entries__").item;
+        Item status = js_set_key_default(jube_root_item(self_root), jube_root_item(key_root), jube_root_item(entries_root));
+        if (item_is_error(status)) return status;
+    }
+    *key_root = make_string_item("size").item;
+    Item status = js_set_key_default(jube_root_item(self_root), jube_root_item(key_root),
+        (Item){.item = i2it(js_array_length(jube_root_item(entries_root)))});
+    if (item_is_error(status)) return status;
+    return notify_owner && node_url_host->script->url_search_params_update
+        ? node_url_host->script->url_search_params_update(jube_root_item(self_root))
+        : make_js_undefined();
+}
+
+Item node_url_search_params_replace_query(Item params, const char* query, int length) {
+    JubeScopedRoots roots(node_url_host, 2);
+    uint64_t* owner = roots.slot(params);
+    if (!owner) return ItemError;
+    if (length && query[0] == '?') { ++query; --length; }
+    uint64_t* entries = roots.slot(parse_query_entries(query, length));
+    if (!entries) return ItemError;
+    if (item_is_error(jube_root_item(entries))) return jube_root_item(entries);
+    return node_url_search_params_finish(jube_root_item(owner), jube_root_item(entries), true, false);
+}
+
+// both input operands must be rooted before either coercion can collect (D6.3.3).
+static Item node_url_search_params_arguments(JubeScopedRoots& roots, Item name, Item value,
+        bool convert_value, uint64_t** self, uint64_t** entries, uint64_t** key, uint64_t** data) {
+    *self = roots.slot(js_get_this());
+    *key = roots.slot(name);
+    *data = roots.slot(value);
+    if (!*self || !*key || !*data) return ItemError;
+    *entries = roots.slot(js_get_key_default(jube_root_item(*self), make_string_item("__entries__")));
+    if (!*entries) return ItemError;
+    **key = js_to_string(jube_root_item(*key)).item;
+    if (item_is_error(jube_root_item(*key))) return jube_root_item(*key);
+    **data = convert_value ? js_to_string(jube_root_item(*data)).item : ItemNull.item;
+    return item_is_error(jube_root_item(*data)) ? jube_root_item(*data) : make_js_undefined();
+}
+
 // URLSearchParams instance: stores entries as array of [key, value] pairs in __entries__
 
 // URLSearchParams.prototype.append(name, value)
 extern "C" Item js_usp_append(Item name_item, Item value_item) {
     JubeScopedRoots roots(node_url_host, 5);
-    Item self = js_get_this();
-    roots.slot(self);
-    Item entries = js_get_key_default(self, make_string_item("__entries__"));
-    roots.slot(entries);
-    Item name_str = js_to_string(name_item);
-    roots.slot(name_str);
-    if (item_is_error(name_str)) return name_str;
-    Item value_str = js_to_string(value_item);
-    roots.slot(value_str);
-    if (item_is_error(value_str)) return value_str;
-    Item entry = jube_node_array_pair(node_url_host, name_str, value_str);
+    uint64_t* self_root = nullptr;
+    uint64_t* entries_root = nullptr;
+    uint64_t* name_str_root = nullptr;
+    uint64_t* value_str_root = nullptr;
+    Item converted = node_url_search_params_arguments(roots, name_item, value_item, true,
+        &self_root, &entries_root, &name_str_root, &value_str_root);
+    if (item_is_error(converted)) return converted;
+    Item entry = jube_node_array_pair(node_url_host, jube_root_item(name_str_root), jube_root_item(value_str_root));
     roots.slot(entry);
     if (item_is_error(entry)) return entry;
-    Item status = js_array_push(entries, entry);
-    return item_is_error(status) ? status : make_js_undefined();
+    Item status = js_array_push(jube_root_item(entries_root), entry);
+    return item_is_error(status) ? status : node_url_search_params_finish(jube_root_item(self_root), jube_root_item(entries_root), false, true);
 }
 
 // URLSearchParams.prototype.delete(name[, value])
 extern "C" Item js_usp_delete(Item name_item, Item value_item) {
     JubeScopedRoots roots(node_url_host, 5);
-    Item self = js_get_this();
-    roots.slot(self);
-    Item entries = js_get_key_default(self, make_string_item("__entries__"));
-    roots.slot(entries);
-    Item name_str = js_to_string(name_item);
-    roots.slot(name_str);
-    if (item_is_error(name_str)) return name_str;
+    uint64_t* self_root = nullptr;
+    uint64_t* entries_root = nullptr;
+    uint64_t* name_str_root = nullptr;
+    uint64_t* value_str_root = nullptr;
     bool check_value = get_type_id(value_item) != LMD_TYPE_UNDEFINED;
-    Item value_str = check_value ? js_to_string(value_item) : (Item){0};
-    roots.slot(value_str);
-    if (item_is_error(value_str)) return value_str;
-
+    Item converted = node_url_search_params_arguments(roots, name_item, value_item, check_value,
+        &self_root, &entries_root, &name_str_root, &value_str_root);
+    if (item_is_error(converted)) return converted;
     Item new_entries = js_array_new(0);
     // replacement lists are not reachable from the receiver until publication (D6.3.3).
-    roots.slot(new_entries);
-    int64_t len = js_array_length(entries);
+    uint64_t* new_entries_root = roots.slot(new_entries);
+    int64_t len = js_array_length(jube_root_item(entries_root));
     for (int64_t i = 0; i < len; i++) {
-        Item entry = js_elements_get_int(entries, i);
+        Item entry = js_elements_get_int(jube_root_item(entries_root), i);
         Item ek = js_elements_get_int(entry, 0);
-        Item match = js_strict_equal(ek, name_str);
+        Item match = js_strict_equal(ek, jube_root_item(name_str_root));
         if (js_is_truthy(match)) {
             if (check_value) {
                 Item ev = js_elements_get_int(entry, 1);
-                Item vm = js_strict_equal(ev, value_str);
+                Item vm = js_strict_equal(ev, jube_root_item(value_str_root));
                 if (js_is_truthy(vm)) continue; // delete matching
-                js_array_push(new_entries, entry);
+                js_array_push(jube_root_item(new_entries_root), entry);
             }
             continue; // delete
         }
-        js_array_push(new_entries, entry);
+        js_array_push(jube_root_item(new_entries_root), entry);
     }
-    js_set_key_default(self, make_string_item("__entries__"), new_entries);
-    return make_js_undefined();
+    return node_url_search_params_finish(jube_root_item(self_root), jube_root_item(new_entries_root), true, true);
 }
 
 // URLSearchParams.prototype.get(name)
@@ -1257,57 +1296,60 @@ extern "C" Item js_usp_has(Item name_item, Item value_item) {
 // URLSearchParams.prototype.set(name, value)
 extern "C" Item js_usp_set(Item name_item, Item value_item) {
     JubeScopedRoots roots(node_url_host, 6);
-    Item self = js_get_this();
-    roots.slot(self);
-    Item entries = js_get_key_default(self, make_string_item("__entries__"));
-    roots.slot(entries);
-    Item name_str = js_to_string(name_item);
-    roots.slot(name_str);
-    if (item_is_error(name_str)) return name_str;
-    Item value_str = js_to_string(value_item);
-    roots.slot(value_str);
-    if (item_is_error(value_str)) return value_str;
+    uint64_t* self_root = nullptr;
+    uint64_t* entries_root = nullptr;
+    uint64_t* name_str_root = nullptr;
+    uint64_t* value_str_root = nullptr;
+    Item converted = node_url_search_params_arguments(roots, name_item, value_item, true,
+        &self_root, &entries_root, &name_str_root, &value_str_root);
+    if (item_is_error(converted)) return converted;
     bool found = false;
     Item new_entries = js_array_new(0);
-    roots.slot(new_entries);
+    uint64_t* new_entries_root = roots.slot(new_entries);
     uint64_t* pair_root = roots.slot(ItemNull);
     if (!pair_root) return ItemError;
-    int64_t len = js_array_length(entries);
+    int64_t len = js_array_length(jube_root_item(entries_root));
     for (int64_t i = 0; i < len; i++) {
-        Item entry = js_elements_get_int(entries, i);
+        Item entry = js_elements_get_int(jube_root_item(entries_root), i);
         Item ek = js_elements_get_int(entry, 0);
-        Item match = js_strict_equal(ek, name_str);
+        Item match = js_strict_equal(ek, jube_root_item(name_str_root));
         if (js_is_truthy(match)) {
             if (!found) {
-                *pair_root = jube_node_array_pair(node_url_host, name_str, value_str).item;
+                *pair_root = jube_node_array_pair(node_url_host, jube_root_item(name_str_root), jube_root_item(value_str_root)).item;
                 if (item_is_error(jube_root_item(pair_root))) return jube_root_item(pair_root);
-                js_array_push(new_entries, jube_root_item(pair_root));
+                js_array_push(jube_root_item(new_entries_root), jube_root_item(pair_root));
                 found = true;
             }
-            // skip duplicate entries
+            // skip duplicate jube_root_item(entries_root)
         } else {
-            js_array_push(new_entries, entry);
+            js_array_push(jube_root_item(new_entries_root), entry);
         }
     }
     if (!found) {
-        *pair_root = jube_node_array_pair(node_url_host, name_str, value_str).item;
+        *pair_root = jube_node_array_pair(node_url_host, jube_root_item(name_str_root), jube_root_item(value_str_root)).item;
         if (item_is_error(jube_root_item(pair_root))) return jube_root_item(pair_root);
-        js_array_push(new_entries, jube_root_item(pair_root));
+        js_array_push(jube_root_item(new_entries_root), jube_root_item(pair_root));
     }
-    js_set_key_default(self, make_string_item("__entries__"), new_entries);
-    return make_js_undefined();
+    return node_url_search_params_finish(jube_root_item(self_root), jube_root_item(new_entries_root), true, true);
 }
 
 // URLSearchParams.prototype.sort()
 extern "C" Item js_usp_sort(void) {
+    JubeScopedRoots roots(node_url_host, 4);
     Item self = js_get_this();
-    Item entries = js_get_key_default(self, make_string_item("__entries__"));
+    uint64_t* self_root = roots.slot(self);
+    if (!self_root) return ItemError;
+    Item entries = js_get_key_default(jube_root_item(self_root), make_string_item("__entries__"));
+    uint64_t* entries_root = roots.slot(entries);
+    uint64_t* left_root = roots.slot(ItemNull);
+    uint64_t* right_root = roots.slot(ItemNull);
+    if (!self_root || !entries_root || !left_root || !right_root) return ItemError;
     // simple bubble sort by key
-    int64_t len = js_array_length(entries);
+    int64_t len = js_array_length(jube_root_item(entries_root));
     for (int64_t i = 0; i < len - 1; i++) {
         for (int64_t j = 0; j < len - 1 - i; j++) {
-            Item a = js_elements_get_int(entries, j);
-            Item b = js_elements_get_int(entries, j + 1);
+            Item a = js_elements_get_int(jube_root_item(entries_root), j);
+            Item b = js_elements_get_int(jube_root_item(entries_root), j + 1);
             Item ak = js_elements_get_int(a, 0);
             Item bk = js_elements_get_int(b, 0);
             char sa[4096] = {};
@@ -1315,13 +1357,15 @@ extern "C" Item js_usp_sort(void) {
             if (item_to_cstr(ak, sa, sizeof(sa)) && item_to_cstr(bk, sb, sizeof(sb))) {
                 int cmp = strcmp(sa, sb);
                 if (cmp > 0) {
-                    js_elements_set_int(entries, j, b);
-                    js_elements_set_int(entries, j + 1, a);
+                    *left_root = a.item;
+                    *right_root = b.item;
+                    js_elements_set_int(jube_root_item(entries_root), j, jube_root_item(right_root));
+                    js_elements_set_int(jube_root_item(entries_root), j + 1, jube_root_item(left_root));
                 }
             }
         }
     }
-    return make_js_undefined();
+    return node_url_search_params_finish(jube_root_item(self_root), jube_root_item(entries_root), false, true);
 }
 
 // Borrowed UTF-8 view of a string entry; non-strings serialize as empty. The
@@ -1339,10 +1383,13 @@ static bool node_url_string_view(Item value, const char** out, size_t* out_len) 
 }
 
 // URLSearchParams.prototype.toString()
-extern "C" Item js_usp_toString(void) {
-    Item self = js_get_this();
-    Item entries = js_get_key_default(self, make_string_item("__entries__"));
-    int64_t len = js_array_length(entries);
+Item node_url_search_params_string(Item params) {
+    JubeScopedRoots roots(node_url_host, 2);
+    uint64_t* owner = roots.slot(params);
+    if (!owner) return ItemError;
+    uint64_t* entries_root = roots.slot(js_get_key_default(jube_root_item(owner), make_string_item("__entries__")));
+    if (!entries_root) return ItemError;
+    int64_t len = js_array_length(jube_root_item(entries_root));
     if (len == 0) return make_string_item("", 0);
     if (!node_url_host || !node_url_host->value ||
             !node_url_host->value->string_bytes || !node_url_host->value->string_length) {
@@ -1356,7 +1403,7 @@ extern "C" Item js_usp_toString(void) {
     size_t byte_len = 0;
     size_t total = 0;
     for (int64_t i = 0; i < len; i++) {
-        Item entry = js_elements_get_int(entries, i);
+        Item entry = js_elements_get_int(jube_root_item(entries_root), i);
         if (i > 0) total += 1;  // '&'
         node_url_string_view(js_elements_get_int(entry, 0), &bytes, &byte_len);
         total += url_encode_measure(bytes, byte_len, URL_KEEP_FORM, true, NULL);
@@ -1369,7 +1416,7 @@ extern "C" Item js_usp_toString(void) {
     if (!buf) return make_string_item("", 0);
     size_t pos = 0;
     for (int64_t i = 0; i < len; i++) {
-        Item entry = js_elements_get_int(entries, i);
+        Item entry = js_elements_get_int(jube_root_item(entries_root), i);
         if (i > 0) buf[pos++] = '&';
         node_url_string_view(js_elements_get_int(entry, 0), &bytes, &byte_len);
         pos += url_encode_write(bytes, byte_len, URL_KEEP_FORM, true, buf + pos);
@@ -1382,6 +1429,8 @@ extern "C" Item js_usp_toString(void) {
     mem_free(buf);
     return result;
 }
+
+extern "C" Item js_usp_toString(void) { return node_url_search_params_string(js_get_this()); }
 
 // URLSearchParams.prototype.forEach(callback[, thisArg])
 extern "C" Item js_usp_forEach(Item callback, Item this_arg) {
