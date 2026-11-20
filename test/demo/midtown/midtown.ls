@@ -8,10 +8,12 @@
 import dom
 import runtime: lambda.scene3d.runtime
 import u: .mod_util
+import v: .mod_vehicle
 import ms: .mod_mission
 import cam: .mod_camera
 import sc: .mod_scene
 import hud: .mod_hud
+import minimap: .mod_minimap
 import present: .mod_present
 
 let PROFILE = sys.proc.self.env.MIDTOWN_PROFILE == "1"
@@ -32,7 +34,8 @@ pn frame(owner, st, now) {
     if (PROFILE) {
         print("MIDTOWN_PROFILE frame_ms=" ++ string(if (st.last == null) 0.0 else now - st.last) ++ " step_ms=" ++ string((simulated - started) * 1000) ++
             " sync_ms=" ++ string((clock() - simulated) * 1000) ++ " debt_ms=" ++ string(scene.lag * 1000) ++
-            " cap=" ++ string(stepped.speed_cap) ++ "\n")
+            " cap=" ++ string(stepped.speed_cap) ++ " speed_kmh=" ++ string(v.speed(stepped.car) * 3.6) ++
+            " distance=" ++ string(stepped.car.odometer) ++ " damage=" ++ string(stepped.car.damage) ++ "\n")
     }
     let token = if (next.paused) 0 else dom.request_frame(owner, "drive_frame")
     return {*: next, last: if (next.paused) null else now, token: token}
@@ -53,6 +56,7 @@ pn command(owner, st, act) {
     if (act == "start") { return begin(owner, st, false) }
     if (act == "auto-start") { return begin(owner, st, true) }
     if (not st.started) { return st }
+    if (act == "map-recenter") { return present.recenter_minimap(st) }
     if (act == "look") {
         let look = sc.next_look(st.look)
         let lights = look != "day"
@@ -109,7 +113,8 @@ view <drive_session> state st: START { ~.rendered }
 on drive_activate(evt) {
     if ((evt.event_phase != 2 or st.handles != null)^) { return 'pass' }
     let owner = evt.target
-    let bound = {*: st, handles: present.bind(owner)}
+    let handles = present.bind(owner)^
+    let bound = {*: st, handles: handles}
     st = frame(owner, bound, evt.time_stamp)
     return 'handled'
 }
@@ -156,8 +161,25 @@ on keyup(evt) {
     st = {*: st, keys: present.set_key(st.keys, held, false)}
     return 'prevent-default'
 }
+on wheel(evt) {
+    let delta = evt.deltaY or 0
+    if ((st.handles == null or not st.started or delta == 0 or dom.closest(evt.target, "#map-disc") == null)^) { return 'pass' }
+    st = present.zoom_minimap(st, if (delta < 0) 1 else -1)^
+    return 'prevent-default'
+}
 on pointerdown(evt) {
     if ((st.handles == null or evt.button != 0)^) { return 'pass' }
+    let surface = dom.closest(evt.target, "#map-disc")
+    if (surface != null) {
+        if ((st.drag != null or dom.closest(evt.target, "#map-recenter") != null)^) { return 'pass' }
+        let box = dom.bounding_box(surface)
+        if ((box.width <= 0.0)^) { return 'pass' }
+        dom.set_pointer_capture(surface, evt.pointerId)
+        // the smaller HUD still drags by the pointer's on-screen distance.
+        st = {*: st, drag: {map: true, pointer: evt.pointerId, x: evt.clientX, y: evt.clientY, scale: minimap.SIZE / box.width}}
+        return 'prevent-default'
+    }
+    if ((st.drag != null and st.drag.map == true)^) { return 'pass' }
     let pedal = dom.closest(evt.target, "[data-hold]")
     if (pedal != null) {
         dom.set_pointer_capture(pedal, evt.pointerId)
@@ -174,17 +196,38 @@ on pointerdown(evt) {
 }
 on pointermove(evt) {
     if ((st.drag == null or st.drag.pedal != null)^) { return 'pass' }
+    if ((st.drag.map == true)^) {
+        if ((evt.pointerId != st.drag.pointer)^) { return 'pass' }
+        let drag = st.drag
+        let next = present.pan_minimap(st, (evt.clientX - drag.x) * drag.scale, (evt.clientY - drag.y) * drag.scale)^
+        st = {*: next, drag: {*: drag, x: evt.clientX, y: evt.clientY}}
+        return 'prevent-default'
+    }
     st = {*: st, camera: cam.drag(st.camera, (evt.clientX - st.drag.x) * 0.006, (evt.clientY - st.drag.y) * 0.003),
         drag: {*: st.drag, x: evt.clientX, y: evt.clientY}}
     return 'prevent-default'
 }
 on pointerup(evt) {
     if ((st.drag == null)^) { return 'pass' }
+    if ((st.drag.map == true)^) {
+        if ((evt.pointerId != st.drag.pointer)^) { return 'pass' }
+        st = {*: st, drag: null}
+        dom.release_pointer_capture((st.handles.map_disc)^, evt.pointerId)
+        dom.focus_set((st.handles.scene)^, false)
+        return 'prevent-default'
+    }
     dom.release_pointer_capture(evt.target, evt.pointerId)
     st = {*: st, touch: if (st.drag.pedal != null) present.set_key(st.touch, st.drag.pedal, false) else st.touch, drag: null}
     return 'prevent-default'
 }
+on lostpointercapture(evt) {
+    if ((st.drag != null and st.drag.map == true and evt.pointerId == st.drag.pointer)^) {
+        st = {*: st, drag: null}
+    }
+    return 'pass'
+}
 on pointercancel(evt) {
+    if ((st.drag != null and st.drag.map == true and evt.pointerId != st.drag.pointer)^) { return 'pass' }
     st = {*: st, touch: present.NO_KEYS, drag: null}
     return 'pass'
 }
@@ -199,7 +242,9 @@ on physicscontactstart(evt) {
     return 'handled'
 }
 on blur(evt) {
-    st = {*: st, keys: present.NO_KEYS, touch: present.NO_KEYS, drag: null}
+    // the scene can lose keyboard focus after a map press. Capture owns the pan until release or cancellation.
+    let captured_map = (st.drag != null and st.drag.map == true)^
+    st = {*: st, keys: present.NO_KEYS, touch: present.NO_KEYS, drag: if (captured_map) st.drag else null}
     return 'pass'
 }
 on closerequest(evt) {

@@ -94,7 +94,11 @@ CSS layout and rendering engine for HTML/CSS document presentation.
 [Lambda Issue Ledger](vibe/Lambda_Issue_Ledger.md). Record package-specific
 issues in the relevant package implementation plan.
 General Lambda defects discovered during package work remain in the Lambda
-ledger. Input and Radiant issues remain with their owners as described above.
+ledger. `lambda-input` and Radiant retain separate ownership under
+D9.1.1v4 / D9.1.3v2. Record their issues in the
+[Lib and Input Issue Ledger](vibe/Lib_Input_Issue_Ledger.md) or the
+[Radiant Issue Ledger](vibe/Radiant_Issue_Ledger.md). Both ledgers live beside
+Lambda's ledger in this checkout's `vibe/`.
 
 ## Lambda CLI Commands
 
@@ -198,4 +202,7 @@ On macOS, GUI Chromium may quit during Puppeteer captures. Use Puppeteer’s bun
 - `doc/Lambda_Validator.md` — Schema-based data validation
 - `doc/Lambda_Cheatsheet.md` — Quick syntax cheatsheet
 - `doc/dev/Lambda_Jube_Runtime.md` — Jube native-module build and packaging (Node compatibility and RDB modules; hosted languages removed 2026-10-07, the Bash and Ruby front ends are compiled out)
-- `vibe/` — Working design records, the home of detailed design: `vibe/Lambda_Design_*.md` (core runtime), `vibe/radiant/` (Radiant), `vibe/jube/` (LambdaJS, Jube). `doc/Lambda_Formal_Design.md` Appendix C maps each section to its records
+- `vibe/` — Working design records, the home of detailed design:
+  `vibe/Lambda_Design_*.md` (core runtime), `vibe/input/` (input),
+  `vibe/radiant/` (Radiant), `vibe/jube/` (LambdaJS, Jube).
+  `doc/Lambda_Formal_Design.md` Appendix C maps each section to its records

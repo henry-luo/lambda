@@ -1516,9 +1516,9 @@ TEST_F(RadiantDocumentTest, JapaneseListMarkersRetainStyleAndRenumberAfterStartC
     for (const auto& entry : cases) {
         DomElement* item = dom_find_element_by_id(document->root->as_element(), entry.id);
         ASSERT_NE(item, nullptr);
-        ASSERT_NE(item->pseudo.get(), nullptr);
-        ASSERT_NE(item->pseudo->marker.get(), nullptr);
-        MarkerProp* marker = item->pseudo->marker->marker_prop();
+        ASSERT_NE(item->pseudo_prop(), nullptr);
+        ASSERT_NE(item->pseudo_prop()->marker.get(), nullptr);
+        MarkerProp* marker = item->pseudo_prop()->marker->marker_prop();
         ASSERT_NE(marker, nullptr);
         EXPECT_STREQ(marker->text_content.get(), entry.expected);
         EXPECT_GT(marker->width, 0.0f);
@@ -1527,7 +1527,7 @@ TEST_F(RadiantDocumentTest, JapaneseListMarkersRetainStyleAndRenumberAfterStartC
     dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, list, list->parent);
     layout_html_doc(&ui, document, true);
     DomElement* second = dom_find_element_by_id(document->root->as_element(), "second");
-    EXPECT_STREQ(second->pseudo->marker->marker_prop()->text_content.get(), "百、");
+    EXPECT_STREQ(second->pseudo_prop()->marker->marker_prop()->text_content.get(), "百、");
 }
 
 TEST_F(RadiantDocumentTest, NestedSearchControlsUseTextareaRowsAndLineHeight) {
@@ -4193,8 +4193,8 @@ TEST_F(RadiantDocumentTest, VerticalTextareaSourcesAlignWithTheirEditableLines) 
             float probe_x = 0.0f, control_x = 0.0f;
             view_get_visual_bounds(probe, &probe_x, nullptr, nullptr, nullptr);
             view_get_visual_bounds(control, &control_x, nullptr, nullptr, nullptr);
-            ASSERT_NE(control->form, nullptr);
-            if (lines == 4) EXPECT_GT(control->form->last_text_baseline_overflow, 0.0f);
+            ASSERT_NE(control->form_storage(), nullptr);
+            if (lines == 4) EXPECT_GT(control->form_storage()->last_text_baseline_overflow, 0.0f);
             float baseline_x = control_x + (strcmp(mode, "vertical-rl") == 0
                 ? control->width - baseline : baseline);
             EXPECT_FLOAT_EQ(probe_x + probe->width / 2.0f, baseline_x);
@@ -5570,9 +5570,9 @@ TEST_F(RadiantDocumentTest, VerticalRootGeneratedBlocksParticipateInNormalFlow) 
             EXPECT_FLOAT_EQ(root->height, 200.0f);
             EXPECT_EQ(layout_element_css_writing_mode(root), CSS_VALUE_HORIZONTAL_TB);
             expect_box("result", root_x + (reverse ? state.rl_body : state.lr_body), 4, state.child_width, 190);
-            if (state.before || state.after) ASSERT_NE(root->pseudo, nullptr);
+            if (state.before || state.after) ASSERT_NE(root->pseudo_prop(), nullptr);
             for (bool before : {false, true}) {
-                DomElement* pseudo = before ? root->pseudo->before : root->pseudo->after;
+                DomElement* pseudo = before ? root->pseudo_prop()->before : root->pseudo_prop()->after;
                 ASSERT_NE(pseudo, nullptr);
                 if (!(before ? state.before : state.after)) {
                     EXPECT_EQ(resolve_display_value(pseudo).outer, CSS_VALUE_NONE);
@@ -6450,10 +6450,10 @@ TEST_F(RadiantDocumentTest, PseudoFontsOwnInheritedTextShadowsAcrossRetainedRese
     for (unsigned pass = 0; pass < 3; pass++) {
         layout_html_doc(&ui, document, false);
         ASSERT_NE(result->font, nullptr);
-        ASSERT_NE(result->pseudo, nullptr);
+        ASSERT_NE(result->pseudo_prop(), nullptr);
         TextShadow* original = result->font->text_shadow;
         ASSERT_NE(original, nullptr);
-        DomElement* copies[] = {result->pseudo->before, result->pseudo->after};
+        DomElement* copies[] = {result->pseudo_prop()->before, result->pseudo_prop()->after};
         for (DomElement* copy : copies) {
             ASSERT_NE(copy, nullptr);
             ASSERT_NE(copy->font, nullptr);
@@ -6487,12 +6487,12 @@ TEST_F(RadiantDocumentTest, PreparedStylesKeepInheritedFontsAndRebindControlPerc
         EXPECT_FLOAT_EQ(code->font->font_size, 13.0f);
         EXPECT_FLOAT_EQ(control->width, 100.0f);
         EXPECT_EQ(closed->view_type, RDT_VIEW_NONE);
-        ASSERT_NE(generated->pseudo.get(), nullptr);
-        DomElement* after = generated->pseudo->after;
+        ASSERT_NE(generated->pseudo_prop(), nullptr);
+        DomElement* after = generated->pseudo_prop()->after;
         ASSERT_NE(after, nullptr);
-        ASSERT_NE(after->pseudo.get(), nullptr);
-        ASSERT_NE(after->pseudo->marker.get(), nullptr);
-        MarkerProp* marker = after->pseudo->marker->marker_prop();
+        ASSERT_NE(after->pseudo_prop(), nullptr);
+        ASSERT_NE(after->pseudo_prop()->marker.get(), nullptr);
+        MarkerProp* marker = after->pseudo_prop()->marker->marker_prop();
         ASSERT_NE(marker, nullptr);
         ASSERT_NE(marker->text_content.get(), nullptr);
         EXPECT_STREQ(marker->text_content.get(), "2. ");
@@ -7010,10 +7010,10 @@ TEST_F(RadiantDocumentTest, RecascadeRetainsEqualInputsAndExpiresAuthoredAndInhe
     recascade();
     EXPECT_FLOAT_EQ(target->width, 180.0f);
     EXPECT_EQ(sibling->style_version, version);
-    ASSERT_NE(sibling->pseudo, nullptr);
-    ASSERT_NE(sibling->pseudo->before, nullptr);
-    ASSERT_NE(sibling->pseudo->before->first_child, nullptr);
-    EXPECT_STREQ(sibling->pseudo->before->first_child->as_text()->text, "X");
+    ASSERT_NE(sibling->pseudo_prop(), nullptr);
+    ASSERT_NE(sibling->pseudo_prop()->before, nullptr);
+    ASSERT_NE(sibling->pseudo_prop()->before->first_child, nullptr);
+    EXPECT_STREQ(sibling->pseudo_prop()->before->first_child->as_text()->text, "X");
 
     ASSERT_TRUE(target->set_attribute("dir", "rtl"));
     recascade();
@@ -7042,12 +7042,12 @@ TEST_F(RadiantDocumentTest, SharedPublicationRegeneratesTableListAndPseudoStruct
         EXPECT_FLOAT_EQ(find("table")->height, 20.0f);
         EXPECT_FLOAT_EQ(find("item-b")->y - find("item-a")->y, 20.0f);
         for (const char* id : {"item-a", "item-b"}) {
-            ASSERT_NE(find(id)->pseudo, nullptr);
-            ASSERT_NE(find(id)->pseudo->marker, nullptr);
-            EXPECT_EQ(find(id)->pseudo->marker->view_type, RDT_VIEW_MARKER);
+            ASSERT_NE(find(id)->pseudo_prop(), nullptr);
+            ASSERT_NE(find(id)->pseudo_prop()->marker, nullptr);
+            EXPECT_EQ(find(id)->pseudo_prop()->marker->view_type, RDT_VIEW_MARKER);
         }
-        ASSERT_NE(find("generated")->pseudo, nullptr);
-        ASSERT_NE(find("generated")->pseudo->before, nullptr);
+        ASSERT_NE(find("generated")->pseudo_prop(), nullptr);
+        ASSERT_NE(find("generated")->pseudo_prop()->before, nullptr);
         EXPECT_FLOAT_EQ(find("generated")->height, 20.0f);
         float svg_x = 0.0f, svg_y = 0.0f;
         view_get_visual_bounds(find("picture"), &svg_x, &svg_y, nullptr, nullptr);
@@ -7071,12 +7071,12 @@ TEST_F(RadiantDocumentTest, SharedPublicationRegeneratesTableListAndPseudoStruct
     change_style("cell-a", nullptr);
     EXPECT_FLOAT_EQ(find("cell-b")->x - find("cell-a")->x, 40.0f);
     change_style("item-a", "display:block");
-    if (find("item-a")->pseudo && find("item-a")->pseudo->marker)
-        EXPECT_NE(find("item-a")->pseudo->marker->parent, find("item-a"));
+    if (find("item-a")->pseudo_prop() && find("item-a")->pseudo_prop()->marker)
+        EXPECT_NE(find("item-a")->pseudo_prop()->marker->parent, find("item-a"));
     change_style("item-a", nullptr);
-    ASSERT_NE(find("item-a")->pseudo, nullptr);
-    ASSERT_NE(find("item-a")->pseudo->marker, nullptr);
-    EXPECT_EQ(find("item-a")->pseudo->marker->parent, find("item-a"));
+    ASSERT_NE(find("item-a")->pseudo_prop(), nullptr);
+    ASSERT_NE(find("item-a")->pseudo_prop()->marker, nullptr);
+    EXPECT_EQ(find("item-a")->pseudo_prop()->marker->parent, find("item-a"));
 }
 
 TEST_F(RadiantDocumentTest, HiddenPositionedPopupDoesNotPaintRetainedDecoration) {
@@ -7311,9 +7311,9 @@ TEST_F(RadiantDocumentTest, CompletedFlexTextFlowSurvivesStretchAndInvalidatesCo
         EXPECT_FLOAT_EQ(find("line-b")->height, 26.0f);
         EXPECT_FLOAT_EQ(find("line-b")->y - find("line-a")->y, 26.0f);
         DomElement* quoted = find("quote-inner");
-        ASSERT_NE(quoted->pseudo, nullptr);
-        ASSERT_NE(quoted->pseudo->before, nullptr);
-        DomNode* quote = quoted->pseudo->before->first_child;
+        ASSERT_NE(quoted->pseudo_prop(), nullptr);
+        ASSERT_NE(quoted->pseudo_prop()->before, nullptr);
+        DomNode* quote = quoted->pseudo_prop()->before->first_child;
         ASSERT_NE(quote, nullptr);
         ASSERT_TRUE(quote->is_text());
         EXPECT_STREQ(quote->as_text()->text, "1");
@@ -7988,7 +7988,7 @@ TEST_F(RadiantDocumentTest, CommonFlexSubtreesRestoreFragmentsWithoutRepeatingOr
         }
         auto generated = [&](const char* id, bool before) -> const char* {
             DomElement* element = find(id);
-            DomElement* pseudo = before ? element->pseudo->before.get() : element->pseudo->after.get();
+            DomElement* pseudo = before ? element->pseudo_prop()->before.get() : element->pseudo_prop()->after.get();
             return pseudo->first_child->as_text()->text;
         };
         EXPECT_STREQ(generated("chapter-a", true), "1 ");
@@ -9291,10 +9291,10 @@ TEST_F(RadiantDocumentTest, TextareaRevealsEditingCaretAndClipsScrolledContents)
         ui.create_surface(ui.window_width, ui.window_height);
         layout_html_doc(&ui, document, false);
         DomElement* area = dom_find_element_by_id(document->root->as_element(), "area");
-        ASSERT_NE(area, nullptr); ASSERT_NE(area->form, nullptr);
+        ASSERT_NE(area, nullptr); ASSERT_NE(area->form_storage(), nullptr);
         focus_set_programmatic(state, area);
         tc_ensure_init(area);
-        uint32_t end = area->form->current_value_u16_len;
+        uint32_t end = area->form_storage()->current_value_u16_len;
         auto expect_caret_pixels = [&](bool visible) {
             render_html_doc(&ui, document->view_tree, nullptr);
             ASSERT_FALSE(ui.render_failed);
@@ -9317,25 +9317,25 @@ TEST_F(RadiantDocumentTest, TextareaRevealsEditingCaretAndClipsScrolledContents)
         };
         tc_set_selection_range(area, end, end, 0);
         expect_caret_pixels(true);
-        EXPECT_GT(area->form->scroll_y, 0.0f);
+        EXPECT_GT(area->form_storage()->scroll_y, 0.0f);
         tc_set_selection_range(area, 0, 0, 0);
         expect_caret_pixels(true);
-        EXPECT_FLOAT_EQ(area->form->scroll_y, 0.0f);
+        EXPECT_FLOAT_EQ(area->form_storage()->scroll_y, 0.0f);
         // dragging beyond the viewport clips its caret until the drag autoscroll tick.
         state_store_selection_start_pointer(state, area, end);
         ASSERT_TRUE(state->editing.pointer_selecting);
         ASSERT_TRUE(caret_is_visible(state));
         expect_caret_pixels(false);
-        EXPECT_FLOAT_EQ(area->form->scroll_y, 0.0f);
+        EXPECT_FLOAT_EQ(area->form_storage()->scroll_y, 0.0f);
         selection_finish_active_gesture(state);
         // inserting new lines must reveal the new blank line as well as populated lines.
         StrBuf* appended = strbuf_new();
-        strbuf_append_str(appended, area->form->current_value);
+        strbuf_append_str(appended, area->form_storage()->current_value);
         strbuf_append_str(appended, "\nnine\n");
         tc_set_value(area, appended->str, appended->length);
         strbuf_free(appended);
         expect_caret_pixels(true);
-        EXPECT_GT(area->form->scroll_y, 0.0f);
+        EXPECT_GT(area->form_storage()->scroll_y, 0.0f);
     }
 }
 
@@ -17188,8 +17188,8 @@ TEST_F(RadiantDocumentTest, RubyFloatBandsUseCompleteHeightBeforeChoosingSourceL
         bounds("single-wrap-control", edge, 800.0f, 30.0f, 20.0f);
         bounds("single-wrap-ruby", edge + (wraps ? 0.0f : 30.0f), 800.0f + (wraps ? 20.0f : 0.0f), 40.0f, 20.0f);
         DomElement* after = find("counter-after");
-        ASSERT_NE(after->pseudo, nullptr); ASSERT_NE(after->pseudo->before, nullptr);
-        DomText* generated = first_text_leaf(after->pseudo->before);
+        ASSERT_NE(after->pseudo_prop(), nullptr); ASSERT_NE(after->pseudo_prop()->before, nullptr);
+        DomText* generated = first_text_leaf(after->pseudo_prop()->before);
         ASSERT_NE(generated, nullptr); EXPECT_STREQ((const char*)generated->text_data(), "1");
         ASSERT_NE(radiant_document_ensure_state(document, "ruby-float-band"), nullptr);
         DomRange* range = dom_range_create(document->state); ASSERT_NE(range, nullptr);
@@ -20649,8 +20649,8 @@ TEST_F(RadiantFormControls, RangeLogicalDefaultsAndZeroContentMeasurementsStayCu
             EXPECT_FLOAT_EQ(child->width,content_width+(decorated ? 22.0f : 0.0f));
             EXPECT_FLOAT_EQ(child->height,content_height+(decorated ? 12.0f : 0.0f));
             uint64_t geometry = retained_subtree_geometry(child);
-            float intrinsic_width = child->form->intrinsic_width;
-            float intrinsic_height = child->form->intrinsic_height;
+            float intrinsic_width = child->form_storage()->intrinsic_width;
+            float intrinsic_height = child->form_storage()->intrinsic_height;
             FlexFlowTestContext flow(&ui,document,child);
             for (unsigned query = 0; query < 2; query++) {
                 IntrinsicSize measured = layout_measure_form_control(&flow.layout,lam::view_as_block(child),AvailableSpace::make_indefinite());
@@ -20661,8 +20661,8 @@ TEST_F(RadiantFormControls, RangeLogicalDefaultsAndZeroContentMeasurementsStayCu
                 EXPECT_FLOAT_EQ(natural.max_width,vertical ? block_extent : FormDefaults::RANGE_WIDTH);
                 EXPECT_FLOAT_EQ(natural.max_height,vertical ? FormDefaults::RANGE_WIDTH : block_extent);
                 EXPECT_EQ(retained_subtree_geometry(child),geometry);
-                EXPECT_FLOAT_EQ(child->form->intrinsic_width,intrinsic_width);
-                EXPECT_FLOAT_EQ(child->form->intrinsic_height,intrinsic_height);
+                EXPECT_FLOAT_EQ(child->form_storage()->intrinsic_width,intrinsic_width);
+                EXPECT_FLOAT_EQ(child->form_storage()->intrinsic_height,intrinsic_height);
             }
         }
         ui.document = nullptr; free_document(document); document = nullptr;
@@ -21544,7 +21544,7 @@ TEST_F(RadiantFormControls, AuthoredButtonStylesRetainComputedInputsAcrossSizing
     ASSERT_NE(button->form_control(), nullptr);
     ASSERT_NE(button->layout_cache, nullptr);
     ASSERT_NE(button->layout_cache->resolved_style, nullptr);
-    FormControlProp* native = button->form;
+    FormControlProp* native = button->form_storage();
     FlexFlowTestContext flow(&ui, document, button);
     uint32_t revision = radiant::css_resolved_style_input_revision(&flow.layout, button);
     ASSERT_NE(revision, 0u);
@@ -21557,7 +21557,7 @@ TEST_F(RadiantFormControls, AuthoredButtonStylesRetainComputedInputsAcrossSizing
     document->incremental_layout = true;
     layout_html_doc(&ui, document, true);
     EXPECT_EQ(retained_subtree_geometry(button), geometry);
-    EXPECT_EQ(button->form.get(), native);
+    EXPECT_EQ(button->form_storage(), native);
     EXPECT_FLOAT_EQ(button->width, 100.0f);
 
     DomElement* row = button->parent_element();
@@ -21574,7 +21574,7 @@ TEST_F(RadiantFormControls, AuthoredButtonStylesRetainComputedInputsAcrossSizing
     document->incremental_layout = false;
     layout_html_doc(&ui, document, true);
     EXPECT_EQ(retained_subtree_geometry(button), geometry);
-    EXPECT_EQ(button->form.get(), native);
+    EXPECT_EQ(button->form_storage(), native);
 
 }
 
@@ -21633,11 +21633,11 @@ TEST_F(RadiantFormControls, ScriptCreatedFormSurvivesRetainedStyleReset) {
     ASSERT_NE(form, nullptr);
     ASSERT_TRUE(form->heap_allocated);
     view_pool_reset_retained_subtree(document->view_tree, owner);
-    EXPECT_EQ(select->form, form);
+    EXPECT_EQ(select->form_storage(), form);
     layout_html_doc(&ui, document, true);
-    EXPECT_EQ(select->form, form);
+    EXPECT_EQ(select->form_storage(), form);
     form_control_release_prop(select);
-    EXPECT_EQ(select->form, nullptr);
+    EXPECT_EQ(select->form_storage(), nullptr);
 }
 
 TEST_F(RadiantFormControls, RetainedStyleResetPreservesOpenSelectUntilControlRelease) {
@@ -21648,7 +21648,7 @@ TEST_F(RadiantFormControls, RetainedStyleResetPreservesOpenSelectUntilControlRel
     ASSERT_NE(state, nullptr);
     DomElement* select = dom_find_element_by_id(owner, "select");
     ASSERT_NE(select, nullptr);
-    FormControlProp* form = select->form;
+    FormControlProp* form = select->form_storage();
     ASSERT_NE(form, nullptr);
     doc_state_open_dropdown(state, select);
     form_control_set_hover_index(state, select, 2);
@@ -21656,7 +21656,7 @@ TEST_F(RadiantFormControls, RetainedStyleResetPreservesOpenSelectUntilControlRel
     // restyling retains the control; releasing it later must still dismiss its popup.
     view_pool_reset_retained_subtree(document->view_tree, owner);
     layout_html_doc(&ui, document, true);
-    EXPECT_EQ(select->form, form);
+    EXPECT_EQ(select->form_storage(), form);
     EXPECT_EQ(state->open_dropdown, select);
     EXPECT_TRUE(form_control_is_dropdown_open(state, select));
     EXPECT_EQ(form_control_get_selected_index(state, select), 1);
@@ -21664,7 +21664,7 @@ TEST_F(RadiantFormControls, RetainedStyleResetPreservesOpenSelectUntilControlRel
     EXPECT_TRUE(radiant_state_validate_interaction(state, nullptr));
     form_control_release_prop(select);
     EXPECT_EQ(state->open_dropdown, nullptr);
-    EXPECT_EQ(select->form, nullptr);
+    EXPECT_EQ(select->form_storage(), nullptr);
     EXPECT_TRUE(radiant_state_validate_interaction(state, nullptr));
 }
 

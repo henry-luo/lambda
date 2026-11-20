@@ -3883,7 +3883,9 @@ TEST(CssTransform, GroupingEffectsFlattenUsedTransformStyle) {
     FilterFunction function = {};
     element.set_synthetic(true);
     element.ext = lam::own(&extension);
-    element.transform = lam::view_prop(&transform);
+    DomPropExt slots = {};
+    element.prop_ext = lam::own(&slots);
+    slots.transform = lam::view_prop(&transform);
     element.scroller = lam::view_prop(&scroll);
     element.in_line = lam::view_ref(&inline_prop);
     element.blk = lam::view_prop(&block);
@@ -3943,9 +3945,13 @@ TEST(CssTransform, PaintProjectsNestedDepthOnceAndHonorsFlattening) {
         scene_prop.transform_style = preserve ? CSS_VALUE_PRESERVE_3D : CSS_VALUE_FLAT;
         scene_prop.functions = lam::shared(&translation);
         plane_prop.functions = lam::shared(&translation);
-        camera.transform = lam::view_prop(&camera_prop);
-        scene.transform = lam::view_prop(&scene_prop);
-        plane.transform = lam::view_prop(&plane_prop);
+        DomPropExt slots[3] = {};
+        camera.prop_ext = lam::own(&slots[0]);
+        scene.prop_ext = lam::own(&slots[1]);
+        plane.prop_ext = lam::own(&slots[2]);
+        slots[0].transform = lam::view_prop(&camera_prop);
+        slots[1].transform = lam::view_prop(&scene_prop);
+        slots[2].transform = lam::view_prop(&plane_prop);
         RasterRenderContext context = {};
         context.raster_scale = 1.0f;
         BlockBlot parent = {};
@@ -4423,6 +4429,7 @@ protected:
     struct MockElement {
         uint8_t buf[4096];
         InlineProp in_line;
+        DomPropExt props;
     };
 
     DomElement* createMockElement(MockElement* mock) {
@@ -4431,6 +4438,7 @@ protected:
         element->node_type = DOM_NODE_ELEMENT;
         element->doc = lam::up(&doc);
         ((ViewSpan*)element)->in_line = lam::view_ref(&mock->in_line);
+        element->prop_ext = lam::own(&mock->props);
         return element;
     }
 
@@ -4438,7 +4446,7 @@ protected:
         // transform bounds consume a laid-out block view, as the render fixtures do.
         element->view_type = RDT_VIEW_BLOCK;
         element->font = lam::view_prop(font);
-        element->transform = lam::view_prop(transform);
+        element->prop_ext->transform = lam::view_prop(transform);
         element->width = 40.0f;
         element->height = 10.0f;
         layout.view = lam::up(static_cast<View*>(element));
@@ -4674,37 +4682,41 @@ TEST_F(AnimationTickTest, IndividualTransformsAnimateTogetherAndRetainIndependen
     MockElement mock;
     DomElement* element = createMockElement(&mock);
     TransformProp transform = {};
+    IndividualTransformProp individual = {};
+    transform.individual = lam::own(&individual);
     FontProp font = {};
     font.font_size = 16.0f;
     setTransformContext(element, &transform, &font);
-    transform.individual[0].type = TRANSFORM_TRANSLATE;
-    transform.individual[0].params.translate.x = 6.0f;
-    transform.individual[0].translate_x_percent = NAN;
-    transform.individual[0].translate_y_percent = NAN;
+    individual.values[0].type = TRANSFORM_TRANSLATE;
+    individual.values[0].params.translate.x = 6.0f;
+    individual.values[0].translate_x_percent = NAN;
+    individual.values[0].translate_y_percent = NAN;
     ASSERT_NE(parsedKeyframes("individual{from{translate:0px 0px;rotate:0deg;scale:1}"
         "to{translate:100% 20px;rotate:180deg;scale:3 5}}", "individual"), nullptr);
     setAnimationStyle(element, "animation:individual 1s linear -.5s both paused");
     css_animation_resolve(element, &layout);
-    EXPECT_EQ(transform.individual[0].type, TRANSFORM_TRANSLATE);
-    EXPECT_FLOAT_EQ(transform_translate_component(transform.individual[0].params.translate.x,
-        transform.individual[0].translate_x_percent, 40.0f), 20.0f);
-    EXPECT_FLOAT_EQ(transform.individual[0].params.translate.y, 10.0f);
-    EXPECT_NEAR(transform.individual[1].params.angle, M_PI / 2, 0.00001);
-    EXPECT_FLOAT_EQ(transform.individual[2].params.scale.x, 2.0f);
-    EXPECT_FLOAT_EQ(transform.individual[2].params.scale.y, 3.0f);
+    EXPECT_EQ(individual.values[0].type, TRANSFORM_TRANSLATE);
+    EXPECT_FLOAT_EQ(transform_translate_component(individual.values[0].params.translate.x,
+        individual.values[0].translate_x_percent, 40.0f), 20.0f);
+    EXPECT_FLOAT_EQ(individual.values[0].params.translate.y, 10.0f);
+    EXPECT_NEAR(individual.values[1].params.angle, M_PI / 2, 0.00001);
+    EXPECT_FLOAT_EQ(individual.values[2].params.scale.x, 2.0f);
+    EXPECT_FLOAT_EQ(individual.values[2].params.scale.y, 3.0f);
     ASSERT_NE(scheduler->first, nullptr);
     for (int i = 0; i < 200; i++) css_animation_tick(scheduler->first, 0.5f);
-    EXPECT_FLOAT_EQ(transform.individual[0].params.translate.y, 10.0f);
+    EXPECT_FLOAT_EQ(individual.values[0].params.translate.y, 10.0f);
     animation_scheduler_cancel(scheduler, scheduler->first);
-    EXPECT_FLOAT_EQ(transform.individual[0].params.translate.x, 6.0f);
-    EXPECT_EQ(transform.individual[1].type, TRANSFORM_NONE);
-    EXPECT_EQ(transform.individual[2].type, TRANSFORM_NONE);
+    EXPECT_FLOAT_EQ(individual.values[0].params.translate.x, 6.0f);
+    EXPECT_EQ(individual.values[1].type, TRANSFORM_NONE);
+    EXPECT_EQ(individual.values[2].type, TRANSFORM_NONE);
 }
 
 TEST_F(AnimationTickTest, WebCancellationRestoresAllTransformSlotsBeforeSameTimeSeek) {
     MockElement mock;
     DomElement* element = createMockElement(&mock);
     TransformProp transform = {};
+    IndividualTransformProp individual = {};
+    transform.individual = lam::own(&individual);
     FontProp font = {};
     font.font_size = 16.0f;
     setTransformContext(element, &transform, &font);
@@ -4712,14 +4724,14 @@ TEST_F(AnimationTickTest, WebCancellationRestoresAllTransformSlotsBeforeSameTime
     underlying.type = TRANSFORM_TRANSLATE;
     underlying.params.translate.x = 7.0f;
     transform.functions = lam::shared(&underlying);
-    transform.individual[0].type = TRANSFORM_TRANSLATE;
-    transform.individual[0].params.translate.x = 6.0f;
-    transform.individual[0].translate_x_percent = NAN;
-    transform.individual[0].translate_y_percent = NAN;
-    transform.individual[1].type = TRANSFORM_ROTATE;
-    transform.individual[1].params.angle = .2f;
-    transform.individual[2].type = TRANSFORM_SCALE;
-    transform.individual[2].params.scale = {1.2f, 1.3f};
+    individual.values[0].type = TRANSFORM_TRANSLATE;
+    individual.values[0].params.translate.x = 6.0f;
+    individual.values[0].translate_x_percent = NAN;
+    individual.values[0].translate_y_percent = NAN;
+    individual.values[1].type = TRANSFORM_ROTATE;
+    individual.values[1].params.angle = .2f;
+    individual.values[2].type = TRANSFORM_SCALE;
+    individual.values[2].params.scale = {1.2f, 1.3f};
     CssWebAnimationState* effect = css_web_animation_create(element,
         parsedKeyframes("webTransforms{from{transform:translateX(0px);translate:0px;rotate:0deg;scale:1}"
             "to{transform:translateX(100px);translate:40px;rotate:180deg;scale:3 5}}", "webTransforms"),
@@ -4732,20 +4744,20 @@ TEST_F(AnimationTickTest, WebCancellationRestoresAllTransformSlotsBeforeSameTime
         css_web_animation_resolve(element, &layout);
         ASSERT_NE(transform.functions, nullptr);
         EXPECT_FLOAT_EQ(transform.functions->params.translate.x, 50.0f);
-        EXPECT_FLOAT_EQ(transform.individual[0].params.translate.x, 20.0f);
-        EXPECT_NEAR(transform.individual[1].params.angle, M_PI / 2, .00001);
-        EXPECT_FLOAT_EQ(transform.individual[2].params.scale.x, 2.0f);
-        EXPECT_FLOAT_EQ(transform.individual[2].params.scale.y, 3.0f);
+        EXPECT_FLOAT_EQ(individual.values[0].params.translate.x, 20.0f);
+        EXPECT_NEAR(individual.values[1].params.angle, M_PI / 2, .00001);
+        EXPECT_FLOAT_EQ(individual.values[2].params.scale.x, 2.0f);
+        EXPECT_FLOAT_EQ(individual.values[2].params.scale.y, 3.0f);
         css_web_animation_cancel(effect);
         css_web_animation_cancel(effect);
         EXPECT_FALSE(effect->current_time_resolved);
         ASSERT_NE(transform.functions, nullptr);
         EXPECT_FLOAT_EQ(transform.functions->params.translate.x, 7.0f);
-        EXPECT_FLOAT_EQ(transform.individual[0].params.translate.x, 6.0f);
-        EXPECT_FLOAT_EQ(transform.individual[1].params.angle, .2f);
-        EXPECT_FLOAT_EQ(transform.individual[2].params.scale.x, 1.2f);
-        EXPECT_FLOAT_EQ(transform.individual[2].params.scale.y, 1.3f);
-        for (int slot = 0; slot < 3; slot++) EXPECT_EQ(transform.individual_sample[slot], nullptr);
+        EXPECT_FLOAT_EQ(individual.values[0].params.translate.x, 6.0f);
+        EXPECT_FLOAT_EQ(individual.values[1].params.angle, .2f);
+        EXPECT_FLOAT_EQ(individual.values[2].params.scale.x, 1.2f);
+        EXPECT_FLOAT_EQ(individual.values[2].params.scale.y, 1.3f);
+        for (int slot = 0; slot < 3; slot++) EXPECT_EQ(individual.samples[slot], nullptr);
     }
 }
 
@@ -5816,7 +5828,7 @@ TEST_F(AnimationTickTest, NeutralTransformsCopyUnderlyingListsAndPadWithIdentity
         source.params.translate.x = 10.0f;
         source.translate_x_percent = source.translate_y_percent = NAN;
         if (sample.has_base) transform.functions = lam::shared(&source);
-        element->transform = lam::view_prop(&transform);
+        element->prop_ext->transform = lam::view_prop(&transform);
         CssAnimProp config = defaultAnimProp("neutralTransform", 1.0f);
         AnimationInstance* instance = css_animation_create(scheduler, element, &config,
             parsedKeyframes(sample.ends_none
@@ -6085,7 +6097,7 @@ TEST_F(AnimationTickTest, TransformValueCachesRefreshPerElementAndOwnInheritedLi
     for (int index = 0; index < 2; index++) {
         elements[index] = createMockElement(&mocks[index]);
         elements[index]->font = lam::view_prop(&fonts[index]);
-        elements[index]->transform = lam::view_prop(&transforms[index]);
+        elements[index]->prop_ext->transform = lam::view_prop(&transforms[index]);
         fonts[index].font_size = index == 0 ? 10.0f : 20.0f;
         layout.view = lam::up(static_cast<View*>(elements[index]));
         layout.elmt = lam::up(elements[index]);
@@ -6505,7 +6517,7 @@ TEST_F(AnimationTickTest, TransformAnimationMarksDocumentOwnedList) {
     MockElement mock;
     DomElement* element = createMockElement(&mock);
     TransformProp transform = {};
-    element->transform = lam::view_prop(&transform);
+    element->prop_ext->transform = lam::view_prop(&transform);
 
     TransformFunction keyframe_function = {};
     keyframe_function.type = TRANSFORM_TRANSLATEX;

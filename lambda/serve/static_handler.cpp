@@ -170,7 +170,7 @@ int static_send_file(const StaticHandlerConfig *config,
     }
 
     // detect MIME type
-    const char *content_type = mime_detect(NULL, filepath, NULL, 0);
+    const char *content_type = mime_detect_static_file(filepath);
     if (!content_type) content_type = "application/octet-stream";
     http_response_set_header(resp, "Content-Type", content_type);
 

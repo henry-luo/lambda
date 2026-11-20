@@ -439,7 +439,7 @@ void pdf_walk_begin_transform(RenderContext* base, ViewBlock* view, float x, flo
     PdfWalkContext* ctx = (PdfWalkContext*)base;
     ctx->frame.x = x; ctx->frame.y = y;
     RdtMatrix matrix = rdt_matrix_identity();
-    render_geometry_transform_matrix(view->transform, x, y, view->width, view->height, &matrix);
+    render_geometry_transform_matrix(view->transform_prop(), x, y, view->width, view->height, &matrix);
     pdf_walk_push_transform(ctx, matrix, ctx->element, view);
 }
 void pdf_walk_end_transform(RenderContext* base) {

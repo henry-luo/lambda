@@ -45,10 +45,7 @@ pn brushes(owner, st) {
         dom.set_inner_html(holder, markup)
         dom.set_attribute(holder, "data-items", markup)
     }
-    for (i, b in st.brushes) {
-        let button = dom.query_selector(holder, "[data-brush='" ++ text(i)^ ++ "']")
-        if (button != null) set_class(button, "active", st.tool == "brush" and i == st.brush)^
-    }
+    if (dom.selected_index(holder) != st.brush) dom.set_selected_index(holder, st.brush)
 }
 
 // the paper menu follows the session's texture, including one a painting file brought back.

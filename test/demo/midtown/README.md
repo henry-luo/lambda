@@ -22,7 +22,7 @@ none of them. Its city, rules, models and textures are original and generated in
 
 ## The open road
 
-Union Street runs east through a gap in the perimeter barrier to the gateway roundabout. From there a
+Union Street runs east to the gateway roundabout, and the inland edges of town open onto the meadow. From there a
 3 km loop road crosses a river truss bridge, climbs through farmland with hedgerows, farmsteads and a
 row of wind turbines, passes through a lit ridge tunnel, follows cliff tops and a beach past a
 lighthouse, and returns over a cable-stayed estuary bridge. Open-road traffic drives the loop both
@@ -37,6 +37,8 @@ and rulings: [Midtown Open Road](../../../vibe/Lambda_Demo_Midtown_Open_Road.md)
   **Space** handbrake (the rear steps out, so the car drifts), **C** hold to look back.
 - **V** cycles the chase, wide, bumper and overhead cameras. Drag the scene to look
   around; the view drifts back behind the car once it moves.
+- Scroll over the minimap to zoom. The widest view fits the whole playable terrain.
+  Drag the map to explore. **Recenter** restores car-following at the current zoom.
 - **N** cycles day, dusk and night. Dusk and night light the windows, shop fronts,
   street lamps and their pools of light, and switch the headlights on; **L** or **Z**
   toggles them.
@@ -70,6 +72,7 @@ more props. Buildings, parked cars, lamp posts, trees and signal poles are solid
 | `mod_land_mesh.ls`, `mod_land_scene.ls`, `mod_scenery*.ls`, `mod_route.ls`, `mod_cells.ls` | Terrain, road, roundabout, bridge and tunnel meshes; woods, hedgerows, farms, turbines, lighthouse and boats; open-road traffic on two lane paths; the shared cell index. |
 | `mod_scene.ls` | The native scene: merged city meshes, instanced furniture, the physics world, clips, lighting looks and post effects. |
 | `mod_hud.ls`, `mod_present.ls`, `midtown.ls` | HUD markup, the per-frame step and sync, and the page with its event handlers. |
+| `mod_minimap.ls`, `_minimap_art.ls` | Visible map sampling and generation of the bundled map artwork. |
 
 The simulation is pure Lambda: each frame `advance()` steps the car, traffic,
 people, courier and camera. Everything that moves on screen is a physics body,
@@ -99,22 +102,37 @@ waits about 6 ms for the GPU, and the translucent HUD panels are recomposited
 over the moving scene each frame. The window now composites the scene on the GPU
 by default instead of reading it back (`RADIANT_GPU_COMPOSITOR=off` restores the readback)
 ([GPU compositor](../../../vibe/radiant/Radiant_Design_GPU_Compositor.md)) and repaints
-only the HUD readouts that changed; the page then holds about 56 fps, with a median
-frame of one 60 Hz vsync. `MIDTOWN_PROFILE=1` prints each frame's interval, step
-and sync times, the scene's lag and the speed cap; `MIDTOWN_SPAWN=x,z,heading` starts
-the car elsewhere, for example `MIDTOWN_SPAWN=-178,168,1.5708` in front of the stunt ramp.
+only the HUD regions that changed. `MIDTOWN_PROFILE=1` prints each frame's interval,
+step and sync times, physics lag, speed cap, speed in km/h, distance and damage.
+`MIDTOWN_SPAWN=x,z,heading` starts the car elsewhere. For example,
+`MIDTOWN_SPAWN=-178,168,1.5708` starts in front of the stunt ramp.
 
 Out of town the frame stays light: vehicles and people beyond 900 m of the camera take no pose
 commands (their bodies keep their last pose, lost in the haze); town traffic and pedestrians rest while
-the car is more than 400 m beyond the barrier; traffic far from the car steps every second (town) or
+the car is more than 400 m beyond town; traffic far from the car steps every second (town) or
 fourth (open road) frame with the time it is owed. Every car is a single draw (the parked cars share
 one, their paint a vertex tint over the atlas). Street trees use the countryside's broadleaf model,
 and the countryside's trees are instanced per terrain chunk so the view and shadow cascades skip
-distant woods. The minimap's region
-layer is an SVG image laid out at a third of the map's scale and enlarged by its holder's transform:
-the turning map redraws it each frame, and at full size that cost about 2.5 ms. Measured headless
-(release, 1280×800), the Lambda step and sync take about 1.6 ms a frame in town and 1.5 ms on the
-open road.
+distant woods.
+
+The minimap samples a static raster covering the playable terrain into a 200×200
+canvas. The widest zoom fits the terrain bounds inside the disc with north up.
+While panning, the car and courier markers share the same world-to-map projection
+and only the markers move as the car drives through a fixed view. Sampling is a
+pure calculation (S12.1.1v5), and the HUD uploads the canvas through the DOM
+interface (D9.5.6v2).
+
+In paired 1280×800 native-window replays with the same release executable, the town
+drive rose from 39 fps to 54–55 fps. The median frame fell from 31.3 ms to 16.7 ms,
+and the share of intervals over 25 ms fell from 52–53% to about 10%. On the coast,
+the replay rose from 47 fps to 56 fps.
+
+Regenerate the minimap after changing the terrain bounds, city, or road geometry.
+
+```sh
+./lambda.exe render test/demo/midtown/_minimap_art.ls -vw 2340 -vh 1500 --scale 1.25 \
+  -o test/demo/midtown/assets/minimap.png
+```
 
 The native scene pauses itself once its physics falls two seconds behind real time
 ("simulation pacing debt exceeded"). Two things keep a slow machine short of that.
@@ -129,11 +147,20 @@ such as test suites running in another checkout, is the usual cause.
 ```sh
 ./test/test_lambda_gtest.exe --gtest_filter='*scene3d_midtown*'
 ./test/test_radiant_view_gtest.exe --gtest_filter='Scene3dTest.Midtown*'
-# Direct replays after changing just the Lambda demo (also tests/mobile.json):
+# Direct replays after changing the demo (also tests/mobile.json and tests/minimap.json)
 LAMBDA_HEADLESS_GLFW_WINDOW=1 ./lambda.exe view test/demo/midtown/midtown.ls \
   --headless --event-file test/demo/midtown/tests/desktop.json \
   --event-result temp/midtown/desktop-result.json
+# Start westbound at the east end of Union Street and check the manual controls.
+LAMBDA_HEADLESS_GLFW_WINDOW=1 MIDTOWN_SPAWN=273,-3,-1.5707963267948966 \
+  ./lambda.exe demo midtown --headless --event-file test/demo/midtown/tests/highspeed.json
 ```
+
+The high-speed replay checks that full throttle reaches 160 km/h, braking drops
+the speedometer to 5 km/h or less, and the native scene remains active. The
+model golden also checks that the car can stop with room left and zero damage,
+and can cross from the meadow into town (S12.1.1v5). Headless replay advances a virtual
+clock. Frame intervals from that replay describe the simulation cadence.
 
 The golden also has an `open road` section: the loop's length and structures, the grade limit, the
 deck heights the car drives on, a drive across the truss bridge and through the tunnel without a

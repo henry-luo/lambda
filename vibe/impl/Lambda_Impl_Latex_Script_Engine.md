@@ -9,7 +9,7 @@ expl3 APIs to `lambda.doc.latex` in Lambda Script. TeX source remains data
 (**S1.8**); the existing input boundary is governed by **D10.2.2** and the
 input layer must not depend on the Lambda runtime (**D9.1.3v2**). The requested
 production migration requires the coordinated formal and native-client work
-described in [the input migration record](../../lambda-input/vibe/input/Input_Latex.md).
+described in [the input migration record](../input/Input_Latex.md).
 The existing native engine design and historical Phase IV work are in
 [TeX engine design](../latex/Lambda_Design_TeX_Engine.md) and
 [LaTeX Phase IV implementation](Lambda_Impl_Latex_Phase4.md).
@@ -29,7 +29,7 @@ The existing native engine design and historical Phase IV work are in
 4. Specify and implement the production entry-point and native-client migration,
    including resource authority, lifetime and formal-design changes, before
    retiring the C++ path. The input-owned defects remain in the
-   [Lib and Input issue ledger](../../lambda-input/vibe/Lib_Input_Issue_Ledger.md).
+   [Lib and Input issue ledger](../Lib_Input_Issue_Ledger.md).
 
 ## Current checkpoint
 
@@ -988,7 +988,7 @@ The existing native engine design and historical Phase IV work are in
   `generate-native-scanner-matrix.py`. The primitive is not yet integrated
   into digestion. The native scanner's locale dependence and partial UTF-8
   output are recorded with the Input owner as
-  [LI-064](../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-064).
+  [LI-064](../Lib_Input_Issue_Ledger.md#li-064).
   The Input owner scanner now uses its existing ASCII-letter helper, preserving
   C-locale results and making classification independent of the host locale.
   Its new native GTest fails on the original scanner and passes on the fix;
@@ -1000,7 +1000,7 @@ The existing native engine design and historical Phase IV work are in
   executable. A fresh checksum-verified copy of the current
   Input source, including the locale fix and its dirty owner changes, ran
   `make test-input-baseline`. It failed on sandbox-denied localhost servers
-  and the existing [LI-002](../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-002)
+  and the existing [LI-002](../Lib_Input_Issue_Ledger.md#li-002)
   external-parent admission test. The TeX engine portion passed 12 and skipped
   two expl3 cases; the separate resource-enabled run passed all 14. The full
   output is `temp/tex-script-f/input-locale-baseline.log`.
@@ -1653,7 +1653,7 @@ The requested implementation needs Lambda-owned package/runtime work and an
 agreed input/host boundary; the shape of that boundary is not yet decided.
 Input must not import the runtime, values crossing the boundary require precise
 rooting, and resource authority must be preserved. Input-side design and the
-candidate first subset are recorded in `../lambda-input/vibe/input/Input_Latex.md`.
+candidate first subset are recorded in `../input/Input_Latex.md`.
 
 ### Superseding request: full TeX and LaTeX script port — 2026-11-11
 
@@ -1674,7 +1674,7 @@ imports), D11.2.1 authority and existing conformance and document fixtures.
 
 At the time of this 2026-11-11 observation, no script engine had been shipped.
 Input-side scope and candidate compatibility gates are documented in
-`../lambda-input/vibe/input/Input_Latex.md`.
+`../input/Input_Latex.md`.
 
 2026-11-11 follow-up: the user authorized coordinated edits to the Lambda and
 input checkouts. `lmd/package/doc/latex/tex_engine/reader.ls` starts the script
@@ -3372,7 +3372,7 @@ also handles tested passthrough environment options and unknown commands in
 inline math; see `constructor-current-probe2.out`. It retains passthrough
 nested environment names and explicitly rejects unqualified raw commands and
 custom environments inside an argument. The latter is blocked by input issue
-[LI-017](../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-017), which causes
+[LI-017](../Lib_Input_Issue_Ledger.md#li-017), which causes
 native to emit its internal environment-end marker. Test evidence is
 `constructor-env-probe.ls`, `.out`, and `constructor-env-probe2.out` in the
 same temporary directory. Interpreter and JIT now agree on 17 of 20 combined
@@ -3828,7 +3828,7 @@ digester rejects raw inline source mapping until it is qualified.
 
 Native LaTeX AST comparison for valid verbatim containing `%` or an apparent
 `\end{document}` is additionally blocked by input issue
-[LI-018](../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-018): native TeX
+[LI-018](../Lib_Input_Issue_Ledger.md#li-018): native TeX
 preserves those spans, but its LaTeX environment scan interprets their contents.
 
 
@@ -4025,7 +4025,7 @@ nested discard behavior rather than dropping the error.
 A staged boundary-adjustment candidate matches 16 of 18 native text cases but
 differs on two nested/echo cases; it also exposes unqualified AST mappings.
 The native differences are caused by input issue
-[LI-019](../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-019): native leaves
+[LI-019](../Lib_Input_Issue_Ledger.md#li-019): native leaves
 stale discard boundaries after the removal and can leak discarded output.
 Evidence is `../lambda-input/temp/expl3-script/discard-unskip-detail.ls/.out`,
 `discard-unskip-detail.log` and `discard-unskip-ast-probe.out`. The candidate
@@ -4490,7 +4490,7 @@ malformed target and continues with the original sequence. Evidence:
 `../lambda-input/temp/expl3-script/seq-reverse-probe.ls/.out`. Recovery is still
 open; the explicit invalid-target error remains visible. Native AST comparison
 when expl3 is first invoked inside a constructor argument is separately blocked
-by [LI-020](../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-020).
+by [LI-020](../Lib_Input_Issue_Ledger.md#li-020).
 
 
 ## Staged sequence indexing leaks an expression terminator — 2026-11-12
@@ -4708,7 +4708,7 @@ A further wrapper comparison currently differs between Script and native even
 before the staged change. Native splits expl3 control names in the echoed
 definition, and the two parsers also disagree on its source span. Native
 scanner evidence and the still-unconfirmed offset cause are recorded as
-[LI-021](../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-021); do not
+[LI-021](../Lib_Input_Issue_Ledger.md#li-021); do not
 copy the native scanner limitation into Script. Evidence:
 `../lambda-input/temp/expl3-script/tl-set-ast-cases.ls`,
 `tl-set-ast-cases-live.out`, `tl-set-ast-cases-unguarded.out` and
@@ -4797,7 +4797,7 @@ ASTs that differ from native. One direct document-body example matches and
 one math example is already unsupported. Evidence:
 `../lambda-input/temp/expl3-script/cs-exist-probe.ls/.out` and
 `cs-exist-ast.ls/.out`. The exact contribution of native definition scanning
-and source-span behavior (see [LI-021](../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-021))
+and source-span behavior (see [LI-021](../Lib_Input_Issue_Ledger.md#li-021))
 versus Script mapping needs isolation. A staged guard marks actual conditional
 macro expansions, including aliases, and returns `latex-digest-unsupported`;
 see `cs-exist-ast-guarded.out`. Keep the mismatching cases visible and do not

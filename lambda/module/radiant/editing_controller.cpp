@@ -71,11 +71,11 @@ static void editing_controller_composition_anchor(
     }
 
     if (editing_surface_is_text_control(surface) && surface->owner &&
-        surface->owner->form) {
+        surface->owner->form_storage()) {
         if (out_view) *out_view = surface->view
             ? surface->view : static_cast<View*>(surface->owner);
         if (out_offset) {
-            *out_offset = (int)surface->owner->form->selection_start; // INT_CAST_OK: StateStore projection exposes selection offsets as int.
+            *out_offset = (int)surface->owner->form_storage()->selection_start; // INT_CAST_OK: StateStore projection exposes selection offsets as int.
         }
     }
 }
@@ -243,7 +243,7 @@ static bool editing_controller_velocity_for_rect(float pointer_x,
 static float editing_controller_text_control_content_extent(ViewBlock* block,
                                                             DomElement* elem,
                                                             bool horizontal) {
-    if (!block || !elem || !elem->form) return 0.0f;
+    if (!block || !elem || !elem->form_storage()) return 0.0f;
     Rect content = editing_geometry_text_control_content_box(block);
     return horizontal ? content.width : content.height;
 }
@@ -260,11 +260,11 @@ static float editing_controller_text_control_content_height(ViewBlock* block,
 
 static float editing_controller_text_control_max_line_width(UiContext* uicon,
                                                             DomElement* elem) {
-    if (!uicon || !elem || !elem->form) return 0.0f;
+    if (!uicon || !elem || !elem->form_storage()) return 0.0f;
     ViewBlock* block = lam::view_require_block(elem);
     tc_ensure_init(elem);
-    const char* value = elem->form->current_value ? elem->form->current_value : elem->form->value;
-    uint32_t value_len = elem->form->current_value_len;
+    const char* value = elem->form_storage()->current_value ? elem->form_storage()->current_value : elem->form_storage()->value;
+    uint32_t value_len = elem->form_storage()->current_value_len;
     if (!value) value = "";
 
     Rect content = editing_geometry_text_control_content_box(block);
@@ -287,11 +287,11 @@ static float editing_controller_text_control_max_line_width(UiContext* uicon,
 }
 
 static float editing_controller_textarea_content_height(DomElement* elem) {
-    if (!elem || !elem->form) return 0.0f;
+    if (!elem || !elem->form_storage()) return 0.0f;
     ViewBlock* block = lam::view_require_block(elem);
     tc_ensure_init(elem);
-    const char* value = elem->form->current_value ? elem->form->current_value : elem->form->value;
-    uint32_t value_len = elem->form->current_value_len;
+    const char* value = elem->form_storage()->current_value ? elem->form_storage()->current_value : elem->form_storage()->value;
+    uint32_t value_len = elem->form_storage()->current_value_len;
     float font_size = block->font ? block->fontp()->font_size : 13.333f;
     float line_height = font_size * 1.4f;
     uint32_t lines = 1;
@@ -363,12 +363,12 @@ static bool editing_controller_text_control_drag_autoscroll(
         float pointer_y,
         const EditingControllerHooks* hooks) {
     if (!evcon || !evcon->ui_context || !state || !elem ||
-        !tc_is_text_control(elem) || !elem->form) {
+        !tc_is_text_control(elem) || !elem->form_storage()) {
         return false;
     }
 
     ViewBlock* block = lam::view_require_block(elem);
-    bool is_textarea = form_control_is_textarea(elem->form);
+    bool is_textarea = form_control_is_textarea(elem->form_storage());
     RdtLogicalPoint origin = view_geometry_local_to_block_document(
         static_cast<View*>(block), {block->x, block->y});
 
@@ -394,8 +394,8 @@ static bool editing_controller_text_control_drag_autoscroll(
         ? editing_controller_textarea_content_height(elem) - content_h : 0.0f;
     if (max_y < 0.0f) max_y = 0.0f;
 
-    float old_x = elem->form->scroll_x;
-    float old_y = elem->form->scroll_y;
+    float old_x = elem->form_storage()->scroll_x;
+    float old_y = elem->form_storage()->scroll_y;
     float next_x = old_x + vx;
     float next_y = old_y + vy;
     if (next_x < 0.0f) next_x = 0.0f;
@@ -424,8 +424,8 @@ static bool editing_controller_text_control_drag_autoscroll(
                                           vx, vy, hooks);
     }
 
-    elem->form->scroll_x = next_x;
-    elem->form->scroll_y = next_y;
+    elem->form_storage()->scroll_x = next_x;
+    elem->form_storage()->scroll_y = next_y;
     editing_controller_extend_selection_after_scroll(evcon, state,
         static_cast<View*>(elem), pointer_x, pointer_y, hooks);
     evcon->need_repaint = true;
@@ -472,8 +472,8 @@ static bool editing_controller_password_reveal_tick(DocState* state,
     View* focused = focus_get(state);
     if (!focused || !focused->is_element()) return false;
     DomElement* elem = lam::dom_require_element(focused);
-    if (!tc_is_text_control(elem) || !elem->form ||
-        !form_input_kind_is(elem->form->input_type,
+    if (!tc_is_text_control(elem) || !elem->form_storage() ||
+        !form_input_kind_is(elem->form_storage()->input_type,
             FORM_INPUT_KIND_PASSWORD)) {
         return false;
     }
@@ -489,8 +489,8 @@ static bool editing_controller_password_reveal_active_for_focus(DocState* state)
     View* focused = focus_get(state);
     if (!focused || !focused->is_element()) return false;
     DomElement* elem = lam::dom_require_element(focused);
-    return tc_is_text_control(elem) && elem->form &&
-        form_input_kind_is(elem->form->input_type,
+    return tc_is_text_control(elem) && elem->form_storage() &&
+        form_input_kind_is(elem->form_storage()->input_type,
             FORM_INPUT_KIND_PASSWORD) &&
         form_control_password_reveal_get(state, focused, nullptr, nullptr);
 }
@@ -731,8 +731,8 @@ extern "C" int editing_controller_caret_surface_kind(DocState* state) {
     EditingSurface surface;
     if (editing_surface_from_target(caret_view, &surface) &&
         editing_surface_is_text_control(&surface)) {
-        return surface.owner && surface.owner->form &&
-            form_control_is_textarea(surface.owner->form)
+        return surface.owner && surface.owner->form_storage() &&
+            form_control_is_textarea(surface.owner->form_storage())
             ? 3     // textarea
             : 1;    // single-line text control
     }

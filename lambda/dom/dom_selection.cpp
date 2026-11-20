@@ -788,7 +788,7 @@ static Item js_selection_collapse_to_edge(Item self_v, bool to_end) {
     DomElement* control = active_text_control_for_selection(s);
     if (control) {
         tc_ensure_init(control);
-        FormControlProp* form = control->form;
+        FormControlProp* form = control->form_storage();
         uint32_t edge = form ? (to_end ? form->selection_end : form->selection_start) : 0;
         DocState* state = state_for_text_control_selection(s, control);
         state_store_set_text_control_selection(state, control,
@@ -1361,7 +1361,7 @@ static Item _tc_selectionchange_drain(Item this_val, Item* args, int argc) {
         DomElement* next = task_state ? task_state->selectionchange_event_next : nullptr;
         if (task_state) {
             task_state->selectionchange_event_next = nullptr;
-            task_state->selectionchange_event_pending = 0;
+            task_state->selectionchange_event_pending = false;
         }
         // The text-control selection writer can be nested inside the native
         // anchor/focus transition. Dispatch at this checkpoint so `onselect`
@@ -1389,7 +1389,7 @@ static Item _tc_selectionchange_drain(Item this_val, Item* args, int argc) {
 
 extern "C" void dom_queue_textcontrol_selectionchange(DomElement* elem) {
     if (!elem) return;
-    if (!elem->form) return;
+    if (!elem->form_storage()) return;
     if (!js_active_runtime_state) return;
     if (!js_input || !js_input->pool) return;
     DomDocument* doc = elem->doc;
@@ -1412,7 +1412,7 @@ extern "C" void dom_queue_textcontrol_selectionchange(DomElement* elem) {
         !dom_node_pin(doc, pending_ref, DOM_NODE_PIN_EVENT_QUEUE)) {
         return;
     }
-    task_state->selectionchange_event_pending = 1;
+    task_state->selectionchange_event_pending = true;
     task_state->selectionchange_event_next = lam::up(state->tc_selectionchange_head);
     state->tc_selectionchange_head = elem;
     if (state->tc_selectionchange_drain_scheduled) {
@@ -1440,7 +1440,7 @@ extern "C" void dom_selection_reset(void) {
         DomElement* next = task_state ? task_state->selectionchange_event_next : nullptr;
         if (task_state) {
             task_state->selectionchange_event_next = nullptr;
-            task_state->selectionchange_event_pending = 0;
+            task_state->selectionchange_event_pending = false;
         }
         dom_node_unpin(pending->doc, dom_node_ref((DomNode*)pending),
                        DOM_NODE_PIN_EVENT_QUEUE);

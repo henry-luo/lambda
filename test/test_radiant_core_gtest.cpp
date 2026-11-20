@@ -85,6 +85,7 @@ protected:
 TEST_F(RadiantCoreTest, TeardownReleasesFormPayloadBelowNonRenderingParents) {
     DomElement* owner = element();
     FormControlProp forms[2] = {};
+    DomPropExt slots[2] = {};
     NameId tags[] = {MARKUP_NAME_IMG, MARKUP_NAME_OBJECT};
     for (size_t i = 0; i < 2; i++) {
         DomElement* parent = element();
@@ -93,7 +94,8 @@ TEST_F(RadiantCoreTest, TeardownReleasesFormPayloadBelowNonRenderingParents) {
         parent->display.inner = RDT_DISPLAY_REPLACED;
         forms[i].custom_validity_msg = mem_strdup("fallback control", MEM_CAT_LAYOUT);
         ASSERT_NE(forms[i].custom_validity_msg, nullptr);
-        child->form = lam::view_prop(&forms[i]);
+        child->prop_ext = lam::own(&slots[i]);
+        ASSERT_TRUE(child->set_form_storage(&forms[i]));
         ASSERT_TRUE(parent->DomNode::append_child(child));
         ASSERT_TRUE(owner->DomNode::append_child(parent));
     }
@@ -111,12 +113,14 @@ TEST_F(RadiantCoreTest, RetainedResetPreservesScriptCreatedFormProperties) {
     form.control_type = FORM_CONTROL_TEXT;
     form.custom_validity_msg = mem_strdup("invalid value", MEM_CAT_LAYOUT);
     ASSERT_NE(form.custom_validity_msg, nullptr);
-    control->form = lam::view_prop(&form);
+    DomPropExt slots = {};
+    control->prop_ext = lam::own(&slots);
+    ASSERT_TRUE(control->set_form_storage(&form));
     control->set_role_kind(DomElement::ROLE_FORM);
     tree.root = lam::up(control);
 
     view_pool_reset_retained_subtree(&tree, control);
-    EXPECT_EQ(control->form, &form);
+    EXPECT_EQ(control->form_storage(), &form);
     EXPECT_EQ(control->form_control(), &form);
     EXPECT_STREQ(form.custom_validity_msg, "invalid value");
     tree.destroy();

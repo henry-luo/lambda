@@ -12,7 +12,9 @@ button:hover { background: #46464d; }
 button.active { background: #0a84ff; border-color: #0a84ff; color: #fff; }
 button[aria-disabled="true"] { opacity: 0.45; }
 .tool .glyph { margin-right: 4px; }
-.brushes { flex: 0 1 auto; min-width: 0; overflow: hidden; }
+.brushes { flex: none; }
+.sliders { flex-direction: column; align-items: flex-start; }
+.sliders .caption { min-width: 48px; }
 .slider { display: flex; align-items: center; gap: 4px; }
 .slider .caption { color: #a1a1a6; }
 .slider input { width: 90px; }
@@ -22,8 +24,9 @@ button[aria-disabled="true"] { opacity: 0.45; }
 .swatches { display: grid; grid-template-columns: repeat(8, 14px); gap: 3px; }
 .swatch { width: 14px; height: 14px; padding: 0; border-radius: 3px; border: 1px solid #00000055; }
 .zoom { min-width: 44px; text-align: center; font-variant-numeric: tabular-nums; }
-.paper select { font: inherit; color: #e8e8ed; background: #1f1f22; border: 1px solid #48484f; border-radius: 6px;
+select { font: inherit; color: #e8e8ed; background: #1f1f22; border: 1px solid #48484f; border-radius: 6px;
   padding: 3px 6px; }
+.brushes select { width: 120px; }
 .import input { width: 120px; }
 .file input { width: 160px; }
 .import input, .file input { font: inherit; color: #e8e8ed; background: #1f1f22; border: 1px solid #48484f;

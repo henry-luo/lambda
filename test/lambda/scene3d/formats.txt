@@ -19,3 +19,4 @@ true
 [[true, true, true, true, true], [false, false, false, false, false], [true, false, true, false, false], [false, false, false, false, false]]
 [[16, [1, 0, 0, 1], [0, 0, 1, 0]], [16, [1, 0, 0, 1], [0, 0, 1, 0]], [16, [1, 0, 0, 1], [0, 0, 1, 0]]]
 ["MASK", 0.3, 0.8, 0.6, true, true, true]
+[9, [1, 0.735, 0.537, 0.964, 1, 0, 0.735, 0.735, 0.735]]

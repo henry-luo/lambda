@@ -15883,7 +15883,7 @@ static void resolve_import(Transpiler* tp, AstImportNode* node) {
         if (node->alias) {
             StrView uri = {module.str + 1, module.length - 2};
             String* uri_string = decode_quoted_content(tp, span, uri.str, (int)uri.length);
-            Target* target = namespace_target(tp->pool, uri_string->chars,
+            Target* target = namespace_target(tp->pool, tp->name_pool, uri_string->chars,
                 node->alias->chars, '.');
             add_namespace(tp, node->alias, target);
         }

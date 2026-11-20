@@ -1919,7 +1919,7 @@ static Item radiant_dom_throw_named_error(const char* name, const char* message)
 static bool radiant_dom_input_commit_live_value(DomElement* elem,
                                                  const char* value) {
     if (!radiant_input_set_live_value(elem, value)) return false;
-    if (elem->form) elem->form->value = radiant_input_live_value(elem);
+    if (elem->form_storage()) elem->form_storage()->value = radiant_input_live_value(elem);
     // IDL value state affects native control rendering without changing an attribute.
     dom_notify_mutation(DOM_JS_MUTATION_CONTROL_VALUE, (void*)elem,
                            (void*)elem->parent);
@@ -2207,7 +2207,7 @@ static int radiant_dom_m4c_attribute_set(Item receiver, Item value, Item* out,
     if (!elem || !out) return 0;
     const char* text = fn_to_cstr(value);
     elem->set_attribute("value", text ? text : "");
-    if (update_form && elem->form) elem->form->value = elem->get_attribute("value");
+    if (update_form && elem->form_storage()) elem->form_storage()->value = elem->get_attribute("value");
     if (notify) {
         dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
     }

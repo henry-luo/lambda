@@ -9,9 +9,9 @@ pub let SWATCHES = ["#1c1c1e", "#5a5a5f", "#a1a1a6", "#ffffff", "#7a2e1f", "#c03
 fn tool(id, label, key, glyph) => <button type:"button", class:"tool", id:"tool-" ++ id, 'data-tool':id,
     title:label ++ " (" ++ key ++ ")", 'aria-label':label, <span class:"glyph", glyph> <span class:"label", label>>
 
-pub fn brush_buttons(st) => [for (i, b in st.brushes) <button type:"button", class:"brush", 'data-brush':string(i), b.name>]
-// the palette markup the presenter compares before it rebuilds the brush buttons.
-pub fn brush_markup(st) => join([for (b in brush_buttons(st)) format(b, 'xml')], "") ^ { "" }
+pub fn brush_options(st) => [for (i, b in st.brushes) <option value:string(i), b.name>]
+// the presenter rebuilds options only when the palette changes, including imports.
+pub fn brush_markup(st) => join([for (b in brush_options(st)) format(b, 'xml')], "") ^ { "" }
 
 fn slider(id, label, low, high, value) => <label class:"slider", <span class:"caption", label>
     <input id:id, type:"range", min:string(low), max:string(high), step:"1", value:string(value)>
@@ -45,7 +45,8 @@ pub fn tree(st) => <div id:"paint", class:"paint-app", tabindex:"-1",
             action("open", "Open", "Open a .painting file (⌘O)") action("save", "Save", "Save as a .painting file (⌘S)")
             action("export", "Export PNG", "Write the painting as a PNG beside the file")>>
         <div class:"bar",
-        <div class:"group brushes", id:"brushes", 'data-items':brush_markup(st), *brush_buttons(st)>
+        <div class:"group brushes", <label class:"slider", <span class:"caption", "Brush">
+            <select id:"brushes", 'aria-label':"Brush type", 'data-items':brush_markup(st), *brush_options(st)>>>
         <div class:"group paper", paper_select()>
         <div class:"group medium", medium_select() pigment_select() action("dry", "Dry", "Set the wet paint, so new strokes glaze over it")
             action("light", "Light", "Show or hide the oil paint's relief under a light")>

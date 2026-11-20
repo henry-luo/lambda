@@ -7,7 +7,7 @@
   signals: 161,
   parked: 102,
   props: 59,
-  obstacles: 859,
+  obstacles: 855,
   tallest: 111.85,
   styles: [18, 20, 30, 45],
   ground: [0, 0.15, 1],
@@ -21,6 +21,18 @@
   turn: [0.54, 21.9],
   crash: [0, true, true],
   jump: [2.32, true, true]
+}
+"high-speed driving"
+{
+  reached_160: true,
+  stopped: true,
+  room_to_spare: true,
+  no_damage: true
+}
+"meadow crossing"
+{
+  entered_town: true,
+  no_damage: true
 }
 "traffic"
 {

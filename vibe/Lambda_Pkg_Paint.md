@@ -4,7 +4,7 @@
 >
 > **Implementation:** the user asked to proceed on 2026-11-09 and chose a `.kra`-like ZIP container for painting files (PT12). M0 is implemented: the engine kernels, the `radiant.paint_*` bridge, the package core, and `lambda.image`'s brush running on `lambda.paint`. M1's engine and brush parts are implemented too: smudge, blend modes, tips and grain in the engine, and libmypaint dynamics with `.myb` import in the package (PT6). Both were committed on 2026-11-09. M1e, macOS pen capture with the W3C pen fields and `dom.pointer_samples` (PT10, PE6), is implemented. So is M1f, the interactive session API and the first `lambda demo paint` (PT10). M1g, saving and opening `.painting` files as stored pixels plus PNG export (PT12), is implemented too, and so are bitmap tips and paper grain (M1i). M1h, the `var` procedures, landed on 2026-11-11. M1 still lacks the latency measurement and the MyPaint parity captures. M2 (pigment and bristle) was implemented on 2026-11-12, uncommitted: the pigment medium with KM mixing, drying and impasto lighting, and bristle tips over both media, in the engine, the bridge, the package and the demo. The [implementation record](impl/Lambda_Impl_Paint.md) has the evidence and the next steps.
 >
-> **Scope:** end-to-end painting in Lambda: brushes, strokes, canvases, media, interactive stroke-by-stroke painting, and automated conversion of a raster or vector image into a painted image. The per-pixel kernels form a small native engine in the Radiant project, specified by the companion [Radiant Paint Engine proposal](../radiant/vibe/Radiant_Design_Paint_Engine.md) (ledger PE#). Out of scope: pixel-filter effect collections (the G'MIC approach), neural style transfer and other learned models, 3D painting, vector drawing (`lambda.editor.draw`), and full MyPaint or Krita application parity.
+> **Scope:** end-to-end painting in Lambda: brushes, strokes, canvases, media, interactive stroke-by-stroke painting, and automated conversion of a raster or vector image into a painted image. The per-pixel kernels form a small native engine in the Radiant project, specified by the companion [Radiant Paint Engine proposal](radiant/Radiant_Design_Paint_Engine.md) (ledger PE#). Out of scope: pixel-filter effect collections (the G'MIC approach), neural style transfer and other learned models, 3D painting, vector drawing (`lambda.editor.draw`), and full MyPaint or Krita application parity.
 >
 > **M3 continuation:** the native wet step, dry deposit and Lambda `var` bridge are implemented for f32 and float64 sheets (**D3.2.1**, **D7.6.4**). Round, MyPaint and bristle strokes write pigment and water; a watercolor session presents, steps and keeps sheet snapshots. The procart watercolor demo uses the native step. Paint demo integration, live-sheet file storage and remaining qualification are in the implementation record; M3 is not yet closed.
 >
@@ -96,7 +96,7 @@ A stroke is an element:
 |---|---|
 | Layer tile | `f32[64, 64, C]`, with C fixed by the layer format (PT4) |
 | Stroke samples | `f32[N, 7]` |
-| Dab table | `f32[N, F]`, with F fixed by the engine's versioned field layout ([PE Appendix A](../radiant/vibe/Radiant_Design_Paint_Engine.md#appendix-a-dab-table-layout-v1-draft)) |
+| Dab table | `f32[N, F]`, with F fixed by the engine's versioned field layout ([PE Appendix A](radiant/Radiant_Design_Paint_Engine.md#appendix-a-dab-table-layout-v1-draft)) |
 | Brush tip | `f32[h, w]` coverage |
 | Paper texture | `f32[h, w]` height, tiled across the canvas |
 | Pigment table | `f32[M, 2B]`: absorption K and scattering S per band |
@@ -118,7 +118,7 @@ A layer is a map `{width, height, tile: 64, format, blend_space, tiles}`. `tiles
 | Format | Channels | Meaning |
 |---|---|---|
 | `rgba` | 4 | Premultiplied RGBA in the layer's blend space |
-| `pigment` | 3B + 2 | Wet film: thickness-weighted K and S per band, which makes deposit additive, plus film thickness. Underneath: substrate reflectance per band (paper, then dried paint) and dried relief height. B = 3 initially. Drying folds the film into the substrate by Kubelka–Munk layer composition, so glazes stay transparent and impasto relief persists ([PE8](../radiant/vibe/Radiant_Design_Paint_Engine.md#pe8--pigment-medium)) |
+| `pigment` | 3B + 2 | Wet film: thickness-weighted K and S per band, which makes deposit additive, plus film thickness. Underneath: substrate reflectance per band (paper, then dried paint) and dried relief height. B = 3 initially. Drying folds the film into the substrate by Kubelka–Munk layer composition, so glazes stay transparent and impasto relief persists ([PE8](radiant/Radiant_Design_Paint_Engine.md#pe8--pigment-medium)) |
 | `coverage` | 1 | A mask: selections and wash-mode stroke coverage |
 
 `blend_space` is `'linear'` (linear light, the default) or `'srgb'` (sRGB-encoded values, as libmypaint blends by default and as the current `lambda.image` brush does). See PT-O5.
@@ -355,7 +355,7 @@ The engine is available wherever Radiant is linked: `lambda.exe` and `lambda-hea
 Replay is the exception (PT12), but planners, re-rendering and time-lapse need it to be fast.
 
 1. **One call per pass.** Lambda evaluates the dynamics of every stroke in a pass into one dab table, vectorized across the batch. The engine renders that table in one call (PT7), so the boundary cost and tile forking are paid once.
-2. **Per-pixel order, not global order.** When dabs do not read the canvas, a pixel's result depends only on the ordered sequence of dabs that cover it. The engine bins dabs by tile, keeping stroke order within each bin, and renders tiles in parallel. The result is bit-identical to sequential rendering ([PE4](../radiant/vibe/Radiant_Design_Paint_Engine.md#pe4--dab-kernel)).
+2. **Per-pixel order, not global order.** When dabs do not read the canvas, a pixel's result depends only on the ordered sequence of dabs that cover it. The engine bins dabs by tile, keeping stroke order within each bin, and renders tiles in parallel. The result is bit-identical to sequential rendering ([PE4](radiant/Radiant_Design_Paint_Engine.md#pe4--dab-kernel)).
 3. **Resolved colours make smudge replayable.** Smudge reads pixels that earlier dabs wrote, which serializes it. When a stroke is first rendered, interactively or by a planner pass, the engine returns each dab's resolved colour after smudge and colour shifts, and the stroke log keeps it. A replay with resolved colours treats those dabs as non-reading, so they parallelize and reproduce the original exactly on the same build. Without resolved colours, for example with a new brush or at another resolution, smudging strokes render sequentially in their original order.
 4. **Wet media run their simulation.** Time is part of the medium. A wet pass is one call that contains its strokes and drying steps. Each step is data-parallel over the active window.
 5. **Level of detail for previews.** A preview replays at reduced scale, with positions and radii scaled, and then refines at full resolution in the background, as Krita's Instant Preview does (§7.1). Interactive sessions use the same idea for very large brushes.
@@ -365,7 +365,7 @@ Replay is the exception (PT12), but planners, re-rendering and time-lapse need i
 
 ### PT17 — GPU backend (proposed)
 
-The GPU can paint strokes, and a GPU backend is proposed as an accelerator behind the same dab tables. Its design is [PE13](../radiant/vibe/Radiant_Design_Paint_Engine.md#pe13--gpu-backend-proposed); the package-visible rules are:
+The GPU can paint strokes, and a GPU backend is proposed as an accelerator behind the same dab tables. Its design is [PE13](radiant/Radiant_Design_Paint_Engine.md#pe13--gpu-backend-proposed); the package-visible rules are:
 
 - **What runs well on the GPU.** Each canvas-independent dab becomes one instanced quad. Graphics APIs blend overlapping fragments in submission order, so one instanced draw reproduces the sequential per-pixel order. Pigment deposit is additive (PT4), so its order does not matter. Bristle segments are thin quads. The wet step is fragment-shader passes over float textures, which Radiant's `gl_core` already uses for simulation state. Smudge runs on the GPU only with resolved colours (PT16); otherwise it stays on the CPU.
 - **Typed arrays stay authoritative (PT3).** GPU textures are caches. Dirty tiles are read back into the layer at commit points (stroke end, pass end, save), never per dab, and readbacks are batched because each one stalls the pipeline.

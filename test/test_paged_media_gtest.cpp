@@ -1457,8 +1457,8 @@ TEST_F(SecondaryViewTest, CssImageSetListAndBorderConsumersRetainDensityAndStyle
         resolve_css_property(declaration->property_code, declaration, &context);
     }
     ASSERT_NE(element->block(), nullptr);
-    EXPECT_STREQ(element->block()->list_style_image.url, "/assets/styles/two.png");
-    EXPECT_FLOAT_EQ(element->block()->list_style_image.resolution, 2.0f);
+    EXPECT_STREQ(element->block()->extras().list_style_image.url, "/assets/styles/two.png");
+    EXPECT_FLOAT_EQ(element->block()->extras().list_style_image.resolution, 2.0f);
     ASSERT_NE(element->boundary(), nullptr); ASSERT_NE(element->boundary()->border, nullptr);
     EXPECT_STREQ(element->boundary()->border->border_image_url, "/assets/styles/two.png");
     EXPECT_FLOAT_EQ(element->boundary()->border->border_image_resolution, 2.0f);
@@ -1470,7 +1470,7 @@ TEST_F(SecondaryViewTest, CssImageSetListAndBorderConsumersRetainDensityAndStyle
     }
     PoolStats repeated = {}; pool_get_detailed_stats(doc.view_tree->prop_pool, &repeated);
     EXPECT_EQ(warm.live_bytes, repeated.live_bytes);
-    EXPECT_STREQ(element->block()->list_style_image.url, "/assets/styles/two.png");
+    EXPECT_STREQ(element->block()->extras().list_style_image.url, "/assets/styles/two.png");
     EXPECT_STREQ(element->boundary()->border->border_image_url, "/assets/styles/two.png");
     // shorthand expansion must recognize the image atom before assigning its other longhands.
     const char* shorthand = "list-style:image-set(url(one.png) 1x,url(two.png) 2x) outside";
@@ -6458,8 +6458,8 @@ TEST_F(SecondaryViewTest, AdjoiningTablesResolveFirstGroupSidednessAndCloseBefor
             }
             EXPECT_EQ(grids, 1u);
             ASSERT_NE(table->blk, nullptr);
-            EXPECT_EQ(table->block()->break_before, CSS_VALUE_AUTO);
-            EXPECT_EQ(table->block()->break_after, CSS_VALUE_AUTO);
+            EXPECT_EQ(table->block()->extras().break_before, CSS_VALUE_AUTO);
+            EXPECT_EQ(table->block()->extras().break_after, CSS_VALUE_AUTO);
         }
     }
 }

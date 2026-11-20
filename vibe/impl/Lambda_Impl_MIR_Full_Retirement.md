@@ -16,7 +16,7 @@
   module constants, precise-root finalizer and scalar homes (D6.3, D7.4.1,
   D8.2.4). No language system-function row or host export is removed (D9.4.6).
 - Sibling sources remain read-only. Nonblocking
-  [LI-007](../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-007) records
+  [LI-007](../Lib_Input_Issue_Ledger.md#li-007) records
   36 stale shared-header declarations, with a prepared, unapplied owner patch.
 - The split release rebuild and final private CLI/native-test links succeed.
   **12 GTests, 18 Python methods, 24 JS golden/GC cases and four diagnostic
@@ -125,7 +125,7 @@ performance receipts remain usable as separately identified controls.
   source syntax checks and three affected GTest-source syntax checks.
 - **RI-004 blocks adapter/full-host rebuilding:** Lambda's existing pointer
   event consumer expects fields/types absent from Radiant `558eb3e`'s
-  `event.hpp`. See [owner ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#ri-004)
+  `event.hpp`. See [owner ledger](../Radiant_Issue_Ledger.md#ri-004)
   and `temp/mvp_full_mir_retirement/adapters.log`. Which checkout needs its
   protocol update is unconfirmed. No owner source/build edits or fallback used.
 - Root `lambda.exe` is unchanged (prior default-switch release), SHA256
@@ -181,7 +181,7 @@ wrappers. The later user-directed region retirement is complete with LI-006
 resolved; no region integration milestone remains planned.
 
 The input owner subsequently removed the thirty shared declarations recorded
-in [LI-004](../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-004).
+in [LI-004](../Lib_Input_Issue_Ledger.md#li-004).
 That issue is resolved. The separate, explicitly approved region-header edit
 is recorded under LI-006.
 

@@ -307,7 +307,7 @@ extern "C" void radiant_text_edit_history_notify(DomElement* elem,
                                                  uint32_t depth, // UNUSED_DEPTH_OK: undo-stack depth (output data field via the log).
                                                  uint32_t cursor) {
     if (!elem || !tc_is_text_control(elem)) return;
-    FormControlProp* form = elem->form;
+    FormControlProp* form = elem->form_storage();
     DocState* state = form && form->state_ref
         ? form->state_ref
         : (elem->doc ? (DocState*)elem->doc->state : nullptr);
@@ -1069,14 +1069,14 @@ static void collapse_active_text_control_selection_for_rich_target(DocState* sta
 
     DomElement* elem = tc_get_active_element(state);
     if (!elem) elem = tc_get_last_focused_text_control(state);
-    if (!elem || !tc_is_text_control(elem) || !elem->form) return;
+    if (!elem || !tc_is_text_control(elem) || !elem->form_storage()) return;
 
     DomNode* target_node = static_cast<DomNode*>(target);
     DomNode* text_control_node = static_cast<DomNode*>(elem);
     if (view_geometry_dom_is_descendant(target_node, text_control_node)) return;
 
     tc_ensure_init(elem);
-    uint32_t end = elem->form ? elem->form->current_value_u16_len : 0;
+    uint32_t end = elem->form_storage() ? elem->form_storage()->current_value_u16_len : 0;
     form_control_set_selection(state, static_cast<View*>(elem), end, end, 0);
     tc_set_active_element(state, nullptr);
     log_debug("collapse_active_text_control_selection_for_rich_target: collapsed text control to %u", end);
@@ -1665,7 +1665,7 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
         ViewBlock* block = lam::view_require_block(target);
         DocState* state = event_context_target_state(evcon);
         ScrollbarPressPart popup_part = state && state->open_dropdown == target
-            ? select_dropdown_scrollbar_part(state, block->form,
+            ? select_dropdown_scrollbar_part(state, block->form_storage(),
                 evcon->event.mouse_button.x, evcon->event.mouse_button.y) : SCROLLBAR_PRESS_NONE;
         mb.put("scrollbarPart", scrollpane_press_part_name(
             popup_part != SCROLLBAR_PRESS_NONE ? popup_part : scrollpane_press_part(evcon, block)));
@@ -1719,7 +1719,7 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
             if (target && target->is_element()) {
                 DomElement* el = lam::dom_require_element(target);
                 if (el->form_control()) {
-                    val = el->form->value;
+                    val = el->form_storage()->value;
                     val_len = val ? (int)strlen(val) : 0;
                     if (val && byte_off > 0) {
                         int safe_off = byte_off <= val_len ? byte_off : val_len;
@@ -3945,8 +3945,8 @@ static bool form_apply_caret_operation(EventContext* evcon, DomElement* elem,
                                        DocState* state, View* target,
                                        const char* value, int value_len, int cur) {
     uint32_t dest = 0;
-    bool multiline = elem && elem->form &&
-        form_control_is_textarea(elem->form);
+    bool multiline = elem && elem->form_storage() &&
+        form_control_is_textarea(elem->form_storage());
     if (!form_caret_operation_destination(s_caret_op_name, value, value_len,
                                           cur, multiline, &dest)) {
         return false;
@@ -4424,7 +4424,7 @@ static void rich_select_all_sync_descendant_text_controls(DocState* state,
     DomElement* elem = lam::dom_require_element(node);
     if (tc_is_text_control(elem)) {
         tc_ensure_init(elem);
-        FormControlProp* form = elem->form;
+        FormControlProp* form = elem->form_storage();
         if (!form) return;
         uint32_t len = form->current_value_u16_len;
         form_control_set_selection(state, static_cast<View*>(elem),
@@ -4658,14 +4658,14 @@ static bool dispatch_form_text_replace(EventContext* evcon, DomElement* elem,
                                SM_EV_FORM_REPLACE_TEXT, live_target);
     sm_observe_action(state, SM_ACT_DISPATCH_BEFOREINPUT);
 
-    uint32_t old_len = event_log_text_len(live_elem->form ? live_elem->form->value : nullptr);
+    uint32_t old_len = event_log_text_len(live_elem->form_storage() ? live_elem->form_storage()->value : nullptr);
     const char* previous_history_input_type =
         te_history_input_type_set(state, input_intent_type_name(input_type));
     bool ok = te_replace_byte_range_no_events(live_elem, state, live_target, start, end,
                                               repl, repl_len);
     te_history_input_type_restore(state, previous_history_input_type);
     if (ok) {
-        FormControlProp* form = live_elem->form;
+        FormControlProp* form = live_elem->form_storage();
         uint32_t new_len = event_log_text_len(form ? form->value : nullptr);
         uint32_t selection_start = form ? form->selection_start : 0;
         uint32_t selection_end = form ? form->selection_end : 0;
@@ -4737,7 +4737,7 @@ static bool dispatch_form_selection_byte_range(DomElement* elem, DocState* state
 
     tc_ensure_init(elem);
     tc_sync_selection_to_form(elem, state);
-    FormControlProp* form = elem->form;
+    FormControlProp* form = elem->form_storage();
     if (!form || !form->current_value) return false;
 
     uint32_t start16 = 0;
@@ -4780,7 +4780,7 @@ static bool dispatch_form_copy_selection(EventContext* evcon, DomElement* elem,
                                             &start, &end)) {
         return false;
     }
-    FormControlProp* form = elem->form;
+    FormControlProp* form = elem->form_storage();
     char* buf = mem_dup_n(form->current_value + start, end - start, MEM_CAT_TEMP);
     if (!buf) return false;
     clipboard_copy_text(buf);
@@ -4828,10 +4828,10 @@ static bool dispatch_form_cut_selection(EventContext* evcon, DomElement* elem,
 
 static const char* form_control_live_value(DomElement* elem, uint32_t* out_len) {
     if (out_len) *out_len = 0;
-    if (!elem || !elem->form) return "";
+    if (!elem || !elem->form_storage()) return "";
 
     tc_ensure_init(elem);
-    FormControlProp* form = elem->form;
+    FormControlProp* form = elem->form_storage();
     const char* value = form->current_value ? form->current_value : form->value;
     uint32_t value_len = form->current_value
         ? form->current_value_len
@@ -4973,7 +4973,7 @@ static bool dispatch_form_selection_start(EventContext* evcon, DomElement* elem,
     if (!dispatch_form_editing_surface(evcon, elem, state, target, &surface)) return false;
 
     tc_ensure_init(elem);
-    uint32_t value_len = elem->form ? elem->form->current_value_len : 0;
+    uint32_t value_len = elem->form_storage() ? elem->form_storage()->current_value_len : 0;
     if (offset > value_len) offset = value_len;
 
     SmTransitionGuard sm_guard(state, SM_FAMILY_SELECTION,
@@ -4996,7 +4996,7 @@ static bool dispatch_form_selection_range(EventContext* evcon, DomElement* elem,
     if (!dispatch_form_editing_surface(evcon, elem, state, target, &surface)) return false;
 
     tc_ensure_init(elem);
-    uint32_t value_len = elem->form ? elem->form->current_value_len : 0;
+    uint32_t value_len = elem->form_storage() ? elem->form_storage()->current_value_len : 0;
     if (start > value_len) start = value_len;
     if (end > value_len) end = value_len;
     if (end < start) {
@@ -5023,7 +5023,7 @@ static bool dispatch_form_selection_range(EventContext* evcon, DomElement* elem,
 static void dispatch_form_select_word(EventContext* evcon, DomElement* elem,
                                       DocState* state, View* target,
                                       int byte_offset) {
-    FormControlProp* form = elem ? elem->form : nullptr;
+    FormControlProp* form = elem ? elem->form_storage() : nullptr;
     const char* value = form ? form->current_value : nullptr;
     uint32_t value_len = form ? form->current_value_len : 0;
     if (!value || value_len == 0) return;
@@ -5045,7 +5045,7 @@ static bool dispatch_form_history_restore_selection(DomElement* elem,
     if (!elem || !state || !target || !surface) return false;
     if (!tc_is_text_control(elem)) return false;
 
-    FormControlProp* form = elem->form;
+    FormControlProp* form = elem->form_storage();
     if (!form) return false;
     const char* value = form->current_value ? form->current_value : "";
     uint32_t value_len = form->current_value ? form->current_value_len : 0;
@@ -5133,13 +5133,13 @@ static bool dispatch_form_history(EventContext* evcon, DomElement* elem,
         return true;
     }
 
-    uint32_t old_len = event_log_text_len(elem->form ? elem->form->value : nullptr);
+    uint32_t old_len = event_log_text_len(elem->form_storage() ? elem->form_storage()->value : nullptr);
     // The template installs the entry; native only moves the cursor onto it.
     // There is no native apply behind this — a control no template governs does
     // not undo, the same way it does not validate (ES17 with no fallback).
     bool did = applied_by_template && te_history_step(elem, redo);
     if (did) {
-        FormControlProp* form = elem->form;
+        FormControlProp* form = elem->form_storage();
         uint32_t new_len = event_log_text_len(form ? form->value : nullptr);
         uint32_t selection_start = form ? form->selection_start : 0;
         uint32_t selection_end = form ? form->selection_end : 0;
@@ -5224,7 +5224,7 @@ static bool dispatch_form_key_intent(EventContext* evcon, DomElement* elem,
             break;
         case INPUT_INTENT_INSERT_PARAGRAPH:
         case INPUT_INTENT_INSERT_LINE_BREAK:
-            if (form_control_is_textarea(elem->form)) {
+            if (form_control_is_textarea(elem->form_storage())) {
                 dispatch_form_text_replace(evcon, elem, state, target,
                                            (uint32_t)caret, (uint32_t)caret,
                                            "\n", 1, intent.type);
@@ -5280,7 +5280,7 @@ static uint32_t editing_text_drag_range_len(View* range_view,
     if (editing_surface_is_text_control(surface)) {
         DomElement* elem = surface->owner;
         tc_ensure_init(elem);
-        return (elem && elem->form) ? elem->form->current_value_len : 0;
+        return (elem && elem->form_storage()) ? elem->form_storage()->current_value_len : 0;
     }
     if (range_view->is_text()) {
         DomText* text = lam::dom_require_text(static_cast<DomNode*>(range_view));
@@ -5315,8 +5315,8 @@ static char* editing_text_drag_copy_range_text(View* range_view,
     if (editing_surface_is_text_control(surface)) {
         DomElement* elem = surface->owner;
         tc_ensure_init(elem);
-        src = (elem && elem->form && elem->form->current_value)
-            ? elem->form->current_value
+        src = (elem && elem->form_storage() && elem->form_storage()->current_value)
+            ? elem->form_storage()->current_value
             : "";
     } else if (range_view->is_text()) {
         DomText* text = lam::dom_require_text(static_cast<DomNode*>(range_view));
@@ -5776,12 +5776,12 @@ extern "C" bool radiant_editing_focused_caret_rect(UiContext* uicon,
     EditingCaretRect rect;
     editing_caret_rect_clear(&rect);
     if (editing_surface_is_text_control(&surface) && surface.owner &&
-        surface.owner->form) {
+        surface.owner->form_storage()) {
         tc_ensure_init(surface.owner);
-        const char* value = surface.owner->form->current_value
-            ? surface.owner->form->current_value : surface.owner->form->value;
-        uint32_t value_len = surface.owner->form->current_value_len;
-        uint32_t caret_u16 = surface.owner->form->selection_end;
+        const char* value = surface.owner->form_storage()->current_value
+            ? surface.owner->form_storage()->current_value : surface.owner->form_storage()->value;
+        uint32_t value_len = surface.owner->form_storage()->current_value_len;
+        uint32_t caret_u16 = surface.owner->form_storage()->selection_end;
         uint32_t caret_utf8 = tc_utf16_to_utf8_offset(value ? value : "",
                                                       value_len, caret_u16);
         if (!editing_geometry_text_control_caret_rect(uicon, surface.owner,
@@ -5792,7 +5792,7 @@ extern "C" bool radiant_editing_focused_caret_rect(UiContext* uicon,
         RdtLogicalPoint point = view_geometry_local_to_block_viewport(surface.owner,
             {rect.x, rect.y}, scroll_state_resolve_view_geometry);
         rect.x = point.x;
-        rect.y = point.y - surface.owner->form->scroll_y;
+        rect.y = point.y - surface.owner->form_storage()->scroll_y;
     } else {
         View* caret_view = nullptr;
         int caret_offset = 0;
@@ -7277,7 +7277,7 @@ static DomElement* dom_js_paint_only_target(DomDocument* doc, const DomJsMutatio
     }
     const CssValue* value = declaration->value;
     bool becomes_none = value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE;
-    return transform_has_functions(element->transform) && !becomes_none ? element : nullptr;
+    return transform_has_functions(element->transform_prop()) && !becomes_none ? element : nullptr;
 }
 
 static bool post_html_handler_paint_only_commit(EventContext* evcon, DomDocument* doc,
@@ -10592,7 +10592,7 @@ static bool run_form_submit_activation(EventContext* evcon, View* target) {
     }
     if (!owner) return false;
 
-    if (elem->form_control() && elem->form->control_type == FORM_CONTROL_IMAGE) {
+    if (elem->form_control() && elem->form_storage()->control_type == FORM_CONTROL_IMAGE) {
         ViewBlock* block = radiant_mouse_click_block(evcon, target);
         ImageSurface* image = render_media_image_surface(block);
         if (image) {
@@ -10603,9 +10603,8 @@ static bool run_form_submit_activation(EventContext* evcon, View* target) {
                     {content.offset_x, content.offset_y, content.width, content.height}, 1.0f);
                 float zoom = layout_effective_zoom(block);
                 if (!(zoom > 0.0f)) zoom = 1.0f;
-                // Submission stores integer CSS pixels relative to the image edge.
-                state->form_image_selected_x = lroundf((evcon->offset_x - image_box.x) / zoom);
-                state->form_image_selected_y = lroundf((evcon->offset_y - image_box.y) / zoom);
+                state->form_image_selected_x = (evcon->offset_x - image_box.x) / zoom;
+                state->form_image_selected_y = (evcon->offset_y - image_box.y) / zoom;
             }
         }
     }
@@ -11321,9 +11320,9 @@ static bool click_target_is_disabled_control(DocState* state, View* target) {
  */
 static void calculate_dropdown_dimensions(ViewBlock* select, DocState* state,
                                            float logical_width) {
-    if (!select || !state || !select->form) return;
+    if (!select || !state || !select->form_storage()) return;
 
-    int option_count = select->form->option_count;
+    int option_count = select->form_storage()->option_count;
     if (option_count <= 0) option_count = 1;
 
     // Maximum visible options
@@ -11331,7 +11330,7 @@ static void calculate_dropdown_dimensions(ViewBlock* select, DocState* state,
     int visible_count = (option_count < max_visible) ? option_count : max_visible;
 
     // the popup uses the native option row, not an author-sized closed control
-    float option_height = form_select_dropdown_row_height(select->form);
+    float option_height = form_select_dropdown_row_height(select->form_storage());
 
     // Calculate popup dimensions
     doc_state_set_dropdown_geometry(state, state->dropdown_x, state->dropdown_y,
@@ -11342,7 +11341,7 @@ static void select_refresh_dropdown_geometry(UiContext* uicon, DocState* state) 
     if (!uicon || !state || !state->open_dropdown) return;
     View* select_view = state->open_dropdown;
     ViewBlock* select = lam::view_require_block(select_view);
-    if (!select || !select->form) return;
+    if (!select || !select->form_storage()) return;
 
     float visual_x = 0.0f, visual_y = 0.0f;
     float visual_width = 0.0f, visual_height = 0.0f;
@@ -11366,8 +11365,8 @@ static void select_open_dropdown(UiContext* uicon, DocState* state,
                                  View* select_view) {
     if (!uicon || !state || !select_view) return;
     ViewBlock* select = lam::view_require_block(select_view);
-    if (!select || !select->form) return;
-    log_debug("select_open_dropdown: opening with %d options", select->form->option_count);
+    if (!select || !select->form_storage()) return;
+    log_debug("select_open_dropdown: opening with %d options", select->form_storage()->option_count);
     doc_state_open_dropdown(state, select_view);
     // Popup state stays in the top-level logical viewport; rendering performs
     // the sole logical-to-surface conversion.
@@ -11382,7 +11381,7 @@ static ViewBlock* event_open_dropdown_select(EventContext* evcon,
     if (out_state) *out_state = state;
     if (!state || !state->open_dropdown) return nullptr;
     ViewBlock* select = lam::view_require_block(state->open_dropdown);
-    return select->form ? select : nullptr;
+    return select->form_storage() ? select : nullptr;
 }
 
 static bool dropdown_point_inside(DocState* state, float mouse_x, float mouse_y) {
@@ -11414,16 +11413,16 @@ static bool handle_dropdown_option_click(EventContext* evcon, float mouse_x, flo
     }
 
     // Calculate which option was clicked
-    SelectDropdownGeometry geometry = select_dropdown_geometry(state, select->form);
-    if (select_dropdown_scrollbar_part(state, select->form, mouse_x, mouse_y) != SCROLLBAR_PRESS_NONE)
+    SelectDropdownGeometry geometry = select_dropdown_geometry(state, select->form_storage());
+    if (select_dropdown_scrollbar_part(state, select->form_storage(), mouse_x, mouse_y) != SCROLLBAR_PRESS_NONE)
         return true;
     float option_height = geometry.row_height;
     int clicked_index = (int)((mouse_y - state->dropdown_y + geometry.scroll_y) / option_height); // INT_CAST_OK: option array index
 
     log_debug("handle_dropdown_option_click: option_height=%.1f, clicked_index=%d, option_count=%d",
-             option_height, clicked_index, select->form->option_count);
+             option_height, clicked_index, select->form_storage()->option_count);
 
-    if (clicked_index >= 0 && clicked_index < select->form->option_count) {
+    if (clicked_index >= 0 && clicked_index < select->form_storage()->option_count) {
         log_debug("handle_dropdown_option_click: option %d resolved, dispatching commit", clicked_index);
         // Geometry resolved the option; the template commits it and closes the
         // dropdown. No native fallback, matching activation, validation and
@@ -11448,7 +11447,7 @@ static void update_dropdown_hover(EventContext* evcon, float mouse_x, float mous
 
     // Check if mouse is within dropdown popup
     if (!dropdown_point_inside(state, mouse_x, mouse_y) ||
-        select_dropdown_scrollbar_part(state, select->form, mouse_x, mouse_y) != SCROLLBAR_PRESS_NONE) {
+        select_dropdown_scrollbar_part(state, select->form_storage(), mouse_x, mouse_y) != SCROLLBAR_PRESS_NONE) {
         if (form_control_get_hover_index(state, static_cast<View*>(select)) != -1) {
             form_control_set_hover_index(state, static_cast<View*>(select), -1);
         }
@@ -11456,10 +11455,10 @@ static void update_dropdown_hover(EventContext* evcon, float mouse_x, float mous
     }
 
     // Calculate which option is hovered
-    SelectDropdownGeometry geometry = select_dropdown_geometry(state, select->form);
+    SelectDropdownGeometry geometry = select_dropdown_geometry(state, select->form_storage());
     int hover_index = (int)((mouse_y - state->dropdown_y + geometry.scroll_y) / geometry.row_height); // INT_CAST_OK: option array index
 
-    if (hover_index >= 0 && hover_index < select->form->option_count) {
+    if (hover_index >= 0 && hover_index < select->form_storage()->option_count) {
         if (form_control_get_hover_index(state, static_cast<View*>(select)) != hover_index) {
             form_control_set_hover_index(state, static_cast<View*>(select), hover_index, false);
         }
@@ -13370,7 +13369,7 @@ static void handle_event_impl(UiContext* uicon, DomDocument* doc, RdtEvent* even
         DocState* popup_state = event_context_target_state(&evcon);
         if (popup_state && popup_state->open_dropdown && popup_state->dropdown_dragging) {
             ViewBlock* select = lam::view_require_block(popup_state->open_dropdown);
-            SelectDropdownGeometry geometry = select_dropdown_geometry(popup_state, select->form);
+            SelectDropdownGeometry geometry = select_dropdown_geometry(popup_state, select->form_storage());
             float travel = popup_state->dropdown_height - 2.0f - geometry.thumb_height;
             if (travel > 0.0f) doc_state_set_dropdown_scroll(popup_state,
                 popup_state->dropdown_drag_start_scroll +
@@ -13571,7 +13570,7 @@ static void handle_event_impl(UiContext* uicon, DomDocument* doc, RdtEvent* even
             if (anchor_view && anchor_view->is_element()) {
                 DomElement* anchor_elem = lam::dom_require_element(anchor_view);
                 if (anchor_elem->form_control() &&
-                    form_control_is_textarea(anchor_elem->form)) {
+                    form_control_is_textarea(anchor_elem->form_storage())) {
                     uint32_t hit_offset = 0;
                     editing_geometry_text_control_offset_for_point(evcon.ui_context,
                         anchor_elem, (float)motion->x, (float)motion->y,
@@ -13594,7 +13593,7 @@ static void handle_event_impl(UiContext* uicon, DomDocument* doc, RdtEvent* even
 
                 // Single-line <input type="text"> drag selection
                 if (anchor_elem->form_control() &&
-                    anchor_elem->form->control_type == FORM_CONTROL_TEXT) {
+                    anchor_elem->form_storage()->control_type == FORM_CONTROL_TEXT) {
                     uint32_t hit_offset = 0;
                     editing_geometry_text_control_offset_for_point(evcon.ui_context,
                         anchor_elem, (float)motion->x, (float)motion->y,
@@ -13616,7 +13615,7 @@ static void handle_event_impl(UiContext* uicon, DomDocument* doc, RdtEvent* even
                               char_offset,
                               sel_start,
                               sel_end,
-                              anchor_elem->form->tc_initialized ? 1 : 0);
+                              anchor_elem->form_storage()->tc_initialized ? 1 : 0);
                     evcon.need_repaint = true;
                     goto textarea_drag_done;
                 }
@@ -13916,7 +13915,7 @@ static void handle_event_impl(UiContext* uicon, DomDocument* doc, RdtEvent* even
         // The select behavior template still owns the option commit.
         if (dropdown_point_inside(state, mouse_x, mouse_y)) {
             ViewBlock* select = lam::view_require_block(state->open_dropdown);
-            ScrollbarPressPart part = select_dropdown_scrollbar_part(state, select->form, mouse_x, mouse_y);
+            ScrollbarPressPart part = select_dropdown_scrollbar_part(state, select->form_storage(), mouse_x, mouse_y);
             if (part != SCROLLBAR_PRESS_NONE) {
                 evcon.target = state->open_dropdown;
                 if (event->type == RDT_EVENT_MOUSE_DOWN && btn_event->button == RDT_MOUSE_BUTTON_LEFT) {
@@ -14331,7 +14330,7 @@ static void handle_event_impl(UiContext* uicon, DomDocument* doc, RdtEvent* even
                 // "editing drag anchor offset exceeds target length". Preserving
                 // the selection is also what the drag needs to move.
                 if (!text_drag_armed && target_elem->form_control() &&
-                    target_elem->form->control_type == FORM_CONTROL_TEXT &&
+                    target_elem->form_storage()->control_type == FORM_CONTROL_TEXT &&
                     !form_control_is_disabled(state, static_cast<View*>(target_elem))) {
 
                     EditingBoundary click_boundary;
@@ -14373,7 +14372,7 @@ static void handle_event_impl(UiContext* uicon, DomDocument* doc, RdtEvent* even
                     evcon.need_repaint = true;
 
                 } else if (!text_drag_armed && target_elem->form_control() &&
-                           form_control_is_textarea(target_elem->form) &&
+                           form_control_is_textarea(target_elem->form_storage()) &&
                            !form_control_is_disabled(state, static_cast<View*>(target_elem))) {
                     // Textarea form controls: click-to-position caret
                     EditingBoundary click_boundary;
@@ -14395,10 +14394,10 @@ static void handle_event_impl(UiContext* uicon, DomDocument* doc, RdtEvent* even
                     // F2: dblclick selects the word, tripleclick selects the
                     // logical line in <textarea>.
                     if (pointer_selection_line) {
-                        const char* select_value = target_elem->form
-                            ? target_elem->form->current_value : nullptr;
-                        uint32_t select_len = target_elem->form
-                            ? target_elem->form->current_value_len : 0;
+                        const char* select_value = target_elem->form_storage()
+                            ? target_elem->form_storage()->current_value : nullptr;
+                        uint32_t select_len = target_elem->form_storage()
+                            ? target_elem->form_storage()->current_value_len : 0;
                         uint32_t click_off = char_offset < 0 ? 0 : (uint32_t)char_offset;
                         uint32_t start = te_line_start(select_value, select_len, click_off);
                         uint32_t end = te_line_end(select_value, select_len, click_off);
@@ -15219,7 +15218,7 @@ static void handle_event_impl(UiContext* uicon, DomDocument* doc, RdtEvent* even
             focused->is_element()) {
             DomElement* focus_elem = lam::dom_require_element(focused);
             if (focus_elem->form_control() &&
-                focus_elem->form->control_type == FORM_CONTROL_TEXT) {
+                focus_elem->form_storage()->control_type == FORM_CONTROL_TEXT) {
                 DomElement* owner = radiant_form_owner(focus_elem);
                 if (owner) {
                     View* submitter = static_cast<View*>(
@@ -15485,7 +15484,7 @@ static void handle_event_impl(UiContext* uicon, DomDocument* doc, RdtEvent* even
         if (focused && focused->is_element()) {
             DomElement* elem = lam::dom_require_element(focused);
             if (elem->form_control() &&
-                form_control_is_text_editable(elem->form)) {
+                form_control_is_text_editable(elem->form_storage())) {
                 is_form_input = true;
                 bool editable = !form_control_is_user_readonly(state, static_cast<View*>(elem));
                 int caret_offset = 0;

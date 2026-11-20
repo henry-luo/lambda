@@ -44,4 +44,8 @@ let keys = ["name", "type", "metalness", "roughness", "alpha-mode", "alpha-cutof
 let back = parse(format(s.scene([s.camera({id: "c"}), pbr], {camera: "c"}), 'gltf')^, 'json')^;
 [back.materials[0].alphaMode, back.materials[0].alphaCutoff, back.materials[0].normalTexture.scale, back.materials[0].occlusionTexture.strength,
     back.materials[0].pbrMetallicRoughness.metallicRoughnessTexture != null, back.materials[0].emissiveTexture != null,
-    back.meshes[0].primitives[0].attributes.TANGENT != null]
+    back.meshes[0].primitives[0].attributes.TANGENT != null];
+// float vertex colours outside [0,1] clamp with one warning instead of failing the load
+let bright = s.load(dir ++ "bright.gltf", {id: "bright"})^;
+let bright_colors = by_tag(bright, 'geometry')[0].colors;
+[len(bright_colors), [for (c in bright_colors) round(c * 1000) / 1000]]

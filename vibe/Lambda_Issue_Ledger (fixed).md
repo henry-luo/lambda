@@ -4576,7 +4576,7 @@ input-events category uses its own executable and retains 20 passes / 12 skips.
 The concrete two-site fix explicitly selects the existing workspace Lambda host.
 Its review patch and full isolated qualification are at
 `../radiant/temp/radiant-failed-20261111/lambda-runner-fix.patch` and
-`../radiant/vibe/Radiant_Impl_Failed_Test_Repairs.md`. The page snapshot passes
+`impl/Radiant_Impl_Failed_Test_Repairs.md`. The page snapshot passes
 51/51; the combined layout inventory executes all 5,936 cases with 5,621 passing,
 293 partial, 10 failing and 12 skipped. The ten residual comparisons are recorded
 in Radiant RI-010; no reference, threshold or case selection was changed.
@@ -4587,7 +4587,7 @@ explicit prohibition on editing Lambda implementation/tests/build files.
 Only this owner issue record is added before approval. Native replay-summary
 output is independently repaired and passes the exact UI/view inventories.
 
-**Resolution:** the user explicitly approved the scoped two-file repair. Both adapters now select the existing workspace Lambda host. The normal page snapshot passes 51/51 and all 5,936 combined layout cases execute; the same ten remaining comparisons are tracked as Radiant RI-010. The required native/static/dynamic owner gate and reported UI/view inventories pass with their existing skips. No reference, baseline score, tolerance or fixture selection was changed. The implementation and pinned receipt are in `../radiant/vibe/Radiant_Impl_Failed_Test_Repairs.md` and `../radiant/temp/radiant-failed-20261111/verification-summary.json`. The pending-approval paragraph above records the original stopping condition; authorization has now been received and the source repair is applied.
+**Resolution:** the user explicitly approved the scoped two-file repair. Both adapters now select the existing workspace Lambda host. The normal page snapshot passes 51/51 and all 5,936 combined layout cases execute; the same ten remaining comparisons are tracked as Radiant RI-010. The required native/static/dynamic owner gate and reported UI/view inventories pass with their existing skips. No reference, baseline score, tolerance or fixture selection was changed. The implementation and pinned receipt are in `impl/Radiant_Impl_Failed_Test_Repairs.md` and `../radiant/temp/radiant-failed-20261111/verification-summary.json`. The pending-approval paragraph above records the original stopping condition; authorization has now been received and the source repair is applied.
 
 ## Place borrows and the watercolor timeout — 2026-11-11
 
