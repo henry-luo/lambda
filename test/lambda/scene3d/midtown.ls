@@ -61,6 +61,12 @@ let braked_high = reduce([at_speed, *[for (i in 1 to 240) i]], (c, i) any^ =>
 {reached_160: v.speed(at_speed) * 3.6 >= 160.0, stopped: v.speed(braked_high) < 0.3,
  room_to_spare: braked_high.x > 0.0 - city.LIMIT + v.HALF_LENGTH + 20.0, no_damage: braked_high.damage == 0.0}
 
+// Drive from the meadow through the former eastern wall between intersections.
+"meadow crossing";
+let meadow = v.spawn(city.LIMIT + 18.0, 100.0, 0.0 - u.PI / 2.0)
+let crossed = drive(meadow, GAS, 3.0);
+{entered_town: crossed.x < city.LIMIT - v.HALF_LENGTH, no_damage: crossed.damage == 0.0}
+
 // ---- traffic: a simulated minute, never off the road and never inside another car
 "traffic";
 let player = {id: "player", player: true, x: 0.0, z: 900.0, heading: 0.0, hl: 2.25}

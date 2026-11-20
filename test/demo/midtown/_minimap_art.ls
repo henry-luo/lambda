@@ -36,7 +36,8 @@ fn river_band() any^ {
 }
 fn map_svg() element^ {
     let r = minimap.REGION
-    let coast = [for (k in 0 to 48, let x = r.x0 + k * 40.0) [x, land.coast_z(x)]]
+    let samples = int(ceil((r.x1 - r.x0) / 40.0))^
+    let coast = [for (k in 0 to samples, let x = min(r.x1, r.x0 + k * 40.0)) [x, land.coast_z(x)]]
     let loop = roads.LOOP.samples^
     let bores = [for (st in roads.STRUCTURES where st.kind == "tunnel") [for (p in loop where p.s >= st.a and p.s <= st.b) p]];
     <svg xmlns: "http://www.w3.org/2000/svg", width: r.x1 - r.x0, height: r.z1 - r.z0,
@@ -45,9 +46,11 @@ fn map_svg() element^ {
         <path d: outline([*coast, [r.x1, r.z1], [r.x0, r.z1]]), fill: "#2e5d78">, <path d: river_band(), fill: "#2e5d78">,
         <path d: band(loop, 6.5), fill: "#2b2f35">, <path d: band(loop, 4.0), fill: "#d6d0c2">,
         *[for (b in bores) <path d: band(b, 4.0), fill: "#5d6168">],
-        <rect x: city.LIMIT, y: -6.0, width: roads.R1.x - city.LIMIT, height: 12.0, fill: "#d6d0c2">,
+        *plan(),
+        // draw the gateway over the city's surrounding ground so it joins the street.
+        <rect x: city.LIMIT, y: city.road(city.GATE_J) - city.ROAD, width: roads.R1.x - city.LIMIT, height: 2.0 * city.ROAD, fill: "#d6d0c2">,
         <circle cx: roads.R1.x, cy: roads.R1.z, r: roads.R1.ring + 5.0, fill: "#d6d0c2">,
-        <circle cx: roads.R1.x, cy: roads.R1.z, r: roads.R1.island, fill: "#4d7a45">, *plan()]>
+        <circle cx: roads.R1.x, cy: roads.R1.z, r: roads.R1.island, fill: "#4d7a45">]>
 }
 
 <html <head <style "html,body{margin:0}svg{display:block}">> <body map_svg()^>>

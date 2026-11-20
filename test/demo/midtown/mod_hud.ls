@@ -15,12 +15,13 @@ pub fn readout(id, width) element => <span class: "readout", id: id, *[for (i in
 pub let GEARS = ["R", "N", "1", "2", "3", "4", "5"]
 
 // ---- the minimap: a clipped viewport with the courier marker and compass above it
-fn minimap() element => <div class: "map-disc", *[
+fn minimap() element => <div id: "map-disc", class: "map-disc", 'data-off-center': "false", *[
     <canvas id: "map-plan", width: map_view.SIZE, height: map_view.SIZE>,
     <div id: "map-target", class: "map-target", style: "opacity:0", *[<div class: "map-target-ring">]>,
     <div id: "map-pointer", class: "map-pointer", style: "opacity:0", *[<div class: "map-pointer-tip">]>,
     <div id: "map-north", class: "map-north", *[<span "N">]>,
-    <svg class: "map-car", viewBox: "-10 -10 20 20", width: 20, height: 20, <path d: "M 0 -8 L 6 7 L 0 3.5 L -6 7 Z", fill: "#ff5a4f", stroke: "#fff", 'stroke-width': 1.2>>]>
+    <svg id: "map-car", class: "map-car", viewBox: "-10 -10 20 20", width: 20, height: 20, <path d: "M 0 -8 L 6 7 L 0 3.5 L -6 7 Z", fill: "#ff5a4f", stroke: "#fff", 'stroke-width': 1.2>>,
+    <button id: "map-recenter", class: "map-recenter", type: "button", 'data-act': "map-recenter", "Recenter">]>
 
 // ---- the speedometer: 0-220 km/h over 240°, a needle, rev bar, gear and damage
 fn polar(r, deg) => (let a = (deg - 90.0) * u.PI / 180.0, [r * cos(a), r * sin(a)])

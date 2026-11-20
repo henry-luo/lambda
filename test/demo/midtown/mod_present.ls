@@ -37,7 +37,8 @@ pub fn initial(start = START) {
     let car = v.spawn(start.x, start.z, start.heading);
     {token: 0, last: null, t: 0.0, started: false, paused: false, help: false, handles: null, keys: NO_KEYS, touch: NO_KEYS,
      car: car, traffic: tr.spawn(16), route: rt.spawn(7), peds: pd.spawn(24), mission: ms.initial(), camera: cam.initial(car),
-     look: "day", lights: false, auto: null, shown: {speed: "   ", timer: "   ", gear: "N", place: "", street: "", look: "", mission: "", cash: "", map_pose: null},
+     look: "day", lights: false, auto: null, map_zoom: minimap.DEFAULT_ZOOM, map_pan: null,
+     shown: {speed: "   ", timer: "   ", gear: "N", place: "", street: "", look: "", mission: "", cash: "", map_pose: null},
      toast: "", toast_until: 0.0, smashed: [], best_air: 0.0, top_speed: 0.0, drag: null, tour: 0.0, frames: 0, speed_cap: null, spot: 0}
 }
 
@@ -207,7 +208,7 @@ pub pn bind(owner) {
         speed: cells("speed", 3), timer: cells("timer", 3), timer_box: node("timer-box"), gears: [for (k in 0 to 6) node("gear-" ++ string(k))],
         district: node("district"), street: node("street"), look: node("look-name"), mission: node("mission"), mission_text: node("mission-text"),
         cash: node("cash"), toast: node("toast"), toast_text: node("toast-text"), map_canvas: node("map-plan"),
-        map_plan: plan, map_target: node("map-target"),
+        map_plan: plan, map_disc: node("map-disc"), map_car: node("map-car"), map_target: node("map-target"),
         pointer: node("map-pointer"), north: node("map-north")}
 }
 pn paint(target, property, value) { dom.presentation_style_set_property(target, property, value) }
@@ -226,7 +227,62 @@ fn padded(text, width) any^ => join(fill(max(0, width - len(text)), " ")^, "") +
 fn deg(a) any^ => numbers.fixed(a * 180.0 / u.PI, 2) ++ "deg"
 fn px(x) any^ => numbers.fixed(x, 2) ++ "px"
 
-let MAP_SCALE_TEXT = numbers.fixed(minimap.SCALE, 3) ^ { "0.62" }
+// keep the courier marker the same screen size as the map zooms.
+let MAP_MARKER_SCALE = numbers.fixed(minimap.SCALES[minimap.DEFAULT_ZOOM], 3) ^ { "0.62" }
+pn map_frame(h, st) {
+    if ((not st.started)^) { return null }
+    let car = st.car
+    let pose = minimap.view_pose(car, st.map_zoom, st.map_pan)^
+    let previous = st.shown.map_pose
+    // a detached map can keep its canvas while only the car marker moves.
+    if ((previous == null or pose.x != previous.x or pose.z != previous.z or pose.turn != previous.turn or pose.zoom != previous.zoom)^) {
+        dom.set_canvas_pixels(h.map_canvas, minimap.frame(h.map_plan, pose)^)^
+    }
+    if ((previous == null or pose.turn != previous.turn)^) {
+        paint(h.north, "transform", "rotate(" ++ deg(pose.turn) ++ ")")^
+    }
+    let detached = st.map_pan != null
+    let offset = if (detached) minimap.projected(pose, car.x, car.z)^ else [0.0, 0.0]
+    let off_center = abs(offset[0]) > 0.5 or abs(offset[1]) > 0.5
+    if ((detached or (previous != null and previous.detached))^) {
+        paint(h.map_car, "transform", "translate(" ++ px(offset[0]) ++ ", " ++ px(offset[1]) ++ ") rotate(" ++
+            deg(u.PI - car.heading + pose.turn) ++ ")")^
+    }
+    if ((off_center != (previous != null and previous.off_center))^) {
+        dom.set_attribute(h.map_disc, "data-off-center", if (off_center) "true" else "false")^
+    }
+    let tgt = st.mission.target
+    if (tgt != null) {
+        let point = minimap.projected(pose, tgt.x, tgt.z)^
+        let x = point[0], y = point[1]
+        paint(h.map_target, "transform", "translate(" ++ px(x) ++ ", " ++ px(y) ++ ") scale(" ++ MAP_MARKER_SCALE ++ ")")^
+        let far = sqrt(x * x + y * y) > minimap.CENTER - 12.0
+        paint(h.pointer, "transform", "rotate(" ++ deg(math.atan2(y, x) + u.PI / 2.0) ++ ")")^
+        paint(h.pointer, "opacity", if (far) "1" else "0")^
+    } else if ((previous != null and previous.has_target)^) {
+        paint(h.pointer, "opacity", "0")^
+    }
+    return {*: pose, detached: detached, off_center: off_center, has_target: tgt != null}
+}
+pn update_minimap(st) {
+    let pose = map_frame(st.handles, st)^
+    return {*: st, shown: {*: st.shown, map_pose: pose}}
+}
+pub pn zoom_minimap(st, direction) {
+    let zoom = u.clamp(st.map_zoom + direction, 0, len(minimap.SCALES) - 1)
+    let center = if (zoom == 0) minimap.OVERVIEW else st.map_pan
+    if ((zoom == st.map_zoom and center == st.map_pan)^) { return st }
+    return update_minimap({*: st, map_zoom: zoom, map_pan: center})
+}
+pub pn pan_minimap(st, dx, dy) {
+    let pose = minimap.view_pose(st.car, st.map_zoom, st.map_pan)^
+    let center = minimap.pan(pose, dx, dy)^
+    if ((center.x == pose.x and center.z == pose.z)^) { return st }
+    return update_minimap({*: st, map_pan: center})
+}
+pub pn recenter_minimap(st) {
+    return update_minimap({*: st, map_pan: null})
+}
 pn hud_frame(h, st) {
     let car = st.car
     let kmh = v.speed(car) * 3.6
@@ -239,29 +295,12 @@ pn hud_frame(h, st) {
     if ((gear != st.shown.gear)^) {
         for (k, g in hud.GEARS) { if (g == st.shown.gear or g == gear) paint(h.gears[k], "opacity", if (g == gear) "1" else "0") }
     }
-    // a stationary car keeps the last map pixels and needs no canvas upload.
-    let turn = car.heading - u.PI
-    let previous_pose = st.shown.map_pose
-    let moved = previous_pose == null or car.x != previous_pose.x or car.z != previous_pose.z or car.heading != previous_pose.heading
-    if ((st.started and moved)^) {
-        dom.set_canvas_pixels(h.map_canvas, minimap.frame(h.map_plan, car, turn)^)^
-    }
-    paint(h.north, "transform", "rotate(" ++ deg(turn) ++ ")")^
+    let map_pose = map_frame(h, st)^
     let m = st.mission
-    let tgt = m.target
-    if (tgt != null) {
-        let dx = tgt.x - car.x, dz = tgt.z - car.z
-        let sx = dx * cos(turn) - dz * sin(turn), sz = dx * sin(turn) + dz * cos(turn)
-        paint(h.map_target, "transform", "translate(" ++ px(sx * minimap.SCALE) ++ ", " ++ px(sz * minimap.SCALE) ++ ") scale(" ++ MAP_SCALE_TEXT ++ ")")^
-        let far = sqrt(dx * dx + dz * dz) * minimap.SCALE > minimap.CENTER - 12.0
-        paint(h.pointer, "transform", "rotate(" ++ deg(math.atan2(sz, sx) + u.PI / 2.0) ++ ")")^
-        paint(h.pointer, "opacity", if (far) "1" else "0")^
-    }
     let timer = if (m.phase == "deliver") padded(string(int(ceil(ms.time_left(m, st.t))) ^ { 0 }), 3) else "   "
     digits(h.timer, st.shown.timer, timer)^
     paint(h.toast, "opacity", numbers.fixed(u.clamp((st.toast_until - st.t) * 2.0, 0.0, 1.0), 2))^
-    return {*: st.shown, speed: speed, timer: timer, gear: gear,
-        map_pose: if (st.started) {x: car.x, z: car.z, heading: car.heading} else null}
+    return {*: st.shown, speed: speed, timer: timer, gear: gear, map_pose: map_pose}
 }
 // words change only when the situation does
 pn hud_words(h, st) {
