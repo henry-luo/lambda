@@ -10,6 +10,7 @@ const {readCsvObjects, readPageCatalog, serializeCsv} = require('../../utils/onl
 
 const viewport = {width: 1200, height: 800};
 const DEFAULT_CAPTURE_SETTLE_MS = 1000;
+const CAPTURE_ANIMATION_ORIGIN = 'post-load';
 const resultColumns = [
     'label', 'url', 'lambda_ok', 'lambda_exit_code', 'lambda_elapsed_ms',
     'lambda_error', 'browser_ok', 'browser_elapsed_ms', 'browser_error',
@@ -18,6 +19,7 @@ const resultColumns = [
     'browser_retry_after', 'lambda_attempt_utc', 'browser_attempt_utc',
     'lambda_timeout_ms', 'browser_timeout_ms', 'browser_log',
     'lambda_settle_ms', 'browser_settle_ms',
+    'lambda_animation_origin', 'browser_animation_origin',
 ];
 
 function integerOption(value, name, minimum = 1) {
@@ -109,7 +111,8 @@ function selectWork(pages, previous, options, snapshotsDir) {
         if (options.renderer === 'both' && options.settleMs !== undefined && (work.lambda || work.browser)) {
             // a retry at a new window also refreshes its successful counterpart to keep a comparable pair.
             for (const tool of ['lambda', 'browser']) {
-                if (String(reusable[`${tool}_settle_ms`] ?? '') !== String(options.settleMs)) work[tool] = true;
+                if (String(reusable[`${tool}_settle_ms`] ?? '') !== String(options.settleMs) ||
+                    reusable[`${tool}_animation_origin`] !== CAPTURE_ANIMATION_ORIGIN) work[tool] = true;
             }
         }
         return work;
@@ -194,6 +197,7 @@ async function runLambdaRender(page, outputPath, options, snapshotsDir) {
         (!hasPng(outputPath) ? 'Lambda did not write a valid PNG' : '');
     return {ok: !error, error, exitCode: exitCode ?? -1, signal: signal || '',
         elapsedMs: elapsedMs(start), timeoutMs: options.lambdaTimeoutMs, settleMs: options.settleMs ?? '',
+        animationOrigin: options.settleMs === undefined ? '' : CAPTURE_ANIMATION_ORIGIN,
         loadOk: diagnostic.loadComplete,
         outputLog: path.basename(outputLog), log: path.basename(engineLog)};
 }
@@ -232,6 +236,11 @@ async function captureBrowser(browser, pageCase, outputPath, options, diagnostic
         // committed response; an intermediate HTTP redirect is not a loaded page.
         session = await tab.createCDPSession();
         await session.send('Page.enable');
+        if (options.settleMs !== undefined) {
+            // native startup holds animation time at zero while resources load.
+            await session.send('Animation.enable');
+            await session.send('Animation.setPlaybackRate', {playbackRate: 0});
+        }
         const tree = await session.send('Page.getFrameTree');
         const mainFrame = tree.frameTree.frame.id;
         let loading = false;
@@ -275,6 +284,8 @@ async function captureBrowser(browser, pageCase, outputPath, options, diagnostic
         finalUrl = response.url();
         retryAfter = response.headers()['retry-after'] || '';
         if (status < 200 || status >= 300) throw new Error(`HTTP ${status}`);
+        if (options.settleMs !== undefined)
+            await session.send('Animation.setPlaybackRate', {playbackRate: 1});
         if (options.settleMs > 0) {
             let timeout;
             try {
@@ -320,7 +331,9 @@ async function captureBrowser(browser, pageCase, outputPath, options, diagnostic
                 }, {timeout: 1500}).catch(() => null) : null;
                 const documentState = state?.result?.value ? JSON.parse(state.result.value) : null;
                 fs.writeFileSync(diagnosticPath, JSON.stringify({label: pageCase.label, url: pageCase.url,
-                    attemptedUtc: new Date().toISOString(), ...result, responses, lifecycle, document: documentState,
+                    attemptedUtc: new Date().toISOString(), ...result,
+                    animationOrigin: options.settleMs === undefined ? '' : CAPTURE_ANIMATION_ORIGIN,
+                    responses, lifecycle, document: documentState,
                     failedRequests, pendingRequests: [...pending].slice(0, 64)
                         .map((request) => ({url: request.url(), type: request.resourceType()})),
                 }, null, 2) + '\n');
@@ -330,7 +343,9 @@ async function captureBrowser(browser, pageCase, outputPath, options, diagnostic
             if (tab) await tab.close().catch(() => {});
         }
     }
-    return {...result, settleMs: options.settleMs ?? '', log: diagnosticPath ? path.basename(diagnosticPath) : ''};
+    return {...result, settleMs: options.settleMs ?? '',
+        animationOrigin: options.settleMs === undefined ? '' : CAPTURE_ANIMATION_ORIGIN,
+        log: diagnosticPath ? path.basename(diagnosticPath) : ''};
 }
 
 function updateRow(row, tool, result) {
@@ -340,6 +355,7 @@ function updateRow(row, tool, result) {
     row[`${tool}_attempt_utc`] = new Date().toISOString();
     row[`${tool}_timeout_ms`] = result.timeoutMs ?? '';
     row[`${tool}_settle_ms`] = result.settleMs ?? '';
+    row[`${tool}_animation_origin`] = result.animationOrigin ?? '';
     if (tool === 'lambda') {
         row.lambda_exit_code = result.exitCode;
         row.lambda_signal = result.signal;

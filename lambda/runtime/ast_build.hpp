@@ -29,7 +29,6 @@ typedef enum LambdaSyntaxForm : uint8_t {
     // ---- type-pattern sub-language (parse_type_pattern.cpp) ----
     LSF_TP_FIRST,
     LSF_TP_LIT_STRING = LSF_TP_FIRST, // PRIMARY; flag symbol; literal_value = String*
-    LSF_TP_LIT_NUMBER,        // PRIMARY; flag float; literal_value = value bits
     LSF_TP_LIT_BOOL,          // PRIMARY
     LSF_TP_LITERAL,           // PRIMARY: shared value-literal decoder
     LSF_TP_ANY,               // PRIMARY: the `any` operand of a type `!T`
@@ -53,7 +52,6 @@ typedef enum LambdaSyntaxForm : uint8_t {
     LSF_TP_TUPLE,             // LIST_TYPE
     LSF_TP_CONTENT,           // CONTENT_TYPE of an element type
     LSF_TP_ELEMENT,           // ELMT_TYPE
-    LSF_TP_FN_PARAM,          // KEY_EXPR: one fn-type parameter
     LSF_TP_FN,                // FUNC_TYPE
     LSF_TP_LAST = LSF_TP_FN,
     // ---- main grammar (build_ast.cpp) ----
@@ -61,7 +59,6 @@ typedef enum LambdaSyntaxForm : uint8_t {
     LSF_BASE_TYPE,            // TYPE (ident-sized): may resolve to a system function
     LSF_IDENT,                // IDENT: a name read (morphs by what it resolves to)
     LSF_MEMBER_NAME,          // IDENT: a member key spelling, never looked up
-    LSF_WRAPPER,              // PRIMARY around one expression
     LSF_CURRENT_ITEM,         // CURRENT_ITEM / CURRENT_INDEX
     LSF_CURRENT_ERROR,        // CURRENT_ERROR
     LSF_NAVIGATION,           // NAVIGATION_EXPR
@@ -175,12 +172,6 @@ bool lambda_literal_kind_from_token(LambdaTokenKind token, LambdaAstLiteralKind*
 Type* build_type_literal_from_span(Transpiler* tp, SourceSpan span,
         LambdaAstLiteralKind kind);
 
-// Maps an already-committed Lambda operator spelling to the retained AST
-// operator. Prefix and infix spellings intentionally use separate entry
-// points: `+`, `-`, `*`, and `!` have different retained meanings by form.
-bool lambda_unary_operator_from_spelling(StrView spelling, Operator* op_out);
-bool lambda_binary_operator_from_spelling(StrView spelling, Operator* op_out);
-
 // Builds and binds a name read at resolve time (a callee spelled as a type
 // word). Name lookup, imported-value handling, and `that`-clause rewriting
 // stay in this one constructor.
@@ -257,12 +248,9 @@ bool lambda_import_is_relative(StrView module);
 LambdaParseStatus lambda_rd_reduce_ast(Transpiler* tp, const char* source,
         size_t length, AstScript** root_out, LambdaParseError* error);
 
-// The resolve pass uses short-lived construction scopes for bottom-up type
-// assembly. Rebuild the canonical lexical graph from the retained AST before
-// validation or lowering publishes any of those edges. The bind pass collects
-// every function while it rewrites AST edges; later validation analyses share
-// that list instead of rescanning the whole unit.
-bool lambda_ast_rebind_direct_scope_graph_with_functions(Transpiler* tp,
+// Publish preorder IDs and query tables for the freshly resolved lexical
+// graph. Validation shares one function list derived from the index.
+bool lambda_ast_publish_scope_graph(Transpiler* tp,
     AstScript* script, ArrayList** functions_out);
 
 // Run post-reduction semantic validation and analysis for an already built AST.

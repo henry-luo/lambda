@@ -48,8 +48,8 @@ MIR_error_func_t g_batch_mir_error_handler = NULL;
 // Set from CLI (e.g., --opt-level=0), including reusable preamble images.
 unsigned int g_js_mir_optimize_level = 2;
 
-// The Lambda Direct compiler still owns this legacy document policy. LambdaJS
-// no longer reads it: D8.4.2 requires selected JS MIR to execute native code.
+// The standalone Radiant host still links this former document-policy flag.
+// Lambda and LambdaJS backend selection follow D8.3.1v3 and D8.4.2.
 int g_js_force_document_interp = 0;
 
 // diagnostic probes are shared by the host and native JS runtime.

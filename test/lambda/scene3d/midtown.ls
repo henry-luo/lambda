@@ -52,6 +52,21 @@ let flight = reduce([[run_up], *[for (k in 1 to 40) k]], (samples, k) any^ =>
  crash: [r2(crash.z + v.HALF_LENGTH - tower.z0), r2(v.speed(crash)) < 1.0, crash.damage > 10.0],
  jump: [r2(max([for (c in flight) c.y])), len([for (c in flight where not c.grounded) c]) > 4, flight[40].grounded]}
 
+// Accelerate westbound on Union Street and stop before its perimeter barrier.
+"high-speed driving";
+let gateway = v.spawn(roads.R1.x - roads.R1.apron - 7.0, city.road(city.GATE_J) - city.LANE, 0.0 - u.PI / 2.0)
+let at_speed = drive(gateway, GAS, 12.2)
+let braked_high = reduce([at_speed, *[for (i in 1 to 240) i]], (c, i) any^ =>
+    if (v.forward_speed(c) <= 0.2) c else v.step(c, {*: v.IDLE, brake: 1.0}, 1.0 / 60.0));
+{reached_160: v.speed(at_speed) * 3.6 >= 160.0, stopped: v.speed(braked_high) < 0.3,
+ room_to_spare: braked_high.x > 0.0 - city.LIMIT + v.HALF_LENGTH + 20.0, no_damage: braked_high.damage == 0.0}
+
+// Drive from the meadow through the former eastern wall between intersections.
+"meadow crossing";
+let meadow = v.spawn(city.LIMIT + 18.0, 100.0, 0.0 - u.PI / 2.0)
+let crossed = drive(meadow, GAS, 3.0);
+{entered_town: crossed.x < city.LIMIT - v.HALF_LENGTH, no_damage: crossed.damage == 0.0}
+
 // ---- traffic: a simulated minute, never off the road and never inside another car
 "traffic";
 let player = {id: "player", player: true, x: 0.0, z: 900.0, heading: 0.0, hl: 2.25}

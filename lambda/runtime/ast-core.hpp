@@ -550,7 +550,6 @@ typedef struct AstIndex {
     AstNodeId* next_siblings;
     NameScope** scopes;
     NameEntry** bindings;
-    AstNode** classes;
     // index-owned declaration identities also survive clones of shared ASTs.
     struct hashmap* declaration_ids;
     // Dense function roots make FunctionId the shared authority for Lambda
@@ -586,10 +585,11 @@ typedef struct AstIndex {
     uint32_t function_count;
     uint32_t function_capacity;
     uint32_t scope_count;
+    uint32_t scope_capacity;
     uint32_t binding_count;
+    uint32_t binding_capacity;
     uint32_t class_count;
-    // Allocation reserves node IDs in every tier. Graph-sensitive columns are
-    // materialized only for MIR/const consumers; T0 reads the AST directly.
+    // The index publishes graph facts once the structural tree is available.
     bool graph_published;
     AstNode** slots;
     AstNodeId* slot_ids;
@@ -619,7 +619,6 @@ bool ast_index_build_profile(AstIndex* index, AstNode* root, const LangProfile* 
 // Direct reduction reserves index storage as a node is born. Binding assigns
 // its stable ID in structural preorder after provisional scopes are remapped,
 // preserving the range invariant (D8.2.4/D8.2.5).
-bool ast_index_note_allocation(AstIndex* index, AstNode* node);
 bool ast_index_prepare_binding(AstIndex* index);
 bool ast_index_bind_node(AstIndex* index, AstNode* node, AstNode* parent,
     AstFunctionId current_owner, AstFunctionId* node_owner);
@@ -660,18 +659,16 @@ bool ast_index_scan_profile_support(AstIndex* index,
 // Rebuild derived range and reverse-query tables after a sanctioned AST
 // extension adjusts lexical function parents.
 bool ast_index_rebuild_queries(AstIndex* index);
-AstClassId ast_index_nearest_class(const AstIndex* index, AstNodeId node_id,
-                                   bool include_node);
 bool ast_index_node_is_function(const AstNode* node);
 AstBindingId ast_index_binding_id(const AstIndex* index, const AstNode* node);
 AstBindingId ast_index_find_binding_entry(const AstIndex* index,
                                           const NameEntry* entry);
 NameEntry* ast_index_binding(const AstIndex* index, AstBindingId id);
-AstNode* ast_index_binding_definition(const AstIndex* index, AstBindingId id);
 // NameScope owns the shared name lookup table. Both front ends
 // retain declaration order in first/last/next while wide scopes probe here.
 NameEntry* name_scope_lookup_name(const NameScope* scope, const String* name);
 NameEntry* name_scope_lookup_name_bytes(const NameScope* scope, const String* name);
+NameEntry* name_scope_lookup_chain(const NameScope* scope, const String* name);
 bool name_scope_index_add(Pool* pool, NameScope* scope, NameEntry* entry);
 bool name_scope_plan_binding_slots(NameScope* scope);
 #ifdef __cplusplus
@@ -1500,6 +1497,8 @@ typedef struct AstFuncNode : AstNode {
     // defining module is fully built (lambda_ast_decide_cow_borrows), so a
     // caller in another module may rely on them.
     bool cow_param_effects_final;
+    // The resolver saw no explicit return in this source body.
+    bool lambda_no_explicit_return;
     uint32_t declared_effects;  // carried from syntax until TypeFunc is published
     Type* declared_return_type;
 } AstFuncNode;
@@ -1955,7 +1954,11 @@ typedef struct LangProfile {
     void (*visit_ext_children)(AstNode* node, AstChildVisitor visitor, void* ctx);
 } LangProfile;
 
-inline LangProfile lambda_profile = { "lambda", NULL, NULL };
+// D8.2.4: Lambda semantic walks and indexed extensions share the language edges.
+typedef void (*AstLambdaChildVisitor)(AstNode* child, void* ctx);
+void ast_visit_lambda_children(AstNode* node, AstLambdaChildVisitor visit, void* ctx);
+void ast_visit_lambda_index_extensions(AstNode* node, AstChildVisitor visit, void* ctx);
+inline LangProfile lambda_profile = { "lambda", NULL, ast_visit_lambda_index_extensions };
 
 // JavaScript owns its extension walkers. Define this profile alongside those
 // walkers so parallel AST builders never mutate shared profile state.

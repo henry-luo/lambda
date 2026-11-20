@@ -1900,14 +1900,6 @@ static bool lambda_dynamic_abi_is_core(FunctionEntryAbi abi) {
         abi == FN_ENTRY_ABI_LAMBDA_INTERPRETED;
 }
 
-static bool lambda_dynamic_signature_has_var_parameter(const TypeFunc* signature) {
-    if (!signature) return false;
-    for (const TypeParam* param = signature->param; param; param = param->next) {
-        if (param->is_var_param) return true;
-    }
-    return false;
-}
-
 static Item lambda_dynamic_check_signature(Function* fn, int actual,
         LambdaDynamicCallMode mode, const char* caller, int* physical_count,
         bool* needs_adapter) {
@@ -1957,7 +1949,7 @@ static Item lambda_dynamic_check_signature(Function* fn, int actual,
     int fixed = fn->arity;
     bool variadic = false;
     if (signature && signature->type_id == LMD_TYPE_FUNC) {
-        if (lambda_dynamic_signature_has_var_parameter(signature) &&
+        if (ast_type_func_has_var_parameter(signature) &&
                 mode != LAMBDA_DYNAMIC_CALL_BORROWED) {
             return lambda_dynamic_call_error(ERR_UNSUPPORTED_DYNAMIC_ABI, caller,
                 "dynamic dispatch of a function with `var` parameters is deferred");
@@ -2126,10 +2118,8 @@ static Item lambda_dynamic_call(Function* fn, List* args, uint64_t* result_home,
     }
     // A LambdaJS function begins with the common type id but has a distinct
     // layout. Validate this byte before reading Core Function metadata.
-    if (fn->entry_abi != FN_ENTRY_ABI_LAMBDA_BOXED_FUNCTION &&
-            fn->entry_abi != FN_ENTRY_ABI_LAMBDA_BOXED_PROCEDURE &&
-            fn->entry_abi != FN_ENTRY_ABI_HOST_ADAPTER &&
-            fn->entry_abi != FN_ENTRY_ABI_LAMBDA_INTERPRETED) {
+    bool core = lambda_dynamic_abi_is_core(fn->entry_abi);
+    if (!core && fn->entry_abi != FN_ENTRY_ABI_HOST_ADAPTER) {
         return lambda_dynamic_call_error(ERR_UNSUPPORTED_DYNAMIC_ABI, caller,
             "function does not publish a Core boxed dynamic-call entry");
     }
@@ -2213,6 +2203,25 @@ static Item lambda_dynamic_call(Function* fn, List* args, uint64_t* result_home,
 Item fn_call_into(Function* fn, List* args, uint64_t* result_home) {
     return lambda_dynamic_call(fn, args, result_home, LAMBDA_DYNAMIC_CALL_FUNCTION,
         "fn_call_into");
+}
+
+Item lambda_call_rooted_into(Function* fn, List* args, const AstFuncNode* definition,
+        uint64_t* result_home) {
+    int argc = args ? (int)args->length : 0;
+    const TypeFunc* signature = (const TypeFunc*)fn->fn_type;
+    if (fn->entry_abi != FN_ENTRY_ABI_LAMBDA_INTERPRETED || fn->def != definition ||
+            !signature || signature != definition->type || signature->type_id != LMD_TYPE_FUNC ||
+            signature->is_variadic || signature->param_count != argc) {
+        return fn_call_into(fn, args, result_home);
+    }
+    // A rooted Item may still point into relocatable scalar storage (D6.2.3).
+    // Keep the owning adapter for those inputs, even on a direct edge.
+    const Item* items = args ? args->items : NULL;
+    for (int index = 0; index < argc; index++) {
+        if (lambda_item_uses_scalar_home(items[index])) return fn_call_into(fn, args, result_home);
+    }
+    return lambda_dynamic_invoke_by_count(fn, items, argc, result_home,
+        "fn_call_into", LAMBDA_DYNAMIC_CALL_FUNCTION);
 }
 
 Item fn_call_emit(Function* fn, List* args, List* destination) {
@@ -8342,13 +8351,11 @@ static inline int64_t map_attr_count(const Map* owner) {
 // S8.3.3v3: count(x) is the size of the run x is (S2.5.5v2, S11.1.6v2): 0 for
 // null, len(x) for a list, and 1 for any other value -- an array or text is
 // one item. It is what `len` cannot say about a query or any `T*`: a lone
-// match is the value itself, and a lone array match is one item, not its
-// contents. An error never reaches here: the call boundary rejects it first,
-// so count(error) is error, as len(error) is (S8.3.1v3).
-int64_t fn_count(Item item) {
-    if (get_type_id(item) == LMD_TYPE_NULL) return 0;
-    if (item_is_list(item)) return fn_len(item);
-    return 1;
+// match is the value itself, and a lone array match counts as one item.
+Item fn_count_checked(Item item) {
+    GUARD_ERROR1(item);
+    if (item_is_list(item)) return fn_len_checked(item);
+    return (Item){.item = i2it(get_type_id(item) == LMD_TYPE_NULL ? 0 : 1)};
 }
 
 

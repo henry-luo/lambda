@@ -408,6 +408,20 @@ def expect_cli_sibling_roots(module) -> None:
         fail('CLI omitted the Input-owned source allocation policy')
 
 
+def expect_nomir_owner_paths(module) -> None:
+    generator = module.PremakeGenerator(str(ROOT / 'build_lambda_config.json'), 'mac', variant='lambda-nomir')
+    plist = ROOT / generator.config['platforms']['macos']['info_plist']
+    if plist.resolve() != module.sibling_roots()[1] / 'radiant/host_info.plist' or not plist.is_file():
+        fail(f'no-MIR variant lost the Radiant host plist: {plist}')
+    generator.generate_main_program()
+    emitted = '\n'.join(generator.premake_content)
+    input_dir = Path(os.path.relpath(module.sibling_roots()[0] / 'lambda/input', ROOT))
+    if f'filter "files:{input_dir.as_posix()}/**"\n        defines {{ "LAMBDA_IO_STATIC_VALUES" }}' not in emitted:
+        fail('no-MIR variant omitted the Input-owned source allocation policy')
+    radiant_main = Path(os.path.relpath(module.sibling_roots()[1] / 'radiant/main.cpp', ROOT))
+    if '"lambda/main.cpp",' not in emitted or f'"{radiant_main.as_posix()}",' in emitted:
+        fail('no-MIR variant must use only the Lambda host entry point')
+
 
 def expect_owned_test_source_resolution(module) -> None:
     input_root, radiant_root = module.sibling_roots()
@@ -709,6 +723,7 @@ def main() -> int:
     expect_macos_ime_profile(module)
     expect_safety_early_profiles(module)
     expect_cli_sibling_roots(module)
+    expect_nomir_owner_paths(module)
     expect_owned_test_source_resolution(module)
     expect_nested_test_source_generation(module)
     expect_profile_isolated_archives(module)

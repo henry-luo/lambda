@@ -270,8 +270,13 @@ let SKY_NOISE = noise.make(rng.derive(rng.key([city.SEED, "sky"]), "clouds"), {k
 let BALL_N = BALL.normals
 let SKY_N = (len(BALL_N) div 3) ^ { 0 }
 let SKY_Y = [for (i in 0 to (SKY_N - 1)) BALL_N[3 * i + 1]]
-let CLOUD = (let n = [for (i in 0 to (SKY_N - 1)) if (SKY_NOISE == null) 0.0 else noise.sample3(SKY_NOISE, BALL_N[3 * i] * 2.0, SKY_Y[i] * 5.0, BALL_N[3 * i + 2] * 2.0) ^ { 0.0 }],
-    land.smooth(0.08, 0.5, n) * land.smooth(0.02, 0.1, SKY_Y) * (1.0 - land.smooth(0.45, 0.85, SKY_Y)) * 0.92)
+// The altitude fades make cloud coverage zero outside the horizon band.
+// Avoid the four-octave noise lookup for vertices the sky cannot use.
+let CLOUD = [for (i in 0 to (SKY_N - 1), let y = SKY_Y[i])
+    if (SKY_NOISE == null or y <= 0.02 or y >= 0.85) 0.0 else {
+        let n = noise.sample3(SKY_NOISE, BALL_N[3 * i] * 2.0, y * 5.0, BALL_N[3 * i + 2] * 2.0) ^ { 0.0 };
+        land.smooth(0.08, 0.5, n) * land.smooth(0.02, 0.1, y) * (1.0 - land.smooth(0.45, 0.85, y)) * 0.92
+    }]
 fn sky_dome(name) any^ {
     let look = LOOKS[name]
     let k = land.clamp01(SKY_Y * 1.6)
@@ -282,11 +287,8 @@ fn sky_dome(name) any^ {
 }
 // the barrier, the promenade and sea wall, the water, and the sky domes around everything
 fn surroundings(look_name) any^ {
-    let l = city.LIMIT, sh = city.SHORE
-    let gate = city.road(city.GATE_J);
-    [mesh("barrier", m.merge([m.cuboid(0.0 - l - 1.0, 0.0, 0.0 - l - 1.0, l + 1.0, 1.1, 0.0 - l), m.cuboid(0.0 - l - 1.0, 0.0, l, l + 1.0, 1.1, l + 1.0),
-        m.cuboid(0.0 - l - 1.0, 0.0, 0.0 - l, 0.0 - l, 1.1, l), m.cuboid(l, 0.0, 0.0 - l, l + 1.0, 1.1, gate - city.ROAD),
-        m.cuboid(l, 0.0, gate + city.ROAD, l + 1.0, 1.1, l)]), "m-concrete"),
+    let l = city.LIMIT, sh = city.SHORE;
+    [mesh("barrier", m.cuboid(0.0 - l - 1.0, 0.0, l, l + 1.0, 1.1, l + 1.0), "m-concrete"),
      mesh("promenade", m.slab(0.0 - l - 1.0, l + 1.0, l + 1.0, sh, -0.03, city.CURB, 4.0), "m-paving"),
      mesh("sea-wall", m.merge([m.cuboid(0.0 - l - 1.0, -3.0, sh, l + 1.0, city.CURB, sh + 1.2), *[for (k in 0 to 40) m.block(0.0 - l + k * 10.1, city.CURB, sh + 0.5, 0.12, 1.0, 0.12)],
         m.cuboid(0.0 - l - 1.0, city.CURB + 0.95, sh + 0.45, l + 1.0, city.CURB + 1.05, sh + 0.55)]), "m-steel"),

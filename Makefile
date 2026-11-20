@@ -1726,7 +1726,7 @@ test-gc-rooting-core: build
 	@diff -u test/js/regression_side_stack_frame_gc.txt temp/gc_rooting_js_interp.txt
 	@echo "Running Lambda MIR-Direct exact-root forced-GC gate..."
 	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
-		./lambda.exe run --no-log test/lambda/proc/proc_var.ls > temp/gc_rooting_lambda.txt
+		./lambda.exe run --tier=jit --no-log test/lambda/proc/proc_var.ls > temp/gc_rooting_lambda.txt
 	@diff -u test/lambda/proc/proc_var.txt temp/gc_rooting_lambda.txt
 	@echo "Running suspended partial-Item construction forced-GC gate..."
 	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
@@ -1738,10 +1738,10 @@ test-gc-rooting-core: build
 	@diff -u test/lambda/uint64_storage_lifetime.txt temp/gc_rooting_module_scalars.txt
 	@echo "Running number-model exact-conversion forced-GC gates..."
 	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
-		./lambda.exe --no-log test/lambda/number_model_realign.ls > temp/gc_rooting_number_model_jit.txt
+		./lambda.exe --tier=jit --no-log test/lambda/number_model_realign.ls > temp/gc_rooting_number_model_jit.txt
 	@diff -u test/lambda/number_model_realign.txt temp/gc_rooting_number_model_jit.txt
 	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
-		./lambda.exe --mir-interp --no-log test/lambda/number_model_realign.ls > temp/gc_rooting_number_model_interp.txt
+		./lambda.exe --tier=jit --mir-interp --no-log test/lambda/number_model_realign.ls > temp/gc_rooting_number_model_interp.txt
 	@diff -u test/lambda/number_model_realign.txt temp/gc_rooting_number_model_interp.txt
 	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
 		./lambda.exe run --no-log test/lambda/proc/proc_number_model_realign.ls > temp/gc_rooting_number_model_proc.txt

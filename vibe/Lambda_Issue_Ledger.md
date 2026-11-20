@@ -21,6 +21,24 @@
 Scratch spool durability amplification was fixed and moved to the
 [fixed ledger](<Lambda_Issue_Ledger (fixed).md#durable-scratch-spool-amplification>).
 
+## Background Lambda promotion builds single-definition images — 2026-11-19
+
+**Status:** OPEN. D8.3.3 specifies bounded direct-callee clusters. The
+production queue calls `lambda_mvp_compile_function_snapshot`, whose snapshot
+branch assembles only the target. The cluster collector still serves the
+synchronous harness path for retaining a satellite across a LambdaJS native
+export request. Collect the cluster on the evaluator and give the worker its
+chosen definitions as frozen input under D8.3.4. Check publication when a
+member also has a pending promotion, and retain the image before installing
+the first entry. See the
+[retirement audit](impl/Lambda_Impl_Interpreter_MIR_Unification.md#remaining-candidates-from-the-second-pass).
+
+<a id="lr12-64"></a>
+
+## LR12-64 — FIXED
+
+Captured Node content accessors, registered detached mutation ownership and stable observer oldValues are qualified in the [fixed record](<Lambda_Issue_Ledger (fixed).md#lr12-64>).
+
 <a id="lr12-62"></a>
 The interpreter object-method effect-bound fix is recorded under S12.1.6v3
 and D7.1.1v4 in the [fixed ledger](<Lambda_Issue_Ledger (fixed).md#lr12-62>).
@@ -95,6 +113,22 @@ error-path rollback as a transient pair in `doc_context_install`,
 `lambda_security_path_cache_store`, and `write_set_record`. The unrelated baseline
 failure was previously recorded in the static-module design.
 [Static-module checkpoint](Lambda_Design_Static_Modules.md)
+
+## Isolated Radiant replay costs in Lambda — 2026-11-19
+
+Every-allocation GC in the View resource and module tests amplified the work
+of queueing scalar leaf objects. The marker now marks leaves directly and
+validates alignment before consulting the exact object index (D5.3.1). The
+View tests still force collection on each allocation and poison freed memory.
+The JS watchdog also wakes at native layout boundaries without waiting for
+the next sampling interval (D7.4.3).
+
+The LaTeX replay exposed a quadratic `unique` scan over packed integers.
+Homogeneous packed-int inputs now use a membership table with the original
+first-occurrence order. Mixed values keep the comparison path (S5.6.1v2).
+The interpreter also rules out ineligible compact array literals before
+walking their widening dependencies (D8.3.1v3).
+
 <a id="lr12-61"></a>
 ## LR12-61 — Identical CSS-dependent metadata forces layout again
 

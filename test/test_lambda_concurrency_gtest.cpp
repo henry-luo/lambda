@@ -4598,7 +4598,6 @@ class RuntimeGlobalsConcurrency : public ::testing::Test {
 protected:
     static void SetUpTestSuite() {
         runtime_init(&shared_module_stress_runtime);
-        shared_module_stress_runtime.use_mir_direct = true;
 
         // Cache the shared package code before worker contexts exist.  Calling
         // load_script from a worker would test per-thread compilation instead

@@ -8,6 +8,10 @@ const fixtures = [
     {name: 'offset child retains owner gradient coordinates', content: '<h1 style="margin-left:260px">MM</h1>',
         gradient: 'linear-gradient(90deg,red 50%,lime 50%)', extra: 'width:420px', noRed: true},
     {name: 'ordinary foreground control', content: '<h1>MMMM</h1>', extra: 'background:none;background-clip:border-box;color:lime', expected: 'green'},
+    {name: 'inline owner below earlier lines', content: 'AAAA<br>AAAA<br><span class="inner">MMMM</span>',
+        extra: 'background:none;background-clip:border-box;color:black;font:48px/48px Arial', inlineOwner: true},
+    {name: 'nested inline owner below earlier lines', content: 'AAAA<br>AAAA<br><span class="inner"><b>MMMM</b></span>',
+        extra: 'background:none;background-clip:border-box;color:black;font:48px/48px Arial', inlineOwner: true},
 ];
 
 function fixtureHtml(fixture) {
@@ -15,7 +19,7 @@ function fixtureHtml(fixture) {
     const gradient = fixture.gradient || (fixture.radial ? `radial-gradient(${color},${color})` : `linear-gradient(${color},${color})`);
     return `<!doctype html><style>body{margin:0;background:white}
 .owner{margin:20px;padding:10px;width:300px;font:64px/1 Arial;background:${gradient};background-clip:text;color:transparent;${fixture.extra || ''}}
-h1{font:inherit;margin:12px 0;padding-left:16px}.inner{background:linear-gradient(lime,lime);background-clip:text}
+h1{font:inherit;margin:12px 0;padding-left:16px}.inner{background:linear-gradient(lime,lime);background-clip:text;${fixture.inlineOwner ? 'color:transparent' : ''}}
 </style><div class="owner">${fixture.content}</div>`;
 }
 

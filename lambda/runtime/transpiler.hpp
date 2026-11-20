@@ -137,7 +137,6 @@ struct Runtime {
     uint32_t js_promotion_call_threshold;
     uint32_t js_promotion_backedge_threshold;
     const char* import_base_dir; // override import base directory for main script (NULL = use script's directory)
-    bool use_mir_direct; // all executable Lambda paths use MIR Direct
     // Worker-local module prebuilds may create immutable AST cache templates,
     // but never execute or lower them to MIR.
     bool ast_prebuild_only;
@@ -162,9 +161,6 @@ struct Runtime {
     int script_load_misses;
     int script_load_compiles;
     int script_load_invalidations;
-    // Active closed-JS-module image leases. These keep JIT entry addresses
-    // alive until this Runtime has torn down its realm and module namespaces.
-    ArrayList* js_module_mir_scopes;
     // Canonical runtime-owned execution state.  Runners, callbacks, and guest
     // bridges bind this stable object through TLS; none embeds it on a stack.
     // It is the one owner of the isolate's heap, name pool, type list and
@@ -179,10 +175,6 @@ struct Runtime {
     bool cleanup_destructive;
     bool cleanup_incomplete;
 };
-
-// Complete a guest MIR activation that either reused its caller's heap or
-// created a standalone heap which must remain owned until runtime_cleanup().
-void mir_guest_finish_context(Runtime* runtime, bool reusing_context);
 
 // global dry-run flag (set from Runtime, accessible from C code via lambda.h)
 #include "runtime-state.h"
@@ -244,10 +236,9 @@ bool ast_expr_has_widened_dependency(AstNode* node);
 
 #ifndef LAMBDA_NO_MIR
 extern"C" {
-MIR_context_t jit_init(unsigned int optimize_level);
-// Hosted profiles that select native MIR must not inherit the process-wide
-// interpreter diagnostic mode used by other compilation paths.
-MIR_context_t jit_init_native(unsigned int optimize_level);
+MIR_context_t jit_init(unsigned int optimize_level, bool native_codegen);
+void lambda_mir_enable_interp_diagnostic(void);
+bool lambda_mir_interp_requested(void);
 void jit_log_code_addresses(MIR_context_t ctx);
 size_t jit_release_generated_ir(MIR_context_t ctx);
 // sealed eager images retain code/data, but no further generator work.
@@ -432,8 +423,6 @@ void runtime_register_script(Runtime* runtime, Script* script);
 // a cached AST template. NULL when the Runtime has not loaded it.
 Script* runtime_script_instance(Runtime* runtime, const Script* owner);
 void runtime_free_script(Runtime* runtime, Script* script, bool remove_index);
-bool runtime_hold_js_module_mir_scope(Runtime* runtime,
-                                      struct InputCacheScope* scope);
 // Code images name immutable logical units; these helpers bind them to the
 // receiving runtime's dense EvalContext slab table (D8.5.1).
 uint32_t script_compilation_unit_id(const Script* script);

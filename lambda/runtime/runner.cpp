@@ -1193,8 +1193,6 @@ static Script* lambda_script_template_clone(Runtime* runtime, const Script* cach
         instance->main_func = NULL;
         instance->mir_gen_initialized = false;
         instance->interp_satellite_count = 0;
-        instance->interp_whole_script_poc_attempted = false;
-        instance->interp_whole_script_poc_active = false;
     }
     // The template's dependency list belongs to the cache image. The clone
     // graph below replaces it with fresh Script shells for this EvalContext.
@@ -1634,10 +1632,9 @@ static bool interp_force_jit_script(Script* script, Runtime* runtime,bool preser
     Transpiler tp = {};
     memcpy(&tp, script, sizeof(Script));
     tp.runtime = runtime;
-    tp.requires_native_mir_exports = true;
     if(preserve_live_slab) {
         tp.script_owner=script;tp.preserve_ast_index=true;
-        tp.compile_against_interp_slab=true;tp.whole_script_poc=true;
+        tp.compile_against_interp_slab=true;
     }
     // compile adopts `tp` back into `script`; clearing only the Script let the
     // copied T0 flags return, and a T0 runner then initialized MIR code as T0.
@@ -1757,7 +1754,6 @@ static bool lambda_finalize_ast_template_for_execution(Runtime* runtime,
     memcpy(&transpiler, script, sizeof(Script));
     transpiler.script_owner = script;
     transpiler.runtime = runtime;
-    transpiler.requires_native_mir_exports = !script->is_main;
     script->ast_frontend_only = false;
     transpiler.ast_frontend_only = false;
     if (lambda_prepare_ast_interpreter(&transpiler)) {
@@ -1840,7 +1836,7 @@ static int lambda_bind_compiler_pass(void* opaque) {
     LambdaDirectFrontendPassContext* pass =
         (LambdaDirectFrontendPassContext*)opaque;
     if (!pass || !pass->tp || !pass->tp->ast_root ||
-            !lambda_ast_rebind_direct_scope_graph_with_functions(pass->tp,
+            !lambda_ast_publish_scope_graph(pass->tp,
                 (AstScript*)pass->tp->ast_root, &pass->functions)) {
         if (pass && pass->tp) {
             log_error("Lambda AST binding rejected %s", pass->script_path);
@@ -1883,12 +1879,6 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     get_time(&start);
 #endif
     tp->source = script->source;
-    // A non-main Script can be linked from a native parent. Keep its exports
-    // callable even when automatic document policy prefers interpretation.
-    tp->requires_native_mir_exports = !script->is_main;
-    // Capture, support, and call-site passes share the published graph in
-    // every tier; delaying its columns for T0 would reintroduce tree scans.
-    tp->defer_ast_index_columns = false;
     LambdaDirectFrontendPassContext front_end = {tp, script_path, {}};
     compiler_pass_manager_init(&tp->pass_manager, COMPILER_FACT_NONE);
     CompilerPassSpec parse_pass = {"parse", COMPILER_FACT_NONE,
@@ -2302,7 +2292,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     void* cached_image = NULL;
     bool cache_artifact_rejected = false;
     LambdaTier selected_tier = lambda_tier_selected();
-    if (cache_artifact_enabled && runtime->use_mir_direct && !runtime->mir_cache_disabled &&
+    if (cache_artifact_enabled && !runtime->mir_cache_disabled &&
             (selected_tier == LAMBDA_TIER_JIT || selected_tier == LAMBDA_TIER_AUTO) &&
             input_script_cache_get_mir(raw_lease, &cached_image)) {
         Script* cached_template = (Script*)cached_image;
@@ -2406,7 +2396,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
         }
         cache_artifact_rejected = true;
     }
-    bool builds_mir = selected_tier == LAMBDA_TIER_JIT && runtime->use_mir_direct;
+    bool builds_mir = selected_tier == LAMBDA_TIER_JIT;
     InputScriptBuildKind build_kind = builds_mir ? INPUT_SCRIPT_BUILD_MIR : INPUT_SCRIPT_BUILD_AST;
     // A cache claim may wait for a prebuild worker that recursively loads one
     // of its imports. The registry lock protects this Runtime's short index
@@ -2574,7 +2564,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     bool cache_published = false;
     if (cache_artifact_enabled && cache_dependencies_valid &&
             lambda_cache_prepare_template_direct_imports(new_script) &&
-            new_script->jit_context && runtime->use_mir_direct &&
+            new_script->jit_context &&
             !runtime->mir_cache_disabled && !new_script->cache_cross_lang_tainted &&
             lambda_mir_template_graph_reusable(new_script)) {
         InputScriptArtifactOps ops = {
@@ -2627,13 +2617,6 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
 Script* load_script_mir_direct(Runtime *runtime, const char* script_path,
                                const char* source, bool is_import) {
     if (!runtime) return NULL;
-    // Cross-language loaders do not enter run_script_mir(), so select the sole
-    // MIR Direct backend explicitly before loading the module.
-    bool was_mir_direct = runtime->use_mir_direct;
-    runtime->use_mir_direct = true;
-#ifdef LAMBDA_NO_MIR
-    runtime->use_mir_direct = false;
-#endif
     // The JS membrane reaches a Lambda export through a native function
     // pointer, so this module must actually be JIT-compiled. Under AUTO the
     // planner would stop at T0 and produce no MIR context at all, leaving
@@ -2656,7 +2639,6 @@ Script* load_script_mir_direct(Runtime *runtime, const char* script_path,
             script->module_initialized)) script = NULL;
 #endif
     lambda_tier_set(was_tier);
-    runtime->use_mir_direct = was_mir_direct;
 #ifndef LAMBDA_NO_JS
     // cached MIR shells also need fresh exports in the importing Runtime (D6.4.3 / D8.3.5).
     register_lambda_script_namespace(runtime, script);
@@ -3398,12 +3380,6 @@ extern "C" void jube_register_builtin_modules(void);
 
 void runtime_init(Runtime* runtime) {
     memset(runtime, 0, sizeof(Runtime));
-    // MIR Direct is the sole Lambda backend; keep the mode bit true for cache
-    // and import scheduling code that still uses it as a fast-path predicate.
-    runtime->use_mir_direct = true;
-#ifdef LAMBDA_NO_MIR
-    runtime->use_mir_direct = false;
-#endif
     runtime->scripts = arraylist_new(16);
     runtime->loaded_script_index = RuntimeLoadedScriptIndex::create(64);
     runtime->max_errors = 10;  // default error threshold
@@ -3721,23 +3697,6 @@ void runtime_destroy_cached_script_template(Script* script) {
     // retained AST pool and sealed MIR context exactly once.
     script->cache_owned_template = false;
     runtime_free_script(NULL, script, false);
-}
-
-bool runtime_hold_js_module_mir_scope(Runtime* runtime, InputCacheScope* scope) {
-    if (!runtime || !scope) return false;
-    if (!runtime->js_module_mir_scopes) runtime->js_module_mir_scopes = arraylist_new(2);
-    return runtime->js_module_mir_scopes && arraylist_append(
-        runtime->js_module_mir_scopes, scope);
-}
-
-static void runtime_close_js_module_mir_scopes(Runtime* runtime) {
-    if (!runtime || !runtime->js_module_mir_scopes) return;
-    for (int i = 0; i < runtime->js_module_mir_scopes->length; i++) {
-        InputCacheScope* scope = (InputCacheScope*)runtime->js_module_mir_scopes->data[i];
-        input_script_cache_close_scope(scope);
-    }
-    arraylist_free(runtime->js_module_mir_scopes);
-    runtime->js_module_mir_scopes = NULL;
 }
 
 void runtime_teardown_batch_scripts(Runtime* runtime) {
@@ -4218,7 +4177,6 @@ static RuntimeCleanupResult runtime_try_cleanup_impl(Runtime* runtime, bool reti
     }
     lambda_stack_cleanup();
 #ifndef LAMBDA_NO_RESOURCE_CACHE
-    runtime_close_js_module_mir_scopes(runtime);
 #endif
     runtime_free_all_scripts(runtime);
     attempt.complete = true;

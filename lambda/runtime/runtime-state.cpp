@@ -307,12 +307,11 @@ RuntimeExecutionScope::RuntimeExecutionScope(EvalContext* owner)
 RuntimeExecutionScope::~RuntimeExecutionScope() { if (owner_ && owner_->execution_depth > 0) owner_->execution_depth--; }
 
 RuntimeModuleStateScope::RuntimeModuleStateScope(EvalContext* owner)
-        : owner_(owner), previous_(owner ? owner->active_module_state : NULL),
-          restore_previous_(true) {}
+        : owner_(owner), previous_(owner ? owner->active_module_state : NULL) {}
 
 RuntimeModuleStateScope::~RuntimeModuleStateScope() {
     // Top-level entries retain their slab; nested entries restore the caller (D9.3.1).
-    if (restore_previous_ && owner_ && context == owner_ && previous_) {
+    if (owner_ && context == owner_ && previous_) {
         owner_->active_module_state = previous_;
     }
 }
@@ -406,30 +405,6 @@ static bool lambda_property_key_spec_decode(const PropertyKeySpec* specs,
     if (bytes[spec->name_offset + spec->name_length] != '\0') return false;
     if (out_name) {
         *out_name = {(const char*)bytes + spec->name_offset, spec->name_length};
-    }
-    return true;
-}
-
-extern "C" bool lambda_property_key_specs_prelink(const PropertyKeySpec* specs,
-        uint32_t count, uint32_t bytes_size) {
-    if (count == 0) return true;
-    if (!context || !context->name_pool) {
-        log_error("module-key-prelink: missing runtime name pool");
-        return false;
-    }
-    for (uint32_t index = 0; index < count; index++) {
-        NameId predefined_id = NAME_ID_NONE;
-        StrView name = {NULL, 0};
-        if (!lambda_property_key_spec_decode(specs, count, bytes_size, index,
-                &predefined_id, &name)) {
-            log_error("module-key-prelink: invalid property key spec %u", index);
-            return false;
-        }
-        if (predefined_id == NAME_ID_NONE &&
-                !name_pool_create_strview(context->name_pool, name)) {
-            log_error("module-key-prelink: name allocation failed for spec %u", index);
-            return false;
-        }
     }
     return true;
 }
@@ -810,34 +785,6 @@ extern "C" bool lambda_module_state_prepare_layout(LambdaModuleLayout* layout) {
         layout->property_key_count, layout->property_key_bytes_size);
 }
 
-extern "C" bool lambda_module_state_link_property_keys(uint32_t module_id,
-        const PropertyKeySpec* specs, uint32_t count, uint32_t bytes_size) {
-    EvalContext* owner = context;
-    LambdaModuleState* state = lambda_module_state_at(owner, module_id);
-    if (!state) return false;
-    if (state->property_key_count != 0 && state->property_key_count != count) {
-        log_error("module-key-link: sealed count changed for module %u", module_id);
-        return false;
-    }
-    state->property_key_count = count;
-    return lambda_module_state_link_property_keys_for_state(state, specs,
-        count, bytes_size);
-}
-
-extern "C" bool lambda_module_state_append_property_keys(uint32_t module_id,
-        const PropertyKeySpec* specs, uint32_t count, uint32_t bytes_size) {
-    EvalContext* owner = context;
-    LambdaModuleState* state = lambda_module_state_at(owner, module_id);
-    if (!state) return false;
-    if (count == 0) return true;
-
-    NameId* appended = (NameId*)mem_calloc(count, sizeof(NameId), MEM_CAT_EVAL);
-    bool linked = appended && lambda_module_state_resolve_property_keys(specs, count,
-        bytes_size, appended) && lambda_module_state_append_key_ids(state, appended, count);
-    mem_free(appended);
-    return linked;
-}
-
 extern "C" bool lambda_module_state_reserve(uint32_t var_count,
         uint32_t* out_module_id) {
     EvalContext* owner = context;
@@ -905,12 +852,6 @@ extern "C" bool lambda_module_state_bind_static_for_unit(uint32_t unit_id,
         void* consts, void* type_list) {
     return lambda_module_state_bind_static(lambda_module_state_id_for_unit(
         context, unit_id), consts, type_list);
-}
-
-extern "C" uint32_t lambda_module_state_property_key_count(uint32_t module_id) {
-    EvalContext* owner = context;
-    LambdaModuleState* state = lambda_module_state_at(owner, module_id);
-    return state ? state->property_key_count : 0;
 }
 
 extern "C" Item lambda_name_id_to_item(NameId name_id) {

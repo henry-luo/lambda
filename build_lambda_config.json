@@ -119,6 +119,7 @@
     "lambda/serve/tls_handler.cpp"
   ],
   "exclude_source_files": [
+    "radiant/main.cpp",
     "radiant/webview_child_mac_static.cpp",
     "radiant/webview_layer_mac_static.cpp",
     "radiant/rdt_video_mac_static.cpp",
@@ -134,6 +135,20 @@
     "SQLITE_THREADSAFE=1",
     "SQLITE_OMIT_LOAD_EXTENSION",
     "LAMBDA_NODE_MODULES_DYNAMIC_ONLY=1"
+  ],
+  "file_rules": [
+    {
+      "files": [
+        "${input_root}/lambda/input/**",
+        "${input_root}/lambda/io/**",
+        "${input_root}/lambda/core/**",
+        "${input_root}/lambda/format/**",
+        "${input_root}/lambda/network/**"
+      ],
+      "defines": [
+        "LAMBDA_IO_STATIC_VALUES"
+      ]
+    }
   ],
   "configurable_defines": {
     "JS_TEST262_FAST_PATHS": "1"
@@ -1248,21 +1263,7 @@
       ],
       "linker_flags": [],
       "build_dir": "build_cli",
-      "debug": false,
-      "file_rules": [
-        {
-          "files": [
-            "${input_root}/lambda/input/**",
-            "${input_root}/lambda/io/**",
-            "${input_root}/lambda/core/**",
-            "${input_root}/lambda/format/**",
-            "${input_root}/lambda/network/**"
-          ],
-          "defines": [
-            "LAMBDA_IO_STATIC_VALUES"
-          ]
-        }
-      ]
+      "debug": false
     },
     "macos-ime": {
       "extends": "cli",

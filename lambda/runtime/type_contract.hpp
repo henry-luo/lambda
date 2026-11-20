@@ -111,6 +111,7 @@ bool lambda_array_contract_compatible(Type* candidate, Type* expected,
 // carrier, so they deliberately return false.
 bool lambda_array_num_elem_type_for_contract(Type* element,
     ArrayNumElemType* out_type);
+bool array_num_layout_proves_contract_rank(const ArrayNum* array, uint8_t rank);
 // An owned ArrayNum whose lane and shape rank match an interned certificate.
 bool lambda_array_num_matches_cert(Item value, const ArrayRepCert* cert);
 // An owned ArrayNum with the exact scalar lane and shape rank already decodes

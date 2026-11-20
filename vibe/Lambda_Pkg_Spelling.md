@@ -593,6 +593,11 @@ Use existing HTML/Markdown/DOCX/LaTeX parsing and document adapters; do not
 strip raw markup with a regex. Check text and selected prose attributes such
 as image descriptions, while excluding code, scripts, styles, math, destinations,
 and content marked `spellcheck=false`. Preserve declared language boundaries.
+The Slides canvas and its inline plain and rich editing surfaces share the
+canvas spellcheck setting. Disabling it clears the inline source and cancels
+its pending spelling work at the next update (**D10.2.1**, **S13.3.1v2**).
+Deferred rich-edit checks target the retained editor owner so they survive
+replacement of the editable DOM projection.
 
 A prose run has text, language, a document revision, and a mapping from its
 code-point intervals to source segments. Join text across inline formatting so

@@ -546,6 +546,80 @@ Grounded in the current code; candidates for cleanup, not necessarily bugs.
 
 ## 13. Web Platform: DOM, CSSOM, Events & Fetch (JS13)
 
+### JS13-L17 — Canvas gradient paint objects are absent — **FEATURE GAP**
+
+**2026-11-20.** Host profile **D8.4.4**; graphics boundary
+**D9.5.1 / D9.5.6v2**, ownership **D5.5.1**. No formal ruling changes.
+
+The bounded HTML Canvas 2D surface in `lambda/dom/dom_canvas.cpp` installs
+solid paints, paths, transforms, images and text, but neither
+`createLinearGradient` nor `createRadialGradient`. A local HTML canvas probe
+reports both as undefined; calling the radial constructor raises TypeError.
+This is a missing paint-object API, not a failed implementation of an
+advertised method. A complete repair needs gradient objects, stops and
+lifetime/state handling through the native graphics boundary; substituting
+solid fills or dropping the call would not implement the authored drawing.
+
+Gladia's public `/js/hero-canvas.js` requires radial gradients for its large
+purple hero background. Its matched-animation-origin live capture still lacks
+the background and headline. The headline separately waits for a feature-flag
+callback or a 1500ms JavaScript fallback, beyond native's selected 1000ms
+frame; Chromium's JS timers still include loading time. Do not attribute all
+live omissions solely to gradients. No timer advance, forced visibility or
+new Canvas subsystem is introduced in this major-difference round. Gladia
+remains high severity. Evidence: `temp/online-visual-round103/`, including
+`canvas-gradient-control.{html,log}`, downloaded scripts and the loaded pair.
+
+### JS13-L16 — Image request state, decode promises and initial completion — **FIXED for the native image profile**
+
+**2026-11-20.** Shared JS contract **D8.4.4**, native boundary
+**D9.5.6v2**, precise ownership **D6.3.3 / D5.5.2**. No formal ruling changes.
+
+HTMLImageElement lacked loading, currentSrc, complete and decode(). The
+native decoder and scripted load events already worked, but a standard
+capability check could bypass image reveal handlers. The branded prototype
+now exposes loading reflection (eager/lazy, unknown values read as eager),
+the selected absolute request URL, terminal request state, and a decode promise.
+The loading attribute remains a hint; this does not add viewport-based lazy
+admission. Picture/srcset selection uses the existing native selector.
+
+Decode begins at a microtask checkpoint, waits for real request completion and
+rejects EncodingError for failed decoding or a changed pending request.
+A metadata probe is insufficient: the backend materializes raster pixels with
+the existing decoder, or checks the parsed native SVG picture. Event and timer
+callbacks hold a rooted bound record; completion removes listeners, cancels the
+poll timer and breaks the record/callback edge before promise reactions run.
+No GC pointer enters Radiant. The shared DOMException helper now roots both
+string arguments during construction.
+
+Parser-created images also lacked the completion path used by scripted src
+writes. The load boundary now prepares their native requests, including local
+and data images; native request completion owns both synchronous and asynchronous
+notification. Removing the second DOM-side notification avoids duplicate load
+events. This is also recorded under native RI-155.
+
+Validation: 8 local image checks and 3 HTTP image checks pass. The HTTP checks
+cover a delayed image at the zero-time load boundary, replacement while waiting,
+and a valid PNG header with corrupt pixels. The corrupt-pixel check incorrectly
+fulfilled before the full-decode repair. All 14 HTTP session controls pass; the
+16 local image/script controls have 15 passes and the pre-existing
+ratio_content_growth_control failure (95px instead of 432px), independently
+reproduced with the previous renderer. The exact Gatsby reveal-script reduction
+is green in both Chromium and Lambda. Layout integer lint passes. No broad
+baseline rerun is claimed. Evidence: temp/online-visual-round99/.
+
+**Live qualification limit:** Mode's current capture is byte-identical to the
+previous renderer, with 19.53% coarse error. Its custom hero is authored with
+zero-sized/hidden containers and uses a separate client startup path. The
+generic Gatsby reveal script has no matching data-main-image elements in the
+live SSR document. The initial attribution to that generic script was incorrect;
+these verified platform repairs do not clear Mode or establish its complete
+startup root cause. Its current async framework measures 142,207 bytes, above the
+unchanged 131,072-byte pre-layout async/defer budget. No cap, clock, visibility
+override or vendor code was changed. Orum's current hero is present, but the prior
+renderer produces identical pixels on the current source, so its high-severity
+clearance is capture requalification only.
+
 ### JS13-L15 — Button commands and command events — **PARTIAL**
 
 Button `command` and `commandForElement` resolve named and direct references in

@@ -5,7 +5,7 @@ import morph: .morph
 import themes: .theme
 import compose: .compose
 
-pub fn compile(deck, options = {}) map^ {
+pub fn compile(deck, options = {}, prior_deck = null, prior_plan = null) map^ {
     let checked_options = if (not (options is map)) raise c.fail("options", "expected map")
     let checked_options_attrs = c.attributes(options, ["instance", "width", "height", "base_uri", "reduced_motion", "autostart", "autoplay_dwell_ms", "ui", "controls", "start_slide"], "options")^;
     let checked_options_ui = themes.ui_style(options.ui, "options.ui")^;
@@ -32,7 +32,13 @@ pub fn compile(deck, options = {}) map^ {
     let invalid = [for (child in ((content(deck)) ^ { [] }) where ((not (child is element) or not contains(['slide', 'master', 'layout'], name(child))) ^ { false })) child]
     let guard_3 = if (len(invalid) > 0) raise c.fail("deck", "unsupported presentation child")
     let layouts = compose.layouts(deck, width, height)^;
-    let slides = [for (i, node in compose.slides(deck, width, height, theme, layouts)^) timeline.compile(scene.build(node, i, width, height, theme, layouts)^)^]
+    // A composed node determines its scene at the same index and dimensions.
+    // Revalidate headers/masters on every compile, and rebuild morph links below.
+    let reuse = prior_plan!=null and prior_plan.width==width and prior_plan.height==height and
+        prior_plan.theme==theme and compose.definitions(prior_deck,'layout')^==compose.definitions(deck,'layout')^
+    let slides = [for (i, node in compose.slides(deck, width, height, theme, layouts)^)
+        if (reuse and prior_plan.slides[i].source==node) prior_plan.slides[i]
+        else timeline.compile(scene.build(node, i, width, height, theme, layouts)^)^]
     let checked_start = if (options.start_slide != null and (not (options.start_slide is int) or options.start_slide < 0 or options.start_slide >= len(slides))) raise c.fail("options","invalid start_slide")
     let guard_4 = if (len(slides) == 0) raise c.fail("deck", "presentation has no slides")
     let checked_3 = c.check_unique(slides, "deck")^;

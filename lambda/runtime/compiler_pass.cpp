@@ -27,12 +27,6 @@ extern "C" void compiler_pass_manager_set_observer(CompilerPassManager* manager,
     manager->observer_context = context;
 }
 
-extern "C" void compiler_pass_manager_note(CompilerPassManager* manager,
-        const char* name, uint64_t elapsed_us) {
-    if (!manager || !manager->observer || !name) return;
-    manager->observer(name, elapsed_us, manager->observer_context);
-}
-
 extern "C" int compiler_pass_manager_run(CompilerPassManager* manager, void* context) {
     if (!manager) return 0;
     for (uint32_t i = manager->next_pass; i < manager->pass_count; i++) {

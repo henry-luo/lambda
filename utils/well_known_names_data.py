@@ -57,6 +57,7 @@ MARKUP_TRAILING_ENTRIES = [
     ("CSS_ANCHOR_SCOPE", "anchor-scope"),
     ("CSS_POSITION_ANCHOR", "position-anchor"),
     ("CSS_POSITION_AREA", "position-area"),
+    ("CSS_COLOR_SCHEME", "color-scheme"),
 
 ]
 MARKUP_ENTRY_SYMBOLS = {
@@ -132,7 +133,7 @@ marker-start marker-mid marker-end marker vector-effect color-interpolation colo
 page string-set footnote-policy
 x y cx cy r rx ry
 shape-outside shape-margin shape-image-threshold
-anchor-name anchor-scope position-anchor position-area
+anchor-name anchor-scope position-anchor position-area color-scheme
 """.split()
 
 CSS_PROPERTY_ENTRIES = [

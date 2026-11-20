@@ -4,12 +4,10 @@ zero-fallback, output-identical set. Output goes to ./temp/ (CLAUDE rule 2).
 
 Usage: python3 test/interp/tier_sweep.py [--dir test/lambda] [--timeout 20]
 """
-import argparse, os, re, sys
+import argparse, os, sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from lambda_process import run_lambda_process
-
-FALLBACK_RE = re.compile(r"interp: executed=(\d+) fallback=(\d+) excluded=(\d+)")
+from lambda_process import parse_interp_stats, run_lambda_process
 
 
 # Mirrors test_lambda_gtest.cpp's discovery: functional scripts run directly,
@@ -22,19 +20,17 @@ FUNCTIONAL_DIRS = (
 PROCEDURAL_DIRS = ("test/lambda/proc", "test/lambda/conc", "test/lambda/pdf")
 
 
-def run(script, tier, timeout, procedural=False):
-    result = run_lambda_process("./lambda.exe", script, tier, timeout, procedural)
+def run(executable, script, tier, timeout, procedural=False):
+    result = run_lambda_process(executable, script, tier, timeout, procedural)
     if result.timed_out:
         return None, None, "timeout"
-    stats = FALLBACK_RE.search(result.stderr or "")
-    fallback = int(stats.group(2)) if stats else 0
-    executed = int(stats.group(1)) if stats else 0
-    excluded = int(stats.group(3)) if stats else 0
-    return result.stdout, (executed, fallback, excluded), result.status
+    return result.stdout, parse_interp_stats(result.stderr) or (0, 0, 0), result.status
 
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--executable", default="./lambda.exe",
+                    help="Lambda binary used for both tiers")
     ap.add_argument("--dir", default=None,
                     help="scan one directory instead of the whole baseline corpus")
     ap.add_argument("--timeout", type=int, default=20)
@@ -71,8 +67,11 @@ def main():
     # only stderr — nothing here depends on the shared log.txt.
     def verdict_for(entry):
         script, procedural = entry
-        jit_out, _, jit_status = run(script, "jit", args.timeout, procedural)
-        int_out, stats, int_status = run(script, "interp", args.timeout, procedural)
+        def run_tier(tier, timeout):
+            return run(args.executable, script, tier, timeout, procedural)
+
+        jit_out, _, jit_status = run_tier("jit", args.timeout)
+        int_out, stats, int_status = run_tier("interp", args.timeout)
         # A timeout under N-way parallel load is a scheduling artifact, not a
         # divergence: the same script compared clean when re-run alone. Retry
         # the pair once with a longer budget so a slow script cannot manufacture
@@ -80,8 +79,8 @@ def main():
         # folding it into either answer.
         if "timeout" in (jit_status, int_status):
             long_timeout = args.timeout * 3
-            jit_out, _, jit_status = run(script, "jit", long_timeout, procedural)
-            int_out, stats, int_status = run(script, "interp", long_timeout, procedural)
+            jit_out, _, jit_status = run_tier("jit", long_timeout)
+            int_out, stats, int_status = run_tier("interp", long_timeout)
         executed, fallback, excluded = stats if stats else (0, 0, 0)
         if "timeout" in (jit_status, int_status):
             verdict = "timeout"
@@ -96,8 +95,8 @@ def main():
             # (test/lambda/pdf/phase2_font.ls compared clean 9 times in a row).
             # A false alarm here is worse than a slow sweep -- it is what would
             # make the oracle stop being believed.
-            jit_out2, _, jit_status2 = run(script, "jit", args.timeout * 3, procedural)
-            int_out2, _, int_status2 = run(script, "interp", args.timeout * 3, procedural)
+            jit_out2, _, jit_status2 = run_tier("jit", args.timeout * 3)
+            int_out2, _, int_status2 = run_tier("interp", args.timeout * 3)
             verdict = ("mismatch"
                        if jit_out2 != int_out2 or jit_status2 != int_status2
                        else "match")

@@ -15,6 +15,7 @@ under CC0. `_generate.py` regenerates every asset using Python 3's standard libr
   Static matrix and quaternion markers make transform errors visible.
 - `tetra.stl` is a binary tetrahedron whose stored facet normals are zero, so its outward normals must come from the winding. `pyramid.ply` is a little-endian binary pyramid with a quad base and per-vertex `uchar` colors.
 - `lit.gltf` requires `EXT_meshopt_compression`: raw attribute groups for its positions and UVs and a delta index sequence, behind a fallback buffer. Its material scales the checker texture with `KHR_texture_transform` and glows through `KHR_materials_emissive_strength`; a spot and a point light use `KHR_lights_punctual`.
+- `bright.gltf` is one triangle with float `COLOR_0` multipliers above 1 and below 0, as exporters write facet jitter; the loader clamps them with one warning.
 - `puppet.a3d` has two bones and a `Wave` action with partial overrides at
   0, 500, 1000, 1500 and 2000 milliseconds. Missing overrides retain the previous pose.
   One color uses lowercase hex to cover case-insensitive color decoding.

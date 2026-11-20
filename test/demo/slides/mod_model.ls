@@ -1,5 +1,6 @@
 // S1.4 / S12.1.1v3: authored decks and undo snapshots are immutable values.
 import slide: lambda.slide
+import compiler: lambda.slide.normalize
 import c: lambda.slide.common
 import factory: lambda.ui.core.element
 import css: lambda.editor.core.inline_format
@@ -61,9 +62,15 @@ fn text_children(children,value) any^ {
 }
 pub fn is_comment(note) => note["data-slide-comment"] == true
 pub fn notes(st) => text(<notes *[for (note in scene(st).notes where ((not is_comment(note)) ^ { false })) note]>)
-fn numbered(node,index) => <slide *:map(node),*[for (child in ((content(node)) ^ { [] }))
-    if (name(child) == 'text' and child.class == "slides-page-number")
-        <text *:map(child),<span *:if (child[0] is element) map(child[0]) else {},string(index+1)>> else child]>
+fn page_number(child) => name(child) == 'text' and child.class == "slides-page-number"
+fn numbered(node,index) {
+    let children = content(node) ^ { [] };
+    // Scenes without inserted page numbers retain their source on doc updates.
+    if (not any([for (child in children) page_number(child)])) node
+    else <slide *:map(node),*[for (child in children)
+        if (page_number(child)) <text *:map(child),<span *:if (child[0] is element) map(child[0]) else {},string(index+1)>>
+        else child]>
+}
 pub fn with_slides(deck,items) => <presentation *:map(deck),
     *[*[for (child in ((content(deck)) ^ { [] }) where ((name(child) != 'slide') ^ { false })) child], *[for (i,node in items) numbered(node,i)]]>
 pub fn replace_slide(deck,index,node) => with_slides(deck,[for (i,s in ((scenes(deck)) ^ { [] })) if (i == index) node else s])
@@ -87,7 +94,7 @@ pub fn initial(deck=null,base="") any^ {
 }
 fn snapshot(st) => {doc:st.doc,index:st.index,selected:st.selected,base:st.base,path:st.path,import_warnings:st.import_warnings}
 pub fn commit_doc(st,doc,index=null,selected=null) any^ {
-    let plan = if (doc == st.doc) st.plan else slide.compile(doc)^
+    let plan = if (doc == st.doc) st.plan else compiler.compile(doc,{},st.doc,st.plan)^
     let hist = if (doc == st.doc) {past:st.undo,future:st.redo} else shared_history.snapshot_record({past:st.undo,future:st.redo},snapshot(st),80);
     {*:st,doc:doc,plan:plan,index:if (index == null) st.index else index,
         selected:if (selected == null) st.selected else selected,error:"",redo:hist.future,undo:hist.past}
@@ -95,7 +102,7 @@ pub fn commit_doc(st,doc,index=null,selected=null) any^ {
 pub fn history(st,forward=false) any^ {
     let hist = {past:st.undo,future:st.redo}
     let step = if (forward) shared_history.snapshot_redo(hist,snapshot(st),false,false)^ else shared_history.snapshot_undo(hist,snapshot(st),false,false)^;
-    if (step == null) st else {*:st,*:step.value,plan:slide.compile(step.value.doc)^,editing:null,drag:null,error:"",
+    if (step == null) st else {*:st,*:step.value,plan:compiler.compile(step.value.doc,{},st.doc,st.plan)^,editing:null,drag:null,error:"",
         undo:step.history.past,redo:step.history.future}
 }
 pub fn select_slide(st,index) => {*:st,index:max(0,min(len(st.plan.slides)-1,index)),selected:"",error:""}

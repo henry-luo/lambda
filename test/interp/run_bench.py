@@ -19,17 +19,15 @@ import time
 SUMMARY_RE = re.compile(
     r"interp: executed=(\d+) fallback=(\d+) excluded=(\d+) nodes=(\d+) peak_rss_mb=([\d.]+)")
 
-# The shipped default path is not uniformly native codegen: modules over
-# MIR_LARGE_MODULE_INSN_THRESHOLD (100k insns) link through
-# MIR_set_interp_interface instead. A jit-tier row that does not say which mode
-# ran is not interpretable, so the mode is read back out of the run log.
-LARGE_INTERP_RE = re.compile(r"lambda-mir: .*-> MIR interpreter")
+# Also recognize historical controls with automatic MIR interpretation.
+MIR_INTERP_RE = re.compile(
+    r"MIR INTERPRETER mode|lambda-mir: (?:policy selected interpreter|.*-> MIR interpreter)")
 
 
 def jit_mode_of_last_run(log_path="log.txt"):
     try:
         with open(log_path, errors="replace") as f:
-            return "MIR-interp" if LARGE_INTERP_RE.search(f.read()) else "native"
+            return "MIR-interp" if MIR_INTERP_RE.search(f.read()) else "native"
     except OSError:
         return "unknown"
 
@@ -138,9 +136,8 @@ def main() -> int:
         print(f"| {item_id} | {label} | {tier} | {mode} | {count} | {total_ms:.1f} | "
               f"{peak:.2f} | {fallback} |")
     if any(r[3] == "MIR-interp" for r in rows):
-        print("\nNOTE: rows marked MIR-interp took the >100k-insn escape hatch, so "
-              "their baseline skipped codegen. Re-run with LAMBDA_JS_LARGE_INTERP=0 "
-              "for the forced-native (--jit-all) comparison.")
+        print("\nRows marked MIR-interp executed the MIR bytecode diagnostic "
+              "or used an older binary with automatic MIR interpretation.")
     return 0
 
 

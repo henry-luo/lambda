@@ -219,3 +219,13 @@ lit = {'asset': {'version': '2.0', 'generator': 'Lambda fixture generator'},
         {'name': 'key light', 'translation': [0, 0, 2], 'extensions': {'KHR_lights_punctual': {'light': 0}}},
         {'name': 'fill light', 'translation': [1, 1, 1], 'extensions': {'KHR_lights_punctual': {'light': 1}}}]}
 (root / 'lit.gltf').write_text(json.dumps(lit, indent=2) + '\n')
+# A triangle whose float COLOR_0 multipliers stray outside [0,1], as exporters write facet jitter;
+# the loader clamps them with one warning (WebGL design §15, glTF row).
+bright_data = struct.pack('<9f', -.5,0,0, .5,0,0, 0,.8,0) + struct.pack('<9f', 1.02,.5,.25, .92,1.0,-.05, .5,.5,.5)
+bright = {'asset': {'version': '2.0', 'generator': 'Lambda CC0 fixture'}, 'scene': 0, 'scenes': [{'nodes': [0]}],
+    'buffers': [{'byteLength': len(bright_data), 'uri': 'data:application/octet-stream;base64,' + base64.b64encode(bright_data).decode()}],
+    'bufferViews': [{'buffer': 0, 'byteOffset': 0, 'byteLength': 36}, {'buffer': 0, 'byteOffset': 36, 'byteLength': 36}],
+    'accessors': [{'bufferView': 0, 'componentType': 5126, 'count': 3, 'type': 'VEC3', 'min': [-.5,0,0], 'max': [.5,.8,0]},
+        {'bufferView': 1, 'componentType': 5126, 'count': 3, 'type': 'VEC3'}],
+    'meshes': [{'primitives': [{'attributes': {'POSITION': 0, 'COLOR_0': 1}}]}], 'nodes': [{'mesh': 0, 'name': 'bright'}]}
+(root / 'bright.gltf').write_text(json.dumps(bright, indent=2) + '\n')

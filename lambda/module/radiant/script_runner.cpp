@@ -51,6 +51,7 @@
 #include "lib/arraylist.h"
 #include "lib/strbuf.h"
 #include "lib/str.h"
+#include "lib/dom_image.h"
 #include "lib/url.h"
 #include "lib/file.h"
 #include "lib/hashmap.h"
@@ -70,6 +71,7 @@
 #include <sys/time.h>
 #include <unistd.h>
 #include <time.h>
+#include <uv.h>
 #endif
 
 extern __thread EvalContext* context;
@@ -95,10 +97,13 @@ struct JsExecGuard {
     JsExecGuard* previous;
     sigjmp_buf jmpbuf;
     struct sigaction old_segv, old_bus, old_prof;
-    volatile sig_atomic_t guarded, timed_out, started, budget_seconds, running;
+    volatile sig_atomic_t guarded, timed_out, started;
+    int budget_ms;
     size_t source_len;
     pthread_t watchdog_thread, owner;
-    bool thread_active, handler_installed;
+    uv_mutex_t watchdog_lock;
+    uv_cond_t watchdog_wake;
+    bool running, thread_active, handler_installed;
     uint64_t elapsed_cpu_us, arm_cpu_us;
 };
 static __thread JsExecGuard* js_exec_current = nullptr;
@@ -157,15 +162,16 @@ static bool js_exec_watchdog_process_cpu_us(uint64_t* out_cpu_us) {
 
 static void* js_exec_watchdog_main(void* arg) {
     JsExecGuard* guard = (JsExecGuard*)arg;
-    const struct timespec poll_interval = {0, 10000000L};
+    const uint64_t poll_interval_ns = 10000000;
+    uv_mutex_lock(&guard->watchdog_lock);
     while (guard->running) {
         uint64_t current_cpu_us = 0;
         if (!js_exec_watchdog_process_cpu_us(&current_cpu_us)) {
             log_error("script_runner_timeout: process CPU clock became unavailable");
-            return NULL;
+            break;
         }
         uint64_t budget_cpu_us =
-            (uint64_t)guard->budget_seconds * 1000000ULL;
+            (uint64_t)guard->budget_ms * 1000ULL;
         if (current_cpu_us >= guard->arm_cpu_us &&
                 guard->elapsed_cpu_us + current_cpu_us - guard->arm_cpu_us >= budget_cpu_us) {
             // Targeting the owner preserves the sigsetjmp/siglongjmp thread
@@ -175,16 +181,18 @@ static void* js_exec_watchdog_main(void* arg) {
                 log_error("script_runner_timeout: failed to signal watchdog owner (%d)",
                           signal_status);
             }
-            return NULL;
+            break;
         }
-        nanosleep(&poll_interval, NULL);
+        // Retain periodic CPU checks but wake immediately at a host-layout boundary.
+        uv_cond_timedwait(&guard->watchdog_wake, &guard->watchdog_lock, poll_interval_ns);
     }
+    uv_mutex_unlock(&guard->watchdog_lock);
     return NULL;
 }
 
-static bool js_exec_watchdog_arm(int timeout_seconds) {
+static bool js_exec_watchdog_arm(int timeout_ms) {
     JsExecGuard* guard = js_exec_current;
-    if (!guard || timeout_seconds <= 0 || guard->thread_active) return false;
+    if (!guard || timeout_ms <= 0 || guard->thread_active) return false;
     if (!js_exec_watchdog_process_cpu_us(&guard->arm_cpu_us)) return false;
     struct sigaction timeout_action;
     memset(&timeout_action, 0, sizeof(timeout_action));
@@ -193,14 +201,26 @@ static bool js_exec_watchdog_arm(int timeout_seconds) {
         log_error("script_runner_timeout: failed to install SIGPROF handler");
         return false;
     }
+    int sync_status = uv_mutex_init(&guard->watchdog_lock);
+    if (sync_status == 0) {
+        sync_status = uv_cond_init(&guard->watchdog_wake);
+        if (sync_status != 0) uv_mutex_destroy(&guard->watchdog_lock);
+    }
+    if (sync_status != 0) {
+        sigaction(SIGPROF, &guard->old_prof, NULL);
+        log_error("script_runner_timeout: failed to initialize watchdog wait (%d)", sync_status);
+        return false;
+    }
     guard->handler_installed = true;
     guard->owner = pthread_self();
-    guard->budget_seconds = timeout_seconds;
-    guard->running = 1;
+    guard->budget_ms = timeout_ms;
+    guard->running = true;
     int create_status = pthread_create(&guard->watchdog_thread, NULL,
                                        js_exec_watchdog_main, guard);
     if (create_status != 0) {
-        guard->running = 0;
+        guard->running = false;
+        uv_cond_destroy(&guard->watchdog_wake);
+        uv_mutex_destroy(&guard->watchdog_lock);
         sigaction(SIGPROF, &guard->old_prof, NULL);
         guard->handler_installed = false;
         log_error("script_runner_timeout: failed to create CPU watchdog thread (%d)",
@@ -215,9 +235,14 @@ static void js_exec_watchdog_disarm(JsExecGuard* guard = js_exec_current) {
     if (!guard) return;
     // Joining the sender closes the signal-delivery race before the previous
     // action is restored, so a completed document cannot die from late SIGPROF.
-    guard->running = 0;
     if (guard->thread_active) {
+        uv_mutex_lock(&guard->watchdog_lock);
+        guard->running = false;
+        uv_cond_signal(&guard->watchdog_wake);
+        uv_mutex_unlock(&guard->watchdog_lock);
         pthread_join(guard->watchdog_thread, NULL);
+        uv_cond_destroy(&guard->watchdog_wake);
+        uv_mutex_destroy(&guard->watchdog_lock);
         uint64_t now = 0;
         if (js_exec_watchdog_process_cpu_us(&now) && now >= guard->arm_cpu_us) {
             guard->elapsed_cpu_us += now - guard->arm_cpu_us;
@@ -239,18 +264,20 @@ static void js_exec_watchdog_add_module_source(size_t source_length) {
         guard->source_len += source_length;
     }
     if (!guard->started) return;
-    int expanded_budget = radiant_script_exec_timeout_seconds(
+    int expanded_budget = radiant_script_exec_timeout_ms(
         guard->source_len);
-    if (expanded_budget <= guard->budget_seconds) return;
+    if (expanded_budget <= guard->budget_ms) return;
 
-    guard->budget_seconds = expanded_budget;
-    log_info("script_runner_timeout: module graph %zu bytes gets %ds watchdog",
+    uv_mutex_lock(&guard->watchdog_lock);
+    guard->budget_ms = expanded_budget;
+    uv_mutex_unlock(&guard->watchdog_lock);
+    log_info("script_runner_timeout: module graph %zu bytes gets %dms watchdog",
         guard->source_len, expanded_budget);
 }
 
 static void js_exec_watchdog_begin_user_code(void) {
     if (js_exec_current) {
-        js_exec_current->started = js_exec_watchdog_arm(js_exec_current->budget_seconds);
+        js_exec_current->started = js_exec_watchdog_arm(js_exec_current->budget_ms);
     }
 }
 
@@ -2260,6 +2287,12 @@ static bool script_runner_find_embedded_navigation(DomNode* node, void* context)
     return true;
 }
 
+static bool script_runner_prepare_image_request(DomNode* node, void*) {
+    if (node->is_element() && node->as_element()->tag() == MARKUP_NAME_IMG)
+        dom_engine_image_request_info(node->as_element());
+    return true;
+}
+
 static bool script_runner_wait_for_load_blockers(Runtime* runtime,
                                                  JsScriptTaskCollection* collection) {
     DomDocument* doc = runtime ? (DomDocument*)runtime->dom_doc : nullptr;
@@ -2286,6 +2319,14 @@ static bool script_runner_wait_for_load_blockers(Runtime* runtime,
         js_microtask_flush();
     }
 
+    {
+        RuntimeExecutionScope execution_scope(runtime_get_eval_context(runtime));
+        // parsed images need the same request/completion path as scripted src writes.
+        view_geometry_walk_dom_tree(doc->root, script_runner_prepare_image_request, nullptr);
+        dom_dispatch_pending_resource_loads();
+        if (item_is_error(js_microtask_flush_result())) return false;
+    }
+
     if (!doc->resource_manager) {
         doc->fully_loaded = true;
         if (collection && collection->load_blocking_scripts > 0) {
@@ -2309,6 +2350,7 @@ static bool script_runner_wait_for_load_blockers(Runtime* runtime,
         if (source_sequence != doc->js.mutation_sequence) {
             source_sequence = doc->js.mutation_sequence;
             radiant_discover_document_resources(doc);
+            view_geometry_walk_dom_tree(doc->root, script_runner_prepare_image_request, nullptr);
         }
         return true;
     };
@@ -2727,13 +2769,13 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     js_exec_current->timed_out = 0;
     js_exec_current->started = 0;
     js_exec_current->guarded = 1;
-    int timeout_seconds = radiant_script_exec_timeout_seconds(watchdog_source_len);
+    int timeout_ms = radiant_script_exec_timeout_ms(watchdog_source_len);
     js_exec_current->source_len = watchdog_source_len;
-    js_exec_current->budget_seconds = timeout_seconds;
+    js_exec_current->budget_ms = timeout_ms;
     js_set_document_source_load_observer(js_exec_watchdog_add_module_source);
-    if (timeout_seconds > RADIANT_SCRIPT_EXEC_TIMEOUT_BASE_SECONDS) {
-        log_info("script_runner_timeout: source %zu bytes gets %ds watchdog",
-                 watchdog_source_len, timeout_seconds);
+    if (timeout_ms > RADIANT_SCRIPT_EXEC_TIMEOUT_BASE_SECONDS * 1000) {
+        log_info("script_runner_timeout: source %zu bytes gets %dms watchdog",
+                 watchdog_source_len, timeout_ms);
     }
     // Parse/transpile/JIT are synchronous CPU work. A wall-clock alarm made
     // valid parallel fixtures time out while descheduled under CPU contention.
@@ -2762,8 +2804,8 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
         result = execute_document_script_tasks_postdom(runtime, &script_tasks, preamble, timing);
 #ifndef _WIN32
         if (js_exec_current->timed_out) {
-            log_error("execute_document_scripts: JS execution timed out after %ds",
-                js_exec_current->budget_seconds);
+            log_error("execute_document_scripts: JS execution timed out after %dms",
+                js_exec_current->budget_ms);
             result = ItemError;
         }
 #endif
@@ -2854,7 +2896,7 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
                     dom_dispatch_event(target.get(), event.get());
                 }
                 int settled = js_event_loop_wait_until(document_snapshot_ready_predicate, dom_doc,
-                    radiant_script_exec_timeout_seconds(watchdog_source_len) * 1000);
+                    radiant_script_exec_timeout_ms(watchdog_source_len));
                 if (settled < 0) {
                     log_error("script snapshot readiness: explicit wait remains pending after bounded drain");
                     result = ItemError;
@@ -2875,8 +2917,8 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
         // queued load-time callbacks share the document's CPU budget and the
         // D7.4.3 cooperative error path used by its synchronous scripts.
         if (js_exec_current->timed_out && get_type_id(result) != LMD_TYPE_ERROR) {
-            log_error("execute_document_scripts: JS execution timed out after %ds",
-                js_exec_current->budget_seconds);
+            log_error("execute_document_scripts: JS execution timed out after %dms",
+                js_exec_current->budget_ms);
             result = ItemError;
         }
         js_exec_current->guarded = 0;

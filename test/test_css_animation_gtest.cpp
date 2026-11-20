@@ -4926,6 +4926,29 @@ TEST_F(AnimationTickTest, RegisteredNeutralEndpointRecapturesAuthoredBaseAfterRe
     EXPECT_DOUBLE_EQ(customNumber(element, "--neutral"), 3);
 }
 
+TEST_F(AnimationTickTest, CssRestylePreservesImplicitOpacityEndpoint) {
+    MockElement mock;
+    DomElement* element = createMockElement(&mock);
+    mock.in_line.opacity = 1.0f;
+    ASSERT_NE(parsedKeyframes("fade{from{opacity:0}}", "fade"), nullptr);
+    layout.view = lam::up(static_cast<View*>(element));
+    layout.elmt = lam::up(element);
+    const struct { const char* source; float opacity; } cases[] = {
+        {"animation:fade 1s linear -.5s both paused", .5f},
+        {"opacity:.6;animation:fade 1s linear -.5s both paused", .3f},
+        {"--base:40%;opacity:var(--base);animation:fade 1s linear -.5s both paused", .2f},
+        {"animation:fade 1s linear -.5s both paused", .5f}
+    };
+    for (const auto& test_case : cases) {
+        SCOPED_TRACE(test_case.source);
+        setAnimationStyle(element, test_case.source);
+        for (unsigned repeat = 0; repeat < 4; repeat++) {
+            css_animation_resolve(element, &layout);
+            EXPECT_FLOAT_EQ(mock.in_line.opacity, test_case.opacity);
+        }
+    }
+}
+
 TEST_F(AnimationTickTest, CommaKeyframeSelectorsPreserveSourceOrderAndTiming) {
     MockElement mock;
     DomElement* element = createMockElement(&mock);

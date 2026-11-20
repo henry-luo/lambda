@@ -20,9 +20,18 @@
 // MIR linker diagnostics can emit once per module item and lookup.
 #define log_debug(...) log_trace(__VA_ARGS__)
 
-// POC: MIR interpreter mode (skip JIT compilation, use MIR interpreter instead)
-// Set via JS_MIR_INTERP=1 environment variable
-int g_mir_interp_mode = 0;
+static bool g_mir_interp_diagnostic;
+
+void lambda_mir_enable_interp_diagnostic(void) {
+    g_mir_interp_diagnostic = true;
+}
+
+bool lambda_mir_interp_requested(void) {
+    // Historical environment spelling. LambdaJS selects its own backend.
+    const char* env = getenv("JS_MIR_INTERP");
+    return g_mir_interp_diagnostic ||
+        (env && (strcmp(env, "1") == 0 || strcmp(env, "true") == 0));
+}
 
 // ============================================================================
 // O(1) Import Resolution via Hashmap
@@ -239,11 +248,10 @@ void *import_resolver(const char *name) {
     return NULL;
 }
 
-static MIR_context_t jit_init_mode(unsigned int optimize_level,
-                                   int generator_initialized) {
+MIR_context_t jit_init(unsigned int optimize_level, bool native_codegen) {
     init_func_map();  // build O(1) import resolution hashmap
     MIR_context_t ctx = MIR_init();
-    if (!generator_initialized) {
+    if (!native_codegen) {
         log_info("MIR INTERPRETER mode (JIT compilation skipped)");
     } else {
         MIR_gen_init(ctx); // init the JIT generator
@@ -272,14 +280,6 @@ static MIR_context_t jit_init_mode(unsigned int optimize_level,
         }
     }
     return ctx;
-}
-
-MIR_context_t jit_init(unsigned int optimize_level) {
-    return jit_init_mode(optimize_level, !g_mir_interp_mode);
-}
-
-MIR_context_t jit_init_native(unsigned int optimize_level) {
-    return jit_init_mode(optimize_level, 1);
 }
 
 void print_module_item(MIR_item_t mitem) {

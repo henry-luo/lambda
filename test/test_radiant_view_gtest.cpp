@@ -462,6 +462,36 @@ static void test_radiant_view_launch_all(RadiantViewLaunch* launches, size_t cou
     }
 }
 
+// Each tier gets a fresh realm and private outputs. The existing viewer pool
+// runs independent launches within the worker budget granted by the runner.
+struct RadiantViewForcedGcRuns {
+    RadiantViewLaunch launches[3] = {};
+    ShellEnvEntry environments[3][8] = {};
+    char labels[3][64] = {};
+
+    bool prepare(const char* label, const char* page, const char* replay, JsTestExecutionModes modes) {
+        if (modes.count > sizeof(launches) / sizeof(launches[0])) return false;
+        for (size_t i = 0; i < modes.count; ++i) {
+            ShellEnvEntry settings[] = {
+                {"JS_EXEC_BACKEND", modes.values[i]}, {"MEMTRACK_MODE", "STATS"},
+                {"VIEW_MEM_STAGES", "1"}, {"VIEW_MEM_STATS", "1"},
+                {"LAMBDA_GC_FORCE_EVERY", "1"}, {"LAMBDA_GC_POISON_FREED", "1"},
+                {"LAMBDA_LOG_LEVEL", "NOTICE"}, {nullptr, nullptr},
+            };
+            memcpy(environments[i], settings, sizeof(settings));
+            snprintf(labels[i], sizeof(labels[i]), "%s_%s", label, modes.values[i]);
+            RadiantViewLaunch& launch = launches[i];
+            launch.label = labels[i];
+            launch.page = page;
+            launch.event_path = replay;
+            launch.env = environments[i];
+            launch.timeout_ms = RADIANT_VIEW_REPLAY_TIMEOUT_MS;
+            if (!test_radiant_view_prepare_launch(&launch)) return false;
+        }
+        return true;
+    }
+};
+
 static ShellResult test_radiant_view_run_logged_headless(const char* page,
                                                          const char* event_path,
                                                          const ShellEnvEntry* env,
@@ -546,48 +576,50 @@ TEST(RadiantViewTest, DemoCommandLaunchesCatalogAndPreservesViewerOptions) {
     test_radiant_view_ensure_temp_dir();
     struct DemoCase {
         const char* name; const char* selector;
-        bool graphics = false;
     };
     const DemoCase cases[] = {
+        // Start the larger authored documents first so they overlap the short launches.
+        {"midtown", "#midtown #city"},
+        {"doom", "#doom[data-mode=ready]"},
+        {"paint", "#paint #canvas"},
+        {"slides", "#slides-editor #stage"},
         // with no name, `lambda demo` opens the demo index (test/demo/index.ls).
         {nullptr, "#demo-index .card[data-demo=tetris]"},
         {"tetris", "#tetris[data-mode=ready]"},
         {"marble-drop", "#marble-drop[data-level='1']"},
         {"superlambda", "#superlambda[data-mode=ready]"},
-        {"doom", "#doom[data-mode=ready]"},
         {"scene3d", ".scene3d-index .demo-tile"},
-        {"aquarium", "#aquarium #tank-scene", true},
-        {"hamster", "#hamster #cage-scene", true},
-        {"midtown", "#midtown #city", true},
-        {"slides", "#slides-editor #stage"},
+        {"aquarium", "#aquarium #tank-scene"},
+        {"hamster", "#hamster #cage-scene"},
         {"sheet", "#sheet-grid"},
-        {"paint", "#paint #canvas"},
         {"readability", "#readability-demo[data-mode=original] #page-frame"},
         {"chart", ".demo-tile"},
     };
     constexpr size_t count = sizeof(cases) / sizeof(cases[0]);
     RadiantViewLaunch launches[count] = {};
     char labels[count][64], events[count][1024], homes[count][1024];
-    ShellEnvEntry environments[count][3] = {};
+    ShellEnvEntry environments[count][2] = {};
     for (size_t i = 0; i < count; i++) {
         const DemoCase& demo = cases[i];
         snprintf(labels[i], sizeof(labels[i]), "demo_%zu", i);
         RadiantViewLaunch& launch = launches[i];
         launch.label = labels[i]; launch.page = demo.name; launch.command = "demo";
-        launch.graphics = demo.graphics; launch.quiet = true;
+        launch.quiet = true;
         ASSERT_TRUE(test_radiant_view_prepare_launch(&launch));
         snprintf(events[i], sizeof(events[i]), "%s/replay.json", launch.cwd);
         StrBuf* replay = strbuf_new();
+        // The CLI check needs a startup layout and a live event loop. The
+        // Scene3D demo replays exercise actual graphics and their controls.
         strbuf_append_format(replay,
-            "{\"input_turn_ms\":0,\"events\":["
+            "{\"input_turn_ms\":0,\"viewport\":{\"width\":720,\"height\":480},"
+            "\"initial_render\":false,\"events\":["
             "{\"type\":\"assert_count\",\"target\":{\"selector\":\"%s\"},\"min\":1},"
-            "{\"type\":\"window_close\"},{\"type\":\"assert_window_closed\",\"closed\":true}]}", demo.selector);
+            "{\"type\":\"window_close\"},{\"type\":\"assert_window_closed\",\"closed\":true}]}",
+            demo.selector);
         ASSERT_EQ(write_binary_file(events[i], replay->str, replay->length), 0); strbuf_free(replay);
         launch.event_path = events[i];
         snprintf(homes[i], sizeof(homes[i]), "%s/lmd", g_radiant_view_root);
         environments[i][0] = {"LAMBDA_HOME", homes[i]};
-        // only the GPU demos need GLFW; CPU text measurement is windowless.
-        environments[i][1] = {"LAMBDA_HEADLESS_GLFW_WINDOW", demo.graphics ? "1" : nullptr};
         launch.env = environments[i];
     }
     test_radiant_view_launch_all(launches, count);
@@ -1170,23 +1202,14 @@ TEST(RadiantViewTest, ResourceTimingBuffersTrackFetchAndXhrAcrossGc) {
     RadiantViewServerScope server_scope = {server.pid};
     char url[128];
     snprintf(url, sizeof(url), "http://127.0.0.1:%d/page", server.port);
-    for (const char* backend : {"ast", "mir"}) {
-        SCOPED_TRACE(backend);
-        const ShellEnvEntry env[] = {
-            {"JS_EXEC_BACKEND", backend}, {"MEMTRACK_MODE", "STATS"},
-            {"VIEW_MEM_STAGES", "1"}, {"VIEW_MEM_STATS", "1"},
-            {"LAMBDA_GC_FORCE_EVERY", "1"}, {"LAMBDA_GC_POISON_FREED", "1"},
-            {"LAMBDA_LOG_LEVEL", "NOTICE"}, {nullptr, nullptr},
-        };
-        RadiantViewLaunch launch = {};
-        launch.label = strcmp(backend, "ast") == 0 ? "resource_timing_ast" : "resource_timing_mir";
-        launch.page = url;
-        launch.event_path = "test/html/js_resource_timing_events.json";
-        launch.env = env;
-        launch.timeout_ms = RADIANT_VIEW_REPLAY_TIMEOUT_MS;
-        ASSERT_TRUE(test_radiant_view_prepare_launch(&launch));
-        test_radiant_view_launch_all(&launch, 1);
-        ShellResult& result = launch.result;
+    const char* backends[] = {"ast", "mir"};
+    JsTestExecutionModes modes = {backends, sizeof(backends) / sizeof(backends[0])};
+    RadiantViewForcedGcRuns runs;
+    ASSERT_TRUE(runs.prepare("resource_timing", url, "test/html/js_resource_timing_events.json", modes));
+    test_radiant_view_launch_all(runs.launches, modes.count);
+    for (size_t i = 0; i < modes.count; ++i) {
+        SCOPED_TRACE(modes.values[i]);
+        ShellResult& result = runs.launches[i].result;
         const char* output = result.stdout_buf ? result.stdout_buf : "";
         EXPECT_EQ(result.exit_code, 0) << output;
         EXPECT_NE(strstr(output, "Assertions: 1 passed, 0 failed"), nullptr) << output;
@@ -1507,12 +1530,11 @@ TEST(RadiantViewTest, ModuleFetchFailuresDispatchElementErrorsBeforeLaterModules
     lam::Temp<char> page(read_text_file("test/html/js_module_fetch_failure.html"));
     ASSERT_NE(page.get(), nullptr);
     const char bad_script[] = "window.moduleBodyRan++;";
-    const char good_script[] = "window.goodModuleRan++;";
+    const char good_script[] =
+        "window.goodModuleRan++; window.goodModuleResourceErrors.push(window.resourceErrors);";
     const char html[] = "<!doctype html><script>window.moduleBodyRan++;</script>";
     const char entry[] = "import './redirect.js'; window.moduleBodyRan++;";
     const char again[] = "import './entry.js'; window.moduleBodyRan++;";
-    const char control[] = "<!doctype html><script type='module' src='/throw.js'></script>"
-        "<script type='module' src='/syntax.js'></script>";
     const char throwing[] = "throw Error('module-body-control');";
     const char invalid[] = "export const = ;";
     RadiantViewHttpResource resources[] = {
@@ -1525,7 +1547,6 @@ TEST(RadiantViewTest, ModuleFetchFailuresDispatchElementErrorsBeforeLaterModules
         {"GET /missing.js ", "text/plain", "missing", 7, "", 404},
         {"GET /good.js ", "Text/JavaScript; charset=utf-8", good_script, sizeof(good_script) - 1},
         {"GET /legacy.js ", "text/javascript1.5", good_script, sizeof(good_script) - 1},
-        {"GET /control ", "text/html", control, sizeof(control) - 1},
         {"GET /throw.js ", "text/javascript", throwing, sizeof(throwing) - 1},
         {"GET /syntax.js ", "text/javascript", invalid, sizeof(invalid) - 1},
     };
@@ -1535,46 +1556,32 @@ TEST(RadiantViewTest, ModuleFetchFailuresDispatchElementErrorsBeforeLaterModules
     RadiantViewServerScope server_scope = {server.pid};
     char url[128];
     snprintf(url, sizeof(url), "http://127.0.0.1:%d/page", server.port);
-    for (const char* backend : js_test_execution_modes()) {
-        SCOPED_TRACE(backend);
-        const ShellEnvEntry env[] = {
-            {"JS_EXEC_BACKEND", backend}, {"MEMTRACK_MODE", "STATS"},
-            {"LAMBDA_LOG_LEVEL", "NOTICE"},
-            {"VIEW_MEM_STAGES", "1"}, {"VIEW_MEM_STATS", "1"},
-            {"LAMBDA_GC_FORCE_EVERY", "1"}, {"LAMBDA_GC_POISON_FREED", "1"}, {nullptr, nullptr},
-        };
-        RadiantViewLaunch launch = {};
-        launch.label = "module_fetch_failure";
-        launch.page = url;
-        launch.event_path = "test/html/js_module_fetch_failure_events.json";
-        launch.env = env;
-        launch.timeout_ms = RADIANT_VIEW_REPLAY_TIMEOUT_MS;
-        ASSERT_TRUE(test_radiant_view_prepare_launch(&launch));
-        test_radiant_view_launch_all(&launch, 1);
+    JsTestExecutionModes modes = js_test_execution_modes();
+    RadiantViewForcedGcRuns runs;
+    ASSERT_TRUE(runs.prepare("module_fetch_failure", url, "test/html/js_module_fetch_failure_events.json", modes));
+    test_radiant_view_launch_all(runs.launches, modes.count);
+    for (size_t i = 0; i < modes.count; ++i) {
+        SCOPED_TRACE(modes.values[i]);
+        RadiantViewLaunch& launch = runs.launches[i];
         const char* output = launch.result.stdout_buf ? launch.result.stdout_buf : "";
         EXPECT_EQ(launch.result.exit_code, 0) << output;
         EXPECT_FALSE(launch.result.timed_out) << output;
         EXPECT_NE(strstr(output, "Assertions: 1 passed, 0 failed"), nullptr) << output;
         EXPECT_NE(strstr(output, "[MEMTRACK_LIVE] bytes=0 count=0"), nullptr) << output;
         EXPECT_EQ(strstr(output, "execute_document_scripts: post-dom exception"), nullptr) << output;
+        // Each control must fail in execution, with its own source label.
+        for (const char* path : {"throw.js", "syntax.js"}) {
+            char diagnostic[192];
+            snprintf(diagnostic, sizeof(diagnostic),
+                "execute_document_scripts: defer exception in http://127.0.0.1:%d/%s:",
+                server.port, path);
+            EXPECT_NE(strstr(output, diagnostic), nullptr) << output;
+            snprintf(diagnostic, sizeof(diagnostic),
+                "script_runner: script source load failed: http://127.0.0.1:%d/%s",
+                server.port, path);
+            EXPECT_EQ(strstr(output, diagnostic), nullptr) << output;
+        }
         shell_result_free(&launch.result);
-        // actual parse/body errors retain executed-script diagnostics.
-        char control_url[128];
-        snprintf(control_url, sizeof(control_url), "http://127.0.0.1:%d/control", server.port);
-        RadiantViewLaunch negative = {};
-        negative.label = "module_execution_failure";
-        negative.page = control_url;
-        negative.env = env;
-        negative.timeout_ms = RADIANT_VIEW_REPLAY_TIMEOUT_MS;
-        ASSERT_TRUE(test_radiant_view_prepare_launch(&negative));
-        test_radiant_view_launch_all(&negative, 1);
-        const char* diagnostics = negative.result.stdout_buf ? negative.result.stdout_buf : "";
-        EXPECT_EQ(negative.result.exit_code, 0) << diagnostics;
-        EXPECT_FALSE(negative.result.timed_out) << diagnostics;
-        EXPECT_NE(strstr(diagnostics, "execute_document_scripts: defer exception in"), nullptr) << diagnostics;
-        EXPECT_EQ(strstr(diagnostics, "script_runner: script source load failed:"), nullptr) << diagnostics;
-        EXPECT_NE(strstr(diagnostics, "[MEMTRACK_LIVE] bytes=0 count=0"), nullptr) << diagnostics;
-        shell_result_free(&negative.result);
     }
 #endif
 }
@@ -1679,7 +1686,7 @@ TEST(RadiantViewTest, RestoresDocumentRealmBeforeAutofocusBehavior) {
     remove(view_log);
 }
 
-TEST(RadiantViewTest, KeepsNativeExportsForAutomaticInterpreterPolicy) {
+TEST(RadiantViewTest, ResolvesNativePackageExportsAtO0) {
     const char* page = "test/ui/ce/editable-dom-blocks.html";
     const char* events = "test/ui/test_editing_contenteditable_blocks.json";
     const char* view_log = "./temp/test_radiant_view_native_imports.log";
@@ -1687,12 +1694,11 @@ TEST(RadiantViewTest, KeepsNativeExportsForAutomaticInterpreterPolicy) {
     ASSERT_TRUE(test_radiant_view_file_readable(page));
     ASSERT_TRUE(test_radiant_view_file_readable(events));
 
-    // Exercise the automatic large-source branch without treating it as an
-    // explicit interpreter request: imported package exports remain native.
+    // Run the document's Lambda packages through eager native MIR at O0.
     const ShellEnvEntry env[] = {
         {"LAMBDA_LOG_FILE", view_log},
         {"LAMBDA_LOG_LEVEL", "NOTICE"},
-        {"LAMBDA_JS_LARGE_INTERP_BYTES", "1"},
+        {"LAMBDA_EXEC_BACKEND", "jit"},
         {NULL, NULL},
     };
     ShellResult shell_result = test_radiant_view_run_logged_headless(
@@ -2896,16 +2902,21 @@ static bool test_radiant_view_write_native_layout_probe(const char* page, bool o
             ".row{display:grid;grid-template-columns:50% 1fr;background:var(--paint)}"
             ".row span{font-size:var(--size);color:var(--ink)}"
             "</style><body>", file) >= 0;
-    for (unsigned row = 0; row < 9000 && written; row++)
+    // The watchdog uses a fractional CPU budget. Keep the larger document in
+    // the static snapshot case, which exercises staging independently.
+    const unsigned rows = observer_loop ? 3000 : 9000;
+    for (unsigned row = 0; row < rows && written; row++)
         written = fputs("<div class=row><span>registry title</span><span>reference</span></div>", file) >= 0;
     written = written && fputs("<script>var body=document.body;"
             "setTimeout(function(){console.log('SNAPSHOT_READY_TIMER')},0);"
             "setTimeout(function(){console.log('SNAPSHOT_LATE_TIMER')},50);"
-            "body.getBoundingClientRect();", file) >= 0;
+            "body.getBoundingClientRect();"
+            "body.style.width='500px';console.log('NATIVE_LAYOUT_BUDGET_DONE');", file) >= 0;
     written = written && fputs(observer_loop
-            ? "new ResizeObserver(function(){while(true){}}).observe(body);"
+            ? "new ResizeObserver(function(){"
+              "console.log('NATIVE_LAYOUT_BUDGET_OBSERVER_ENTERED');while(true){}}).observe(body);"
               "body.style.width='450px';</script>"
-            : "body.style.width='500px';console.log('NATIVE_LAYOUT_BUDGET_DONE');</script>", file) >= 0;
+            : "</script>", file) >= 0;
     bool closed = fclose(file) == 0;
     return written && closed;
 }
@@ -2913,20 +2924,19 @@ static bool test_radiant_view_write_native_layout_probe(const char* page, bool o
 TEST(RadiantViewTest, NativeLayoutPreservesScriptCpuBudgetAndObserversRemainBounded) {
     test_radiant_view_ensure_temp_dir();
     const char* page = "./temp/test_radiant_view_native_layout_budget.html";
-    const ShellEnvEntry env[] = {{"LAMBDA_JS_EXEC_TIMEOUT_SECONDS", "1"}, {NULL, NULL}};
-    const bool observer_cases[] = {false, true};
-    for (bool observer_loop : observer_cases) {
-        SCOPED_TRACE(observer_loop);
-        ASSERT_TRUE(test_radiant_view_write_native_layout_probe(page, observer_loop));
-        ShellResult result = test_radiant_view_run_logged_headless(
-            page, nullptr, env, nullptr, nullptr, 60000);
-        const char* output = result.stdout_buf ? result.stdout_buf : "";
-        EXPECT_FALSE(result.timed_out) << output;
-        EXPECT_EQ(result.exit_code, 0) << output;
-        EXPECT_EQ(strstr(output, "JS execution timed out") != nullptr, observer_loop) << output;
-        if (!observer_loop) EXPECT_NE(strstr(output, "NATIVE_LAYOUT_BUDGET_DONE"), nullptr) << output;
-        shell_result_free(&result);
-    }
+    const ShellEnvEntry env[] = {{"LAMBDA_JS_EXEC_TIMEOUT_SECONDS", "0.15"}, {NULL, NULL}};
+    ASSERT_TRUE(test_radiant_view_write_native_layout_probe(page, true));
+    ShellResult result = test_radiant_view_run_logged_headless(
+        page, nullptr, env, nullptr, nullptr, 60000);
+    const char* output = result.stdout_buf ? result.stdout_buf : "";
+    EXPECT_FALSE(result.timed_out) << output;
+    EXPECT_EQ(result.exit_code, 0) << output;
+    const char* layout_done = strstr(output, "NATIVE_LAYOUT_BUDGET_DONE");
+    const char* observer_entered = strstr(output, "NATIVE_LAYOUT_BUDGET_OBSERVER_ENTERED");
+    // One document proves layout returned and that the observer's own JS exhausted the budget.
+    EXPECT_TRUE(layout_done && observer_entered && layout_done < observer_entered) << output;
+    EXPECT_NE(strstr(output, "JS execution timed out"), nullptr) << output;
+    shell_result_free(&result);
 }
 
 TEST(RadiantViewTest, StaticSnapshotDoesNotAdvanceTimersDuringNativeLayout) {

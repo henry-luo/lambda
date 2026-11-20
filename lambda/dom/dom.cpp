@@ -1348,17 +1348,22 @@ static Item dom_replace_text_data(DomText* text_node, uint32_t offset,
 
     size_t repl_len = strlen(repl_chars);
     uint32_t repl_u16_len = (uint32_t)utf8_to_utf16_length(repl_chars, repl_len);
-    const char* old_text = text_node->text ? text_node->text : "";
+    // replacing a detached node's owned payload can free it before observers run.
+    char* old_text = mem_strdup(text_node->text ? text_node->text : "", MEM_CAT_DOM);
+    if (!old_text) return js_status_ok();
     DocState* state = dom_state_for_nodes(
         (DomNode*)text_node, text_node->parent);
     if (!dom_text_replace_data_contents(state, text_node, offset, count,
-                                        repl_chars, repl_len, repl_u16_len)) {
+                                        repl_chars, repl_len, repl_u16_len,
+                                        dom_node_owner_document(text_node))) {
+        mem_free(old_text);
         return js_status_ok();
     }
     dom_record_mutation_detail(DOM_JS_MUTATION_TEXT, (DomNode*)text_node,
                                   text_node->parent, 0);
     dom_mutation_notify(DOM_JS_MUTATION_TEXT, (DomNode*)text_node,
                            text_node->parent, nullptr, old_text);
+    mem_free(old_text);
     log_debug("dom_replace_text_data: offset=%u count=%u replacement_u16=%u",
               offset, count, repl_u16_len);
     return js_status_ok();
@@ -6327,14 +6332,16 @@ extern "C" Item dom_core_parse_fragment(Item context, Item markup) {
     return dom_wrap_element(fragment);
 }
 
+static Item dom_replace_children(Item parent_item, Item* args, int argc);
+
 static bool dom_replace_text_content(DomElement* elem, const char* text) {
-    // Replace through the Mark-aware path so DOM links and backing children stay aligned.
-    if (!elem || !text || !dom_replace_inner_html(elem, "", false)) return false;
-    if (text[0] != '\0') {
-        DomText* text_node = elem->append_text(text);
-        if (!text_node) return false;
-        dom_post_insert((DomNode*)elem, (DomNode*)text_node, false);
-    }
+    if (!elem || !text) return false;
+    // replace-all owns a single childList record, including both removed and added nodes.
+    RootFrame roots(2);
+    Rooted<Item> parent(roots, dom_wrap_element(elem));
+    Rooted<Item> replacement(roots, js_name_item(text));
+    Item argument = replacement.get();
+    if (item_is_error(dom_replace_children(parent.get(), &argument, *text ? 1 : 0))) return false;
     // Stylesheet text changes CSS globally; ordinary text is subtree-local.
     DomJsMutationKind kind = elem->tag_name && str_icmp_cstr(elem->tag_name, "style") == 0
         ? DOM_JS_MUTATION_STYLE : DOM_JS_MUTATION_TEXT;
@@ -7340,7 +7347,9 @@ static Item dom_document_get_property_for(DomDocument* doc_arg, Item prop_name) 
     // spec's null (ESO101).
     if (prop_id == JS_DOM_PROP_PARENT_NODE ||
             prop_id == JS_DOM_PROP_PARENT_ELEMENT ||
-            prop_id == JS_DOM_PROP_OWNER_DOCUMENT) {
+            prop_id == JS_DOM_PROP_OWNER_DOCUMENT ||
+            prop_id == JS_DOM_PROP_NODE_VALUE ||
+            prop_id == JS_DOM_PROP_TEXT_CONTENT) {
         return ItemNull;
     }
 
@@ -8536,8 +8545,7 @@ static void _after_image_src_set(DomElement* elem, const char* attr_name,
     // the decoder owns intrinsic state; DOM queues completion after accepting or rejecting the source.
     if (!_is_tag(elem, "img") || str_icmp_cstr(attr_name, "src") != 0) return;
     bool pending = false;
-    bool loaded = dom_engine_set_image_source(elem, attr_value, &pending);
-    if (!pending) dom_queue_image_completion(elem, loaded);
+    dom_engine_set_image_source(elem, attr_value, &pending);
 }
 
 extern "C" void dom_after_set_attribute(void* elem_ptr,
@@ -10363,6 +10371,8 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
 
     if (!prop) return ItemNull;
 
+    if (prop_id == JS_DOM_PROP_NODE_VALUE) return dom_core_node_value(elem_item);
+
     if (strcmp(prop, "baseURI") == 0) {
         // detached CharacterData/Attr ownership is retained by the native document registry.
         return dom_document_base_uri(dom_node_owner_document(node));
@@ -11563,6 +11573,9 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
     JsDomPropId prop_id = dom_prop_id(prop);
     if (!prop) return ItemNull;
 
+    if (node->node_type == DOM_NODE_DOCTYPE &&
+            (prop_id == JS_DOM_PROP_NODE_VALUE || prop_id == JS_DOM_PROP_TEXT_CONTENT)) return value;
+
     if (DomAttr* attribute = node->as_attribute()) {
         if (prop_id == JS_DOM_PROP_VALUE || prop_id == JS_DOM_PROP_NODE_VALUE ||
             prop_id == JS_DOM_PROP_TEXT_CONTENT) {
@@ -11592,11 +11605,26 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
         DomText* text_node = node->as_text();
         // CharacterData setters accept DOMString, so numeric/boolean values
         // must be converted instead of being mistaken for an absent string.
-        const char* new_text = dom_to_dom_string_cstr(value);
+        const char* new_text = prop_id != JS_DOM_PROP_DATA && value.item == ITEM_NULL
+            ? "" : dom_to_dom_string_cstr(value);
         if (new_text) {
             uint32_t old_u16_len = dom_text_utf16_length(text_node);
             JS_ASSIGN_OR_RETURN(set_result, dom_replace_text_data(text_node, 0, old_u16_len, new_text));
             log_debug("dom_set_property: set text node data='%.30s'", new_text);
+        }
+        return value;
+    }
+
+    if (node->is_comment() &&
+            (prop_id == JS_DOM_PROP_DATA || prop_id == JS_DOM_PROP_NODE_VALUE ||
+             prop_id == JS_DOM_PROP_TEXT_CONTENT)) {
+        const char* next = prop_id != JS_DOM_PROP_DATA && value.item == ITEM_NULL
+            ? "" : dom_to_dom_string_cstr(value);
+        DomComment* comment = node->as_comment();
+        const char* old = comment->content;
+        if (next && dom_comment_set_content(comment, next, dom_node_owner_document(node))) {
+            dom_record_mutation_detail(DOM_JS_MUTATION_TEXT, node, node->parent, 0);
+            dom_mutation_notify(DOM_JS_MUTATION_TEXT, node, node->parent, nullptr, old);
         }
         return value;
     }
@@ -11608,6 +11636,11 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
         return value;
     }
     DomElement* elem = node->as_element();
+
+    // container nodeValue and Document/DocumentType textContent setters are inert.
+    if (prop_id == JS_DOM_PROP_NODE_VALUE ||
+            (prop_id == JS_DOM_PROP_TEXT_CONTENT &&
+             elem->tag_name && strcmp(elem->tag_name, "#document") == 0)) return value;
 
     // Document writes (title, location, designMode, ...) land on the Document,
     // and the document node is the Document (ESO101). Without this the node

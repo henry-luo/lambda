@@ -28,7 +28,7 @@ extern "C" {
 // C-level return type convention for system functions
 typedef enum CRetType {
     C_RET_ITEM = 0,    // returns boxed Item (default, most sys funcs)
-    C_RET_INT64,       // returns raw int64_t (fn_len, bitwise, and machine operations)
+    C_RET_INT64,       // returns raw int64_t for native ABI entries
     C_RET_DOUBLE,      // returns raw double (pn_clock)
     C_RET_BOOL,        // returns Bool/uint8_t (fn_contains, fn_starts_with, etc.)
     C_RET_STRING,      // returns String* (fn_string)
@@ -393,51 +393,6 @@ typedef struct JitImport {
     fn_ptr func;
     JitImportMetadata metadata;
 } JitImport;
-
-// The C-level result type of a sys func's registered entry point. `return_type`
-// in SysFuncInfo is the Lambda-level semantic type, NOT the C type: functions
-// with the same Lambda return can return String* in C while others return Item,
-// so the SysFunc enum is the discriminator. Shared by MIR lowering and the T0
-// interpreter so both box a given entry's result identically.
-static inline TypeId sysfunc_c_ret_type_id(const SysFuncInfo* info) {
-    if (!info) return LMD_TYPE_ANY;
-    switch (info->fn) {
-    // count() returns a raw count; len() now returns Item so host-read errors
-    // travel in its value lane without double boxing at either backend.
-    case SYSFUNC_COUNT:
-        return LMD_TYPE_INT;
-    // The raw bitwise family operates on machine words. Its result is
-    // converted into the int lane at the boundary below.
-    case SYSFUNC_BAND: case SYSFUNC_BOR: case SYSFUNC_BXOR:
-    case SYSFUNC_BNOT:
-        return LMD_TYPE_INT64;
-    // C functions returning Bool (uint8_t)
-    case SYSFUNC_CONTAINS: case SYSFUNC_STARTS_WITH: case SYSFUNC_ENDS_WITH:
-    case SYSFUNC_EXISTS:
-        return LMD_TYPE_BOOL;
-    // C functions returning String*
-    case SYSFUNC_STRING:
-        return LMD_TYPE_STRING;
-    // C functions returning Symbol*
-    case SYSFUNC_NAME: case SYSFUNC_SYMBOL:
-        return LMD_TYPE_SYMBOL;
-    // C functions returning Type*
-    case SYSFUNC_TYPE:
-        return LMD_TYPE_TYPE;
-    // C functions returning DateTime (uint64_t)
-    case SYSFUNC_DATETIME: case SYSFUNC_DATETIME0:
-    case SYSFUNC_DATE: case SYSFUNC_DATE0: case SYSFUNC_DATE3:
-    case SYSFUNC_TIME: case SYSFUNC_TIME0: case SYSFUNC_TIME3:
-    case SYSFUNC_JUSTNOW:
-    case SYSPROC_NOW: case SYSPROC_TODAY:
-        return LMD_TYPE_DTIME;
-    // C functions returning double
-    case SYSPROC_CLOCK:
-        return LMD_TYPE_FLOAT;
-    default:
-        return LMD_TYPE_ANY;  // returns Item, no boxing needed
-    }
-}
 
 // S11.4.3 call-boundary policy shared by MIR lowering and T0. These rows
 // accept ordinary values only: an ItemError operand is the call's value,

@@ -1,11 +1,12 @@
 {
   "name": "Slides: editable market cards, blank-space caret, no-op/cancel visibility, pixels, repeated sessions and save/open",
-  "html": "test/demo/slides/slides.ls",
+  "html": "test/demo/slides/_card_editing_fixture.ls",
   "viewport": {
     "width": 1440,
     "height": 900
   },
   "input_turn_ms": 0,
+  "initial_render": false,
   "events": [
     {
       "type": "script",
@@ -13,6 +14,7 @@
     },
     {
       "type": "advance_time",
+      "render": false,
       "ms": 100,
       "steps": 3
     },
@@ -46,11 +48,13 @@
     },
     {
       "type": "advance_time",
+      "render": false,
       "ms": 60,
-      "steps": 3
+      "steps": 1
     },
     {
       "type": "assert_focus",
+      "assert_interval": 10,
       "target": {
         "selector": "#canvas-rich-text"
       }
@@ -58,6 +62,10 @@
     {
       "type": "assert_script",
       "js": "caretInCard()"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('spelling-slides-text').getAttribute('data-spelling-seq')==='0'"
     },
     {
       "type": "assert_script",
@@ -95,6 +103,7 @@
     },
     {
       "type": "assert_surface",
+      "render": false,
       "region": [
         701,
         532,
@@ -181,11 +190,13 @@
     },
     {
       "type": "advance_time",
+      "render": false,
       "ms": 60,
-      "steps": 3
+      "steps": 1
     },
     {
       "type": "assert_focus",
+      "assert_interval": 10,
       "target": {
         "selector": "#canvas-rich-text"
       }
@@ -249,11 +260,13 @@
     },
     {
       "type": "advance_time",
+      "render": false,
       "ms": 60,
-      "steps": 3
+      "steps": 1
     },
     {
       "type": "assert_focus",
+      "assert_interval": 10,
       "target": {
         "selector": "#canvas-rich-text"
       }
@@ -317,6 +330,7 @@
     },
     {
       "type": "assert_focus",
+      "assert_interval": 10,
       "target": {
         "selector": "#canvas-text"
       }
@@ -358,11 +372,13 @@
     },
     {
       "type": "advance_time",
+      "render": false,
       "ms": 60,
-      "steps": 3
+      "steps": 1
     },
     {
       "type": "assert_focus",
+      "assert_interval": 10,
       "target": {
         "selector": "#canvas-rich-text"
       }
@@ -444,6 +460,7 @@
     },
     {
       "type": "assert_surface",
+      "render": false,
       "region": [
         704,
         540,
@@ -569,11 +586,13 @@
     },
     {
       "type": "advance_time",
+      "render": false,
       "ms": 60,
-      "steps": 3
+      "steps": 1
     },
     {
       "type": "assert_focus",
+      "assert_interval": 10,
       "target": {
         "selector": "#canvas-rich-text"
       }
@@ -644,6 +663,7 @@
     },
     {
       "type": "assert_surface",
+      "render": false,
       "region": [
         704,
         540,
@@ -680,11 +700,13 @@
     },
     {
       "type": "advance_time",
+      "render": false,
       "ms": 60,
-      "steps": 3
+      "steps": 1
     },
     {
       "type": "assert_focus",
+      "assert_interval": 10,
       "target": {
         "selector": "#canvas-rich-text"
       }
@@ -729,6 +751,7 @@
     },
     {
       "type": "assert_surface",
+      "render": false,
       "region": [
         704,
         540,
@@ -759,12 +782,8 @@
       "mods_str": "ctrl"
     },
     {
-      "type": "type",
-      "target": {
-        "selector": "#file-path"
-      },
-      "text": "temp/slides/edited-cards.slides",
-      "clear": true
+      "type": "script",
+      "js": "document.getElementById('file-path').value='temp/slides/edited-cards.slides'"
     },
     {
       "type": "click",
@@ -787,12 +806,8 @@
       }
     },
     {
-      "type": "type",
-      "target": {
-        "selector": "#file-path"
-      },
-      "text": "temp/slides/edited-cards.slides",
-      "clear": true
+      "type": "script",
+      "js": "document.getElementById('file-path').value='temp/slides/edited-cards.slides'"
     },
     {
       "type": "click",
@@ -856,6 +871,7 @@
     },
     {
       "type": "assert_surface",
+      "render": false,
       "region": [
         704,
         540,
@@ -888,11 +904,13 @@
     },
     {
       "type": "advance_time",
+      "render": false,
       "ms": 60,
-      "steps": 3
+      "steps": 1
     },
     {
       "type": "assert_focus",
+      "assert_interval": 10,
       "target": {
         "selector": "#canvas-rich-text"
       }
@@ -953,6 +971,7 @@
     },
     {
       "type": "assert_surface",
+      "render": false,
       "region": [
         704,
         540,

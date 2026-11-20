@@ -69,6 +69,10 @@ const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g,
     (character) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[character]));
 
 function captureTimingError(capture) {
+    const leftOrigin = capture?.lambda_animation_origin ?? '';
+    const rightOrigin = capture?.browser_animation_origin ?? '';
+    if (leftOrigin !== rightOrigin || (leftOrigin && leftOrigin !== 'post-load'))
+        return 'Capture animation origins differ or are invalid; recapture both renderers with the same origin.';
     const left = capture?.lambda_settle_ms ?? '';
     const right = capture?.browser_settle_ms ?? '';
     if (left === '' && right === '') return '';
@@ -100,6 +104,8 @@ ${rows.map((row) => `<article data-search="${escapeHtml(row.label + ' ' + row.ur
 <a href="${escapeHtml(row.url)}">${escapeHtml(row.url)}</a><small>${escapeHtml(row.error)}</small>
 ${row.lambda_settle_ms !== undefined || row.browser_settle_ms !== undefined ?
     `<small>Post-load window: Lambda ${escapeHtml(row.lambda_settle_ms)} ms · Chromium ${escapeHtml(row.browser_settle_ms)} ms.</small>` : ''}
+${row.lambda_animation_origin || row.browser_animation_origin ?
+    `<small>Animation origin: Lambda ${escapeHtml(row.lambda_animation_origin)} · Chromium ${escapeHtml(row.browser_animation_origin)}.</small>` : ''}
 ${row.severity_reason ? `<small>${escapeHtml(row.severity_reason)}</small>` : ''}
 <small>Lambda ${row.lambda_width || '?'} × ${row.lambda_height || '?'} · ${escapeHtml(row.lambda_attempt_utc || 'capture date not recorded')}
  / Chromium ${row.browser_width || '?'} × ${row.browser_height || '?'} · ${escapeHtml(row.browser_attempt_utc || 'capture date not recorded')}</small>
@@ -136,6 +142,10 @@ function main(args = process.argv.slice(2)) {
         if ((capture?.lambda_settle_ms ?? '') !== '' || (capture?.browser_settle_ms ?? '') !== '') {
             row.lambda_settle_ms = capture?.lambda_settle_ms ?? '';
             row.browser_settle_ms = capture?.browser_settle_ms ?? '';
+        }
+        if (capture?.lambda_animation_origin || capture?.browser_animation_origin) {
+            row.lambda_animation_origin = capture.lambda_animation_origin || '';
+            row.browser_animation_origin = capture.browser_animation_origin || '';
         }
         if (!capture || capture.url !== page.url || capture.lambda_ok !== 'true' || capture.browser_ok !== 'true') {
             return {...row, status: 'capture_unavailable', error: capture?.lambda_error || capture?.browser_error || 'missing or stale capture'};

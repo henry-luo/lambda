@@ -1,5 +1,5 @@
 // D8.3.2 loop-head handoff. Every procedure below owns a top-level
-// `while` that runs past LAMBDA_LOOP_JIT_THRESHOLD (10000), so under AUTO the
+// `while` that runs past the default LAMBDA_LOOP_JIT_THRESHOLD, so under AUTO the
 // running activation may move to its compiled continuation at a later head
 // test. Whether and where it moves depends on worker timing; the output must
 // not. Each case is shaped so a wrong handoff changes what it prints. Under

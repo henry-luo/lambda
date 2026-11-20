@@ -40,7 +40,11 @@ pub fn numbers(node, keys, positive, path) bool^ {
 
 pub fn check_unique(items, path) bool^ {
     let ids = [for (item in items) item.id]
-    let duplicated = [for (id in ids where len([for (other in ids where other == id) other]) > 1) id]
-    if (len(duplicated) > 0) raise fail(path, "duplicate ID " ++ duplicated[0])
-    else true
+    // S5.6.1v2: the common case needs only the native equality scan. On a
+    // duplicate, keep reporting the first offending ID in authored order.
+    if (len(unique(ids)) == len(ids)) true
+    else {
+        let duplicated = [for (id in ids where len([for (other in ids where other == id) other]) > 1) id];
+        if (len(duplicated) > 0) raise fail(path, "duplicate ID " ++ duplicated[0]) else true
+    }
 }

@@ -104,6 +104,17 @@ def project_source_path(relative, root=None, roots=None):
     return root / path
 
 
+def ensure_split_include_dirs(config, roots=None):
+    """Include the owner roots after a profile replaces the include list."""
+    root = Path(__file__).resolve().parent.parent
+    input_root, radiant_root = roots or sibling_roots()
+    includes = config.setdefault('includes', [])
+    for directory in (input_root, radiant_root, input_root / 'test', input_root / 'test/css', radiant_root / 'test'):
+        path = Path(os.path.relpath(directory, root)).as_posix()
+        if path not in includes:
+            includes.append(path)
+
+
 def resolve_split_paths(config):
     """Map owned paths in imported manifests without changing target names."""
     root = Path(__file__).resolve().parent.parent
@@ -130,10 +141,5 @@ def resolve_split_paths(config):
         return value
 
     result = visit(config)
-    # Canonical includes resolve against the owning project, including overrides.
-    includes = result.setdefault('includes', [])
-    for directory in (input_root, radiant_root, input_root / 'test', input_root / 'test/css', radiant_root / 'test'):
-        path = Path(os.path.relpath(directory, root)).as_posix()
-        if path not in includes:
-            includes.append(path)
+    ensure_split_include_dirs(result, (input_root, radiant_root))
     return result

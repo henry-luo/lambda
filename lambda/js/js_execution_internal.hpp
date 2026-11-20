@@ -9,7 +9,6 @@
 
 extern MIR_error_func_t g_batch_mir_error_handler;
 extern unsigned int g_js_mir_optimize_level;
-extern int g_js_force_document_interp;
 extern "C" Item js_process_emit_before_exit(int code);
 extern "C" void js_process_emit_exit(int code);
 bool js_module_ast_prebuild_imports(const char* filename, const char* source,

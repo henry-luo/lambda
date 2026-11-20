@@ -18,9 +18,18 @@ void lambda_mvp_compile_script(Transpiler* tp, Script* script, const char* scrip
 bool lambda_mvp_compile_function(Runtime* runtime, Script* script,
         const AstFuncNode* fn, void** out_boxed_entry);
 
-// builds a private image without mutating the running Script (D8.3.4).
+struct InterpLoopInput {
+    TypeId type;
+    TypeId element; // guard a flat packed ArrayNum when nonzero
+};
+
+// The evaluator freezes cluster membership before submitting an image (D8.3.4).
+int lambda_mvp_collect_satellite_members(Script* script, const AstFuncNode* target,
+        const AstFuncNode** members, int capacity, bool include_compiled = false);
 bool lambda_mvp_compile_function_snapshot(Runtime* runtime, Script* script,
         const AstFuncNode* fn, uint32_t sequence,
+        const AstFuncNode* const* members, int member_count,
+        const InterpLoopInput* loop_inputs,
         InterpSatelliteCancelProbe cancel_probe, void* cancel_context,
         InterpSatelliteImage** out_image);
 
@@ -37,6 +46,7 @@ bool lambda_mvp_lower(LambdaMvpModule* module);
 bool lambda_mvp_finalize(LambdaMvpModule* module, LambdaMvpStats* stats, ArrayList** property_keys);
 void lambda_mvp_destroy(LambdaMvpModule* module);
 bool lambda_mvp_compile_satellite(Transpiler* tp, MIR_context_t ctx,
-    const MirModuleNames* names, MirModuleArtifacts* artifacts, ArrayList** property_keys);
+    const MirModuleNames* names, MirModuleArtifacts* artifacts, ArrayList** property_keys,
+    const AstFuncNode* boxed_target, const InterpLoopInput* loop_inputs);
 #endif
 

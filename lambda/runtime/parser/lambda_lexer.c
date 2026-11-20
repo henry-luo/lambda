@@ -44,7 +44,8 @@ static bool lexer_is_newline(const LambdaLexer* lexer) {
 }
 
 static bool lexer_is_ascii_alpha(char ch) {
-    return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z');
+    unsigned lower = (unsigned char)ch | 0x20;
+    return lower - 'a' <= 'z' - 'a';
 }
 
 static bool lexer_is_digit(char ch) {
@@ -84,13 +85,9 @@ static size_t lexer_unicode_escape_length(const LambdaLexer* lexer) {
 }
 
 static bool lexer_is_ident_start(const LambdaLexer* lexer) {
-    return lexer_is_ident_start_byte(lexer_peek(lexer, 0)) ||
-        lexer_unicode_escape_length(lexer) != 0;
-}
-
-static bool lexer_is_ident_continue(const LambdaLexer* lexer) {
-    return lexer_is_ident_continue_byte(lexer_peek(lexer, 0)) ||
-        lexer_unicode_escape_length(lexer) != 0;
+    char ch = lexer_peek(lexer, 0);
+    return lexer_is_ident_start_byte(ch) ||
+        (ch == '\\' && lexer_unicode_escape_length(lexer) != 0);
 }
 
 // `.digit` continues a member/path chain when the byte before the dot ends a
@@ -115,13 +112,22 @@ static bool lexer_dot_continues_member_target(const LambdaLexer* lexer, size_t s
     return false;
 }
 
-static void lexer_advance_ident_unit(LambdaLexer* lexer) {
-    size_t escaped = lexer_unicode_escape_length(lexer);
-    if (escaped) {
-        for (size_t i = 0; i < escaped; i++) lexer_advance_byte(lexer);
-        return;
+static void lexer_scan_identifier(LambdaLexer* lexer) {
+    const char* source = lexer->source;
+    size_t length = lexer->length;
+    for (;;) {
+        size_t end = lexer->offset;
+        // Identifier runs cannot contain newlines. Advance the column once
+        // per run and validate each embedded escape at its first backslash.
+        while (end < length && lexer_is_ident_continue_byte(source[end])) end++;
+        lexer->column += end - lexer->offset;
+        lexer->offset = end;
+        if (end == length || source[end] != '\\') return;
+        size_t escaped = lexer_unicode_escape_length(lexer);
+        if (!escaped) return;
+        lexer->offset += escaped;
+        lexer->column += escaped;
     }
-    lexer_advance_byte(lexer);
 }
 
 static LambdaToken lexer_make_token(LambdaTokenKind kind, size_t start,
@@ -149,19 +155,21 @@ static LambdaToken lexer_error_token(LambdaLexer* lexer, size_t start,
 // Skip horizontal extras and comments. A line-comment intentionally stops just
 // before its newline so the caller emits the statement-boundary token.
 static bool lexer_skip_extras(LambdaLexer* lexer) {
+    const char* source = lexer->source;
+    size_t length = lexer->length;
     for (;;) {
-        while (lexer_is_horizontal_space(lexer_peek(lexer, 0))) lexer_advance_byte(lexer);
-
-        if (lexer_peek(lexer, 0) != '/' || !lexer_has(lexer, 2)) return true;
-        if (lexer_peek(lexer, 1) == '/') {
-            lexer_advance_byte(lexer);
-            lexer_advance_byte(lexer);
-            while (lexer->offset < lexer->length && !lexer_is_newline(lexer)) {
-                lexer_advance_byte(lexer);
+        size_t end = lexer->offset;
+        while (end < length && lexer_is_horizontal_space(source[end])) end++;
+        // Horizontal extras and line comments can update the byte column in bulk.
+        if (end < length && source[end] == '/' && length - end >= 2 && source[end + 1] == '/') {
+            end += 2;
+            while (end < length && source[end] != '\r' && source[end] != '\n') {
+                end++;
             }
-            continue;
         }
-        if (lexer_peek(lexer, 1) != '*') return true;
+        lexer->column += end - lexer->offset;
+        lexer->offset = end;
+        if (end >= length || source[end] != '/' || length - end < 2 || source[end + 1] != '*') return true;
 
         lexer_advance_byte(lexer);
         lexer_advance_byte(lexer);
@@ -186,84 +194,89 @@ static bool lexer_word_equals(const char* source, size_t start, size_t end,
     return end - start == length && memcmp(source + start, word, length) == 0;
 }
 
-static bool lexer_word_in(const char* source, size_t start, size_t end,
-        const char* const* words, size_t word_count) {
-    for (size_t i = 0; i < word_count; i++) {
-        if (lexer_word_equals(source, start, end, words[i])) return true;
-    }
-    return false;
-}
-
-// The lexer's vocabulary has one owner: these tables. lexer_keyword_kind
-// classifies with them and lambda_lexer_vocabulary_word enumerates them (REPL
-// completion), so a new keyword can never be missing from either.
-struct LexerKeyword { const char* text; LambdaTokenKind kind; };
-static const struct LexerKeyword lexer_keywords[] = {
-        {"let", LAMBDA_TOK_LET}, {"pub", LAMBDA_TOK_PUB},
-        {"var", LAMBDA_TOK_VAR}, {"type", LAMBDA_TOK_TYPE},
-        {"fn", LAMBDA_TOK_FN}, {"pn", LAMBDA_TOK_PN},
-        {"view", LAMBDA_TOK_VIEW}, {"edit", LAMBDA_TOK_EDIT},
-        {"state", LAMBDA_TOK_STATE}, {"on", LAMBDA_TOK_ON},
-        {"if", LAMBDA_TOK_IF}, {"else", LAMBDA_TOK_ELSE},
-        {"match", LAMBDA_TOK_MATCH}, {"case", LAMBDA_TOK_CASE},
-        {"default", LAMBDA_TOK_DEFAULT}, {"for", LAMBDA_TOK_FOR},
-        {"while", LAMBDA_TOK_WHILE}, {"break", LAMBDA_TOK_BREAK},
-        {"continue", LAMBDA_TOK_CONTINUE}, {"return", LAMBDA_TOK_RETURN},
-        {"raise", LAMBDA_TOK_RAISE}, {"import", LAMBDA_TOK_IMPORT},
-        {"put", LAMBDA_TOK_PUT}, {"del", LAMBDA_TOK_DEL},
-        {"commit", LAMBDA_TOK_COMMIT}, {"rollback", LAMBDA_TOK_ROLLBACK},
-        {"open", LAMBDA_TOK_OPEN}, {"grammar", LAMBDA_TOK_GRAMMAR},
-        {"apply", LAMBDA_TOK_APPLY}, {"not", LAMBDA_TOK_NOT},
-        {"div", LAMBDA_TOK_DIV}, {"and", LAMBDA_TOK_AND},
-        {"or", LAMBDA_TOK_OR}, {"to", LAMBDA_TOK_TO},
-        {"is", LAMBDA_TOK_IS}, {"in", LAMBDA_TOK_IN},
-        {"at", LAMBDA_TOK_AT}, {"of", LAMBDA_TOK_OF},
-        {"that", LAMBDA_TOK_THAT},
-        {"where", LAMBDA_TOK_WHERE}, {"order", LAMBDA_TOK_ORDER},
-        {"by", LAMBDA_TOK_BY}, {"group", LAMBDA_TOK_GROUP},
-        {"into", LAMBDA_TOK_INTO}, {"limit", LAMBDA_TOK_LIMIT},
-        {"offset", LAMBDA_TOK_OFFSET}, {"asc", LAMBDA_TOK_ASC},
-        {"desc", LAMBDA_TOK_DESC}, {"last", LAMBDA_TOK_LAST},
-        {"as", LAMBDA_TOK_AS},
-        {"eq", LAMBDA_TOK_EQ_WORD}, {"ne", LAMBDA_TOK_NE_WORD},
-        {"lt", LAMBDA_TOK_LT_WORD}, {"le", LAMBDA_TOK_LE_WORD},
-        {"ge", LAMBDA_TOK_GE_WORD}, {"gt", LAMBDA_TOK_GT_WORD},
-};
-static const char* const lexer_base_types[] = {
-    "null", "any", "bool", "int64", "int", "float", "f64", "complex",
-    "decimal", "integer", "number", "none", "datetime", "date", "time", "binary",
-    "range", "list", "array", "map", "element", "object",
-    "function", "error", "string", "symbol", "i8", "i16", "i32", "i64",
-    "u8", "u16", "u32", "u64", "f16", "f32",
-};
-static const char* const lexer_named_values[] = {"true", "false", "inf", "nan"};
-#define LEXER_TABLE_COUNT(table) (sizeof(table) / sizeof((table)[0]))
+// Lookup and REPL completion share this vocabulary in completion order.
+#define LAMBDA_LEXER_WORDS(WORD, length) \
+    WORD("let", LET, length) WORD("pub", PUB, length) \
+    WORD("var", VAR, length) WORD("type", TYPE, length) \
+    WORD("fn", FN, length) WORD("pn", PN, length) \
+    WORD("view", VIEW, length) WORD("edit", EDIT, length) \
+    WORD("state", STATE, length) WORD("on", ON, length) \
+    WORD("if", IF, length) WORD("else", ELSE, length) \
+    WORD("match", MATCH, length) WORD("case", CASE, length) \
+    WORD("default", DEFAULT, length) WORD("for", FOR, length) \
+    WORD("while", WHILE, length) WORD("break", BREAK, length) \
+    WORD("continue", CONTINUE, length) WORD("return", RETURN, length) \
+    WORD("raise", RAISE, length) WORD("import", IMPORT, length) \
+    WORD("put", PUT, length) WORD("del", DEL, length) \
+    WORD("commit", COMMIT, length) WORD("rollback", ROLLBACK, length) \
+    WORD("open", OPEN, length) WORD("grammar", GRAMMAR, length) \
+    WORD("apply", APPLY, length) WORD("not", NOT, length) \
+    WORD("div", DIV, length) WORD("and", AND, length) \
+    WORD("or", OR, length) WORD("to", TO, length) \
+    WORD("is", IS, length) WORD("in", IN, length) \
+    WORD("at", AT, length) WORD("of", OF, length) \
+    WORD("that", THAT, length) WORD("where", WHERE, length) \
+    WORD("order", ORDER, length) WORD("by", BY, length) \
+    WORD("group", GROUP, length) WORD("into", INTO, length) \
+    WORD("limit", LIMIT, length) WORD("offset", OFFSET, length) \
+    WORD("asc", ASC, length) WORD("desc", DESC, length) \
+    WORD("last", LAST, length) WORD("as", AS, length) \
+    WORD("eq", EQ_WORD, length) WORD("ne", NE_WORD, length) \
+    WORD("lt", LT_WORD, length) WORD("le", LE_WORD, length) \
+    WORD("ge", GE_WORD, length) WORD("gt", GT_WORD, length) \
+    WORD("null", BASE_TYPE, length) WORD("any", BASE_TYPE, length) \
+    WORD("bool", BASE_TYPE, length) WORD("int64", BASE_TYPE, length) \
+    WORD("int", BASE_TYPE, length) WORD("float", BASE_TYPE, length) \
+    WORD("f64", BASE_TYPE, length) WORD("complex", BASE_TYPE, length) \
+    WORD("decimal", BASE_TYPE, length) WORD("integer", BASE_TYPE, length) \
+    WORD("number", BASE_TYPE, length) WORD("none", BASE_TYPE, length) \
+    WORD("datetime", BASE_TYPE, length) WORD("date", BASE_TYPE, length) \
+    WORD("time", BASE_TYPE, length) WORD("binary", BASE_TYPE, length) \
+    WORD("range", BASE_TYPE, length) WORD("list", BASE_TYPE, length) \
+    WORD("array", BASE_TYPE, length) WORD("map", BASE_TYPE, length) \
+    WORD("element", BASE_TYPE, length) WORD("object", BASE_TYPE, length) \
+    WORD("function", BASE_TYPE, length) WORD("error", BASE_TYPE, length) \
+    WORD("string", BASE_TYPE, length) WORD("symbol", BASE_TYPE, length) \
+    WORD("i8", BASE_TYPE, length) WORD("i16", BASE_TYPE, length) \
+    WORD("i32", BASE_TYPE, length) WORD("i64", BASE_TYPE, length) \
+    WORD("u8", BASE_TYPE, length) WORD("u16", BASE_TYPE, length) \
+    WORD("u32", BASE_TYPE, length) WORD("u64", BASE_TYPE, length) \
+    WORD("f16", BASE_TYPE, length) WORD("f32", BASE_TYPE, length) \
+    WORD("true", NAMED_VALUE, length) WORD("false", NAMED_VALUE, length) \
+    WORD("inf", NAMED_VALUE, length) WORD("nan", NAMED_VALUE, length)
 
 static LambdaTokenKind lexer_keyword_kind(const char* source, size_t start, size_t end) {
-    for (size_t i = 0; i < LEXER_TABLE_COUNT(lexer_keywords); i++) {
-        if (lexer_word_equals(source, start, end, lexer_keywords[i].text)) {
-            return lexer_keywords[i].kind;
-        }
+    const char* text = source + start;
+    size_t length = end - start;
+    // Each constant-length arm eliminates other words and lets the compiler
+    // inline fixed-size comparisons. The default also admits future lengths.
+#define MATCH_WORD(word, kind, bytes) \
+    if ((bytes) == sizeof(word) - 1 && memcmp(text, word, sizeof(word) - 1) == 0) \
+        return LAMBDA_TOK_##kind;
+#define WORD_LENGTH(bytes) case bytes: LAMBDA_LEXER_WORDS(MATCH_WORD, bytes) break;
+    switch (length) {
+    WORD_LENGTH(2)
+    WORD_LENGTH(3)
+    WORD_LENGTH(4)
+    WORD_LENGTH(5)
+    WORD_LENGTH(6)
+    WORD_LENGTH(7)
+    WORD_LENGTH(8)
+    default: LAMBDA_LEXER_WORDS(MATCH_WORD, length) break;
     }
-    if (lexer_word_in(source, start, end, lexer_base_types,
-            LEXER_TABLE_COUNT(lexer_base_types))) {
-        return LAMBDA_TOK_BASE_TYPE;
-    }
-    if (lexer_word_in(source, start, end, lexer_named_values,
-            LEXER_TABLE_COUNT(lexer_named_values))) {
-        return LAMBDA_TOK_NAMED_VALUE;
-    }
+#undef WORD_LENGTH
+#undef MATCH_WORD
     return LAMBDA_TOK_IDENTIFIER;
 }
 
 const char* lambda_lexer_vocabulary_word(size_t index) {
-    if (index < LEXER_TABLE_COUNT(lexer_keywords)) return lexer_keywords[index].text;
-    index -= LEXER_TABLE_COUNT(lexer_keywords);
-    if (index < LEXER_TABLE_COUNT(lexer_base_types)) return lexer_base_types[index];
-    index -= LEXER_TABLE_COUNT(lexer_base_types);
-    if (index < LEXER_TABLE_COUNT(lexer_named_values)) return lexer_named_values[index];
-    return NULL;
+#define WORD_TEXT(word, kind, length) word,
+    static const char* const words[] = { LAMBDA_LEXER_WORDS(WORD_TEXT, 0) };
+#undef WORD_TEXT
+    return index < sizeof(words) / sizeof(words[0]) ? words[index] : NULL;
 }
+
+#undef LAMBDA_LEXER_WORDS
 
 // S16.10.1v2: a word is barred from binding names when it is *capture-real* —
 // it can begin a construct, so a binding of that name could not be read back
@@ -560,36 +573,105 @@ LambdaToken lambda_lexer_next(LambdaLexer* lexer) {
     size_t start = lexer->offset;
     uint32_t line = lexer->line;
     uint32_t column = lexer->column;
-    if (!lexer_skip_extras(lexer)) return lexer_error_token(lexer, start, line, column);
-    start = lexer->offset;
-    line = lexer->line;
-    column = lexer->column;
-
-    if (lexer->offset >= lexer->length) {
+    char ch = start < lexer->length ? lexer->source[start] : '\0';
+    // Most adjacent tokens have no extras. Enter the scanner only when the
+    // leading byte can start whitespace or a comment.
+    if (lexer_is_horizontal_space(ch) || ch == '/') {
+        if (!lexer_skip_extras(lexer)) return lexer_error_token(lexer, start, line, column);
+        start = lexer->offset;
+        line = lexer->line;
+        column = lexer->column;
+        ch = start < lexer->length ? lexer->source[start] : '\0';
+    }
+    if (start >= lexer->length) {
         return lexer_make_token(LAMBDA_TOK_EOF, start, line, column, start);
     }
-    if (lexer_is_newline(lexer)) {
+    // Dispatch punctuation by its first byte. Only the operator families
+    // with longer spellings inspect subsequent bytes (S16.2.2v3).
+    char following = lexer->length - start > 1 ? lexer->source[start + 1] : '\0';
+    size_t width = 1;
+    LambdaTokenKind kind;
+    switch (ch) {
+    case '(': kind = LAMBDA_TOK_LPAREN; break;
+    case ')': kind = LAMBDA_TOK_RPAREN; break;
+    case '[': kind = LAMBDA_TOK_LBRACKET; break;
+    case ']': kind = LAMBDA_TOK_RBRACKET; break;
+    case '{': kind = LAMBDA_TOK_LBRACE; break;
+    case '}': kind = LAMBDA_TOK_RBRACE; break;
+    case ',': kind = LAMBDA_TOK_COMMA; break;
+    case ':': kind = LAMBDA_TOK_COLON; break;
+    case ';': kind = LAMBDA_TOK_SEMICOLON; break;
+    case '^': kind = LAMBDA_TOK_CARET; break;
+    case '%': kind = LAMBDA_TOK_PERCENT; break;
+    case '#': kind = LAMBDA_TOK_HASH; break;
+    case '@': kind = LAMBDA_TOK_EFFECT_AT; break;
+    case '&': kind = LAMBDA_TOK_AMPERSAND; break;
+    case '?': kind = LAMBDA_TOK_QUESTION; break;
+    case '/': kind = LAMBDA_TOK_SLASH; break;
+    case '+':
+        if (following == '+') { width = 2; kind = LAMBDA_TOK_PLUS_PLUS; }
+        else kind = LAMBDA_TOK_PLUS;
+        break;
+    case '*':
+        if (following == '*') { width = 2; kind = LAMBDA_TOK_STAR_STAR; }
+        else kind = LAMBDA_TOK_STAR;
+        break;
+    case '-':
+        if (following == '>') { width = 2; kind = LAMBDA_TOK_RETURN_ARROW; }
+        else kind = LAMBDA_TOK_MINUS;
+        break;
+    case '|':
+        if (following == '>') { width = 2; kind = LAMBDA_TOK_PIPE_FORWARD; }
+        else if (following == ':') { width = 2; kind = LAMBDA_TOK_PIPE_FILTER; }
+        else kind = LAMBDA_TOK_PIPE;
+        break;
+    case '=':
+        if (following == '=') {
+            // PTH45v2: reference equality takes precedence over value equality.
+            width = lexer_peek(lexer, 2) == '=' ? 3 : 2;
+            kind = width == 3 ? LAMBDA_TOK_EQ_EQ_EQ : LAMBDA_TOK_EQ_EQ;
+        } else if (following == '>') { width = 2; kind = LAMBDA_TOK_ARROW; }
+        else kind = LAMBDA_TOK_EQ;
+        break;
+    case '!':
+        if (following == '=') { width = 2; kind = LAMBDA_TOK_BANG_EQ; }
+        else kind = LAMBDA_TOK_BANG;
+        break;
+    case '<':
+        if (following == ':') { width = 2; kind = LAMBDA_TOK_SUBTYPE; }
+        else if (following == '=') { width = 2; kind = LAMBDA_TOK_LT_EQ; }
+        else kind = LAMBDA_TOK_LT;
+        break;
+    case '>':
+        if (following == '=') { width = 2; kind = LAMBDA_TOK_GT_EQ; }
+        else kind = LAMBDA_TOK_GT;
+        break;
+    case '.':
+        // Adjacent member targets take step tokens even before a digit.
+        if (lexer_is_digit(following) && !lexer_dot_continues_member_target(lexer, start))
+            goto number;
+        if (following == '?') { width = 2; kind = LAMBDA_TOK_DOT_QUESTION; }
+        else if (following == '.' && lexer_peek(lexer, 2) == '.') {
+            width = 3;
+            kind = LAMBDA_TOK_ELLIPSIS;
+        } else {
+            kind = LAMBDA_TOK_DOT;
+            lexer->after_step_dot = true;
+        }
+        break;
+    case '\r': case '\n':
         lexer_advance_newline(lexer);
-        // a trailing `.` continues across the break (S16.2.1), so the number
-        // on the next line is still its step: `\.` ⏎ `1.2` is `\.1.2`
+        // A trailing dot still selects the next step across a break (S16.2.1).
         lexer->after_step_dot = integer_step;
         return lexer_make_token(LAMBDA_TOK_NEWLINE, start, line, column, lexer->offset);
-    }
-
-    char ch = lexer_peek(lexer, 0);
-    if (ch == '"' || ch == '\'') {
+    case '"': case '\'': {
         bool valid = lexer_scan_quoted(lexer, ch, ch == '"', false);
         return valid ? lexer_make_token(ch == '"' ? LAMBDA_TOK_STRING : LAMBDA_TOK_SYMBOL,
             start, line, column, lexer->offset) : lexer_error_token(lexer, start, line, column);
     }
-    if ((ch == 'b' || ch == 't') && lexer_peek(lexer, 1) == '\'') {
-        bool valid = lexer_scan_binary(lexer, ch == 't');
-        return valid ? lexer_make_token(ch == 'b' ? LAMBDA_TOK_BINARY : LAMBDA_TOK_DATETIME,
-            start, line, column, lexer->offset) : lexer_error_token(lexer, start, line, column);
-    }
-    // A Unicode escape is an identifier unit; a relative root stands alone;
-    // only the remaining backslash forms begin a pattern island.
-    if (ch == '\\' && lexer_unicode_escape_length(lexer) == 0) {
+    case '\\':
+        // An escape starts an identifier. Other backslashes start a root or pattern.
+        if (lexer_unicode_escape_length(lexer)) goto identifier;
         if (lexer_backslash_is_relative_root(lexer)) {
             lexer_advance_byte(lexer);
             return lexer_make_token(LAMBDA_TOK_PATH_REL, start, line, column, lexer->offset);
@@ -598,74 +680,7 @@ LambdaToken lambda_lexer_next(LambdaLexer* lexer) {
             return lexer_make_token(LAMBDA_TOK_PATTERN_ISLAND, start, line, column, lexer->offset);
         }
         return lexer_error_token(lexer, start, line, column);
-    }
-    // `.1` is a float only at an expression boundary; after an adjacent
-    // member target it is the path segment in `record.1` / `\.a.1`.
-    if (lexer_is_digit(ch) || (ch == '.' && lexer_is_digit(lexer_peek(lexer, 1)) &&
-            !lexer_dot_continues_member_target(lexer, start))) {
-        LambdaTokenKind kind = lexer_scan_number(lexer,
-            integer_step && lexer_is_digit(ch));
-        if (lexer_number_runs_into_identifier(lexer)) {
-            return lexer_error_token(lexer, start, line, column);
-        }
-        return lexer_make_token(kind, start, line, column, lexer->offset);
-    }
-
-    if (lexer_is_ident_start(lexer)) {
-        do { lexer_advance_ident_unit(lexer); } while (lexer_is_ident_continue(lexer));
-        if (lexer_word_equals(lexer->source, start, lexer->offset, "decimal") &&
-                lexer->offset + 4 <= lexer->length && lexer->source[lexer->offset] == '.' &&
-                (memcmp(lexer->source + lexer->offset + 1, "inf", 3) == 0 ||
-                 memcmp(lexer->source + lexer->offset + 1, "nan", 3) == 0) &&
-                (lexer->offset + 4 == lexer->length ||
-                 !lexer_is_ident_continue_byte(lexer->source[lexer->offset + 4]))) {
-            for (int i = 0; i < 4; i++) lexer_advance_byte(lexer);
-            return lexer_make_token(LAMBDA_TOK_NAMED_VALUE, start, line, column, lexer->offset);
-        }
-        LambdaTokenKind word = lexer_keyword_kind(lexer->source, start, lexer->offset);
-        // S7.6.8: only contiguous `or^` is the combined fallback operator.
-        if (word == LAMBDA_TOK_OR && lexer->offset < lexer->length && lexer->source[lexer->offset] == '^') {
-            lexer_advance_byte(lexer);
-            word = LAMBDA_TOK_OR_CARET;
-        }
-        return lexer_make_token(word, start, line, column, lexer->offset);
-    }
-
-#define PUNCT1(character, token_kind) \
-    case character: lexer_advance_byte(lexer); return lexer_make_token(token_kind, start, line, column, lexer->offset)
-    switch (ch) {
-    PUNCT1('(', LAMBDA_TOK_LPAREN);
-    PUNCT1(')', LAMBDA_TOK_RPAREN);
-    PUNCT1('[', LAMBDA_TOK_LBRACKET);
-    PUNCT1(']', LAMBDA_TOK_RBRACKET);
-    PUNCT1('{', LAMBDA_TOK_LBRACE);
-    PUNCT1('}', LAMBDA_TOK_RBRACE);
-    PUNCT1(',', LAMBDA_TOK_COMMA);
-    PUNCT1(':', LAMBDA_TOK_COLON);
-    PUNCT1(';', LAMBDA_TOK_SEMICOLON);
-    PUNCT1('^', LAMBDA_TOK_CARET);
-    PUNCT1('%', LAMBDA_TOK_PERCENT);
-    // PTH32: `#` is free -- Lambda comments are `//` and `/* */`.
-    PUNCT1('#', LAMBDA_TOK_HASH);
-    PUNCT1('@', LAMBDA_TOK_EFFECT_AT);
-    default: break;
-    }
-#undef PUNCT1
-
-    if (ch == '.') {
-        if (lexer_peek(lexer, 1) == '?') {
-            lexer_advance_byte(lexer); lexer_advance_byte(lexer);
-            return lexer_make_token(LAMBDA_TOK_DOT_QUESTION, start, line, column, lexer->offset);
-        }
-        if (lexer_peek(lexer, 1) == '.' && lexer_peek(lexer, 2) == '.') {
-            lexer_advance_byte(lexer); lexer_advance_byte(lexer); lexer_advance_byte(lexer);
-            return lexer_make_token(LAMBDA_TOK_ELLIPSIS, start, line, column, lexer->offset);
-        }
-        lexer_advance_byte(lexer);
-        lexer->after_step_dot = true;
-        return lexer_make_token(LAMBDA_TOK_DOT, start, line, column, lexer->offset);
-    }
-    if (ch == '~') {
+    case '~':
         lexer_advance_byte(lexer);
         if (lexer_peek(lexer, 0) == '~') {
             lexer_advance_byte(lexer);
@@ -678,7 +693,7 @@ LambdaToken lambda_lexer_next(LambdaLexer* lexer) {
         // keeps the two-token reading: `~ key` is the current item then `key`.
         if (lexer_is_ident_start(lexer)) {
             size_t word_start = lexer->offset;
-            do { lexer_advance_ident_unit(lexer); } while (lexer_is_ident_continue(lexer));
+            lexer_scan_identifier(lexer);
             if (lexer_word_equals(lexer->source, word_start, lexer->offset, "key")) {
                 return lexer_make_token(LAMBDA_TOK_TILDE_KEY, start, line, column, lexer->offset);
             }
@@ -695,103 +710,44 @@ LambdaToken lambda_lexer_next(LambdaLexer* lexer) {
             return lexer_make_token(LAMBDA_TOK_TILDE_ACCESSOR, start, line, column, lexer->offset);
         }
         return lexer_make_token(LAMBDA_TOK_TILDE, start, line, column, lexer->offset);
+    default:
+        if (lexer_is_ident_start_byte(ch)) goto identifier;
+        if (lexer_is_digit(ch)) goto number;
+        return lexer_error_token(lexer, start, line, column);
     }
-    if (ch == '+') {
+    lexer->offset = start + width;
+    lexer->column = column + width;
+    return lexer_make_token(kind, start, line, column, lexer->offset);
+
+number:
+    kind = lexer_scan_number(lexer, integer_step && lexer_is_digit(ch));
+    if (lexer_number_runs_into_identifier(lexer)) {
+        return lexer_error_token(lexer, start, line, column);
+    }
+    return lexer_make_token(kind, start, line, column, lexer->offset);
+
+identifier:
+    if ((ch == 'b' || ch == 't') && following == '\'') {
+        bool valid = lexer_scan_binary(lexer, ch == 't');
+        return valid ? lexer_make_token(ch == 'b' ? LAMBDA_TOK_BINARY : LAMBDA_TOK_DATETIME,
+            start, line, column, lexer->offset) : lexer_error_token(lexer, start, line, column);
+    }
+    lexer_scan_identifier(lexer);
+    if (ch == 'd' && lexer_word_equals(lexer->source, start, lexer->offset, "decimal") &&
+            lexer->length - lexer->offset >= 4 && lexer->source[lexer->offset] == '.' &&
+            (memcmp(lexer->source + lexer->offset + 1, "inf", 3) == 0 ||
+             memcmp(lexer->source + lexer->offset + 1, "nan", 3) == 0) &&
+            (lexer->offset + 4 == lexer->length ||
+             !lexer_is_ident_continue_byte(lexer->source[lexer->offset + 4]))) {
+        lexer->offset += 4;
+        lexer->column += 4;
+        return lexer_make_token(LAMBDA_TOK_NAMED_VALUE, start, line, column, lexer->offset);
+    }
+    LambdaTokenKind word = lexer_keyword_kind(lexer->source, start, lexer->offset);
+    // S7.6.8: only contiguous `or^` is the combined fallback operator.
+    if (word == LAMBDA_TOK_OR && lexer->offset < lexer->length && lexer->source[lexer->offset] == '^') {
         lexer_advance_byte(lexer);
-        if (lexer_peek(lexer, 0) == '+') {
-            lexer_advance_byte(lexer);
-            return lexer_make_token(LAMBDA_TOK_PLUS_PLUS, start, line, column, lexer->offset);
-        }
-        return lexer_make_token(LAMBDA_TOK_PLUS, start, line, column, lexer->offset);
+        word = LAMBDA_TOK_OR_CARET;
     }
-    if (ch == '*') {
-        lexer_advance_byte(lexer);
-        if (lexer_peek(lexer, 0) == '*') {
-            lexer_advance_byte(lexer);
-            return lexer_make_token(LAMBDA_TOK_STAR_STAR, start, line, column, lexer->offset);
-        }
-        return lexer_make_token(LAMBDA_TOK_STAR, start, line, column, lexer->offset);
-    }
-    if (ch == '|') {
-        lexer_advance_byte(lexer);
-        if (lexer_peek(lexer, 0) == '>') {
-            lexer_advance_byte(lexer);
-            return lexer_make_token(LAMBDA_TOK_PIPE_FORWARD, start, line, column, lexer->offset);
-        }
-        // S10.1.6: longest match makes `|:` the filter stage. A union directly
-        // followed by `:` has no right operand, so it was never valid (the
-        // glued `case a |: …` arm stays an error)
-        if (lexer_peek(lexer, 0) == ':') {
-            lexer_advance_byte(lexer);
-            return lexer_make_token(LAMBDA_TOK_PIPE_FILTER, start, line, column, lexer->offset);
-        }
-        return lexer_make_token(LAMBDA_TOK_PIPE, start, line, column, lexer->offset);
-    }
-    if (ch == '=') {
-        lexer_advance_byte(lexer);
-        if (lexer_peek(lexer, 0) == '=') {
-            lexer_advance_byte(lexer);
-            // PTH45v2: `===`, reference equality. Longest match, so `==` keeps
-            // its meaning and `a === b` never lexes as `a == (= b)`.
-            if (lexer_peek(lexer, 0) == '=') {
-                lexer_advance_byte(lexer);
-                return lexer_make_token(LAMBDA_TOK_EQ_EQ_EQ, start, line, column, lexer->offset);
-            }
-            return lexer_make_token(LAMBDA_TOK_EQ_EQ, start, line, column, lexer->offset);
-        }
-        if (lexer_peek(lexer, 0) == '>') {
-            lexer_advance_byte(lexer);
-            return lexer_make_token(LAMBDA_TOK_ARROW, start, line, column, lexer->offset);
-        }
-        return lexer_make_token(LAMBDA_TOK_EQ, start, line, column, lexer->offset);
-    }
-    if (ch == '!') {
-        lexer_advance_byte(lexer);
-        if (lexer_peek(lexer, 0) == '=') {
-            lexer_advance_byte(lexer);
-            return lexer_make_token(LAMBDA_TOK_BANG_EQ, start, line, column, lexer->offset);
-        }
-        return lexer_make_token(LAMBDA_TOK_BANG, start, line, column, lexer->offset);
-    }
-    if (ch == '<') {
-        lexer_advance_byte(lexer);
-        if (lexer_peek(lexer, 0) == ':') {
-            lexer_advance_byte(lexer);
-            return lexer_make_token(LAMBDA_TOK_SUBTYPE, start, line, column, lexer->offset);
-        }
-        if (lexer_peek(lexer, 0) == '=') {
-            lexer_advance_byte(lexer);
-            return lexer_make_token(LAMBDA_TOK_LT_EQ, start, line, column, lexer->offset);
-        }
-        return lexer_make_token(LAMBDA_TOK_LT, start, line, column, lexer->offset);
-    }
-    if (ch == '>') {
-        lexer_advance_byte(lexer);
-        if (lexer_peek(lexer, 0) == '=') {
-            lexer_advance_byte(lexer);
-            return lexer_make_token(LAMBDA_TOK_GT_EQ, start, line, column, lexer->offset);
-        }
-        return lexer_make_token(LAMBDA_TOK_GT, start, line, column, lexer->offset);
-    }
-    if (ch == '&') {
-        lexer_advance_byte(lexer);
-        return lexer_make_token(LAMBDA_TOK_AMPERSAND, start, line, column, lexer->offset);
-    }
-    if (ch == '?') {
-        lexer_advance_byte(lexer);
-        return lexer_make_token(LAMBDA_TOK_QUESTION, start, line, column, lexer->offset);
-    }
-    if (ch == '/') {
-        lexer_advance_byte(lexer);
-        return lexer_make_token(LAMBDA_TOK_SLASH, start, line, column, lexer->offset);
-    }
-    if (ch == '-') {
-        lexer_advance_byte(lexer);
-        if (lexer_peek(lexer, 0) == '>') {
-            lexer_advance_byte(lexer);
-            return lexer_make_token(LAMBDA_TOK_RETURN_ARROW, start, line, column, lexer->offset);
-        }
-        return lexer_make_token(LAMBDA_TOK_MINUS, start, line, column, lexer->offset);
-    }
-    return lexer_error_token(lexer, start, line, column);
+    return lexer_make_token(word, start, line, column, lexer->offset);
 }

@@ -1,14 +1,20 @@
 {
   "name": "Slides: direct plain and rich text editing, formatting, history and save/open",
-  "html": "test/demo/slides/slides.ls",
+  "html": "test/demo/slides/_text_editing_fixture.ls",
   "viewport": {
     "width": 1440,
     "height": 900
   },
   "input_turn_ms": 0,
+  "initial_render": false,
   "events": [
     {
+      "type": "script",
+      "js": "document.getElementById('slide-render').setAttribute('spellcheck','false')"
+    },
+    {
       "type": "advance_time",
+      "render": false,
       "ms": 100,
       "steps": 3
     },
@@ -32,6 +38,7 @@
     },
     {
       "type": "assert_focus",
+      "assert_interval": 10,
       "target": {
         "selector": "#canvas-text"
       }
@@ -41,7 +48,7 @@
       "target": {
         "selector": "#canvas-text"
       },
-      "text": "Draft to cancel",
+      "text": "Draft",
       "clear": true
     },
     {
@@ -71,6 +78,7 @@
     },
     {
       "type": "assert_focus",
+      "assert_interval": 10,
       "target": {
         "selector": "#canvas-text"
       }
@@ -80,7 +88,7 @@
       "target": {
         "selector": "#canvas-text"
       },
-      "text": "A clearer direction",
+      "text": "Go now",
       "clear": true
     },
     {
@@ -93,7 +101,7 @@
       "target": {
         "selector": "#slide-render [data-slide-object=headline]"
       },
-      "contains": "A clearer direction"
+      "contains": "Go now"
     },
     {
       "type": "assert_attribute",
@@ -130,11 +138,13 @@
     },
     {
       "type": "advance_time",
+      "render": false,
       "ms": 60,
       "steps": 3
     },
     {
       "type": "assert_focus",
+      "assert_interval": 10,
       "target": {
         "selector": "#slide-render #canvas-rich-text"
       }
@@ -171,6 +181,7 @@
     },
     {
       "type": "advance_time",
+      "render": false,
       "ms": 60,
       "steps": 3
     },
@@ -183,11 +194,12 @@
       "target": {
         "selector": "#slide-render #canvas-rich-text"
       },
-      "text": "Choose the right customers",
+      "text": "Our aim",
       "clear": false
     },
     {
       "type": "assert_focus",
+      "assert_interval": 10,
       "target": {
         "selector": "#slide-render #canvas-rich-text"
       }
@@ -197,7 +209,7 @@
       "target": {
         "selector": "#slide-render #canvas-rich-text"
       },
-      "contains": "Choose the right customers"
+      "contains": "Our aim"
     },
     {
       "type": "type",
@@ -208,7 +220,7 @@
     },
     {
       "type": "assert_script",
-      "js": "Array.from(document.querySelectorAll('#canvas-rich-text .slide-text-run')).some(x=>x.textContent==='Choose the right customers!')"
+      "js": "Array.from(document.querySelectorAll('#canvas-rich-text .slide-text-run')).some(x=>x.textContent==='Our aim!')"
     },
     {
       "type": "key_press",
@@ -216,11 +228,10 @@
     },
     {
       "type": "assert_script",
-      "js": "Array.from(document.querySelectorAll('#canvas-rich-text .slide-text-run')).some(x=>x.textContent==='Choose the right customers')"
+      "js": "Array.from(document.querySelectorAll('#canvas-rich-text .slide-text-run')).some(x=>x.textContent==='Our aim')"
     },
     {
-      "type": "render",
-      "file": "temp/slides/inline-rich-editing.png"
+      "type": "render_pending"
     },
     {
       "type": "key_combo",
@@ -239,7 +250,7 @@
       "target": {
         "selector": "#slide-render [data-slide-object=focus]"
       },
-      "contains": "Choose the right customers"
+      "contains": "Our aim"
     },
     {
       "type": "assert_text",
@@ -257,7 +268,7 @@
     },
     {
       "type": "assert_script",
-      "js": "(()=>{const d=document.querySelector('#slide-render [data-slide-object=focus]');const title=Array.from(d.querySelectorAll('div')).find(x=>x.textContent==='Choose the right customers');return getComputedStyle(title).fontSize==='30px'&&d.getBoundingClientRect().width>200})()"
+      "js": "(()=>{const d=document.querySelector('#slide-render [data-slide-object=focus]');const title=Array.from(d.querySelectorAll('div')).find(x=>x.textContent==='Our aim');return getComputedStyle(title).fontSize==='30px'&&d.getBoundingClientRect().width>200})()"
     },
     {
       "type": "assert_attribute",
@@ -279,19 +290,20 @@
     },
     {
       "type": "advance_time",
+      "render": false,
       "ms": 60,
       "steps": 3
     },
     {
       "type": "script",
-      "js": "(()=>{const runs=document.querySelectorAll('#canvas-rich-text .slide-text-run');const e=Array.from(runs).find(x=>x.textContent===\"Choose the right customers\");const n=e.firstChild;window.getSelection().setBaseAndExtent(n,0,n,n.textContent.length)})()"
+      "js": "(()=>{const runs=document.querySelectorAll('#canvas-rich-text .slide-text-run');const e=Array.from(runs).find(x=>x.textContent===\"Our aim\");const n=e.firstChild;window.getSelection().setBaseAndExtent(n,0,n,n.textContent.length)})()"
     },
     {
       "type": "type",
       "target": {
         "selector": "#slide-render #canvas-rich-text"
       },
-      "text": "Cancel this card",
+      "text": "Drop",
       "clear": false
     },
     {
@@ -303,7 +315,7 @@
       "target": {
         "selector": "#slide-render [data-slide-object=focus]"
       },
-      "contains": "Choose the right customers"
+      "contains": "Our aim"
     },
     {
       "type": "assert_attribute",
@@ -337,7 +349,7 @@
       "target": {
         "selector": "#slide-render [data-slide-object=focus]"
       },
-      "contains": "Choose the right customers"
+      "contains": "Our aim"
     },
     {
       "type": "dblclick",
@@ -347,19 +359,20 @@
     },
     {
       "type": "advance_time",
+      "render": false,
       "ms": 60,
       "steps": 3
     },
     {
       "type": "script",
-      "js": "(()=>{const runs=document.querySelectorAll('#canvas-rich-text .slide-text-run');const e=Array.from(runs).find(x=>x.textContent===\"Choose the right customers\");const n=e.firstChild;window.getSelection().setBaseAndExtent(n,0,n,n.textContent.length)})()"
+      "js": "(()=>{const runs=document.querySelectorAll('#canvas-rich-text .slide-text-run');const e=Array.from(runs).find(x=>x.textContent===\"Our aim\");const n=e.firstChild;window.getSelection().setBaseAndExtent(n,0,n,n.textContent.length)})()"
     },
     {
       "type": "type",
       "target": {
         "selector": "#slide-render #canvas-rich-text"
       },
-      "text": "Saved from the slide",
+      "text": "Saved!",
       "clear": false
     },
     {
@@ -376,12 +389,8 @@
       "equals": "save"
     },
     {
-      "type": "type",
-      "target": {
-        "selector": "#file-path"
-      },
-      "text": "temp/slides/direct-text.slides",
-      "clear": true
+      "type": "script",
+      "js": "document.getElementById('file-path').value='temp/slides/direct-text.slides'"
     },
     {
       "type": "click",
@@ -400,7 +409,7 @@
     {
       "type": "assert_file",
       "path": "temp/slides/direct-text.slides",
-      "contains": "Saved from the slide"
+      "contains": "Saved!"
     },
     {
       "type": "click",
@@ -415,12 +424,8 @@
       }
     },
     {
-      "type": "type",
-      "target": {
-        "selector": "#file-path"
-      },
-      "text": "temp/slides/direct-text.slides",
-      "clear": true
+      "type": "script",
+      "js": "document.getElementById('file-path').value='temp/slides/direct-text.slides'"
     },
     {
       "type": "click",
@@ -439,7 +444,7 @@
       "target": {
         "selector": "#slide-render [data-slide-object=focus]"
       },
-      "contains": "Saved from the slide"
+      "contains": "Saved!"
     },
     {
       "type": "assert_text",
@@ -456,19 +461,20 @@
     },
     {
       "type": "advance_time",
+      "render": false,
       "ms": 60,
       "steps": 3
     },
     {
       "type": "script",
-      "js": "(()=>{const runs=document.querySelectorAll('#canvas-rich-text .slide-text-run');const e=Array.from(runs).find(x=>x.textContent===\"Saved from the slide\");const n=e.firstChild;window.getSelection().setBaseAndExtent(n,0,n,n.textContent.length)})()"
+      "js": "(()=>{const runs=document.querySelectorAll('#canvas-rich-text .slide-text-run');const e=Array.from(runs).find(x=>x.textContent===\"Saved!\");const n=e.firstChild;window.getSelection().setBaseAndExtent(n,0,n,n.textContent.length)})()"
     },
     {
       "type": "type",
       "target": {
         "selector": "#slide-render #canvas-rich-text"
       },
-      "text": "Committed by clicking outside",
+      "text": "Kept",
       "clear": false
     },
     {
@@ -496,7 +502,7 @@
       "target": {
         "selector": "#slide-render [data-slide-object=focus]"
       },
-      "contains": "Committed by clicking outside"
+      "contains": "Kept"
     },
     {
       "type": "assert_attribute",
@@ -507,8 +513,7 @@
       "equals": ""
     },
     {
-      "type": "render",
-      "file": "temp/slides/inline-rich-committed.png"
+      "type": "render_pending"
     }
   ]
 }

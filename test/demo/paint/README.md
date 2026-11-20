@@ -12,7 +12,7 @@ repaints just the pixels a stroke touched.
 
 - **Tools:** Brush (B), Eraser (E), Picker (I) takes the colour under a click, Hand (H) drags the
   canvas. The middle button or a held space bar also pans.
-- **Brushes:** Round, Airbrush and Marker (a wash that does not darken where it overlaps) are dab
+- **Brushes:** Choose a brush from the **Brush** menu. Round, Airbrush and Marker (a wash that does not darken where it overlaps) are dab
   brushes. Pencil, Ink, Charcoal and Blender are MyPaint-model brushes loaded from `brushes/*.myb`.
   Blender smears the paint under it. Type a path to any version 3 `.myb` file and press
   **Import .myb** to add it to the palette; settings this engine does not render are listed in the
@@ -55,6 +55,7 @@ demo.
   `RADIANT_DAMAGE_VERIFY=1 ./lambda.exe view test/demo/paint/paint.ls --headless --event-file test/ui/paint/demo.json`.
 - `test/ui/paint/watercolor.json` checks watercolor pigment selection, dab and bristle strokes,
   undo/redo and direct drying at the demo's full canvas size.
+- `test/ui/paint/brush_menu.json` checks brush selection in a narrow window.
 - `test/lambda/paint/paint_session.ls` covers the session API the app uses.
 
 Simulated pen batches (`event_sim`'s `samples`) should span no more time than the gap to the next

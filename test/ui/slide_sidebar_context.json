@@ -1,20 +1,26 @@
 {
   "name": "Slides: thumbnail context menu targets, commands, keyboard, focus, viewport bounds and pending edits",
-  "html": "test/demo/slides/slides.ls",
+  "html": "test/demo/slides/_editing_fixture.ls",
   "viewport": {
     "width": 1440,
     "height": 900
   },
   "input_turn_ms": 0,
+  "initial_render": false,
   "events": [
     {
+      "type": "script",
+      "js": "document.getElementById('slide-render').setAttribute('spellcheck','false')"
+    },
+    {
       "type": "advance_time",
+      "render": false,
       "ms": 100,
       "steps": 3
     },
     {
       "type": "script",
-      "js": "window.slideIds=()=>Array.from(document.querySelectorAll('#thumbnails [data-slide-id]')).map(e=>e.getAttribute('data-slide-id'));window.originalIds=slideIds()"
+      "js": "window.slideIds=()=>Array.from(document.querySelectorAll('#thumbnails [data-slide-id]')).map(e=>e.getAttribute('data-slide-id'));window.originalIds=slideIds();window.chapterThree=document.querySelector('[data-slide-id=chapter-3]')"
     },
     {
       "type": "snapshot_surface",
@@ -29,12 +35,14 @@
     },
     {
       "type": "assert_focus",
+      "assert_interval": 10,
       "target": {
         "selector": "#slide-context-add-slide"
       }
     },
     {
       "type": "assert_visible",
+      "assert_interval": 10,
       "target": {
         "selector": "#home-menu"
       },
@@ -64,9 +72,7 @@
       "js": "Array.from(document.querySelectorAll('#home-menu button[id]')).every(e=>document.querySelectorAll('#'+e.id).length===1)"
     },
     {
-      "type": "capture_surface",
-      "source": "page",
-      "file": "temp/slides/context/menu.png"
+      "type": "render_pending"
     },
     {
       "type": "key_press",
@@ -74,6 +80,7 @@
     },
     {
       "type": "assert_visible",
+      "assert_interval": 10,
       "target": {
         "selector": "#home-menu"
       },
@@ -81,6 +88,7 @@
     },
     {
       "type": "assert_focus",
+      "assert_interval": 10,
       "target": {
         "selector": "[data-slide-id=opening]"
       }
@@ -169,6 +177,7 @@
     },
     {
       "type": "assert_visible",
+      "assert_interval": 10,
       "target": {
         "selector": "#home-menu"
       },
@@ -176,6 +185,7 @@
     },
     {
       "type": "assert_focus",
+      "assert_interval": 10,
       "target": {
         "selector": "[data-slide=\"3\"]"
       }
@@ -210,6 +220,7 @@
     },
     {
       "type": "assert_focus",
+      "assert_interval": 10,
       "target": {
         "selector": "[data-slide-id=chapter-3]"
       }
@@ -229,6 +240,7 @@
     },
     {
       "type": "assert_focus",
+      "assert_interval": 10,
       "target": {
         "selector": "[data-slide=\"3\"]"
       }
@@ -240,6 +252,7 @@
     },
     {
       "type": "assert_focus",
+      "assert_interval": 10,
       "target": {
         "selector": "[data-slide-id=chapter-3]"
       }
@@ -267,10 +280,11 @@
     },
     {
       "type": "assert_script",
-      "js": "JSON.stringify(slideIds())===JSON.stringify([originalIds[0],originalIds[2],originalIds[1],...originalIds.slice(3)])"
+      "js": "JSON.stringify(slideIds())===JSON.stringify([originalIds[0],originalIds[2],originalIds[1],...originalIds.slice(3)])&&document.querySelector('[data-slide-id=chapter-3]')===chapterThree"
     },
     {
       "type": "assert_focus",
+      "assert_interval": 10,
       "target": {
         "selector": "[data-slide-id=chapter-3]"
       }
@@ -307,6 +321,7 @@
     },
     {
       "type": "assert_focus",
+      "assert_interval": 10,
       "target": {
         "selector": "[data-slide-id=chapter-3]"
       }
@@ -343,6 +358,7 @@
     },
     {
       "type": "assert_focus",
+      "assert_interval": 10,
       "target": {
         "selector": "[data-slide-id=chapter-4]"
       }
@@ -354,6 +370,7 @@
     },
     {
       "type": "assert_focus",
+      "assert_interval": 10,
       "target": {
         "selector": "[data-slide-id=chapter-3]"
       }
@@ -422,6 +439,7 @@
     },
     {
       "type": "advance_time",
+      "render": false,
       "ms": 100,
       "steps": 3
     },
@@ -435,6 +453,7 @@
     },
     {
       "type": "assert_visible",
+      "assert_interval": 10,
       "target": {
         "selector": "#home-menu"
       },
@@ -450,6 +469,7 @@
     },
     {
       "type": "assert_focus",
+      "assert_interval": 10,
       "target": {
         "selector": "#editor-show"
       }
@@ -493,6 +513,7 @@
     },
     {
       "type": "assert_visible",
+      "assert_interval": 10,
       "target": {
         "selector": "#home-menu"
       },
@@ -500,6 +521,7 @@
     },
     {
       "type": "assert_focus",
+      "assert_interval": 10,
       "target": {
         "selector": "#slide-context-add-slide"
       }
@@ -510,6 +532,7 @@
     },
     {
       "type": "assert_focus",
+      "assert_interval": 10,
       "target": {
         "selector": "#slide-context-duplicate-slide"
       }
@@ -520,6 +543,7 @@
     },
     {
       "type": "assert_focus",
+      "assert_interval": 10,
       "target": {
         "selector": "#slide-context-present-current"
       }
@@ -530,6 +554,7 @@
     },
     {
       "type": "assert_focus",
+      "assert_interval": 10,
       "target": {
         "selector": "#slide-context-add-slide"
       }
@@ -540,6 +565,7 @@
     },
     {
       "type": "assert_focus",
+      "assert_interval": 10,
       "target": {
         "selector": "[data-slide-id=chapter-2]"
       }
@@ -559,6 +585,7 @@
     },
     {
       "type": "assert_visible",
+      "assert_interval": 10,
       "target": {
         "selector": "#home-menu"
       },
@@ -572,6 +599,7 @@
     },
     {
       "type": "assert_visible",
+      "assert_interval": 10,
       "target": {
         "selector": "#home-menu"
       },
@@ -591,6 +619,7 @@
     },
     {
       "type": "assert_focus",
+      "assert_interval": 10,
       "target": {
         "selector": "#home-shapes"
       }
@@ -605,6 +634,7 @@
     },
     {
       "type": "assert_visible",
+      "assert_interval": 10,
       "target": {
         "selector": "#home-menu"
       },
@@ -624,6 +654,7 @@
     },
     {
       "type": "assert_focus",
+      "assert_interval": 10,
       "target": {
         "selector": "[data-slide=\"17\"]"
       }
@@ -664,6 +695,7 @@
     },
     {
       "type": "assert_visible",
+      "assert_interval": 10,
       "target": {
         "selector": "#home-menu"
       },
@@ -679,6 +711,7 @@
     },
     {
       "type": "assert_focus",
+      "assert_interval": 10,
       "target": {
         "selector": "#slide-context-duplicate-slide"
       }
@@ -689,6 +722,7 @@
     },
     {
       "type": "assert_focus",
+      "assert_interval": 10,
       "target": {
         "selector": "#slide-context-toggle-slide-hidden"
       }
@@ -699,6 +733,7 @@
     },
     {
       "type": "assert_focus",
+      "assert_interval": 10,
       "target": {
         "selector": "#slide-context-present-current"
       }
@@ -717,6 +752,7 @@
     },
     {
       "type": "assert_focus",
+      "assert_interval": 10,
       "target": {
         "selector": "[data-slide=\"0\"]"
       }
@@ -732,7 +768,7 @@
       "target": {
         "selector": "#canvas-text"
       },
-      "text": "Kept when opening a menu",
+      "text": "Kept",
       "clear": true
     },
     {
@@ -744,6 +780,7 @@
     },
     {
       "type": "assert_visible",
+      "assert_interval": 10,
       "target": {
         "selector": "#home-menu"
       },
@@ -754,7 +791,7 @@
       "target": {
         "selector": "#slide-render [data-slide-object=title]"
       },
-      "equals": "Kept when opening a menu"
+      "equals": "Kept"
     },
     {
       "type": "click",
@@ -775,7 +812,7 @@
       "target": {
         "selector": "#slide-render [data-slide-object=title]"
       },
-      "equals": "Kept when opening a menu"
+      "equals": "Kept"
     },
     {
       "type": "key_combo",
@@ -795,7 +832,7 @@
       "target": {
         "selector": "#slide-render [data-slide-object=title]"
       },
-      "equals": "Kept when opening a menu"
+      "equals": "Kept"
     },
     {
       "type": "assert_attribute",

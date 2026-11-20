@@ -1435,6 +1435,9 @@ RADIANT_C_API Item fn_radiant_focused(Item node_item) {
 RADIANT_C_API Item fn_radiant_focus_set(Item node_item, Item from_keyboard_item) {
     DomElement* elem = radiant_dom_element_from_item(node_item, "FOCUS_SET");
     DocState* state = elem && elem->doc ? (DocState*)elem->doc->state : nullptr;
+    // The native transition revalidates its target. Both checks see the same
+    // pending author writes and can share a cascade until focus is committed.
+    CssomCascadeQueryScope cascade;
     if (!state || !is_view_programmatically_focusable((View*)elem)) {
         return radiant_bool_item(false);
     }
@@ -4620,9 +4623,24 @@ static const ContextCapsuleOps radiant_query_font_cache_ops = {
     nullptr, radiant_query_math_cache_clear, radiant_query_font_cache_destroy
 };
 
-// compare complete resource bytes and normalized styles, never GC addresses or
-// family names alone. Oversized snapshots retain the uncached query path.
-static bool radiant_query_font_key(Item faces, ByteBuilder* key) {
+struct RadiantQueryFontKey {
+    ByteBuilder* write;
+    const ByteBuilder* match;
+    size_t offset = 0;
+
+    bool field(const void* bytes, size_t size) {
+        constexpr size_t limit = 8 * 1024 * 1024;
+        if (write) return byte_builder_append_limited(write, bytes, size, limit);
+        if (size > match->length - offset || memcmp(match->data + offset, bytes, size) != 0)
+            return false;
+        offset += size;
+        return true;
+    }
+};
+
+// Compare exact bytes and normalized styles in place on a hit. Rebuilding a
+// second copy of the font snapshot for every glyph query wastes memory bandwidth.
+static bool radiant_query_font_key(Item faces, RadiantQueryFontKey key) {
     // a query without faces (system fonts only) is the common case and needs a
     // key too: rebuilding its context per call rescanned every font directory.
     // Accept exactly what radiant_build_query_fonts accepts.
@@ -4631,19 +4649,18 @@ static bool radiant_query_font_key(Item faces, ByteBuilder* key) {
     Rooted<Item> owner(roots, faces);
     int64_t count = radiant_item_is_missing(faces) ? 0 : fn_len(owner.get());
     if (count < 0) return false;
-    const size_t limit = 8 * 1024 * 1024;
-    if (!byte_builder_append_limited(key, &count, sizeof(count), limit)) return false;
+    if (!key.field(&count, sizeof(count))) return false;
     for (int64_t index = 0; index < count; index++) {
         RadiantQueryFace face = {};
         if (!radiant_query_face(owner.get(), index, &face)) return false;
-        if (!byte_builder_append_limited(key, face.style.family, strlen(face.style.family) + 1, limit) ||
-            !byte_builder_append_limited(key, &face.style.size_px, sizeof(face.style.size_px), limit) ||
-            !byte_builder_append_limited(key, &face.style.weight, sizeof(face.style.weight), limit) ||
-            !byte_builder_append_limited(key, &face.style.slant, sizeof(face.style.slant), limit) ||
-            !byte_builder_append_limited(key, &face.length, sizeof(face.length), limit) ||
-            !byte_builder_append_limited(key, face.data, face.length, limit)) return false;
+        if (!key.field(face.style.family, strlen(face.style.family) + 1) ||
+            !key.field(&face.style.size_px, sizeof(face.style.size_px)) ||
+            !key.field(&face.style.weight, sizeof(face.style.weight)) ||
+            !key.field(&face.style.slant, sizeof(face.style.slant)) ||
+            !key.field(&face.length, sizeof(face.length)) ||
+            !key.field(face.data, face.length)) return false;
     }
-    return true;
+    return !key.match || key.offset == key.match->length;
 }
 
 struct RadiantQueryFonts {
@@ -4653,34 +4670,34 @@ struct RadiantQueryFonts {
     explicit RadiantQueryFonts(Item faces) : fonts(nullptr), owned(true) {
         RootFrame roots(1);
         Rooted<Item> owner(roots, faces);
+        RadiantQueryFontCache* cache = ::context
+            ? (RadiantQueryFontCache*)context_capsule_extension(::context, RADIANT_QUERY_FONT_CACHE_OWNER, 0)
+            : nullptr;
+        if (cache && cache->fonts && radiant_query_font_key(owner.get(), {nullptr, &cache->key})) {
+            fonts = cache->fonts;
+            owned = false;
+            return;
+        }
         ByteBuilder key = {};
         if (::context && byte_builder_init(&key, 1024, MEM_CAT_RENDER, false) &&
-                radiant_query_font_key(owner.get(), &key)) {
-            RadiantQueryFontCache* cache = (RadiantQueryFontCache*)context_capsule_extension(
-                ::context, RADIANT_QUERY_FONT_CACHE_OWNER, 0);
-            if (cache && cache->fonts && cache->key.length == key.length &&
-                    memcmp(cache->key.data, key.data, key.length) == 0) {
-                fonts = cache->fonts;
+                radiant_query_font_key(owner.get(), {&key, nullptr})) {
+            fonts = radiant_build_query_fonts(owner.get());
+            if (fonts && !cache) {
+                cache = (RadiantQueryFontCache*)mem_calloc(1, sizeof(*cache), MEM_CAT_RENDER);
+                if (cache && !context_capsule_extension_install(::context,
+                        RADIANT_QUERY_FONT_CACHE_OWNER, 0, cache, &radiant_query_font_cache_ops)) {
+                    mem_free(cache);
+                    cache = nullptr;
+                }
+            }
+            if (fonts && cache) {
+                // publish only a validated snapshot; invalid replacements cannot
+                // poison the previous entry. Native storage owns every font byte.
+                radiant_query_font_cache_clear(cache);
+                cache->fonts = fonts;
+                cache->key = key;
+                key = {};
                 owned = false;
-            } else {
-                fonts = radiant_build_query_fonts(owner.get());
-                if (fonts && !cache) {
-                    cache = (RadiantQueryFontCache*)mem_calloc(1, sizeof(*cache), MEM_CAT_RENDER);
-                    if (cache && !context_capsule_extension_install(::context,
-                            RADIANT_QUERY_FONT_CACHE_OWNER, 0, cache, &radiant_query_font_cache_ops)) {
-                        mem_free(cache);
-                        cache = nullptr;
-                    }
-                }
-                if (fonts && cache) {
-                    // publish only a validated snapshot; invalid replacements cannot
-                    // poison the previous entry. Native storage owns every font byte.
-                    radiant_query_font_cache_clear(cache);
-                    cache->fonts = fonts;
-                    cache->key = key;
-                    key = {};
-                    owned = false;
-                }
             }
         } else fonts = radiant_build_query_fonts(owner.get());
         byte_builder_destroy(&key);

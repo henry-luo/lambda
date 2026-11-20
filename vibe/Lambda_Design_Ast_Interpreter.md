@@ -477,6 +477,10 @@ Everything. Satellite-compiled functions are ordinary MIR Direct output: dual-en
 
 ### 5.7 Whole-script AUTO POC — [measured 2026-08-24]
 
+Retired 2026-11-19 under D8.3.1v3 and D8.3.4. The experiment's flag and
+promotion path were removed after the measurements below. Native exports for
+a resident T0 module still use that module's slab under D9.3.1–D9.3.2.
+
 An opt-in POC tests the alternative promotion policy requested for D8.3.1:
 
 ```text
@@ -814,7 +818,7 @@ Each phase is landable and revertible behind `LAMBDA_EXEC_BACKEND`; P5 now makes
 | **AI16** | The sanctioned const-folder is this engine under `EvalMode::CONST`, purity-gated (D7.1.2), fuel-budgeted — one engine, two modes | **confirmed** |
 | **AI17v3** | `that` predicates evaluate in T0 as calls of their own `fn`, in full and in their declaring scope (declaring module, captures read where the type is named, the names they bind as that function's locals); purity is the static `fn`/`pn` check, not an evaluator mode (S11.4.11, TE-20). Revised 2026-09-26 (twice); v1 and v2 in Appendix S | **confirmed** |
 | **AI18** | The U26-KIV reference interpreter is subsumed: T0 is the executable-spec oracle, differentially gated on every baseline run | **confirmed** |
-| **AI19** | MIR-interp demotes to codegen diagnostic at P5; `mir_policy.hpp` size thresholds retire | **confirmed** |
+| **AI19** | MIR-interp is an explicit codegen diagnostic. The source-size, instruction-count and document thresholds were retired under D8.3.1v3. | **implemented** |
 | **AI20** | REPL/shell route through T0 now; persistent top-level environment (P4) supersedes incremental-compilation caching as the REPL end state | **confirmed** |
 | **AI21** | Stage 2 extends the tier model to LambdaJS over `JsAstNode`, sharing frames/tiering/hooks; JS semantics stay in the JS helper layer; the size-based interp policy is replaced | **confirmed** |
 | **AI22** | No bytecode IR; tree-walk over the typed AST is the only sub-MIR executable form; revisit only with T0 profiles | **confirmed** |

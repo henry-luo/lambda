@@ -33,6 +33,7 @@ static Item no_js_unavailable(const char* entry) {
 __thread JsRuntimeState* js_active_runtime_state = NULL;
 // identity only: no Script ever carries this profile without the JS front end
 LangProfile js_profile = { "js", NULL, NULL };
+// Link compatibility for the standalone Radiant host (D9.1.3v2).
 int g_js_force_document_interp = 0;
 
 bool js_runtime_state_init(EvalContext* context) { (void)context; return true; }
@@ -130,6 +131,10 @@ Item lambda_js_wrap_procedure(Function* function, int arity, const char* name) {
 }
 
 // JS exports reach Lambda only through an imported JS module, which load_js_module refuses
+Item js_call_export_into(Function*, Item*, int, uint64_t*) {
+    return no_js_unavailable("js_call_export_into");
+}
+
 #define NO_JS_EXPORT_CALL(n, params) \
     Item js_call_export_##n##_into params { \
         (void)function; (void)result_home; \

@@ -29,9 +29,13 @@ let resources = [
     {family: VARIANT_FAMILIES.fraktur, file: "doc/math/fonts/KaTeX_Fraktur-Regular.woff2"}
 ]
 
-pub fn faces() array | error {
+fn read_faces() array | error {
     let base = font_files.resource_path("");
     [for (face in resources, let path = base ++ face.file) {font_family: face.family,
         font_weight: face.weight or 400, font_style: face.style or "normal",
         src: path, data: input(path, 'binary')^}]
 }
+
+// All formulas in the module instance share the same bundled font bytes.
+let bundled_faces = read_faces() ^ { ~ }
+pub fn faces() array | error => bundled_faces

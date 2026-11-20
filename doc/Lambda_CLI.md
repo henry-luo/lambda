@@ -30,7 +30,7 @@ These options apply when running a script directly (i.e., `lambda <script.ls>`).
 | | `--optimize=N` / `--opt-level=N` | MIR optimization level; large modules may automatically use the interpreter | `2` |
 | `-O0` … `-O3` | | Optimization level shorthand: 0 = debug with stack traces, 1 = basic, 2 = full, 3 = aggressive | |
 | | `--tier=auto\|jit\|interp` | Execution tier: `auto` interprets and compiles hot functions, `jit` compiles everything, `interp` never compiles. `LAMBDA_EXEC_BACKEND` is the environment equivalent | `auto` |
-| | `--mir-interp` | Run the JIT's output on the MIR interpreter instead of native code | |
+| | `--mir-interp` | Run emitted Lambda MIR on the diagnostic interpreter (D8.3.1v3) | |
 | | `--dry-run` | Skip real I/O; return fabricated results for network/filesystem operations | `false` |
 | | `--static-warning` | Relaxed mode: report static type errors as warnings and keep running (syntax errors and unresolved value names still fail; the result may contain error values) | |
 | | `--no-drain` | Return without draining spawned tasks | |
@@ -828,7 +828,7 @@ An interactive terminal keeps its input history in `~/.lambda_history`; `LAMBDA_
 | `LAMBDA_SCRIPT_CACHE` | `0`/`1` | Enable or disable the parsed-script cache |
 | `LAMBDA_DISABLE_MIR_CACHE` | set | Disable the compiled-module cache |
 | `LAMBDA_PROFILE` | set | Print profiling information at exit |
-| `LAMBDA_JS_LARGE_INTERP` | set | Force the interpreter for large JavaScript modules |
+| `JS_MIR_INTERP` | `1` or `true` | Lambda alias for the explicit `--mir-interp` diagnostic (D8.3.1v3) |
 | `MEMTRACK_MODE` | `OFF`, `STATS`, `DEBUG` | Memory tracker mode (default: `OFF` in release builds, `STATS` in debug builds) |
 
 Diagnostic variables for engine development: `LAMBDA_MEMORY_STATS`, `LAMBDA_RSS_REPORT`, `VIEW_MEM_STATS`, `VIEW_MEM_STAGES`, `VIEW_PAUSE_BEFORE_EXIT`, `LAMBDA_COMPILER_TIMING`, `JS_TRANSPILE_TIMING`, `LAMBDA_MIR_DUMP_PATH`, `LAMBDA_GC_FORCE_EVERY`, `LAMBDA_GC_POISON_FREED`, `LAMBDA_JS_EXEC_TIMEOUT_SECONDS`.

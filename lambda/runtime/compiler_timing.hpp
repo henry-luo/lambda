@@ -89,10 +89,6 @@ void compiler_pass_manager_init(CompilerPassManager* manager, uint32_t initial_f
 int compiler_pass_manager_add(CompilerPassManager* manager, const CompilerPassSpec* pass);
 void compiler_pass_manager_set_observer(CompilerPassManager* manager,
     CompilerPassObserver observer, void* context);
-// A composite front-end stage may report bounded subpasses without creating a
-// second manager or losing the one timing stream shared by both languages.
-void compiler_pass_manager_note(CompilerPassManager* manager, const char* name,
-    uint64_t elapsed_us);
 int compiler_pass_manager_run(CompilerPassManager* manager, void* context);
 #ifdef __cplusplus
 }

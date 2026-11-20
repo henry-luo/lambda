@@ -14,7 +14,7 @@ fn selector(id,label,items,property) any^ {
         for (item in items) <option value:item.value,item.label>>;
     if (property=="font-family") font_picker.field(control,id,"Arial, sans-serif",true) else control
 }
-pub fn tree(fonts=[]) => <div class:"home-ribbon editor-ribbon",
+pub fn tree() => <div class:"home-ribbon editor-ribbon",
     ribbon.group("Undo",ribbon.history_tools((action,label,graphic)any^ =>tool("home-" ++ action,label,graphic,"icon-only",action)));
     ribbon.group("Clipboard",[row([
         <div class:"paste-tool",tool("paste","Paste","paste","home-large");menu("paste-options","Paste options","down","icon-only")>,
@@ -23,7 +23,7 @@ pub fn tree(fonts=[]) => <div class:"home-ribbon editor-ribbon",
         tool("add-slide","New Slide","blank_page","home-large"),
         stack([menu("home-layout","Layout","columns"),tool("reset-layout","Reset","repeat_header"),menu("slide-actions","Slide actions","document")])])]);
     ribbon.group("Font",[
-        row([selector("home-font-family","Font family",text_format.font_options(fonts,"Arial, sans-serif"),"font-family"),
+        row([selector("home-font-family","Font family",[{value:"Arial, sans-serif",label:"Arial, sans-serif"}],"font-family"),
             <input id:"home-font-size",class:"home-font-size",type:"number",min:"1",step:"1",list:"home-font-sizes",title:"Font size",'aria-label':"Font size",'data-property':"home-font_size">,
             <datalist id:"home-font-sizes",for (size in text_format.font_sizes) <option value:string(size)>>,
             tool("grow-font","Grow Font","grow_font","icon-only"),tool("shrink-font","Shrink Font","shrink_font","icon-only"),

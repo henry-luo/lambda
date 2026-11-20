@@ -110,8 +110,7 @@ static bool emit_build_direct_ast(Transpiler* tp, const char* source,
     tp->ast_root = (AstNode*)direct_root;
     // finalization needs the published lexical/index graph used by normal compilation.
     ArrayList* functions = NULL;
-    bool valid = lambda_ast_rebind_direct_scope_graph_with_functions(tp, direct_root, &functions) &&
-        ast_index_build_profile(&tp->ast_index, tp->ast_root, &lambda_profile) &&
+    bool valid = lambda_ast_publish_scope_graph(tp, direct_root, &functions) &&
         lambda_ast_finalize_script_with_functions(tp, direct_root, functions);
     arraylist_free(functions);
     return valid;
@@ -768,7 +767,6 @@ int emit_ast_dump_file(const char* script_path) {
     // runtime ownership/index state even though this command stops before
     // execution. A zeroed Transpiler made import-bearing AST dumps dereference
     // a null Runtime in load_script().
-    runtime.use_mir_direct = true;
 
     char* directory = file_path_dirname(script_path);
     size_t directory_length = directory ? strlen(directory) : 0;

@@ -16,6 +16,14 @@
     {"type": "pointer_event", "event": "pointerdown", "target": ".pedal-left", "x": 44, "y": 818, "button": 0, "buttons": 1},
     {"type": "wait", "ms": 400},
     {"type": "pointer_event", "event": "pointerup", "target": ".pedal-left", "x": 44, "y": 818, "button": 0, "buttons": 0},
-    {"type": "assert_render_stats", "source": "scene3d", "target": "#city", "fields": {"runtime_faulted": 0}}
+    {"type": "assert_render_stats", "source": "scene3d", "target": "#city", "fields": {"runtime_faulted": 0}},
+    {"type": "assert_surface", "source": "page", "region": [340, 71, 8, 10], "rgba": [[232, 255], [60, 125], [50, 115]], "count": {"min": 5}},
+    {"type": "mouse_down", "x": 344, "y": 74},
+    {"type": "mouse_move", "x": 361, "y": 91},
+    {"type": "mouse_up", "x": 361, "y": 91},
+    {"type": "assert_attribute", "target": {"selector": "#map-disc"}, "attribute": "data-off-center", "equals": "true"},
+    {"type": "assert_surface", "source": "page", "region": [357, 88, 8, 10], "rgba": [[232, 255], [60, 125], [50, 115]], "count": {"min": 5}},
+    {"type": "click", "target": {"selector": "#map-recenter"}},
+    {"type": "assert_attribute", "target": {"selector": "#map-disc"}, "attribute": "data-off-center", "equals": "false"}
   ]
 }

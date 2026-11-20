@@ -1119,6 +1119,19 @@ TEST(LambdaTierParityTests, FunctionLoopsHandOffWithoutLosingCollectedValues) {
         "test/lambda/fn_local_loop_handoff.txt", false, "auto");
 }
 
+TEST(LambdaTierParityTests, LoopInputGuardsPreserveRebindingAndSnapshots) {
+    ScopedTestEnv loop_threshold("LAMBDA_LOOP_JIT_THRESHOLD", "1");
+    ScopedTestEnv function_threshold("LAMBDA_FUNC_JIT_THRESHOLD", "1000000");
+    ScopedTestEnv synchronous("LAMBDA_SATELLITE_SYNC", "1");
+    ScopedTestEnv forced_gc("LAMBDA_GC_FORCE_EVERY", "1");
+    ScopedTestEnv poison("LAMBDA_GC_POISON_FREED", "1");
+    for (const char* tier : {"interp", "auto", "jit"}) {
+        SCOPED_TRACE(tier);
+        test_lambda_script_against_file("test/lambda/proc/interp_loop_input_guards.ls",
+            "test/lambda/proc/interp_loop_input_guards.txt", true, tier);
+    }
+}
+
 TEST(LambdaTierParityTests, DynamicCallScalarsSurviveMovingArgumentStorage) {
     ScopedTestEnv forced_gc("LAMBDA_GC_FORCE_EVERY", "37");
     const char* tiers[] = {"interp", "auto", "jit"};

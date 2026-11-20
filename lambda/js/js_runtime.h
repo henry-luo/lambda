@@ -459,6 +459,8 @@ LAMBDA_RT_API Item js_call_function(Item func_item, Item this_val, Item* args, i
 Item js_call_accessor_getter(Item getter, Item receiver);
 Item js_call_function_into(Item func_item, Item this_val, Item* args,
                            int arg_count, uint64_t* result_home);
+Item js_call_export_into(Function* function, Item* args, int arg_count,
+                         uint64_t* result_home);
 Item js_call_export_0_into(Function* function, uint64_t* result_home);
 Item js_call_export_1_into(Function* function, Item a, uint64_t* result_home);
 Item js_call_export_2_into(Function* function, Item a, Item b, uint64_t* result_home);

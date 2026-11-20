@@ -23,8 +23,11 @@ pub pn fit(node,id,owner) {
     let box = dom.bounding_box(menu)
     let viewport = dom.bounding_box(dom.get_element_by_id(root,owner))
     // The owner may be offset inside a larger document, so clamp in its coordinates.
-    dom.style_set_property(menu,"left",string(max(viewport.x+8,min(box.x,viewport.x+viewport.width-box.width-8)))^ ++ "px")
-    dom.style_set_property(menu,"top",string(max(viewport.y+8,min(box.y,viewport.y+viewport.height-box.height-8))) ++ "px")
+    let x = max(viewport.x+8,min(box.x,viewport.x+viewport.width-box.width-8))
+    let y = max(viewport.y+8,min(box.y,viewport.y+viewport.height-box.height-8));
+    // An already visible menu keeps its existing position and committed style.
+    if ((x!=box.x)^) dom.style_set_property(menu,"left",string(x)^ ++ "px")
+    if ((y!=box.y)^) dom.style_set_property(menu,"top",string(y)^ ++ "px")
 }
 
 pub pn focus(node,id,items="button:not([disabled])") {

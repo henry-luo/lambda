@@ -14,8 +14,8 @@ pub fn button(action,label,cls="") => <button id:action,type:"button",class:cls,
 fn select(id,label,items,property="") => <label class:"field",<span label><select id:id,'data-property':property,
     for (value in items) <option value:string(value),string(value)>>>
 fn field(key,label,kind="text") => <label class:"field",<span label><input id:"prop-" ++ key,type:kind,'data-property':key>>
-pub fn ribbon(tab,fonts=[]) {
-    if (tab == "Home") [home.tree(fonts)]
+pub fn ribbon(tab) {
+    if (tab == "Home") [home.tree()]
     else if (tab == "Insert") [insert_ui.tree()]
     else if (tab == "Transitions") [transitions_ui.tree()]
     else if (tab == "Design") [<div class:"design-ribbon editor-ribbon",
@@ -25,9 +25,9 @@ pub fn ribbon(tab,fonts=[]) {
         ribbon_ui.group("Canvas",[button("grid","Grid"),button("design-fit","Fit to window")])>]
     else [animations_ui.tree()]
 }
-pub fn canvas(plan,index:int,key) element^ {
+pub fn canvas(plan,index:int,key,base=null) element^ {
     let scene = plan.slides[index]^;
-    html.layer(plan,scene,[for (obj in scene.targets) sample.baseline(obj)],key,"",true)
+    html.layer(plan,scene,[for (obj in scene.targets) sample.baseline(obj)],key,"",true,base)
 }
 pub fn printout(st,deck) element^ {
     let pages = slide.slides(deck)^
@@ -39,14 +39,22 @@ pub fn printout(st,deck) element^ {
             <style "@page { size:" ++ c.px(st.plan.width) ++ " " ++ c.px(st.plan.height) ++ "; margin:0; }">>
         else child>
 }
-pub fn thumbnails(st) array^ => [for (i,scene in st.plan.slides) <div role:"button",tabindex:"0",class:if (i == st.index) "thumbnail current" else "thumbnail",
-    'data-slide':string(i),'data-slide-id':scene.id,'data-hidden':string(scene.hidden),'aria-current':string(i == st.index),
-    'aria-label':"Slide " ++ string(i+1) ++ (if (scene.hidden) " (hidden): " else ": ") ++ c.value(scene.source.title,scene.id),
+pub fn thumbnail_button_id(key) => "thumb-button-" ++ string(key)
+pub fn thumbnail_preview_id(key) => "thumb-preview-" ++ string(key)
+pub fn thumbnail_title(scene) any^ => c.value(scene.source.title,scene.id) ++ (if (scene.hidden) " (hidden)" else "")
+pub fn thumbnail_label(scene,i) any^ => "Slide " ++ string(i+1) ++ (if (scene.hidden) " (hidden): " else ": ") ++ c.value(scene.source.title,scene.id)
+pub fn thumbnail_canvas(st,i,key) any^ => canvas(st.plan,i,"thumb" ++ string(key),st.base)
+pub fn thumbnail(st,i,key) element^ {
+    let scene = st.plan.slides[i];
+    <div id:thumbnail_button_id(key),role:"button",tabindex:"0",class:"thumbnail",
+    'data-slide':string(i),'data-slide-id':scene.id,'data-hidden':string(scene.hidden),'aria-current':"false",
+    'aria-label':thumbnail_label(scene,i)^,
     <span class:"thumb-number",string(i+1)>
     <span class:"thumb-paper",style:"height:" ++ c.px(c.value(st.thumbnail_width,160.0)*st.plan.height/st.plan.width) ++ ";",
-        <span class:"thumb-render",inert:"",'aria-hidden':"true",style:"transform:scale(" ++ c.fmt(c.value(st.thumbnail_width,160.0)/st.plan.width) ++ ");",
-            canvas(st.plan,i,"thumb" ++ string(i))^>>
-    <span class:"thumb-caption",c.value(scene.source.title,scene.id) ++ (if (scene.hidden) " (hidden)" else "")>>]
+        <span id:thumbnail_preview_id(key),class:"thumb-render",inert:"",'aria-hidden':"true",style:"transform:scale(" ++ c.fmt(c.value(st.thumbnail_width,160.0)/st.plan.width) ++ ");",
+            thumbnail_canvas(st,i,key)^>>
+    <span class:"thumb-caption",thumbnail_title(scene)^>>
+}
 pub fn object_options(st) => [<option value:"","Select an object">,*[for (obj in m.scene(st).targets)
     <option value:obj.dom_key,string(obj.tag) ++ " · " ++ obj.id>]]
 pub fn inline_editor(obj,background) => <textarea id:"canvas-text",'aria-label':"Edit slide text",

@@ -146,11 +146,12 @@ fn shape_content(obj, visual, instance) {
     >
 }
 
-fn object_content(obj, visual, visuals, instance, theme) {
+fn object_content(obj, visual, visuals, instance, theme, resource_base) {
     let src = obj.source
-    if (obj.tag == 'group') for (child in obj.children) render_object(child, visuals, instance, theme)
+    if (obj.tag == 'group') for (child in obj.children) render_object(child, visuals, instance, theme, resource_base)
     else if (obj.tag == 'shape') shape_content(obj, visual, instance)
-    else if (obj.tag == 'image') <img class: "slide-image", src: src.src,
+    else if (obj.tag == 'image') <img class: "slide-image",
+        src: if (resource_base != null and src.src != "") url_resolve(resource_base, src.src) else src.src,
         style: "object-fit:" ++ c.as_text(c.value(src.fit, 'contain')) ++ ";">
     else if (obj.tag == 'text') {
         let size = obj.font_size
@@ -166,7 +167,7 @@ pub fn placement_properties(obj) => {left: c.px(obj.x), top: c.px(obj.y),
 pub fn placement_style(obj) => join([for (key, value in placement_properties(obj))
     string(key) ++ ":" ++ value ++ ";"], "")
 
-fn render_object(obj, visuals, instance, theme) {
+fn render_object(obj, visuals, instance, theme, resource_base) {
     let matches = [for (v in visuals where v.id == obj.id) v]
     let v = matches[0]
     let hidden = v.visible < 0.5 or v.opacity <= 0.0
@@ -179,7 +180,7 @@ fn render_object(obj, visuals, instance, theme) {
         <div id: instance ++ "-" ++ obj.dom_key, class: "slide-effect", style: effect_style(v),
             ["data-slide-object"]: obj.id, ["aria-hidden"]: if (hidden) "true" else "false", *: (if (hidden) {inert: ""} else {}),
             <div class: (if (standalone_svg) "slide-graphic " else "") ++ c.as_text(c.value(obj.source.class, "")), style: content_style,
-                object_content(obj, v, visuals, instance, theme)
+                object_content(obj, v, visuals, instance, theme, resource_base)
             >
         >
     >
@@ -188,13 +189,14 @@ fn render_object(obj, visuals, instance, theme) {
 pub fn layer_background(plan, scene) any^ => c.as_text(theme.background(scene))
 
 // `active` marks the layer the player currently shows (state, not structure).
-pub fn layer(plan, scene, visuals, instance, style = "", active = false) {
+// Embedded layers can resolve their image URLs without recompiling the source deck.
+pub fn layer(plan, scene, visuals, instance, style = "", active = false, resource_base = null) {
     <section id: instance ++ "-s" ++ string(scene.index), class: "slide-layer",
         ["aria-label"]: c.as_text(c.value(scene.source.title, scene.id)),
         *: (if (active) {["data-slide-active"]: "true"} else {}),
         style: "width:" ++ c.px(plan.width) ++ ";height:" ++ c.px(plan.height) ++
             ";background:" ++ layer_background(plan, scene) ++ ";font-family:" ++ scene.palette.font_family ++ ";" ++ style,
-        for (obj in scene.objects) render_object(obj, visuals, instance, scene.palette)
+        for (obj in scene.objects) render_object(obj, visuals, instance, scene.palette, resource_base)
     >
 }
 

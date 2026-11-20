@@ -210,7 +210,7 @@ static ShellResult css_memory_run_page(const char* path) {
         {"LAMBDA_LOG_LEVEL", "NOTICE"},
         {"LAMBDA_LOG_FILE", CSS_MEMORY_LOG},
         {"RADIANT_CSS_CASCADE_MEMORY_PROFILE", "1"},
-        {"RADIANT_CSS_CASCADE_MEMORY_FORCE_RECASCADE", "1"},
+        {"RADIANT_CSS_CASCADE_MEMORY_FORCE_RECASCADE", "cascade-only"},
         {nullptr, nullptr},
     };
     ShellOptions options = {};

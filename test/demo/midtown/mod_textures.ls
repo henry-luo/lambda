@@ -43,10 +43,18 @@ pub fn storefront_svg(emissive) element => svg(512, 144, [rect(0, 0, 512, 144, i
             rect(x + 10, 46, 72, 86, "#2f3f4c"), rect(x + 90, 50, 28, 94, "#3a2b22"), rect(x + 8, 132, 76, 4, "#b7b0a4")])]])
 
 // ---- ground surfaces, each one tile of world texture
-fn speckle(id, size, base, colors, n, smallest, largest) element => svg(size, size, [rect(0, 0, size, size, base),
-    *[for (k in 0 to (n - 1), let key = rng.derive(KEY, [id, k]), let w = rng.between(rng.derive(key, "w"), smallest, largest))
-        rect(rng.between(rng.derive(key, "x"), 0.0, size - w), rng.between(rng.derive(key, "y"), 0.0, size - w), w, w,
-            colors[rng.below(rng.derive(key, "c"), len(colors))], {opacity: 0.55})]])
+fn grains(id, width, height, colors, n, smallest, largest, color_key, opacity) {
+    // Batch the same per-grain keys and component paths. The authored noise
+    // and draw order stay deterministic while crossing the RNG boundary less.
+    let grains = rng.derive_many(KEY, [for (k in 0 to (n - 1)) [id, k]])
+    let paths = [["w"], ["x"], ["y"], [color_key]];
+    [for (key in grains, let parts = rng.derive_many(key, paths),
+        let size = rng.between(parts[0], smallest, largest))
+        rect(rng.between(parts[1], 0.0, width - size), rng.between(parts[2], 0.0, height - size),
+            size, size, colors[rng.below(parts[3], len(colors))], {opacity: opacity})]
+}
+fn speckle(id, size, base, colors, n, smallest, largest) element =>
+    svg(size, size, [rect(0, 0, size, size, base), *grains(id, size, size, colors, n, smallest, largest, "c", 0.55)])
 pub fn asphalt_svg() element => speckle("asphalt", 256, "#3d3f43", ["#34363a", "#4a4c50", "#2e3033", "#55575a"], 420, 1.0, 3.0)
 pub fn grass_svg() element => speckle("grass", 256, "#5b7d3c", ["#4f7034", "#6a8c46", "#46672f", "#7a9a52"], 520, 2.0, 5.0)
 pub fn gravel_svg() element => speckle("gravel", 256, "#9b8f7b", ["#8a7f6c", "#b0a48e", "#7d7262", "#c2b7a1"], 520, 2.0, 5.0)
@@ -80,9 +88,7 @@ pub fn road_svg() element {
     let px = 256.0 / 10.4, py = 512.0 / 24.0
     let edge = (lat) => (5.2 + lat) * px;
     svg(256, 512, [rect(0, 0, 256, 512, "#3c3e42"),
-        *[for (k in 0 to 1100, let key = rng.derive(KEY, ["road", k]), let w = rng.between(rng.derive(key, "w"), 1.0, 3.2))
-            rect(rng.between(rng.derive(key, "x"), 0.0, 256.0 - w), rng.between(rng.derive(key, "y"), 0.0, 512.0 - w), w, w,
-                ["#3a3c40", "#55575c", "#333539", "#5e6064"][rng.below(rng.derive(key, "c"), 4)], {opacity: 0.6})],
+        *grains("road", 256.0, 512.0, ["#3a3c40", "#55575c", "#333539", "#5e6064"], 1101, 1.0, 3.2, "c", 0.6),
         // tyre-worn lanes are a touch darker, the shoulders a touch lighter
         rect(edge(-3.2), 0, 1.0 * px, 512, "#3b3d41", {opacity: 0.35}), rect(edge(-1.4), 0, 1.0 * px, 512, "#3b3d41", {opacity: 0.35}),
         rect(edge(0.4), 0, 1.0 * px, 512, "#3b3d41", {opacity: 0.35}), rect(edge(2.2), 0, 1.0 * px, 512, "#3b3d41", {opacity: 0.35}),
