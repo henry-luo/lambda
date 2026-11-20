@@ -20,6 +20,19 @@ observations still require re-verification. Add new Radiant issues here.
 
 ## Open issues
 
+### RI-141 — Native export image fixture misses its preloaded cache entry
+
+Open, 2026-11-20. In the standalone native release suite,
+`DynamicLayoutTest.ExportQueuesOrdinaryNetworkImagesBeforeInitialLayout`
+stores an SVG for `https://example.test/radiant-export-ready.svg`. Export
+still attempts DNS and produces fallback image geometry. The same failure
+occurs when the test runs alone with an isolated cache. The cache-read
+cause is unconfirmed. The other 119 tests in the cache and dynamic-layout
+run passed. This blocks a clean dynamic-layout gate for the property group
+refactor; it did not block static parity or memory measurement.
+Evidence is in `temp/view-prop-groups/layout-dynamic-isolated.log`.
+Resource acquisition follows D9.1.2v2.
+
 ### RI-140 — Image button paint and dialog pointer selection
 
 Partial. The image-button layout loads `src` through the shared replaced

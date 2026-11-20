@@ -25,6 +25,19 @@ Scratch spool durability amplification was fixed and moved to the
 The interpreter object-method effect-bound fix is recorded under S12.1.6v3
 and D7.1.1v4 in the [fixed ledger](<Lambda_Issue_Ledger (fixed).md#lr12-62>).
 
+## LR12-64 — Split host expects DOM and HTML declarations missing from its Input pin
+
+**Status:** OPEN, 2026-11-20. Lambda `27d7f65817` with Input `3c41675`
+fails to compile the split release host before the view-property refactor.
+`dom.cpp`, `dom_events.cpp`, and `dom_formdata.cpp` use fields and declarations
+absent in the pinned Input headers, including `DomToggleTaskTracker`,
+`form_constructing_entries`, and `Html5ParseOptions::allow_declarative_shadow_roots`.
+Reproduce with `make build-lambda-split SPLIT_PROFILE=release`. Input and Radiant's
+release archives build separately. The mismatch blocks integrated validation,
+while a native Radiant client can still exercise static layout. Provider ownership
+is governed by D9.1.1v4 and D9.1.3v2. The baseline failure is captured in
+`temp/view-prop-groups/build-before.log`.
+
 ## LR12-63 — JavaScript DOM fixtures fail in the Lambda baseline
 
 **Status:** OPEN, 2026-11-19. The Lambda baseline reports exit 139 for

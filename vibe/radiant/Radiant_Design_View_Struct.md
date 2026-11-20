@@ -3,6 +3,7 @@
 Status: **DV1–DV15 IMPLEMENTED** (campaign complete — see impl plan §10/§16); **DV16 (construction convention) proposed 2026-07-18 as follow-up**, implementation = impl plan P7.
 Scope: `dom_node.hpp`, `dom_element.hpp` (lambda/input/css/), `radiant/view.hpp`, `radiant/layout.hpp`.
 Follows: header consolidation (`vibe/radiant/Radiant_Imp_Code_Dedup.md`), robustness design (T7 stale-View), memory design (R1–R7).
+Proposed follow-up to DV4 and DV6: [View property groups](Radiant_Design_View_Prop_Groups.md).
 
 ---
 

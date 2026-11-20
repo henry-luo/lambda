@@ -4674,37 +4674,41 @@ TEST_F(AnimationTickTest, IndividualTransformsAnimateTogetherAndRetainIndependen
     MockElement mock;
     DomElement* element = createMockElement(&mock);
     TransformProp transform = {};
+    IndividualTransformProp individual = {};
+    transform.individual = lam::own(&individual);
     FontProp font = {};
     font.font_size = 16.0f;
     setTransformContext(element, &transform, &font);
-    transform.individual[0].type = TRANSFORM_TRANSLATE;
-    transform.individual[0].params.translate.x = 6.0f;
-    transform.individual[0].translate_x_percent = NAN;
-    transform.individual[0].translate_y_percent = NAN;
+    individual.values[0].type = TRANSFORM_TRANSLATE;
+    individual.values[0].params.translate.x = 6.0f;
+    individual.values[0].translate_x_percent = NAN;
+    individual.values[0].translate_y_percent = NAN;
     ASSERT_NE(parsedKeyframes("individual{from{translate:0px 0px;rotate:0deg;scale:1}"
         "to{translate:100% 20px;rotate:180deg;scale:3 5}}", "individual"), nullptr);
     setAnimationStyle(element, "animation:individual 1s linear -.5s both paused");
     css_animation_resolve(element, &layout);
-    EXPECT_EQ(transform.individual[0].type, TRANSFORM_TRANSLATE);
-    EXPECT_FLOAT_EQ(transform_translate_component(transform.individual[0].params.translate.x,
-        transform.individual[0].translate_x_percent, 40.0f), 20.0f);
-    EXPECT_FLOAT_EQ(transform.individual[0].params.translate.y, 10.0f);
-    EXPECT_NEAR(transform.individual[1].params.angle, M_PI / 2, 0.00001);
-    EXPECT_FLOAT_EQ(transform.individual[2].params.scale.x, 2.0f);
-    EXPECT_FLOAT_EQ(transform.individual[2].params.scale.y, 3.0f);
+    EXPECT_EQ(individual.values[0].type, TRANSFORM_TRANSLATE);
+    EXPECT_FLOAT_EQ(transform_translate_component(individual.values[0].params.translate.x,
+        individual.values[0].translate_x_percent, 40.0f), 20.0f);
+    EXPECT_FLOAT_EQ(individual.values[0].params.translate.y, 10.0f);
+    EXPECT_NEAR(individual.values[1].params.angle, M_PI / 2, 0.00001);
+    EXPECT_FLOAT_EQ(individual.values[2].params.scale.x, 2.0f);
+    EXPECT_FLOAT_EQ(individual.values[2].params.scale.y, 3.0f);
     ASSERT_NE(scheduler->first, nullptr);
     for (int i = 0; i < 200; i++) css_animation_tick(scheduler->first, 0.5f);
-    EXPECT_FLOAT_EQ(transform.individual[0].params.translate.y, 10.0f);
+    EXPECT_FLOAT_EQ(individual.values[0].params.translate.y, 10.0f);
     animation_scheduler_cancel(scheduler, scheduler->first);
-    EXPECT_FLOAT_EQ(transform.individual[0].params.translate.x, 6.0f);
-    EXPECT_EQ(transform.individual[1].type, TRANSFORM_NONE);
-    EXPECT_EQ(transform.individual[2].type, TRANSFORM_NONE);
+    EXPECT_FLOAT_EQ(individual.values[0].params.translate.x, 6.0f);
+    EXPECT_EQ(individual.values[1].type, TRANSFORM_NONE);
+    EXPECT_EQ(individual.values[2].type, TRANSFORM_NONE);
 }
 
 TEST_F(AnimationTickTest, WebCancellationRestoresAllTransformSlotsBeforeSameTimeSeek) {
     MockElement mock;
     DomElement* element = createMockElement(&mock);
     TransformProp transform = {};
+    IndividualTransformProp individual = {};
+    transform.individual = lam::own(&individual);
     FontProp font = {};
     font.font_size = 16.0f;
     setTransformContext(element, &transform, &font);
@@ -4712,14 +4716,14 @@ TEST_F(AnimationTickTest, WebCancellationRestoresAllTransformSlotsBeforeSameTime
     underlying.type = TRANSFORM_TRANSLATE;
     underlying.params.translate.x = 7.0f;
     transform.functions = lam::shared(&underlying);
-    transform.individual[0].type = TRANSFORM_TRANSLATE;
-    transform.individual[0].params.translate.x = 6.0f;
-    transform.individual[0].translate_x_percent = NAN;
-    transform.individual[0].translate_y_percent = NAN;
-    transform.individual[1].type = TRANSFORM_ROTATE;
-    transform.individual[1].params.angle = .2f;
-    transform.individual[2].type = TRANSFORM_SCALE;
-    transform.individual[2].params.scale = {1.2f, 1.3f};
+    individual.values[0].type = TRANSFORM_TRANSLATE;
+    individual.values[0].params.translate.x = 6.0f;
+    individual.values[0].translate_x_percent = NAN;
+    individual.values[0].translate_y_percent = NAN;
+    individual.values[1].type = TRANSFORM_ROTATE;
+    individual.values[1].params.angle = .2f;
+    individual.values[2].type = TRANSFORM_SCALE;
+    individual.values[2].params.scale = {1.2f, 1.3f};
     CssWebAnimationState* effect = css_web_animation_create(element,
         parsedKeyframes("webTransforms{from{transform:translateX(0px);translate:0px;rotate:0deg;scale:1}"
             "to{transform:translateX(100px);translate:40px;rotate:180deg;scale:3 5}}", "webTransforms"),
@@ -4732,20 +4736,20 @@ TEST_F(AnimationTickTest, WebCancellationRestoresAllTransformSlotsBeforeSameTime
         css_web_animation_resolve(element, &layout);
         ASSERT_NE(transform.functions, nullptr);
         EXPECT_FLOAT_EQ(transform.functions->params.translate.x, 50.0f);
-        EXPECT_FLOAT_EQ(transform.individual[0].params.translate.x, 20.0f);
-        EXPECT_NEAR(transform.individual[1].params.angle, M_PI / 2, .00001);
-        EXPECT_FLOAT_EQ(transform.individual[2].params.scale.x, 2.0f);
-        EXPECT_FLOAT_EQ(transform.individual[2].params.scale.y, 3.0f);
+        EXPECT_FLOAT_EQ(individual.values[0].params.translate.x, 20.0f);
+        EXPECT_NEAR(individual.values[1].params.angle, M_PI / 2, .00001);
+        EXPECT_FLOAT_EQ(individual.values[2].params.scale.x, 2.0f);
+        EXPECT_FLOAT_EQ(individual.values[2].params.scale.y, 3.0f);
         css_web_animation_cancel(effect);
         css_web_animation_cancel(effect);
         EXPECT_FALSE(effect->current_time_resolved);
         ASSERT_NE(transform.functions, nullptr);
         EXPECT_FLOAT_EQ(transform.functions->params.translate.x, 7.0f);
-        EXPECT_FLOAT_EQ(transform.individual[0].params.translate.x, 6.0f);
-        EXPECT_FLOAT_EQ(transform.individual[1].params.angle, .2f);
-        EXPECT_FLOAT_EQ(transform.individual[2].params.scale.x, 1.2f);
-        EXPECT_FLOAT_EQ(transform.individual[2].params.scale.y, 1.3f);
-        for (int slot = 0; slot < 3; slot++) EXPECT_EQ(transform.individual_sample[slot], nullptr);
+        EXPECT_FLOAT_EQ(individual.values[0].params.translate.x, 6.0f);
+        EXPECT_FLOAT_EQ(individual.values[1].params.angle, .2f);
+        EXPECT_FLOAT_EQ(individual.values[2].params.scale.x, 1.2f);
+        EXPECT_FLOAT_EQ(individual.values[2].params.scale.y, 1.3f);
+        for (int slot = 0; slot < 3; slot++) EXPECT_EQ(individual.samples[slot], nullptr);
     }
 }
 
