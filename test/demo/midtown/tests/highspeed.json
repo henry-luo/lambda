@@ -1,0 +1,19 @@
+{
+  "name": "MidtownManualReaches160AndBrakes",
+  "viewport": {"width": 1280, "height": 800},
+  "events": [
+    {"type": "wait", "ms": 500},
+    {"type": "click", "target": {"selector": "#start"}},
+    {"type": "wait", "ms": 250},
+    {"type": "script", "js": "window.readSpeed = () => Number(Array.from(document.querySelectorAll('#speed .cell')).map(cell => Array.from(cell.children).find(glyph => getComputedStyle(glyph).opacity === '1').textContent).join(''));"},
+    {"type": "key_down", "key": "ArrowUp"},
+    {"type": "wait", "ms": 12200},
+    {"type": "assert_script", "js": "window.readSpeed() >= 160"},
+    {"type": "key_up", "key": "ArrowUp"},
+    {"type": "key_down", "key": "ArrowDown"},
+    {"type": "wait", "ms": 3050},
+    {"type": "key_up", "key": "ArrowDown"},
+    {"type": "assert_script", "js": "window.readSpeed() <= 5"},
+    {"type": "assert_render_stats", "source": "scene3d", "target": "#city", "fields": {"runtime_paused": 0, "runtime_faulted": 0}}
+  ]
+}

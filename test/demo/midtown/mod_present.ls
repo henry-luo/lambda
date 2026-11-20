@@ -21,6 +21,7 @@ import ms: .mod_mission
 import cam: .mod_camera
 import sc: .mod_scene
 import hud: .mod_hud
+import minimap: .mod_minimap
 
 pub let NO_KEYS = {up: false, down: false, left: false, right: false, brake: false, back: false}
 // vehicles and people further than this from the camera are lost in the haze: their bodies keep their
@@ -36,7 +37,7 @@ pub fn initial(start = START) {
     let car = v.spawn(start.x, start.z, start.heading);
     {token: 0, last: null, t: 0.0, started: false, paused: false, help: false, handles: null, keys: NO_KEYS, touch: NO_KEYS,
      car: car, traffic: tr.spawn(16), route: rt.spawn(7), peds: pd.spawn(24), mission: ms.initial(), camera: cam.initial(car),
-     look: "day", lights: false, auto: null, shown: {speed: "   ", timer: "   ", gear: "N", place: "", street: "", look: "", mission: "", cash: ""},
+     look: "day", lights: false, auto: null, shown: {speed: "   ", timer: "   ", gear: "N", place: "", street: "", look: "", mission: "", cash: "", map_pose: null},
      toast: "", toast_until: 0.0, smashed: [], best_air: 0.0, top_speed: 0.0, drag: null, tour: 0.0, frames: 0, speed_cap: null, spot: 0}
 }
 
@@ -201,10 +202,12 @@ pub pn bind(owner) {
     let root = dom.root_node(owner)
     let node = (id) => dom.get_element_by_id(root, id)
     let cells = (id, width) => [for (i in 0 to (width - 1)) [for (k in 0 to 10) node(id ++ "-" ++ string(i) ++ "-" ++ string(k))]]
+    let plan = minimap.load_plan()^
     return {owner: owner, scene: node("city"), needle: node("needle"), rpm: node("rpm-fill"), damage: node("damage-fill"),
         speed: cells("speed", 3), timer: cells("timer", 3), timer_box: node("timer-box"), gears: [for (k in 0 to 6) node("gear-" ++ string(k))],
         district: node("district"), street: node("street"), look: node("look-name"), mission: node("mission"), mission_text: node("mission-text"),
-        cash: node("cash"), toast: node("toast"), toast_text: node("toast-text"), map: node("map-world"), region: node("map-region"), map_target: node("map-target"),
+        cash: node("cash"), toast: node("toast"), toast_text: node("toast-text"), map_canvas: node("map-plan"),
+        map_plan: plan, map_target: node("map-target"),
         pointer: node("map-pointer"), north: node("map-north")}
 }
 pn paint(target, property, value) { dom.presentation_style_set_property(target, property, value) }
@@ -223,8 +226,7 @@ fn padded(text, width) any^ => join(fill(max(0, width - len(text)), " ")^, "") +
 fn deg(a) any^ => numbers.fixed(a * 180.0 / u.PI, 2) ++ "deg"
 fn px(x) any^ => numbers.fixed(x, 2) ++ "px"
 
-let MAP_SCALE_TEXT = numbers.fixed(hud.MAP_SCALE, 3) ^ { "0.62" }
-let REGION_SCALE_TEXT = numbers.fixed(hud.MAP_SCALE * hud.REGION_SHRINK, 3) ^ { "1.86" }
+let MAP_SCALE_TEXT = numbers.fixed(minimap.SCALE, 3) ^ { "0.62" }
 pn hud_frame(h, st) {
     let car = st.car
     let kmh = v.speed(car) * 3.6
@@ -237,26 +239,29 @@ pn hud_frame(h, st) {
     if ((gear != st.shown.gear)^) {
         for (k, g in hud.GEARS) { if (g == st.shown.gear or g == gear) paint(h.gears[k], "opacity", if (g == gear) "1" else "0") }
     }
-    // the map turns so the car always points up
+    // a stationary car keeps the last map pixels and needs no canvas upload.
     let turn = car.heading - u.PI
-    let rot = "rotate(" ++ deg(turn) ++ ")"
-    paint(h.map, "transform", rot ++ " scale(" ++ MAP_SCALE_TEXT ++ ") translate(" ++ px(0.0 - car.x) ++ ", " ++ px(0.0 - car.z) ++ ")")^
-    paint(h.region, "transform", rot ++ " scale(" ++ REGION_SCALE_TEXT ++ ") translate(" ++
-        px((0.0 - car.x) / hud.REGION_SHRINK) ++ ", " ++ px((0.0 - car.z) / hud.REGION_SHRINK) ++ ")")^
-    paint(h.north, "transform", rot)^
+    let previous_pose = st.shown.map_pose
+    let moved = previous_pose == null or car.x != previous_pose.x or car.z != previous_pose.z or car.heading != previous_pose.heading
+    if ((st.started and moved)^) {
+        dom.set_canvas_pixels(h.map_canvas, minimap.frame(h.map_plan, car, turn)^)^
+    }
+    paint(h.north, "transform", "rotate(" ++ deg(turn) ++ ")")^
     let m = st.mission
     let tgt = m.target
     if (tgt != null) {
-        paint(h.map_target, "transform", "translate(" ++ px(tgt.x) ++ ", " ++ px(tgt.z) ++ ")")^
         let dx = tgt.x - car.x, dz = tgt.z - car.z
         let sx = dx * cos(turn) - dz * sin(turn), sz = dx * sin(turn) + dz * cos(turn)
-        let far = sqrt(dx * dx + dz * dz) * hud.MAP_SCALE > hud.MAP_RADIUS - 8.0
+        paint(h.map_target, "transform", "translate(" ++ px(sx * minimap.SCALE) ++ ", " ++ px(sz * minimap.SCALE) ++ ") scale(" ++ MAP_SCALE_TEXT ++ ")")^
+        let far = sqrt(dx * dx + dz * dz) * minimap.SCALE > minimap.CENTER - 12.0
         paint(h.pointer, "transform", "rotate(" ++ deg(math.atan2(sz, sx) + u.PI / 2.0) ++ ")")^
         paint(h.pointer, "opacity", if (far) "1" else "0")^
     }
     let timer = if (m.phase == "deliver") padded(string(int(ceil(ms.time_left(m, st.t))) ^ { 0 }), 3) else "   "
     digits(h.timer, st.shown.timer, timer)^
-    paint(h.toast, "opacity", numbers.fixed(u.clamp((st.toast_until - st.t) * 2.0, 0.0, 1.0), 2))
+    paint(h.toast, "opacity", numbers.fixed(u.clamp((st.toast_until - st.t) * 2.0, 0.0, 1.0), 2))^
+    return {*: st.shown, speed: speed, timer: timer, gear: gear,
+        map_pose: if (st.started) {x: car.x, z: car.z, heading: car.heading} else null}
 }
 // words change only when the situation does
 pn hud_words(h, st) {
@@ -279,11 +284,9 @@ pn hud_words(h, st) {
 pub pn sync(st) {
     let h = st.handles
     ps.command(h.scene, commands(st, unblocked(h.scene, st.camera)))^
-    hud_frame(h, st)^
+    let shown = hud_frame(h, st)^
     hud_words(h, st)
-    let gear = v.gear_label(st.car)
-    let timer = if (st.mission.phase == "deliver") padded(string(int(ceil(ms.time_left(st.mission, st.t))) ^ { 0 }), 3) else "   "
-    return {*: st, shown: {*: st.shown, speed: padded(string(int(round(v.speed(st.car) * 3.6)) ^ { 0 }), 3), timer: timer, gear: gear}}
+    return {*: st, shown: shown}
 }
 
 // the native scene clock drives the signals; reading it keeps traffic in step with the lamps. Its

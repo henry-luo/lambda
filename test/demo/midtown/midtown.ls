@@ -8,6 +8,7 @@
 import dom
 import runtime: lambda.scene3d.runtime
 import u: .mod_util
+import v: .mod_vehicle
 import ms: .mod_mission
 import cam: .mod_camera
 import sc: .mod_scene
@@ -32,7 +33,8 @@ pn frame(owner, st, now) {
     if (PROFILE) {
         print("MIDTOWN_PROFILE frame_ms=" ++ string(if (st.last == null) 0.0 else now - st.last) ++ " step_ms=" ++ string((simulated - started) * 1000) ++
             " sync_ms=" ++ string((clock() - simulated) * 1000) ++ " debt_ms=" ++ string(scene.lag * 1000) ++
-            " cap=" ++ string(stepped.speed_cap) ++ "\n")
+            " cap=" ++ string(stepped.speed_cap) ++ " speed_kmh=" ++ string(v.speed(stepped.car) * 3.6) ++
+            " distance=" ++ string(stepped.car.odometer) ++ " damage=" ++ string(stepped.car.damage) ++ "\n")
     }
     let token = if (next.paused) 0 else dom.request_frame(owner, "drive_frame")
     return {*: next, last: if (next.paused) null else now, token: token}
@@ -109,7 +111,8 @@ view <drive_session> state st: START { ~.rendered }
 on drive_activate(evt) {
     if ((evt.event_phase != 2 or st.handles != null)^) { return 'pass' }
     let owner = evt.target
-    let bound = {*: st, handles: present.bind(owner)}
+    let handles = present.bind(owner)^
+    let bound = {*: st, handles: handles}
     st = frame(owner, bound, evt.time_stamp)
     return 'handled'
 }

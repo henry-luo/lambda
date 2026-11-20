@@ -7,7 +7,7 @@ import world: .mod_world
 
 pub let SPEC = {length: 4.5, width: 1.86, wheelbase: 2.7, track: 1.58, wheel_r: 0.36,
     gears: [13.0, 22.0, 31.0, 40.0, 49.0],    // top speed of each gear, m/s
-    pull: [9.0, 7.4, 5.9, 4.6, 3.6],          // full-throttle acceleration in each gear, m/s²
+    pull: [9.0, 7.4, 5.9, 4.6, 4.4],          // keep enough fifth-gear pull against drag to leave braking room
     reverse_max: 10.0, reverse_pull: 5.0, brake: 15.0, roll: 0.3, drag: 0.0012, engine_brake: 1.2,
     steer_max: 0.6, steer_rate: 2.6, steer_return: 4.5, grip: 11.0, lateral_damp: 8.0, drift_damp: 1.3,
     shift_time: 0.22, idle_rpm: 850.0, red_rpm: 7000.0, step_up: 0.5, gravity: 9.81}

@@ -18,9 +18,7 @@ body.midtown { font-family: -apple-system, "Helvetica Neue", Helvetica, Arial, s
 /* minimap, top right */
 .map-card { right: 18px; top: 18px; width: 200px; height: 200px; padding: 0; border-radius: 50%; overflow: hidden; pointer-events: none; }
 .map-disc { position: absolute; left: 0; top: 0; width: 200px; height: 200px; overflow: hidden; border-radius: 50%; background: #2a3038; }
-.map-world { position: absolute; left: 100px; top: 100px; width: 0; height: 0; transform-origin: 0 0; }
-.map-plan { position: absolute; display: block; }
-.map-target { position: absolute; left: 0; top: 0; width: 0; height: 0; }
+.map-target { position: absolute; left: 100px; top: 100px; width: 0; height: 0; }
 .map-target-ring { position: absolute; left: -11px; top: -11px; width: 14px; height: 14px; border-radius: 50%;
     border: 4px solid #ffd166; background: rgba(255, 209, 102, 0.4); }
 .map-pointer { position: absolute; left: 100px; top: 100px; width: 0; height: 0; transform-origin: 0 0; }
