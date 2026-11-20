@@ -1,0 +1,15 @@
+{
+  "name": "Paint brush menu remains usable in a narrow window",
+  "html": "test/demo/paint/paint.ls",
+  "viewport": {"width": 320, "height": 600},
+  "events": [
+    {"type": "assert_count", "target": {"selector": "#brushes option"}, "min": 12},
+    {"type": "assert_rect", "target": {"selector": "#brushes"}, "x": 48, "width": 120, "tolerance": 3},
+    {"type": "click", "target": {"selector": "#tool-eraser"}},
+    {"type": "select_option", "target": {"selector": "#brushes"}, "value": "11"},
+    {"type": "assert_attribute", "target": {"selector": "#paint"}, "attribute": "data-brush", "equals": "Oil"},
+    {"type": "assert_attribute", "target": {"selector": "#paint"}, "attribute": "data-tool", "equals": "brush"},
+    {"type": "select_option", "target": {"selector": "#brushes"}, "value": "1"},
+    {"type": "assert_attribute", "target": {"selector": "#paint"}, "attribute": "data-brush", "equals": "Airbrush"}
+  ]
+}

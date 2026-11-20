@@ -151,11 +151,9 @@ on click(evt) {
     if (button == null) { return 'pass' }
     let owner = owner_of(evt)
     let t = dom.get_attribute(button, "data-tool")
-    let b = dom.get_attribute(button, "data-brush")
     let c = dom.get_attribute(button, "data-color")
     let a = dom.get_attribute(button, "data-action")
     if (t != null) { session = publish(owner, model.with_tool(session, t)) }
-    else if (b != null) { session = publish(owner, model.with_brush(session, int(b))) }
     else if (c != null) {
         let rgb = model.hex_rgb(c) ^ { return 'pass' }
         session = publish(owner, {*: model.with_color(session, rgb), status: "Colour " ++ c})
@@ -166,10 +164,10 @@ on click(evt) {
 }
 on change(evt) {
     let id = dom.get_attribute(evt.target, "id")
-    if (id != "paper" and id != "medium" and id != "wet-pigment") { return 'pass' }
+    if (id != "brushes" and id != "paper" and id != "medium" and id != "wet-pigment") { return 'pass' }
     let owner = owner_of(evt)
     let value = dom.get_state(evt.target, "value")
-    let chosen = if (id == "paper") model.with_paper(session, value) else if (id == "wet-pigment")
+    let chosen = if (id == "brushes") model.with_brush(session, int(value)^) else if (id == "paper") model.with_paper(session, value) else if (id == "wet-pigment")
         model.with_wet_pigment(session, int(value)^) else model.with_medium(session, value)
     let next = chosen ^ { session = failed(owner, session, ^.message); return 'handled' }
     session = publish(owner, next)

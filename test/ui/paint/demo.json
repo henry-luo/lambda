@@ -188,10 +188,11 @@
    "max_b": 70
   },
   {
-   "type": "click",
+   "type": "select_option",
    "target": {
-    "selector": "[data-brush='4']"
-   }
+    "selector": "#brushes"
+   },
+   "value": "4"
   },
   {
    "type": "assert_attribute",
@@ -476,10 +477,11 @@
    "equals": "100%"
   },
   {
-   "type": "click",
+   "type": "select_option",
    "target": {
-    "selector": "[data-brush='0']"
-   }
+    "selector": "#brushes"
+   },
+   "value": "0"
   },
   {
    "type": "mouse_down",
@@ -593,10 +595,11 @@
    "equals": "rough"
   },
   {
-   "type": "click",
+   "type": "select_option",
    "target": {
-    "selector": "[data-brush='7']"
-   }
+    "selector": "#brushes"
+   },
+   "value": "7"
   },
   {
    "type": "assert_attribute",
@@ -795,6 +798,27 @@
    "equals": "charcoal"
   },
   {
+   "type": "assert_value",
+   "target": {"selector": "#brushes"},
+   "equals": "12"
+  },
+  {
+   "type": "select_option",
+   "target": {"selector": "#brushes"},
+   "value": "0"
+  },
+  {
+   "type": "select_option",
+   "target": {"selector": "#brushes"},
+   "value": "12"
+  },
+  {
+   "type": "assert_attribute",
+   "target": {"selector": "#paint"},
+   "attribute": "data-brush",
+   "equals": "charcoal"
+  },
+  {
    "type": "select_option",
    "target": {
     "selector": "#medium"
@@ -841,10 +865,11 @@
    "min_b": 245
   },
   {
-   "type": "click",
+   "type": "select_option",
    "target": {
-    "selector": "[data-brush='11']"
-   }
+    "selector": "#brushes"
+   },
+   "value": "11"
   },
   {
    "type": "assert_attribute",
@@ -986,10 +1011,11 @@
    "equals": "false"
   },
   {
-   "type": "click",
+   "type": "select_option",
    "target": {
-    "selector": "[data-brush='10']"
-   }
+    "selector": "#brushes"
+   },
+   "value": "10"
   },
   {
    "type": "assert_attribute",
