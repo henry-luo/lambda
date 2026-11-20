@@ -31,6 +31,7 @@
 #include "../dom/dom_cssom.h"
 #include "../dom/dom_history.h"
 #include "../dom/dom_observers.h"
+#include "../dom/dom_events.h"
 #include "../dom/dom_realm_hooks.h"
 #include "../dom/realm/dom_realm.h"
 #include "js_runtime.h"
@@ -847,8 +848,135 @@ static Item _media_can_play_type(Item, Item receiver, Item* args, int argc, uint
     return make_string_item(dom_platform_can_play_type(text->chars, text->len));
 }
 
-static Item _media_exception(const char* name, const char* message) {
-    return js_domexception_new(js_name_item(message), js_name_item(name));
+static Item _platform_exception(const char* name, const char* message) {
+    RootFrame roots(2);
+    Rooted<Item> text(roots, js_name_item(message)), kind(roots, js_name_item(name));
+    return js_domexception_new(text.get(), kind.get());
+}
+
+static void* _image_receiver(Item receiver) {
+    void* element = _html_element_receiver(receiver) ? dom_unwrap_element(receiver) : nullptr;
+    const char* name = element ? dom_html_interface_name(element) : nullptr;
+    return name && !strcmp(name, "HTMLImageElement") ? element : nullptr;
+}
+
+static Item _image_decode_tick(Item, Item, Item*, int, uint64_t*);
+static const char* const image_decode_events[] = {"load", "error"};
+
+static Item _image_decode_enqueue(Item request, bool microtask) {
+    RootFrame roots(3);
+    Rooted<Item> record(roots, request);
+    Rooted<Item> task(roots, js_elements_get_int(record.get(), 3)), timer(roots, ItemNull);
+    if (!js_is_callable(task.get())) {
+        task.set(js_new_native_payload_function(_image_decode_tick, 0, 1));
+        Item arguments[] = {record.get()};
+        task.set(js_bind_function(task.get(), ItemNull, arguments, 1));
+        JS_RETURN_IF_ERROR(js_elements_set_int(record.get(), 3, task.get()));
+    }
+    if (microtask) { js_microtask_enqueue(task.get()); return ItemNull; }
+    if (js_elements_get_int(record.get(), 6).item != ITEM_TRUE) {
+        for (const char* type : image_decode_events)
+            JS_RETURN_IF_ERROR(dom_add_event_listener(js_elements_get_int(record.get(), 0),
+                js_name_item(type), task.get(), ItemNull));
+        JS_RETURN_IF_ERROR(js_elements_set_int(record.get(), 6, (Item){.item = ITEM_TRUE}));
+    }
+    // pending transfers are polled like media requests; this never marks an undecoded image ready.
+    timer.set(js_setTimeout(task.get(), (Item){.item = i2it(10)}));
+    JS_RETURN_IF_ERROR(timer.get());
+    return js_elements_set_int(record.get(), 5, timer.get());
+}
+
+static Item _image_decode_tick(Item, Item, Item* args, int argc, uint64_t*) {
+    if (!argc) return ItemNull;
+    RootFrame roots(4);
+    Rooted<Item> request(roots, args[0]);
+    Rooted<Item> owner(roots, js_elements_get_int(request.get(), 0));
+    Rooted<Item> promise(roots, js_elements_get_int(request.get(), 1));
+    Rooted<Item> error(roots, ItemNull);
+    if (js_elements_get_int(request.get(), 4).item == ITEM_TRUE) return ItemNull;
+    js_clearTimeout(js_elements_get_int(request.get(), 5));
+    JS_RETURN_IF_ERROR(js_elements_set_int(request.get(), 5, ItemNull));
+    void* element = _image_receiver(owner.get());
+    DomImageRequestInfo info = dom_engine_image_request_info((DomElement*)element);
+    Item generation = js_elements_get_int(request.get(), 2);
+    bool changed = get_type_id(generation) != LMD_TYPE_NULL &&
+        it2d(generation) != (double)info.generation;
+    bool ready = info.available && !changed &&
+        dom_engine_image_decode_request((DomElement*)element, info.generation);
+    bool failed = !element || changed || (!info.pending && !ready);
+    if (failed || ready) {
+        // completion releases both native event and timer ownership before promise reactions run.
+        JS_RETURN_IF_ERROR(js_elements_set_int(request.get(), 4, (Item){.item = ITEM_TRUE}));
+        if (js_elements_get_int(request.get(), 6).item == ITEM_TRUE)
+            for (const char* type : image_decode_events)
+                dom_remove_event_listener(owner.get(), js_name_item(type),
+                    js_elements_get_int(request.get(), 3), ItemNull);
+        JS_RETURN_IF_ERROR(js_elements_set_int(request.get(), 3, ItemNull));
+    }
+    if (failed) {
+        error.set(_platform_exception("EncodingError", "The image could not be decoded"));
+        JS_RETURN_IF_ERROR(error.get());
+        js_promise_reject_existing(promise.get(), error.get());
+    } else if (ready) {
+        js_promise_fulfill_existing(promise.get(), make_js_undefined());
+    } else {
+        // capture the selected request after the initial microtask, before awaiting its decoder.
+        JS_RETURN_IF_ERROR(js_elements_set_int(request.get(), 2, js_make_number((double)info.generation)));
+        JS_RETURN_IF_ERROR(_image_decode_enqueue(request.get(), false));
+    }
+    return ItemNull;
+}
+
+static Item _image_decode(Item, Item receiver, Item*, int, uint64_t*) {
+    if (!_image_receiver(receiver))
+        return js_promise_from_completion(js_throw_type_error("Illegal HTMLImageElement receiver"));
+    RootFrame roots(3);
+    Rooted<Item> owner(roots, receiver), promise(roots, js_promise_create_pending());
+    Rooted<Item> request(roots, js_array_new(0));
+    if (!js_promise_is(promise.get())) return ItemError;
+    js_set_prototype(request.get(), ItemNull);
+    js_array_push(request.get(), owner.get());
+    js_array_push(request.get(), promise.get());
+    for (int i = 2; i < 7; i++) js_array_push(request.get(), ItemNull);
+    // image data updates and decode() both begin at a microtask checkpoint.
+    JS_RETURN_IF_ERROR(_image_decode_enqueue(request.get(), true));
+    return promise.get();
+}
+
+static Item _image_property(Item callee, Item receiver, Item* args, int argc, uint64_t*) {
+    RootFrame roots(2);
+    Rooted<Item> owner(roots, receiver), value(roots, argc ? args[0] : make_js_undefined());
+    auto* element = (DomElement*)_image_receiver(owner.get());
+    if (!element) return js_throw_type_error("Illegal HTMLImageElement receiver");
+    uintptr_t field = js_fn_native((JsFunction*)callee.function)->target.bits;
+    if (field == 1) {
+        return dom_core_set_attribute(owner.get(), js_name_item("loading"), value.get());
+    }
+    if (field == 0) {
+        const char* value = element->get_attribute("loading");
+        return js_name_item(value && !str_icmp_cstr(value, "lazy") ? "lazy" : "eager");
+    }
+    DomImageRequestInfo info = dom_engine_image_request_info(element);
+    return field == 2 ? js_name_item(info.source ? info.source : "")
+        : (Item){.item = b2it(!info.pending)};
+}
+
+static void _install_image_interface(Item global) {
+    RootFrame roots(4);
+    Rooted<Item> prototype(roots, _iface_proto(global, "HTMLImageElement"));
+    Rooted<Item> getter(roots, ItemNull), setter(roots, ItemNull);
+    Rooted<Item> method(roots, js_new_native_payload_function(_image_decode, 0, 0));
+    js_set_function_name(method.get(), js_name_item("decode"));
+    js_set_key_cstr(prototype.get(), "decode", method.get());
+    const char* names[] = {"loading", "currentSrc", "complete"};
+    for (uint64_t i = 0; i < 3; i++) {
+        uint64_t field = i == 0 ? 0 : i + 1;
+        getter.set(js_new_native_payload_function(_image_property, field, 0));
+        setter.set(i == 0 ? js_new_native_payload_function(_image_property, 1, 1) : ItemNull);
+        js_set_function_name(getter.get(), js_name_item(names[i]));
+        js_install_native_accessor(prototype.get(), js_name_item(names[i]),
+            getter.get(), setter.get(), 0);
+    }
 }
 
 static Item _media_timer_tick(void) {
@@ -902,7 +1030,7 @@ extern "C" Item js_dom_media_poll_pending(void) {
         JS_RETURN_IF_ERROR(js_elements_set_int(js_runtime_state.dom.media_play_requests, i, ItemNull));
         if (played) js_promise_fulfill_existing(promise.get(), make_js_undefined());
         else {
-            error.set(_media_exception(failure, !strcmp(failure, "AbortError") ?
+            error.set(_platform_exception(failure, !strcmp(failure, "AbortError") ?
                 "The play() request was interrupted" : !strcmp(failure, "NotAllowedError") ?
                 "Playback requires document activation" : "The media source could not be played"));
             JS_RETURN_IF_ERROR(error.get());
@@ -931,7 +1059,7 @@ static Item _media_play(Item, Item receiver, Item*, int, uint64_t*) {
     info.set(dom_engine_media_info(owner.get()));
     if (item_is_error(info.get())) return js_promise_from_completion(info.get());
     if (!js_is_object_value(info.get())) return js_promise_from_completion(
-        js_throw_value(_media_exception("NotSupportedError", "Media backend is unavailable")));
+        js_throw_value(_platform_exception("NotSupportedError", "Media backend is unavailable")));
     Rooted<Item> request(roots, js_array_new(0)), generation(roots, js_get_key_cstr(info.get(), "generation"));
     js_set_prototype(request.get(), ItemNull);
     js_array_push(request.get(), owner.get()); js_array_push(request.get(), promise.get());
@@ -985,13 +1113,13 @@ static Item _media_field(Item callee, Item receiver, Item* args, int argc, uint6
         double number = 0; item_try_to_double(value.get(), &number);
         if (!isfinite(number)) return js_throw_type_error("Media value must be finite");
         if (!strcmp(field.command, "volume") && (number < 0 || number > 1))
-            return js_throw_value(_media_exception("IndexSizeError", "Volume must be within [0, 1]"));
+            return js_throw_value(_platform_exception("IndexSizeError", "Volume must be within [0, 1]"));
         if (!strcmp(field.command, "seek") && number < 0) value.set((Item){.item = i2it(0)});
     }
     info.set(dom_engine_media_command(owner.get(), js_name_item(field.command), value.get()));
     JS_RETURN_IF_ERROR(info.get());
     if (info.get().item == ITEM_FALSE && (!strcmp(field.command, "volume") || !strcmp(field.command, "muted")))
-        return js_throw_value(_media_exception("NotAllowedError", "Audible media requires document activation"));
+        return js_throw_value(_platform_exception("NotAllowedError", "Audible media requires document activation"));
     return make_js_undefined();
 }
 
@@ -1344,6 +1472,7 @@ extern "C" void dom_install_collection_globals(void) {
         _link_iface_proto(global, ctor_name, parent_name);
     }
     _install_media_interface(global);
+    _install_image_interface(global);
     _install_dialog_interface(global);
     _install_label_interfaces(global);
     dom_install_html_hidden(_iface_proto(global, "HTMLElement"));

@@ -211,6 +211,12 @@ DOM_ENGINE_WEAK bool dom_engine_image_natural_size(DomElement* e, int* w, int* h
 DOM_ENGINE_WEAK bool dom_engine_image_rendered_size(DomElement* e,int* w,int* h) {
     (void)e;(void)w;(void)h;return false;
 }
+DOM_ENGINE_WEAK DomImageRequestInfo dom_engine_image_request_info(DomElement* e) {
+    (void)e; return {};
+}
+DOM_ENGINE_WEAK bool dom_engine_image_decode_request(DomElement* e, uint64_t generation) {
+    (void)e; (void)generation; return false;
+}
 DOM_ENGINE_WEAK void dom_engine_install_animation_globals(void) {}
 DOM_ENGINE_WEAK void dom_engine_animation_frame_prepare(void* d,double t) {(void)d;(void)t;}
 DOM_ENGINE_WEAK uint64_t dom_engine_frame_request(void* n, const char* e) {

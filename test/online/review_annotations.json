@@ -89,7 +89,7 @@
     {
       "label": "saas_landing_432",
       "url": "https://nightwatch.laravel.com/",
-      "manual_major_remaining": "Supporting copy, both primary actions and the large dashboard panel remain absent beneath a blurred heading.",
+      "manual_major_remaining": "",
       "rechecks": [
         {
           "rechecked_at": "2026-11-18T04:43:31.020Z",
@@ -97,7 +97,12 @@
           "previous_manual_major_remaining": "The neutral background palette is repaired, but the main hero heading, copy and actions remain absent.",
           "manual_major_remaining": "Supporting copy, both primary actions and the large dashboard panel remain absent beneath a blurred heading."
         }
-      ]
+      ],
+      "resolved_previous_manual_major_remaining": "Supporting copy, both primary actions and the large dashboard panel remain absent beneath a blurred heading.",
+      "resolved_at": "2026-11-20T05:08:00.293Z",
+      "resolution": "At matched animation origins and the same 1000ms window, Chromium also retains the blurred/delayed hero phases. The supporting copy, actions and dashboard omission in the old comparison is an animation-age difference. The new pair is below the major threshold; grain/spacing residue remains. This is capture-frame calibration, not a new native repair.",
+      "resolution_evidence": "comparison/repairs.html#round-101",
+      "resolved_capture_settle_ms": 1000
     },
     {
       "label": "kotlin_docs",
@@ -205,7 +210,7 @@
     {
       "label": "saas_landing_563",
       "url": "https://superhuman.com/",
-      "manual_major_remaining": "Foreground colors are restored, but the large portrait and overlay placement still differ substantially, and the sign-in control is clipped.",
+      "manual_major_remaining": "",
       "review_history": [
         {
           "reviewed_at": "2026-11-13T12:36:31.193216+00:00",
@@ -228,7 +233,12 @@
           "previous_manual_major_remaining": "Foreground text and translucent-card fills differ substantially across the main hero: black native text/borders replace the white/light browser presentation.",
           "manual_major_remaining": "Foreground colors are restored, but the large portrait and overlay placement still differ substantially, and the sign-in control is clipped."
         }
-      ]
+      ],
+      "resolved_at": "2026-11-20T00:34:52.777Z",
+      "resolution": "The heading now wraps into the correct two lines, and the portrait and major overlays align. Remaining small sign-in clipping and background/frame differences do not retain a major composition mismatch.",
+      "resolution_evidence": "comparison/repairs.html#round-92",
+      "resolved_previous_manual_major_remaining": "Foreground colors are restored, but the large portrait and overlay placement still differ substantially, and the sign-in control is clipped.",
+      "resolved_capture_settle_ms": 1000
     },
     {
       "label": "saas_landing_093",
@@ -383,7 +393,7 @@
     {
       "label": "saas_landing_426",
       "url": "https://rogo.ai/",
-      "manual_major_remaining": "Headline, supporting copy and primary action are now restored, but the main navigation and large patterned hero background remain absent; headline wrapping differs substantially.",
+      "manual_major_remaining": "Headline wrapping is repaired and supporting copy and primary action are present, but the main navigation and large patterned hero background remain absent.",
       "reviewed_at": "2026-11-18T02:59:04.553163+00:00",
       "evidence": "comparison/repairs.html#round-81",
       "rechecks": [
@@ -392,6 +402,12 @@
           "evidence": "comparison/repairs.html#round-83",
           "previous_manual_major_remaining": "Lab color computation restores the subtle hero background, but the main navigation, remainder of the headline, supporting copy and primary action remain absent in the unchanged live capture. Retained after visual review despite a below-threshold coarse score.",
           "manual_major_remaining": "Headline, supporting copy and primary action are now restored, but the main navigation and large patterned hero background remain absent; headline wrapping differs substantially."
+        },
+        {
+          "rechecked_at": "2026-11-20T01:40:10.344219+00:00",
+          "evidence": "comparison/repairs.html#round-94",
+          "previous_manual_major_remaining": "Headline, supporting copy and primary action are now restored, but the main navigation and large patterned hero background remain absent; headline wrapping differs substantially.",
+          "manual_major_remaining": "Headline wrapping is repaired and supporting copy and primary action are present, but the main navigation and large patterned hero background remain absent."
         }
       ]
     },
@@ -474,6 +490,20 @@
       "manual_major_remaining": "The giant DIA headline, introductory line and main download action remain absent.",
       "reviewed_at": "2026-11-18T04:43:31.020Z",
       "evidence": "comparison/repairs.html#round-83"
+    },
+    {
+      "label": "saas_landing_456",
+      "url": "https://gladia.io/",
+      "manual_major_remaining": "Main hero headline and supporting copy remain absent, and the large purple Canvas background is missing. The headline has a 1500ms JS feature-flag fallback beyond the native frame; the drawing script requires missing Canvas gradient APIs (JS13-L17). Matching animation origins does not establish complete JS clock parity.",
+      "reviewed_at": "2026-11-20T05:08:00.293Z",
+      "evidence": "comparison/repairs.html#round-101"
+    },
+    {
+      "label": "pnpm_docs",
+      "url": "https://pnpm.io/",
+      "manual_major_remaining": "The complete client-created top navigation and brand remain absent, shifting the otherwise restored hero upward.",
+      "reviewed_at": "2026-11-20T05:45:28.245309+00:00",
+      "evidence": "comparison/repairs.html#round-102"
     }
   ]
 }

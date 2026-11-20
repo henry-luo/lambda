@@ -99,6 +99,32 @@
       "current_browser_sha256": "0d61f1fd46a548860bd39e993674855504e4558012506199235d0c4f7b821cff",
       "current_mean_error": 0.005197372372805347,
       "current_changed_area": 0.005625
+    },
+    {
+      "label": "saas_landing_322",
+      "url": "https://circle.so/",
+      "round": 95,
+      "reason": "Current headless Chromium no longer follows the former /a route and now serves a different canonical hero design. Both current renderers show The complete community platform. This reference maintenance is separate from the same-source RI-151 layout repair.",
+      "old_reference_final_url": "https://circle.so/a",
+      "current_reference_final_url": "https://circle.so/",
+      "old_primary_heading": "Run your community business on Circle",
+      "old_heading_evidence": "Archived browser PNG; old browser navigation diagnostic ends at /a.",
+      "new_primary_heading": "The complete community platform",
+      "current_response_sha256": "33d04a170a0135fdb2f1460d008ccd5d6f85731044872dbd6b16ee13255c3250",
+      "current_browser_response_sha256": "b04946e1af014ce3563112ba4d92b18f12eb33c2d63dab24be61b009ff4a637d",
+      "old_browser_attempt_utc": "2026-11-18T04:11:30.312Z",
+      "current_lambda_attempt_utc": "2026-11-20T02:34:49.659Z",
+      "current_browser_attempt_utc": "2026-11-20T02:04:29.747Z",
+      "old_lambda_sha256": "2b49e53b57de8b89e0390b1878d13bbc8a7ab7c210b412f6d6f759e92a438c37",
+      "old_browser_sha256": "994ca5c6affef7ea8eeb57d0e29a3c6d0c0be3fdb9e66c4aa2fcdf8333b79cee",
+      "current_lambda_sha256": "2c5670c78ebd3c2896cfba927b749b0bbb6344983d5bb2b74b18ef3af7a05b38",
+      "current_browser_sha256": "e70c2871b294f406df314c86ac4781dd755c7997e1a5ed79ccdaa2b184683cf2",
+      "lambda_pin": "43699b11a65434287337be491ca4afa6ef1a7008cbcbf659512a73838e3d985a",
+      "old_mean_error": 0.17793082788670997,
+      "current_mean_error": 0.04699465332243987,
+      "current_changed_area": 0.16229166666666667,
+      "browser_status": 200,
+      "evidence": "temp/online-visual-round97/circle-reference-evidence.json"
     }
   ]
 }

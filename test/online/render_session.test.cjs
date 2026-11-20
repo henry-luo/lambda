@@ -12,6 +12,10 @@ const root = path.resolve(__dirname, '../..');
 fs.mkdirSync(path.join(root, 'temp'), {recursive: true});
 const scratch = fs.mkdtempSync(path.join(root, 'temp/render-session-test-'));
 const requests = [];
+const PNG = pngLibrary(root);
+const brokenPixels = new PNG({width: 3, height: 2});
+brokenPixels.data.fill(255);
+const brokenPng = PNG.sync.write(brokenPixels).subarray(0, 45);
 let server, origin;
 
 before(async () => {
@@ -19,6 +23,30 @@ before(async () => {
         const url = new URL(request.url, 'http://fixture.invalid');
         requests.push({path: url.pathname, run: url.searchParams.get('run'), cookie: request.headers.cookie || ''});
         response.setHeader('Cache-Control', 'no-store');
+        if (url.pathname === '/decode-image') {
+            setTimeout(() => {
+                if (url.searchParams.get('run') === 'broken-header') {
+                    response.setHeader('Content-Type', 'image/png');
+                    response.end(brokenPng);
+                    return;
+                }
+                response.setHeader('Content-Type', 'image/svg+xml');
+                response.end('<svg xmlns="http://www.w3.org/2000/svg" width="3" height="2"/>');
+            }, 80);
+            return;
+        }
+        if (url.pathname === '/decode-page') {
+            const run = url.searchParams.get('run');
+            const replace = run === 'replace';
+            response.setHeader('Content-Type', 'text/html');
+            response.end('<!doctype html><body><script>' +
+                'const image=new Image;image.src="/decode-image?run=' + run + '";' +
+                'const pending=!image.complete;const promise=image.decode();' +
+                (replace ? 'queueMicrotask(()=>{image.src="data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'2\' height=\'2\'/%3E"});' : '') +
+                'promise.then(()=>console.log("EXPORT_SESSION_RESULT",JSON.stringify({pending,decoded:true,complete:image.complete,width:image.naturalWidth})),' +
+                'error=>console.log("EXPORT_SESSION_RESULT",JSON.stringify({pending,error:error.name})));</script>');
+            return;
+        }
         if (url.pathname === '/redirect') {
             response.writeHead(302, {'Set-Cookie': 'redirect_cookie=kept; Path=/',
                 Location: '/page?run=redirect'}).end();
@@ -88,6 +116,21 @@ async function render(run, route = '/page') {
 function sessionResults(output) {
     return [...output.matchAll(/EXPORT_SESSION_RESULT (\{[^\n]+\})/g)].map(match => JSON.parse(match[1]));
 }
+
+test('image decode waits for the admitted HTTP image at the load boundary', async () => {
+    const result = await render('decode', '/decode-page');
+    assert.deepEqual(result, {pending:true,decoded:true,complete:true,width:3});
+});
+
+test('replacing an in-flight image rejects the original decode promise', async () => {
+    const result = await render('replace', '/decode-page');
+    assert.deepEqual(result, {pending:true,error:'EncodingError'});
+});
+
+test('image decode rejects a valid header with corrupt pixel data', async () => {
+    const result = await render('broken-header', '/decode-page');
+    assert.deepEqual(result, {pending:true,error:'EncodingError'});
+});
 
 async function command(name, args, input = '') {
     const options = parseOptions([], root);

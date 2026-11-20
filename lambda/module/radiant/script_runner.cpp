@@ -51,6 +51,7 @@
 #include "lib/arraylist.h"
 #include "lib/strbuf.h"
 #include "lib/str.h"
+#include "lib/dom_image.h"
 #include "lib/url.h"
 #include "lib/file.h"
 #include "lib/hashmap.h"
@@ -2286,6 +2287,12 @@ static bool script_runner_find_embedded_navigation(DomNode* node, void* context)
     return true;
 }
 
+static bool script_runner_prepare_image_request(DomNode* node, void*) {
+    if (node->is_element() && node->as_element()->tag() == MARKUP_NAME_IMG)
+        dom_engine_image_request_info(node->as_element());
+    return true;
+}
+
 static bool script_runner_wait_for_load_blockers(Runtime* runtime,
                                                  JsScriptTaskCollection* collection) {
     DomDocument* doc = runtime ? (DomDocument*)runtime->dom_doc : nullptr;
@@ -2312,6 +2319,14 @@ static bool script_runner_wait_for_load_blockers(Runtime* runtime,
         js_microtask_flush();
     }
 
+    {
+        RuntimeExecutionScope execution_scope(runtime_get_eval_context(runtime));
+        // parsed images need the same request/completion path as scripted src writes.
+        view_geometry_walk_dom_tree(doc->root, script_runner_prepare_image_request, nullptr);
+        dom_dispatch_pending_resource_loads();
+        if (item_is_error(js_microtask_flush_result())) return false;
+    }
+
     if (!doc->resource_manager) {
         doc->fully_loaded = true;
         if (collection && collection->load_blocking_scripts > 0) {
@@ -2335,6 +2350,7 @@ static bool script_runner_wait_for_load_blockers(Runtime* runtime,
         if (source_sequence != doc->js.mutation_sequence) {
             source_sequence = doc->js.mutation_sequence;
             radiant_discover_document_resources(doc);
+            view_geometry_walk_dom_tree(doc->root, script_runner_prepare_image_request, nullptr);
         }
         return true;
     };
