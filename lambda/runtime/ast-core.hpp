@@ -668,6 +668,7 @@ NameEntry* ast_index_binding(const AstIndex* index, AstBindingId id);
 // retain declaration order in first/last/next while wide scopes probe here.
 NameEntry* name_scope_lookup_name(const NameScope* scope, const String* name);
 NameEntry* name_scope_lookup_name_bytes(const NameScope* scope, const String* name);
+NameEntry* name_scope_lookup_chain(const NameScope* scope, const String* name);
 bool name_scope_index_add(Pool* pool, NameScope* scope, NameEntry* entry);
 bool name_scope_plan_binding_slots(NameScope* scope);
 #ifdef __cplusplus
@@ -1496,6 +1497,8 @@ typedef struct AstFuncNode : AstNode {
     // defining module is fully built (lambda_ast_decide_cow_borrows), so a
     // caller in another module may rely on them.
     bool cow_param_effects_final;
+    // The resolver saw no explicit return in this source body.
+    bool lambda_no_explicit_return;
     uint32_t declared_effects;  // carried from syntax until TypeFunc is published
     Type* declared_return_type;
 } AstFuncNode;

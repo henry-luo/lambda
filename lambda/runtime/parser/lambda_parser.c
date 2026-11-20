@@ -19,6 +19,7 @@ typedef struct LambdaRdParser {
     uint32_t stop_at_element_close;
     LambdaTokenKind prev_kind;
     uint32_t procedural_depth;
+    bool probing;
     bool last_statement_assignment;
     uint32_t expression_depth;
     uint32_t pipe_rhs_depth;
@@ -237,6 +238,9 @@ static LambdaParseValue parser_reduction_fingerprint(const LambdaParseReduction*
 }
 
 static LambdaParseValue parser_reduce_detail_ex(LambdaRdParser* parser, LambdaReductionKind kind, LambdaReductionForm form, SourceSpan span, LambdaToken detail_token, LambdaToken secondary_token, uint32_t flags, const LambdaToken* name_tokens, uint32_t name_count, const LambdaParseValue* children, uint32_t child_count) {
+    // Lookahead checks syntax and token position. Its reduction values only
+    // indicate presence and never reach a sink or the structural fingerprint.
+    if (parser->probing) return 1;
     LambdaParseReduction reduction = {
         .kind = kind,
         .form = form,
@@ -342,6 +346,7 @@ static LambdaParseValue parser_fail(LambdaRdParser* parser, const char* message,
 }
 
 static void parser_prepare_probe(LambdaRdParser* probe) {
+    probe->probing = true;
     probe->sink = NULL;
     probe->sink_context = NULL;
     probe->metrics = NULL;
@@ -562,7 +567,12 @@ static LambdaParseValue parse_let_expression(LambdaRdParser* parser);
 static bool parser_at_declaration_head(LambdaRdParser* parser);
 static LambdaParseValue parse_if_expression(LambdaRdParser* parser);
 static LambdaParseValue parse_if_statement(LambdaRdParser* parser);
-static bool if_starts_block_statement(const LambdaRdParser* parser);
+typedef enum IfStatementHead {
+    IF_NO_BRACE,
+    IF_MAP_BODY,
+    IF_BLOCK_BODY,
+} IfStatementHead;
+static IfStatementHead classify_if_statement_head(const LambdaRdParser* parser);
 static bool parser_parse_scoped_expression(LambdaRdParser* parser, uint32_t procedural_depth, LambdaParseValue* value_out);
 
 static bool parser_consume_balanced(LambdaRdParser* parser, LambdaTokenKind opener, LambdaTokenKind closer, const char* message) {
@@ -1513,7 +1523,8 @@ static bool control_body_brace_is_map(const LambdaRdParser* parser) {
 
 static bool parser_parse_control_body(LambdaRdParser* parser, LambdaToken marker, LambdaReductionForm begin_form, LambdaReductionForm end_form, const char* close_message, const char* expression_message, const char* missing_message, bool allow_expression, bool statement_context, LambdaParseValue* value_out) {
     if (statement_context && parser->current.kind == LAMBDA_TOK_IF) {
-        *value_out = if_starts_block_statement(parser) ? parse_if_statement(parser) : parse_if_expression(parser);
+        *value_out = classify_if_statement_head(parser) == IF_BLOCK_BODY
+            ? parse_if_statement(parser) : parse_if_expression(parser);
         return parser->status == LAMBDA_PARSE_OK;
     }
     if (parser->current.kind == LAMBDA_TOK_LBRACE && (statement_context || !control_body_brace_is_map(parser))) {
@@ -2253,12 +2264,15 @@ static LambdaParseValue parse_expression(LambdaRdParser* parser, int min_bp) {
     return value;
 }
 
-static bool if_starts_block_statement(const LambdaRdParser* parser) {
+static IfStatementHead classify_if_statement_head(const LambdaRdParser* parser) {
     LambdaRdParser probe = parser_probe(parser);
     parser_advance(&probe);
     LambdaParseValue ignored;
     (void)parser_parse_delimited_expression_value(&probe, 0, &ignored);
-    return probe.status == LAMBDA_PARSE_OK && probe.current.kind == LAMBDA_TOK_LBRACE;
+    if (probe.status != LAMBDA_PARSE_OK || probe.current.kind != LAMBDA_TOK_LBRACE)
+        return IF_NO_BRACE;
+    // Reuse the probed condition for the brace/map decision.
+    return control_body_brace_is_map(&probe) ? IF_MAP_BODY : IF_BLOCK_BODY;
 }
 
 static bool parser_parse_parameter_list(LambdaRdParser* parser, LambdaParseValue* parameters_out, bool* variadic_out) {
@@ -2651,20 +2665,8 @@ static LambdaParseValue parse_var_statement(LambdaRdParser* parser) {
     return parser_reduce_one(parser, LAMBDA_REDUCE_STATEMENT, LAMBDA_REDUCTION_FORM_VAR, (SourceSpan){first.span.start_byte, parser->current.span.start_byte}, first, declarations);
 }
 
-static bool if_statement_body_is_map(const LambdaRdParser* parser) {
-    LambdaRdParser probe = parser_probe(parser);
-    parser_advance(&probe);
-    LambdaParseValue ignored;
-    (void)parser_parse_delimited_expression_value(&probe, 0, &ignored);
-    if (probe.status != LAMBDA_PARSE_OK) return false;
-    return control_body_brace_is_map(&probe);
-}
-
 static LambdaParseValue parse_if_statement(LambdaRdParser* parser) {
     LambdaToken first = parser->current;
-    if (if_statement_body_is_map(parser)) {
-        return parse_if_expression(parser);
-    }
     parser_advance(parser);
     LambdaParseValue condition;
     if (!parser_parse_delimited_expression_value(parser, 0, &condition)) return 0;
@@ -2942,8 +2944,10 @@ static LambdaParseValue parse_statement(LambdaRdParser* parser) {
             parser_advance(parser);
             return parser_reduce(parser, LAMBDA_REDUCE_STATEMENT, (SourceSpan){first.span.start_byte, parser->current.span.start_byte}, NULL, 0);
         }
-        if (parser->current.kind == LAMBDA_TOK_IF && if_starts_block_statement(parser)) {
-            return parse_if_statement(parser);
+        if (parser->current.kind == LAMBDA_TOK_IF) {
+            IfStatementHead head = classify_if_statement_head(parser);
+            if (head == IF_BLOCK_BODY) return parse_if_statement(parser);
+            if (head == IF_MAP_BODY) return parse_if_expression(parser);
         }
         if (parser->current.kind == LAMBDA_TOK_WHILE) {
             return parse_while_statement(parser);
