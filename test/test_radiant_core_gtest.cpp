@@ -1789,8 +1789,8 @@ TEST_F(IncrementalCssTest, RebindsOnlyChangedGeometryAndRestoresAuthoredValues) 
     int64_t evaluated = g_style_geometry_evaluations;
 
     // flow consumes margins and sizing; neither mutation changes computed CSS.
-    target->boundary_mut()->flow_margin = target->boundary()->margin;
-    target->boundary_mut()->has_flow_margin = true;
+    target->boundary_mut()->has_flow_margin = false;
+    capture_flow_margin(target->boundary_mut());
     target->boundary_mut()->margin.top = 0.0f;
     target->blk->given_width = 777.0f;
     resolve();

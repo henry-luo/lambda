@@ -5932,12 +5932,12 @@ TEST_F(RadiantDocumentTest, HtmlUaSpacingFollowsComputedFlowFontAndAuthorOverrid
             ASSERT_NE(element, nullptr) << id;
             ASSERT_NE(element->boundary(), nullptr) << id;
             // inspect resolved margins before normal-flow collapse consumes them.
-            const Spacing* value = padding ? &element->boundary()->padding :
-                view_boundary_flow_margin(element->boundary());
-            EXPECT_FLOAT_EQ(value->top, top) << id;
-            EXPECT_FLOAT_EQ(value->right, right) << id;
-            EXPECT_FLOAT_EQ(value->bottom, bottom) << id;
-            EXPECT_FLOAT_EQ(value->left, left) << id;
+            const BoundaryProp* boundary = element->boundary();
+            const float expected[] = {top, right, bottom, left};
+            for (CssBoxSide side : {CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_RIGHT, CSS_BOX_SIDE_BOTTOM, CSS_BOX_SIDE_LEFT}) {
+                float value = padding ? boundary->padding.values[side] : view_boundary_flow_margin(boundary, side).value;
+                EXPECT_FLOAT_EQ(value, expected[side]) << id << " side " << side;
+            }
         };
         auto block_margins = [&](const char* id, float value) {
             spacing(id, false, flow.vertical ? 0.0f : value, flow.vertical ? value : 0.0f,
@@ -15509,11 +15509,9 @@ TEST_F(RadiantDocumentTest, TableRowsConsumeCollapsedBlockMarginsOnce) {
             }
             DomElement* tail = dom_find_element_by_id(document->root->as_element(), "ordinary-tail");
             ASSERT_NE(tail, nullptr); ASSERT_NE(tail->bound, nullptr);
-            const Margin* resolved = view_boundary_flow_margin(tail->boundary());
-            ASSERT_NE(resolved, nullptr);
             // the zero authored margin stays zero even when flow promotes the preceding chain.
-            EXPECT_FLOAT_EQ(resolved->top, 0.0f);
-            EXPECT_FLOAT_EQ(resolved->bottom, 0.0f);
+            EXPECT_FLOAT_EQ(view_boundary_flow_margin(tail->boundary(), CSS_BOX_SIDE_TOP).value, 0.0f);
+            EXPECT_FLOAT_EQ(view_boundary_flow_margin(tail->boundary(), CSS_BOX_SIDE_BOTTOM).value, 0.0f);
             ASSERT_TRUE(tail->set_attribute("style", "margin-bottom:24px"));
             layout_html_doc(&ui, document, true);
             expect_height("ordinary", 90);
