@@ -711,7 +711,7 @@ static void fd_append_image_coordinates(Item entries, DomElement* image, const c
         strbuf_append_str(key, name);
         strbuf_append_char(key, '.');
     }
-    const DomElementExt* state = image->ext;
+    const DomStyleRareExt* state = image->ext;
     float coordinates[] = {state ? state->form_image_selected_x : 0.0f,
                            state ? state->form_image_selected_y : 0.0f};
     strbuf_append_char(key, 'x');
@@ -764,7 +764,7 @@ static Item fd_copy_entries(Item entries) {
 
 static Item fd_construct_entries(DomElement* form, DomElement* submitter, bool dispatch) {
     if (!dom_element_is_html_tag(form, MARKUP_NAME_FORM)) return ItemNull;
-    DomElementExt* state = form->ensure_ext();
+    DomStyleRareExt* state = form->ensure_ext();
     if (!state) return ItemError;
     if (state->form_constructing_entries) return ItemNull;
 

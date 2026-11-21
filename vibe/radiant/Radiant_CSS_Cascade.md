@@ -3003,7 +3003,7 @@ this sharing ends with the paired query, rather than bypassing mutation keys.
 ### Custom-property candidate lookup (2026-10-22)
 
 **D5.5.1 / D5.1.4 / D5.5.2**, **VR15**. A lazy sorted name index in
-`DomElementExt` borrows document-owned custom-property records. Binary lookup
+`DomStyleRareExt` borrows document-owned custom-property records. Binary lookup
 visits only same-name declarations, retaining their original list order for
 cascade ties, rollback and animation filtering. Membership edits invalidate
 the index before record retirement; value and geometry changes need no rebuild.

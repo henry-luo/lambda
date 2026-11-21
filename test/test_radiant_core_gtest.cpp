@@ -2876,7 +2876,7 @@ TEST(DomRetirementOwnerArenaTest, AdoptedMetadataRetiresFromItsPhysicalPool) {
     const char* tag = child->tag_name();
     const char* cached_id = child->id;
     const char* cached_class = child->class_names()[0];
-    DomElementExt* extension = child->ext;
+    DomStyleRareExt* extension = child->ext;
     EXPECT_TRUE(pool_owns(doc.document_pool, cached_id));
     EXPECT_TRUE(pool_owns(doc.document_pool, cached_class));
     dom_node_schedule_detached(&target_doc, child);

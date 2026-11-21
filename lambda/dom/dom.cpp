@@ -255,7 +255,7 @@ static bool dom_expando_flag_is(DomElement* elem, const char* name);
 static void dom_expando_flag_set(DomElement* elem, const char* name, Item value);
 
 static Item dom_dialog_store_return_value(DomElement* element, Item text_value) {
-    DomElementExt* storage = element->ensure_ext();
+    DomStyleRareExt* storage = element->ensure_ext();
     const char* text = fn_to_cstr(text_value);
     const char* copy = storage && element->doc
         ? pool_strdup(element->doc->document_pool, text ? text : "") : nullptr;
@@ -340,7 +340,7 @@ static void dom_set_fragment_script_state(DomElement* root, DomFragmentScriptMod
     for (DomNode* node = root; node;) {
         DomElement* element = node->as_element();
         if (dom_element_is_html_tag(element, MARKUP_NAME_SCRIPT)) {
-            if (DomElementExt* state = element->ensure_ext()) {
+            if (DomStyleRareExt* state = element->ensure_ext()) {
                 state->script_already_started = mode == DomFragmentScriptMode::inert;
                 state->script_parser_pending = mode == DomFragmentScriptMode::parser_inserted;
             }
@@ -632,7 +632,7 @@ extern "C" void dom_clear_script_reactions(DomDocument* document) {
 
 static bool dom_update_slot_assignment(DomElement* slot, bool fallback_changed) {
     DomSlotAssignment assignment = dom_slot_assignment(slot);
-    DomElementExt* state = slot->ext;
+    DomStyleRareExt* state = slot->ext;
     size_t previous = state ? state->signaled_slot_assignment_count : 0;
     size_t count = 0;
     bool changed = false;
@@ -4952,7 +4952,7 @@ enum DomToggleTaskKind { DOM_DIALOG_TOGGLE, DOM_POPOVER_TOGGLE };
 static DomToggleTaskTracker* dom_toggle_tracker(DomElement* element, DomToggleTaskKind kind,
                                                bool ensure) {
     if (kind == DOM_DIALOG_TOGGLE) {
-        DomElementExt* state = ensure ? element->ensure_ext() : element->ext.get();
+        DomStyleRareExt* state = ensure ? element->ensure_ext() : element->ext.get();
         return state ? &state->dialog_toggle : nullptr;
     }
     PopoverStyle* state = ensure ? element->ensure_popover_style() : element->popover_style();
@@ -14464,7 +14464,7 @@ static DomNode* dom_clone_node_into_document(DomNode* node,
     dom_clone_content_attributes(elem, clone);
     // Script clones keep the preparation result and have no parser owner.
     if (elem->ext && elem->ext->script_already_started) {
-        if (DomElementExt* state = clone->ensure_ext()) state->script_already_started = true;
+        if (DomStyleRareExt* state = clone->ensure_ext()) state->script_already_started = true;
     }
     // CSSOM cloning preserves the declaration block, including names changed by serialization.
     if (CssRule* authored = dom_element_inline_declaration_block(elem))
@@ -15144,7 +15144,7 @@ static Item dom_deliver_selected_content(Item env_item) {
 
 static void dom_queue_selected_content(DomElement* select, bool reset) {
     if (!select || select->has_attribute("multiple") || !dom_next_selected_content(select, nullptr)) return;
-    DomElementExt* state = select->ensure_ext();
+    DomStyleRareExt* state = select->ensure_ext();
     if (!state) return;
     state->selected_content_reset_pending |= reset;
     if (state->selected_content_pending) return;
@@ -16477,7 +16477,7 @@ Item dom_form_close_dialog(DomElement* form, DomElement* submitter) {
     Rooted<Item> result(roots, make_js_undefined());
     if (dom_element_is_html_tag(submitter, MARKUP_NAME_INPUT) &&
         form_input_kind_is(submitter->get_attribute("type"), FORM_INPUT_KIND_IMAGE)) {
-        const DomElementExt* coordinates = submitter->ext;
+        const DomStyleRareExt* coordinates = submitter->ext;
         char text[64];
         snprintf(text, sizeof(text), "%d,%d",
             math_round_to_int_sat(coordinates ? coordinates->form_image_selected_x : 0.0f),
@@ -16525,7 +16525,7 @@ static Item dom_request_close_dialog(Item receiver, Item value, Item invoker) {
     DomDocument* doc = elem->doc;
     if (!elem->has_attribute("open") || !dom_node_is_connected(elem) ||
         !dom_doc_has_browsing_context(doc)) return make_js_undefined();
-    DomElementExt* state = elem->ensure_ext();
+    DomStyleRareExt* state = elem->ensure_ext();
     if (!state) return ItemError;
     if (state->dialog_cancel_dispatching) return make_js_undefined();
 

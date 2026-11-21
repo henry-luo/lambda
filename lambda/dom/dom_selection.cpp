@@ -1357,7 +1357,7 @@ static Item _tc_selectionchange_drain(Item this_val, Item* args, int argc) {
     state->tc_selectionchange_head = nullptr;
     state->tc_selectionchange_drain_scheduled = false;
     while (head) {
-        DomElementExt* task_state = head->ext;
+        DomStyleRareExt* task_state = head->ext;
         DomElement* next = task_state ? task_state->selectionchange_event_next : nullptr;
         if (task_state) {
             task_state->selectionchange_event_next = nullptr;
@@ -1400,7 +1400,7 @@ extern "C" void dom_queue_textcontrol_selectionchange(DomElement* elem) {
     if (!state) {
         return;
     }
-    DomElementExt* task_state = elem->ensure_ext();
+    DomStyleRareExt* task_state = elem->ensure_ext();
     if (!task_state) {
         return;
     }
@@ -1436,7 +1436,7 @@ extern "C" void dom_selection_reset(void) {
     DocState* state = doc->state;
     DomElement* pending = state->tc_selectionchange_head;
     while (pending) {
-        DomElementExt* task_state = pending->ext;
+        DomStyleRareExt* task_state = pending->ext;
         DomElement* next = task_state ? task_state->selectionchange_event_next : nullptr;
         if (task_state) {
             task_state->selectionchange_event_next = nullptr;

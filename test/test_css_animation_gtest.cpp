@@ -3874,7 +3874,7 @@ TEST(CssTransform, Translate3dPercentagesUseTransformReferenceBox) {
 
 TEST(CssTransform, GroupingEffectsFlattenUsedTransformStyle) {
     DomElement element = {};
-    DomElementExt extension = {};
+    DomStyleRareExt extension = {};
     TransformProp transform = TRANSFORM_PROP_DEFAULT;
     ScrollProp scroll = SCROLL_PROP_DEFAULT;
     InlineProp inline_prop = INLINE_PROP_DEFAULT;

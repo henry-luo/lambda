@@ -107,7 +107,9 @@ This fixes the F3 collision class (table-as-flex-item, form-in-flex) and removes
 **DV5a — Access style: tagged-union storage, overlay-subclass accessors.** The unions stay *typed and tagged* in `DomElement` (debugger-transparent, grep-able, zero-cost), but the sanctioned access path is accessor methods on the zero-size overlay subclasses, which centralize the tag check: `DomTable::table()` (debug-asserts `role_kind == ROLE_TABLE`, returns `tb`), `ViewTableCell::cell()`, flex/grid item accessors on the container's item view, `form()` on the form-control overlay. This extends the existing pattern (`ViewTable::acts_as_tbody()`, `lam::view_require<RDT_VIEW_TABLE>`). Direct union-member reads outside the accessors are a convention violation; the repeated manual `item_prop_type == X && el->y` guards (~20 sites in event.cpp alone) collapse into the accessors. *(Rejected: `void*` placeholder slot with typed fields only in subclasses — same discipline benefit but the base struct goes debugger-opaque, and overlay subclasses cannot add real storage without breaking the size invariant anyway.)*
 
 ### DV6 — Second-level `ext` group for rare state
-Add one `DomElementExt* ext` (lazy, doc-pool or view-pool per field tier split — see impl note) holding fields that are null/zero on the vast majority of elements:
+The retained design uses `lam::Own<DomStyleRareExt> ext`, allocated on demand in the document pool under D5.5.1. DV6.1 describes its current fields. [View property groups](Radiant_Design_View_Prop_Groups.md#dv61--keep-document-extensions-independently-lazy)
+
+The original proposal grouped these fields behind `ext`:
 - the four fragment-union blocks (F2) — restructure as a small array `FragmentUnion frags[4]` + presence mask;
 - five pseudo-element `StyleTree*`;
 - `multicol`, `vpath`, `backdrop_filter`, `custom_layout_paint`, `layout_fragments` + count;

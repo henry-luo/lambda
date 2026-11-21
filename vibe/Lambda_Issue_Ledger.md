@@ -51,6 +51,29 @@ member also has a pending promotion, and retain the image before installing
 the first entry. See the
 [retirement audit](impl/Lambda_Impl_Interpreter_MIR_Unification.md#remaining-candidates-from-the-second-pass).
 
+<a id="lr12-65"></a>
+
+## LR12-65 — Form validity scan blocks the Lambda host build
+
+**OPEN**, reproduced on 2026-11-21 at Lambda `017c686351` with Input
+`3b18322` and Radiant `4871cce` (D9.5.6v2). Compiling `lambda-rt-cpp` in
+`release_native` fails in `dom_form_user_validity_visit` because the callback
+calls `form_storage()` on `DomFormUserValidityScan`. The scan stores its target
+element in the `form` member. The original sources and the extension rename
+both fail at the same line. This blocks linking the host for verification.
+[Form validity scan](../lambda/dom/dom.cpp#L9688)
+
+<a id="lr12-66"></a>
+
+## LR12-66 — Two host tests still access containment fields on `BlockProp`
+
+**OPEN**, reproduced on 2026-11-21 at Lambda `017c686351` and Radiant `4871cce`
+(D9.1.3v2, DV4.2). The `debug_native` targets for `test_css_animation_gtest`
+and `test_rdt_vector_gtest` still access `computed_containment` and `contain_paint`
+directly on `BlockProp`. Radiant now stores these fields in `BlockContainmentProp`.
+The original sources and the extension rename both fail to compile these tests.
+[Animation test](../test/test_css_animation_gtest.cpp#L2225) · [Vector test](../test/test_rdt_vector_gtest.cpp#L523)
+
 <a id="lr12-64"></a>
 
 ## LR12-64 — FIXED
