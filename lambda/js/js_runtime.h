@@ -1271,6 +1271,7 @@ Item js_define_host_namespace_slot(Item global, Item key, Item value);
 bool js_host_namespace_has_name(const char* name, size_t length);
 Item js_ensure_host_global_family(const char* name);
 bool js_resolve_lazy_global(Item object, Item key, Item* out_value);
+Item js_css_declaration_constructor(const char* name, size_t length);
 Item js_named_native_function_source_item(const String* name);
 int js_is_global_this_object_value(Item object);
 Item js_get_global_property(Item key);

@@ -5,6 +5,51 @@
 - **Formal linkage:** no language or runtime ruling changes. GC changes keep precise rooting (AGENTS rule 15) and only speed ownership lookup.
 - **Related:** [Radiant_Design_UI_Test.md](../radiant/Radiant_Design_UI_Test.md) (runner unification), [Radiant_UI_Automation2.md](../radiant/Radiant_UI_Automation2.md) / [3](../radiant/Radiant_UI_Automation3.md) (phase fixtures).
 
+## Current checkpoint
+
+- Updated 2026-11-21 on `master` at `d52f93d87` in `/Users/henry/Projects/lambda`.
+- Goal is all nine reported View cases below 5 s and the complete View batch
+  below 38.3 s with `debug_native` under the original parallel runner. Change
+  the Radiant engine, its runtime providers or the demo scripts. Keep the
+  worker policy, replay events, graphics mode, JS tiers and forced-GC settings
+  (**D8.4.4**, **D6.3.3**).
+- The runner, replay assertions and graphics settings match HEAD. The
+  original `debug_native` control in
+  `temp/radiant-view-five-seconds/debug-control/` passed 283 cases with one
+  skip in 38.314 s. The Scene3D audio regression and ledger changes predate
+  this tuning.
+- Release samples in `temp/radiant-engine-tuning/release-profile/` identified
+  duplicate packed-field tracing and eager CSS declaration prototype creation
+  in the HTTP cases (**D3.4.6**, **D6.3.3**, **D9.5.4**). The first engine
+  pass passed the unchanged debug View batch in 35.813 s. The CSSOM candidate
+  reduced the two slow HTTP cases to 6.169 and 5.487 s under parallel load.
+- Native document waits wake on libuv completion. Replacement stops
+  the retiring document's satellite compilation before the next paint
+  (**D8.3.4**). Scene3D refreshes shared material inputs once per pose, uses
+  affine extrema for visibility and shadow bounds, and swaps whole readback
+  rows (**D5.5.2**, **D10.1.7**).
+- Native inner-scene attribute writes keep HTML layout clean when CSS has
+  no dependency on them. Metadata-only epochs recognize an already clean
+  layout tree (**D5.5.1**, **D10.1.7**). Demo scripts reuse resident and cage
+  DOM, build Doom indices from object bounds, and gather terrain lattice
+  samples and mesh offsets in arrays (**S8.2.4v3**, **S10.2.1**).
+- The final two nine-slot parallel View runs passed 283 cases with one skip
+  in 35.372 and 36.070 s, from the original timing seed. Reports are
+  `temp/radiant-engine-tuning/bounds-debug-{1,2}/test_summary.json`.
+  Module fetch failures took 4.473–4.956 s. Resource Timing took
+  5.270–5.712 s and Hamster took 5.312–5.918 s. The remaining six cases took
+  5.882–9.416 s. Individual and batch targets have different outcomes.
+- The full Radiant baseline passed with 8,172 passes, 298 layout partials,
+  20 skips and zero failures (`bounds-baseline/test_summary.json`). Its View
+  suite took 39 s during the broader run. MIR forced-GC stress passed 368
+  checks. The two native GC heap test failures reproduce at HEAD
+  (`gc-head.log`). CSSOM, Scene3D CSS dependencies and DOM observers passed
+  focused checks. Midtown, Procart and Paint goldens matched.
+- The 5 s case target remains open. Release profiles capture the cost of
+  initializing and painting each Collection destination, including native
+  loading and retiring compiler work, and Midtown's cold geometry and
+  frame costs. Evidence is under `temp/radiant-engine-tuning/`.
+
 ## 1. Where the time went
 
 Measured from the 2026-10-12 gate run (`baseline,dtna,timeline` + `view` + `dom`, 723 fixtures, ~970 s child CPU, debug `-O3` host):
@@ -232,6 +277,13 @@ a separately rebuilt pre-tuning production-source control with the same exit
 status 4. Cleanup preflight in unchanged `ui_context.cpp` overlooks a document
 whose only evaluator is `loader_runtime`. The aggregate gate therefore remains
 red. Candidate sources were restored and hash-verified after that control.
+
+### 4.6 View case latency in debug (2026-11-21)
+
+A runner reservation and collection-replay experiment reached the individual
+limit but grew the View suite from 38.314 s to 52.044 s. The user requested
+engine and demo improvements. The original worker reservation, assertions
+and graphics mode are restored.
 
 ## 5. What remains heavy
 

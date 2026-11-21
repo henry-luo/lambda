@@ -404,8 +404,8 @@ typedef struct gc_heap {
     bool compaction_owners_valid;   // allocation failure retains the complete heap walk
     uint8_t mark_epoch;
 
-    // verified mapped slot addresses across collections; never roots.
-    void* object_cache[GC_OBJECT_CACHE_SIZE];
+    // Exact ownership results across collections. Bit zero marks an unowned address.
+    uintptr_t object_cache[GC_OBJECT_CACHE_SIZE];
 } gc_heap_t;
 
 static inline gc_scope_checkpoint_t gc_scope_checkpoint_capture(gc_heap_t* gc) {

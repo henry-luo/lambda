@@ -1767,15 +1767,6 @@ extern "C" void js_event_loop_pump_nowait(void) {
     }
 }
 
-typedef struct JsPumpWaitState {
-    bool cap_fired;
-} JsPumpWaitState;
-
-static void event_loop_pump_wait_cap_cb(uv_timer_t* handle) {
-    JsPumpWaitState* state = handle ? (JsPumpWaitState*)handle->data : NULL;
-    if (state) state->cap_fired = true;
-}
-
 static bool event_loop_pump_native_wait(int max_wait_ms) {
     bool had_microtasks = js_microtask_pending_count() > 0;
     js_microtask_flush();
@@ -1787,23 +1778,9 @@ static bool event_loop_pump_native_wait(int max_wait_ms) {
         return false;
     }
 
-    // A one-shot cap lets libuv wake on the next real timer/I/O event without
-    // turning assertion waits into a fixed-interval nanosleep loop.
-    JsPumpWaitState state;
-    state.cap_fired = false;
-    uv_timer_t cap;
-    if (uv_timer_init(loop, &cap) != 0) {
-        js_event_loop_pump_nowait();
-        return false;
-    }
-    cap.data = &state;
-    uv_timer_start(&cap, event_loop_pump_wait_cap_cb, (uint64_t)max_wait_ms, 0);
-    lambda_uv_run_loop(loop, UV_RUN_ONCE);
-    uv_timer_stop(&cap);
-    uv_close((uv_handle_t*)&cap, NULL);
-    lambda_uv_run_loop(loop, UV_RUN_NOWAIT);
+    bool woke = lambda_uv_wait_for_event(loop, max_wait_ms);
     js_microtask_flush();
-    return !state.cap_fired;
+    return woke;
 }
 
 extern "C" bool js_event_loop_pump_wait(int max_wait_ms) {

@@ -134,7 +134,7 @@ static void _set_iface_to_string_tag(Item proto, const char* name) {
     if (get_type_id(proto) != LMD_TYPE_MAP || !name) return;
     // WebIDL interface prototypes carry @@toStringTag; selector/tooltip
     // libraries use this brand to distinguish a DOM Element from plain data.
-    js_set_key_default(proto, js_well_known_symbol_key(4), js_name_item(name));
+    js_define_own_key_storage(proto, js_well_known_symbol_key(4), js_name_item(name));
 }
 
 extern "C" void js_dom_install_interface(Item global, const char* name) {
@@ -158,7 +158,8 @@ extern "C" void js_dom_install_interface(Item global, const char* name) {
     js_set_function_name(ctor_root.get(), key_root.get());
     proto_root.set(js_new_object());
     _set_iface_to_string_tag(proto_root.get(), name);
-    js_set_key_cstr(proto_root.get(), "constructor", ctor_root.get());
+    // Lazy interface creation can run after script has modified Object.prototype.
+    js_define_own_key_storage(proto_root.get(), js_name_item("constructor"), ctor_root.get());
     js_initialize_native_constructor_prototype(ctor_root.get(),
         proto_root.get());
     js_set_key_default(global_root.get(), key_root.get(), ctor_root.get());
@@ -1475,6 +1476,56 @@ static void _publish_interface_records(const char* host, size_t length) {
     jube_type_prototype(jube_iface_type_by_name(host, length));
 }
 
+static const struct CssDeclarationInterface {
+    const char* name;
+    size_t name_length;
+    const char* host;
+    uint32_t host_length;
+    JsRealmSlotId slot;
+} css_declaration_interfaces[] = {
+#define CSS_DECLARATION_INTERFACE(kind, name, host, metadata) \
+    {#name, sizeof(#name) - 1, #host, sizeof(#host) - 1, JS_REALM_SLOT_##host},
+#include "lambda/input/css/css_declaration_interfaces.def"
+#undef CSS_DECLARATION_INTERFACE
+};
+
+Item js_css_declaration_constructor(const char* name, size_t length) {
+    if (!dom_get_document() || length < 3 || memcmp(name, "CSS", 3) != 0) return ItemNull;
+    for (const auto& interface : css_declaration_interfaces) {
+        if (length != interface.name_length || memcmp(name, interface.name, length) != 0) continue;
+        Item* slot = js_realm_intrinsic_slot(interface.slot, 0);
+        if (!slot) return ItemError;
+        if (slot->item) return *slot;
+        // Build the declaring prototype before exposing it to guest reflection.
+        // The realm slot keeps the native identity after a global is changed or deleted.
+        JS_ROOTS(roots, staging, js_new_object(), constructor, ItemNull, prototype, ItemNull);
+        if (get_type_id(staging.get()) != LMD_TYPE_MAP) return ItemError;
+        js_set_prototype(staging.get(), ItemNull);
+        js_dom_install_interface(staging.get(), interface.name);
+        constructor.set(js_get_key_cstr(staging.get(), interface.name));
+        if (get_type_id(constructor.get()) != LMD_TYPE_FUNC) return ItemError;
+        prototype.set(_iface_proto(staging.get(), interface.name));
+        JS_RETURN_IF_ERROR(jube_seed_type_prototype(
+            jube_iface_type_by_name(interface.host, interface.host_length), prototype.get()));
+        *js_realm_intrinsic_slot_existing(interface.slot, 0) = constructor.get();
+        return constructor.get();
+    }
+    return ItemNull;
+}
+
+static void _install_lazy_css_declaration_globals(Item global) {
+    // Cache the base before scripts can replace its constructor. Declaration
+    // subtypes can publish hundreds of accessors, so build them on first use.
+    _publish_interface_records("rule_style_decl", sizeof("rule_style_decl") - 1);
+    for (const auto& interface : css_declaration_interfaces) {
+        Item key = js_name_item(interface.name, interface.name_length);
+        Item value = ItemNull;
+        if (js_own_shape_slot_status_key(global, key, &value, nullptr) == JS_SHAPE_SLOT_DATA &&
+            js_is_callable(value)) continue;
+        js_define_own_key_storage(global, key, (Item){.item = ITEM_JS_LAZY_GLOBAL_SENTINEL});
+    }
+}
+
 extern "C" void dom_install_collection_globals(void) {
     Item global = js_get_global_this();
     dom_install_interface_members(global, "TreeWalker", dom_tree_walker_install_interface);
@@ -1642,11 +1693,7 @@ extern "C" void dom_install_collection_globals(void) {
     }
     js_dom_install_interface(global, "CSSLayerStatementRule");
     _link_iface_proto(global, "CSSLayerStatementRule", "CSSRule");
-#define CSS_DECLARATION_INTERFACE(kind, name, host, metadata) \
-    js_dom_install_interface(global, #name); \
-    _link_iface_proto(global, #name, "CSSStyleDeclaration");
-#include "lambda/input/css/css_declaration_interfaces.def"
-#undef CSS_DECLARATION_INTERFACE
+    _install_lazy_css_declaration_globals(global);
     static const struct { const char* name; int value; } css_rule_constants[] = {
         {"STYLE_RULE", 1}, {"CHARSET_RULE", 2}, {"IMPORT_RULE", 3}, {"MEDIA_RULE", 4},
         {"FONT_FACE_RULE", 5}, {"PAGE_RULE", 6}, {"KEYFRAMES_RULE", 7},
@@ -1669,10 +1716,6 @@ extern "C" void dom_install_collection_globals(void) {
 #include "lambda/input/css/css_rule_interfaces.def"
 #undef CSS_RULE_INTERFACE_ALIAS
 #undef CSS_RULE_INTERFACE
-#define CSS_DECLARATION_INTERFACE(kind, name, host, metadata) \
-    _publish_interface_records(#host, sizeof(#host) - 1);
-#include "lambda/input/css/css_declaration_interfaces.def"
-#undef CSS_DECLARATION_INTERFACE
     // cold prototype inspection must see the same declared getters as live wrappers.
     js_dom_install_interface(global, "RadioNodeList");
     static const char* collection_records[] = {"node_list", "html_collection",

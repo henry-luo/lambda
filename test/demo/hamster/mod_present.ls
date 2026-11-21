@@ -11,8 +11,10 @@ import items: .mod_items
 fn percent(value) any^ => string(int(round(value*100))) ++ "%"
 pub pn camera_sync(owner,st) { scene_dom.camera_sync(scene_dom.node(owner,"cage-camera"),model.camera_state(st)) }
 pub pn animate(owner,st) {
+    let residents = dom.get_element_by_id(owner,"cage-residents")
     for (h in st.pets) {
-        let node = scene_dom.node(owner,h.id)
+        // Animate within each resident's retained subtree.
+        let node = dom.get_element_by_id(residents,h.id)
         let sleeping = h.activity == "sleep"
         let active = h.next != "" and h.activity != "waiting" or h.activity == "exercise"
         let scale = sim.size(h)
@@ -23,12 +25,12 @@ pub pn animate(owner,st) {
         scene_dom.attr(node,"scale",[scale,scale*(if (sleeping) 0.7 else 1.0),scale])^
         for (key,value in {activity:h.activity,node:h.node,next:h.next,age:h.age,food:h.food,energy:h.energy,walked:h.walked}) scene_dom.attr(node,"data-" ++ string(key),value)
         let blink = sleeping or st.elapsed%5.0>4.85
-        scene_dom.attr(scene_dom.node(owner,h.id ++ "-eyes"),"visible",not blink)^
-        scene_dom.attr(scene_dom.node(owner,h.id ++ "-closed-eyes"),"visible",blink)^
-        scene_dom.attr(scene_dom.node(owner,h.id ++ "-head"),"rotation",[0.0,if (active or sleeping) 0.0 else 0.045*sin(st.elapsed*2),
+        scene_dom.attr(dom.get_element_by_id(node,h.id ++ "-eyes"),"visible",not blink)^
+        scene_dom.attr(dom.get_element_by_id(node,h.id ++ "-closed-eyes"),"visible",blink)^
+        scene_dom.attr(dom.get_element_by_id(node,h.id ++ "-head"),"rotation",[0.0,if (active or sleeping) 0.0 else 0.045*sin(st.elapsed*2),
             if (contains(["eat","drink","bathe","play"],h.activity)) 0.1*sin(st.elapsed*6) else 0.0])^
         for (i in 0 to 3) {
-            let limb = scene_dom.node(owner,h.id ++ "-paw-" ++ string(i))
+            let limb = dom.get_element_by_id(node,h.id ++ "-paw-" ++ string(i))
             scene_dom.attr(limb,"position",scene.limb_position(i,phase,active))^
             scene_dom.attr(limb,"rotation",[0.0,0.0,if (active) 0.18*sin(phase+i*math.pi) else 0.0])
         }
@@ -61,7 +63,14 @@ pub pn life(owner,st) {
     for (key in ["food","water","clean"]) scene_dom.text(owner,"supply-" ++ key,percent(st[key]))
 }
 pn sync_grid(owner,previous,st) {
-    if (previous != null and previous.modules == st.modules and previous.level == st.level and previous.selected == st.selected) { return null }
+    if (previous != null and previous.modules == st.modules and previous.level == st.level) {
+        if ((previous.selected != st.selected)^) {
+            // Selection only changes the pressed state of the old and new cells.
+            for (id in [previous.selected,st.selected], let room = cage.lookup(st.modules,id) where (room != null and room.level == st.level)^)
+                scene_dom.attr(dom.get_element_by_id(owner,ui.cell_id(room.x,room.z)),"aria-pressed",id == st.selected)
+        }
+        return null
+    }
     let previous_cells = if (previous == null) [] else ((ui.grid(previous)) ^ { [] })
     for (index,cell in ((ui.grid(st)) ^ { [] }) where cell != previous_cells[index]) {
         let prior = previous_cells[index]
@@ -74,9 +83,37 @@ pn sync_grid(owner,previous,st) {
             dom.set_inner_html(node,join([for (child in children) format(child,'xml')],""))
     }
 }
+fn room_changed(previous,st,room) any^ {
+    let prior = cage.lookup(previous.modules,room.id);
+    // A topology edit also refreshes the shared supplies in rendered furnishings.
+    prior != room or items.has(room,"bowl") or items.has(room,"bottle") or
+        any([for (side in 0 to 3) cage.open_side(previous.modules,prior,side) != cage.open_side(st.modules,room,side)])
+}
+pn sync_modules(parent,previous,st) {
+    if (previous == null) {
+        return scene_dom.replace(parent,[for (room in st.modules) scene.module_tree(st.modules,room,st)])
+    }
+    let children = [for (child in dom.child_nodes(parent)) child]
+    for (child in children)
+        if (cage.lookup(st.modules,dom.get_attribute(child,"id")) == null) dom.remove_child(parent,child)
+    // The order of retained groups is also the scene's draw order.
+    var before: any = null
+    for (room in reverse(st.modules)) {
+        var child = dom.get_element_by_id(parent,room.id)
+        if ((child == null or room_changed(previous,st,room))^) {
+            if (child != null) dom.remove_child(parent,child)
+            child = scene_dom.mount(parent,scene.module_tree(st.modules,room,st))^
+        }
+        if (dom.next_sibling(child) != before) {
+            if (before == null) dom.append_child(parent,child)
+            else dom.insert_before(parent,child,before)
+        }
+        before = child
+    }
+}
 pub pn sync(owner,previous,st) {
     if (previous == null or previous.modules != st.modules)
-        scene_dom.replace(scene_dom.node(owner,"cage-modules"),[for (m in st.modules) scene.module_tree(st.modules,m,st)])^
+        sync_modules(scene_dom.node(owner,"cage-modules"),previous,st)^
     let residents = scene_dom.node(owner,"cage-residents")
     let old = [for (child in dom.child_nodes(residents)) child]
     for (node in old) if (model.pet(st,dom.get_attribute(node,"id")) == null) dom.remove_child(residents,node)
@@ -102,7 +139,9 @@ pub pn sync(owner,previous,st) {
         scene_dom.text(owner,"module-title",upper(cage.entry(selected.kind).title))^
         scene_dom.text(owner,"module-info","Cell " ++ string(selected.x) ++ ", " ++ string(selected.z) ++ " · " ++ string(selected.turn*90) ++ "° · " ++
             string(len(cage.neighbors(st.modules,selected.id))) ++ " doors · " ++ string(len(items.contents(selected))) ++ " furnishings")^
-        dom.set_inner_html(scene_dom.node(owner,"furnishing-list"),join([for (row in ((ui.furnishings(st)) ^ { [] })) format(row,'xml')],""))
+        let prior = if (previous == null) null else cage.lookup(previous.modules,previous.selected)
+        if ((prior == null or items.contents(prior)^ != items.contents(selected)^)^)
+            dom.set_inner_html(scene_dom.node(owner,"furnishing-list"),join([for (row in ((ui.furnishings(st)) ^ { [] })) format(row,'xml')],""))
     }
     scene_dom.text(owner,"build-hint",if (st.tool == "delete") "Click a module to delete it. Residents need a free connected room. Undo restores the room and its contents."
         else if (st.tab == "furnishings") (if (st.item_tool == "") "Select a room to see its furnishings. Choose an item, then click a room to add it."

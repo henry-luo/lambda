@@ -96,6 +96,8 @@ void dom_engine_resolve_scrolled_geometry(DomDocument* doc);
 bool dom_engine_element_viewport_origin(DomElement* element, float* x, float* y);
 bool dom_engine_attribute_has_relational_css_dependency(DomDocument* document, const char* name);
 bool dom_engine_attribute_has_css_dependency(DomDocument* document, DomElement* element, const char* name);
+bool dom_engine_scene_paint_attribute(DomElement* element, const char* name);
+void dom_engine_publish_scene_attribute_change(DomElement* element);
 void dom_engine_publish_metadata_change(DomDocument* document);
 void dom_engine_sync_pseudo_state(void* view, uint32_t pseudo_flag, bool set);
 

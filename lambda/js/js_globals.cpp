@@ -386,6 +386,12 @@ static bool js_resolve_lazy_global_impl(Item object, Item key, Item* out_value, 
         if (out_value) *out_value = value_root.get();
         return true;
     }
+    value_root.set(js_css_declaration_constructor(name->chars, name->len));
+    if (value_root.get().item != ItemNull.item) {
+        value_root.set(js_publish_lazy_global(object_root.get(), key_root.get(), value_root.get()));
+        if (out_value) *out_value = value_root.get();
+        return true;
+    }
     Item value = ItemNull;
     bool resolved = jube_resolve_global(name->chars, name->len, &value);
     if (resolved && out_value) *out_value = value;

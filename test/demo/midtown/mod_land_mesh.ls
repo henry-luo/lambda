@@ -63,7 +63,12 @@ fn grid_indices(w, rows, gone, hidden) any^ {
 // differences (one-sided at the edges)
 fn grid_normals(hs, w, rows, step) any^ {
     let hx = [for (k, h in hs, let i = k % w) (hs[if (i < w - 1) k + 1 else k] - hs[if (i > 0) k - 1 else k]) / (if (i > 0 and i < w - 1) 2.0 * step else step)]
-    let hz = [for (k, h in hs, let j = k div w) (hs[if (j < rows - 1) k + w else k] - hs[if (j > 0) k - w else k]) / (if (j > 0 and j < rows - 1) 2.0 * step else step)]
+    // Consecutive rows are contiguous, so each Z difference is a native array operation.
+    let n = w * rows
+    let first_row = (slice(hs, w, 2 * w) - slice(hs, 0, w)) / step
+    let middle = (slice(hs, 2 * w, n) - slice(hs, 0, n - 2 * w)) / (2.0 * step)
+    let last_row = (slice(hs, n - w, n) - slice(hs, n - 2 * w, n - w)) / step
+    let hz = concat(concat(first_row, middle), last_row)
     let l = math.sqrt(1.0 + hx * hx + hz * hz);
     [0.0 - hx / l, 1.0 / l, 0.0 - hz / l]
 }
@@ -89,8 +94,14 @@ fn wet(h) => h < land.SEA - 0.6
 fn hidden(k) any^ => (let x = land.X0 + (k % NX) * land.STEP, let z = land.Z0 + (k div NX) * land.STEP, covered(x, z) or wet(H[k]))
 let HIDDEN = [for (k in 0 to (NX * NZ - 1)) if (hidden(k)) 1 else 0]
 let GONE = [for (d in region.DROPPED) if (d) 1 else 0]
-// one chunk's rows of a per-vertex array: columns i0..i1 of rows j0..j1, by native slices
-fn rows(values, i0, i1, j0, j1) any^ => reduce([for (j in j0 to j1) slice(values, j * NX + i0, j * NX + i1 + 1)], (acc, r) any^ => concat(acc, r))
+// Join native row slices in a balanced tree so each value is copied at most once per level.
+fn rows(values, i0, i1, j0, j1) any^ {
+    if (j0 == j1) slice(values, j0 * NX + i0, j0 * NX + i1 + 1)
+    else (
+        let mid = (j0 + j1) div 2,
+        concat(rows(values, i0, i1, j0, mid), rows(values, i0, i1, mid + 1, j1))
+    )
+}
 pub let CHUNK_X = 60
 pub let CHUNK_Z = 50
 pub let CHUNKS = [for (j0 in [for (k in 0 to ((NZ - 2) div CHUNK_Z)) k * CHUNK_Z], i0 in [for (k in 0 to ((NX - 2) div CHUNK_X)) k * CHUNK_X])

@@ -6397,12 +6397,22 @@ extern "C" bool dom_engine_attribute_has_css_dependency(DomDocument* doc, DomEle
     return radiant_attribute_has_css_dependency(doc, element, name);
 }
 
+extern "C" bool dom_engine_scene_paint_attribute(DomElement* element, const char* name) {
+    return scene3d_is_inner_paint_attribute(element, name);
+}
+
+extern "C" void dom_engine_publish_scene_attribute_change(DomElement* element) {
+    dom_layer_note_mutation(element);
+    doc_state_mark_dirty(element->doc->state);
+    to_repaint();
+}
+
 extern "C" void dom_engine_publish_metadata_change(DomDocument* doc) {
     DocState* state = doc ? doc->state.get() : nullptr;
     if (!doc || doc->js.mutation_count || (doc->root && doc->root->layout_dirty) ||
         (state && (state->needs_reflow || state->reflow_scheduler.pending))) return;
-    // only consume this metadata epoch; preserve pending resize/font/style work.
-    layout_publish_document_geometry(static_cast<UiContext*>(doc->js.host_ui_context), doc);
+    // Metadata writes leave the tree clean. Publish the new epoch without visiting every node.
+    layout_publish_document_geometry(static_cast<UiContext*>(doc->js.host_ui_context), doc, false);
 }
 
 static bool dom_js_selector_can_match_mutated_element(CssSelector* selector,

@@ -114,7 +114,8 @@ pub fn nearest(x, z, heading, speed = 0.0) any^ {
     let r = roads.road_at(x, z)^
     let p = if (r == null or r.r != 0 or cos(heading - r.heading) >= 0.0) 0 else 1
     let pts = PATHS[p].points
-    let k = reduce([for (q, pt in pts) q], (best, q) any^ => if (u.dist2(pts[q].x, pts[q].z, x, z)^ < u.dist2(pts[best].x, pts[best].z, x, z)^) q else best)
+    // Each sample's squared distance is evaluated only once.
+    let k = argmin([for (pt in pts) u.dist2(pt.x, pt.z, x, z)^])^
     let a = {id: "player", n: 99, kind: "sedan", hl: 2.25, hw: 0.93, path: p, paint: "#c0262d", player: true,
         s: pts[k].s, speed: max(0.0, speed), cruise: 0.95, bump: 0.0, laps: 0};
     {*: a, *: pose_on(p, a.s)}
