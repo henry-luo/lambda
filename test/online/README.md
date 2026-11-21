@@ -120,6 +120,9 @@ node --test test/online/render_video_first_frame.test.cjs
 node --test test/online/render_canvas_transform.test.cjs
 node --test test/online/render_html_controls.test.cjs
 node --test test/online/render_html_scripts.test.cjs
+node --test test/online/render_script_preparation.test.cjs
+node --test test/online/render_dynamic_scripts.test.cjs
+node --test test/online/render_resource_timing.test.cjs
 node --test test/online/render_browser_globals.test.cjs
 node --test test/online/render_node_iterator.test.cjs
 node --test test/online/render_url_live.test.cjs
@@ -2956,3 +2959,242 @@ All1064 other rows, catalog, prior reviews and design-reference audit remain
 unchanged. **113 high,zero critical,954 low** (88 automatic plus25 additional
 manual), severity sorted. [Repair evidence](comparison/repairs.html#round-127).
 Goal remains active.
+
+
+Round128 fixes **RI-180 / RI-181**: authored image/link/script fetchpriority
+now reaches the existing scheduler, including early prefetch and dynamic
+images. Passive decoding preserves low hints; shared URLs retain promotion.
+Local HTML's first admitted remote image/poster now initializes its network
+manager before the bounded snapshot wait (**D9.1.1v4 / D9.1.3v2**).
+
+**Three native GTests and three HTTP controls pass**. Coverage includes18
+priority cases plus dynamic/passive/dedup controls, the unchanged five-case
+export regression, live base resolution, inert templates and selected CSS
+variable resources. Integer lint passes. The existing export check fails
+before repair; a cached73×41 SVG becomes visible afterward. No broad baseline
+or catalog capture sweep repeated; budgets and capture clocks are unchanged.
+
+Fresh matched1000ms post-load pairs keep Aircall (**37.89% mean error**) and
+Dayos (**62.33%, startup overlay**) high; whole-page differences are unchanged.
+Hints on61 saved high-page DOMs indicate exposure, not61 fixable pages.
+Old pairs remain archived (**D10.1.7**). Other1065 rows, catalog and annotations
+are unchanged. **113 high,zero critical,954 low**, severity sorted.
+[Repair evidence](comparison/repairs.html#round-128). Goal remains active.
+
+
+Round129 fixes **RI-182**: a local document containing only CSS backgrounds
+can now initialize its network manager through selected-resource discovery,
+using the existing declaration-base resolution, admission and queue helper
+(**D9.1.1v4 / D9.1.3v2**). Four inline/stylesheet/variable/pseudo background
+cases fail before repair and pass afterward. Five existing image/poster cases,
+the priority matrix and stylesheet-token guard still pass. **Three native
+GTests and three HTTP controls pass**; integer lint passes. A cached73×41 CSS
+background changes from0 to2993 red pixels in an independent export control.
+No broad baseline, catalog sweep, budget or capture-clock change.
+
+The fresh matched1000ms Overpass pair stays high (**24.49% mean error**): its
+live hero is still absent. Earlier repairs restore the header and hero text
+in its saved source, but its portrait remains absent (**2.51% diagnostic
+error**, unchanged by this repair). No whole-page clearance is claimed.
+Only that pair is refreshed; its history is archived (**D10.1.7**). Other1066
+rows, catalog and annotations remain unchanged. **113 high,zero critical,
+954 low**, severity sorted. [Repair evidence](comparison/repairs.html#round-129).
+Goal remains active.
+
+
+Round130 fixes **RI-183**: image-set string sources now enter native resource
+loading through the existing option parser and shared URL visitor. type()
+strings remain metadata; existing source selection and declaration-relative
+URL handling are unchanged (**D9.1.1v4 / D9.1.3v2**). The new HTTP regression
+fails before repair, then passes with the correct pixels and request URL.
+**Three native GTests and six HTTP controls pass**; integer lint passes.
+No broad baseline, catalog sweep, budget or capture-clock change.
+
+Overpass's saved-source portrait is a readiness observation: a read-only
+1000ms capture exactly matches the self-assignment diagnostic (**0.78098%
+mean error**), and its PNG paints locally. No CSS publication or decoder
+change is justified. Its separate absent live hero remains unresolved.
+The single high-page string-source exposure found in saved CSS belongs to
+Conductor's below-fold webinar poster, not a confirmed major-page cause.
+No page cleared. This repair-only update preserves all1067 comparison rows,
+capture entries, references, catalog and annotations. **113 high,zero
+critical,954 low**. [Repair evidence](comparison/repairs.html#round-130).
+Goal remains active.
+
+
+Round131 fixes **RI-184**: admitted external scripts now dispatch completion
+after evaluation and microtasks, with restored currentScript and a rooted
+original target. The shared event scope preserves bootstrap's pending
+stylesheet writes (**D6.4.1 / D6.3.3**, ownership **D9.1.1v4 / D9.1.3v2**).
+Empty sources and runtime throws complete loading; fetch failures retain error;
+inline scripts do not receive resource load events.
+
+Both Youtrust major differences clear against **current matched references**:
+home **30.49% → 1.02%** mean error, pricing **31.18% → 2.74%**. Current Chromium
+controls agree. Minor typography, focus and background geometry remain.
+**Ten focused HTTP cases, six existing script/stylesheet tests and the630-case
+JavaScript layout baseline pass.** No catalog sweep or capture/budget change.
+Both pairs are refreshed because their older animation origins were unrecorded;
+the old pairs are archived. Repaired images also clear against the older
+references. All1065 other rows, catalog and review annotations stay unchanged. **111 high,zero critical,956 low**, severity sorted.
+[Repair evidence](comparison/repairs.html#round-131). Goal remains active.
+
+
+Round132 fixes **JS13-L38**: programmatic click now suppresses reentry on the
+same element throughout dispatch and activation. Teachable's tab initializer
+recursively clicked its own target; its two maximum-call-stack errors are now
+absent. Native per-element state and rooted wrappers preserve removal/layout
+lifetime; other targets, clones, later microtasks and direct dispatch remain
+available (**D8.4.4 / D9.5.6v2 / D6.3.3 / D5.5.1**).
+
+**Seven focused controls agree with Chromium and pass** (six failed before;
+the microtask control already passed), plus **six existing form/label tests**.
+The current Teachable capture loads, but its independent anti-flicker hidden
+state remains. No page clearance or performance claim, broad baseline,
+admission change, capture-clock change or page override.
+This repair-only update preserves all 1067 rows, capture entries, browser
+references, catalog and annotations. **111 high, zero critical, 956 low**.
+[Repair evidence](comparison/repairs.html#round-132). Goal remains active.
+
+
+Round133 fixes **JS13-L39**: Node now inherits EventTarget, native event methods
+honor prototype and instance wrappers, Window retires only untouched standalone
+lazy slots, and Document reflection/deletion reuse the node expando helpers
+(**D8.4.4 / D9.5.4 / D9.5.6v2**).
+
+**All31 focused checks pass.** All five new controls fail before repair and
+agree with Chromium afterward; they also pass separately in AST and MIR.
+Attentive's remaining consent/script-preparation mismatch and Agiloft's
+unisolated callback exception remain under review. No whole-page clearance,
+broad baseline, online sweep, source-limit or capture-clock change is claimed.
+This repair update preserves all1067 rows, capture entries, browser references,
+catalog and annotations at **111 high, zero critical, 956 low**, severity sorted.
+[Repair evidence](comparison/repairs.html#round-133). Goal remains active.
+
+
+Round134 fixes **RI-185**: GIF sampling follows elapsed frame deadlines across
+missed ticks, distinguishes repeat counts from total plays, and holds a finite
+animation's final frame. Completion releases earlier frame buffers; cancellation
+releases the remaining player and restores the cache-owned still
+(**D9.1.3v2 / D10.1.7 / D5.5.1**).
+
+**26 native GIF tests, seven GIF PNG controls, ten existing SVG image controls,
+and integer-cast lint pass.** All seven shared PNG cases agree with Chromium;
+three failed with the prior qualified renderer. Five sparse-tick variants and
+two repeat/completion unit tests also fail before repair.
+Maple's headline uses animated WebP, whose playback gap remains; no whole-page
+clearance is claimed. No broad baseline, catalog sweep, capture-clock or limit
+change. All1067 rows, capture entries, browser references, catalog and
+annotations are preserved at **111 high, zero critical, 956 low**.
+[Repair evidence](comparison/repairs.html#round-134). Goal remains active.
+
+
+Round135 fixes **LI-096 / RI-186**: a sole color with two gradient positions
+counts as two stops and retains its fill through the existing resolver
+(**D9.1.1v4 / D9.1.3v2 / D5.5.1**). Linear, radial, conic and repeating forms
+work with and without geometry preludes; malformed leading hints stay rejected.
+
+**124 native parser tests,12 new PNG cases,25 existing color controls and12
+Chromium controls pass.** All12 new PNG cases fail before repair. Hera's
+identical saved-source comparison improves from13.69% mean /30.86% changed
+area to2.05% /2.42%; its independent live text reveal remains open. No canonical
+page is cleared. All1067 rows, capture entries, browser references, catalog and
+annotations remain at **111 high,zero critical,956 low**. No broad baseline,
+catalog sweep, clock or admission-limit change.
+[Repair evidence](comparison/repairs.html#round-135). Goal remains active.
+
+
+Round136 fixes **RI-187**: snapshot preparation polls completed native image
+state and drains retained-realm callbacks through the existing host seam,
+without advancing the selected virtual clock (**D9.1.3v2 / D5.5.1 / D6.4.1 /
+D10.1.7**). The1000ms resource wait,250ms load boundary and source limits stay
+unchanged. **56 focused image/resource tests and nine Chromium controls pass**;
+five initial cases fail before repair. Integer-cast lint passes. No broad
+baseline or catalog sweep is repeated.
+
+Jetty and Pelago have current matched1000ms pairs and archived historical
+frames. Both remain high: Jetty lacks navigation/media; Pelago's hero media is
+present but its large consent dialog remains absent. Its new manual review
+prevents a coarse-score false clearance. Current native pixels are identical
+with the prior renderer on both pages, so no live improvement is attributed
+to this repair. **111 high,zero critical,956 low** remain across1067 pairs.
+The1065 other rows/captures, all URLs and previous review history are preserved.
+[Repair evidence](comparison/repairs.html#round-136). Goal remains active.
+
+
+Round137 repairs parser-task preparation and foreign-document adoption teardown
+(**D8.4.4 / D9.5.6v2 / D5.5.1 / D6.3.3 / D6.4.1**). Live task metadata is
+snapshotted once before scheduling; head arrivals reach observers before that
+turn. Prepared sources survive later attribute changes/removal. Foreign native
+documents retire before the main pool backing their adopted nodes disappears.
+**64 focused host tests,13 additional MIR cases and13 Chromium controls pass**;
+the JavaScript layout baseline passes **630/630** once for this batch. No source
+cap, clock, public state layout or transfer policy changes. No catalog sweep or
+full multi-category baseline is repeated.
+
+Attentive has a current matched1000ms pair, with its two old frames archived.
+It remains blank and high at **67.46% mean error /91.47% area**. Current native
+pixels are identical with the prior renderer. A small body-arrival control
+still differs from Chromium; the broader parser progression gap remains open.
+No whole-page improvement or clearance is claimed. **111 high,zero critical,
+956 low** remain across1067 pairs; the1066 other rows/captures, all URLs and
+review history are preserved. [Repair evidence](comparison/repairs.html#round-137).
+Goal remains active.
+
+
+Round138 completes five shared repairs: dynamic classic external preparation,
+first remote stylesheet discovery, live enumerable Location components, finite
+requests created after a checkpoint, and virtual immediate continuations
+(**D8.4.4 / D9.1.3v2 / D9.5.6v2 / D6.3.3 / D6.4.1 / D6.4.4 / D10.1.7**).
+**60 focused host checks,17 MIR checks and29 Chromium controls pass.** The
+JavaScript layout baseline passes **630/630** once at this milestone. Source
+limits, watchdogs and the selected1000ms capture window are unchanged; no
+catalog capture sweep or full multi-category baseline is repeated.
+
+Kotlin now renders its documentation article, cards and current version.
+Sidebar navigation and the browser announcement banner remain absent, so it
+stays high severity at **10.62% mean error /22.60% changed area**. The old
+canonical pair is archived and both current frames are recorded. The1066
+other rows/captures, all URLs, review history and reference-design audit are
+preserved. **111 high,zero critical,956 low** remain across1067 pairs.
+[Repair evidence](comparison/repairs.html#round-138). Goal remains active.
+
+
+Round139 reviews two remaining limits using the unchanged, qualified round153
+renderer. No native code or baseline rerun. Kotlin's TOC exists with correct
+geometry but starts a300ms fade when its fetch is delivered at virtual1016.67ms.
+An80ms fetch-created fade reproduces the difference; a100ms timer control
+finishes in both engines. Coordinating native I/O and virtual progression before
+frame selection remains open as **JS13-L43** (**D6.4.1 / D6.4.4 / D10.1.7**).
+No visibility override or extra frame advance is applied.
+
+AWS now executes26 dynamic classic chunks. Four mandatory chunks still exceed
+the unchanged128KiB async/defer cap; its prior/current native pixels remain
+identical and blank. The fresh AWS pair is high at **12.86% mean error /38.60%
+changed area**. Its previous canonical pair is archived. The1066 other rows
+and captures, all URLs, reviews and reference-design audit are preserved.
+**111 high,zero critical,956 low** remain.
+[Follow-up evidence](comparison/repairs.html#round-139). Goal remains active.
+
+
+Round140 fixes three shared defects: finite I/O delivered after virtual-frame
+selection (JS13-L43), undeclared opacity retained after no-fill animation
+completion (RI-189), and supported background keyframes rejected by the host's
+property filter (JS13-L44). The existing frame slices, native request ownership
+and parser normalizer are reused (**D6.4.1 / D6.4.4 / D10.1.7 / D9.1.3v2 /
+D8.4.4 / D9.5.6v2**). No visibility override, extra capture interval or source
+budget increase. Late completions and explicit zero windows remain frozen.
+
+**44 focused checks,7 MIR checks,23 Chromium controls and630/630 JavaScript
+layout baseline checks pass.** The baseline ran once at this milestone; no
+full multi-category baseline or catalog capture sweep was repeated.
+
+Kotlin's full sidebar now renders. The smaller44px announcement banner and
+resulting spacing offset remain, but header, navigation, article, version and
+cards are present. Its inspected pair is below the automated major threshold
+at11.14% mean error /24.38% changed area; the prior manual major omission is
+resolved with its history preserved. Both final frames are refreshed and the
+old canonical pair is archived. The1066 other rows/captures, all URLs, other
+reviews and reference-design audit remain intact. **110 high,zero critical,
+957 low** remain across1067 pairs.
+[Repair evidence](comparison/repairs.html#round-140). Goal remains active.

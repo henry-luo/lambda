@@ -343,6 +343,7 @@ static void dom_set_fragment_script_state(DomElement* root, DomFragmentScriptMod
             if (DomStyleRareExt* state = element->ensure_ext()) {
                 state->script_already_started = mode == DomFragmentScriptMode::inert;
                 state->script_parser_pending = mode == DomFragmentScriptMode::parser_inserted;
+                state->script_parser_inserted = mode == DomFragmentScriptMode::parser_inserted;
             }
         }
         // A parser-inserted template holds a separate, unscheduled source tree.
@@ -753,9 +754,10 @@ static inline void dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATION_
     if (kind == DOM_JS_MUTATION_ATTRIBUTE && attribute_name && str_ieq_cstr(attribute_name, "popover"))
         dom_popover_attribute_changed(target ? target->as_element() : nullptr);
     if (doc->js.prepare_inline_script) {
-        if (kind == DOM_JS_MUTATION_TEXT) {
+        if (kind == DOM_JS_MUTATION_TEXT || (kind == DOM_JS_MUTATION_ATTRIBUTE &&
+                attribute_name && str_ieq_cstr(attribute_name, "src"))) {
             dom_enqueue_script_reaction(doc, target);
-            if (parent != target) dom_enqueue_script_reaction(doc, parent);
+            if (kind == DOM_JS_MUTATION_TEXT && parent != target) dom_enqueue_script_reaction(doc, parent);
         } else if (kind == DOM_JS_MUTATION_CHILD_REMOVE) {
             dom_enqueue_script_reaction(doc, parent);
         }
@@ -7179,6 +7181,24 @@ static const JsUrlComponent k_url_components[] = {
     { "origin",   url_get_origin },
 };
 
+size_t dom_location_component_count(void) {
+    return sizeof(k_url_components) / sizeof(k_url_components[0]);
+}
+
+const char* dom_location_component_name(size_t index) {
+    return index < dom_location_component_count() ? k_url_components[index].name : nullptr;
+}
+
+Item dom_location_set_component(Item document, size_t index, Item value) {
+    DomDocument* doc = js_document_proxy_doc_from_item(document);
+    if (!doc || index >= dom_location_component_count()) return ItemError;
+    // keep existing navigation semantics while binding captured setters to their owning document.
+    void* previous = dom_swap_active_document(doc);
+    Item result = dom_document_proxy_set_property(js_name_item(k_url_components[index].name), value);
+    dom_restore_active_document(previous);
+    return result;
+}
+
 // The component's value as a JS string, or false when `prop` is not one of
 // them. A missing URL or component reads as "", as it does in a browser for a
 // document that has not been navigated.
@@ -7504,9 +7524,11 @@ static Item dom_document_get_property_for(DomDocument* doc_arg, Item prop_name) 
         return js_name_item("");
     }
 
-    // location-style URL access. We model document.location and bare
-    // location as aliases of the document/window proxy itself.
-    if (prop_id == JS_DOM_PROP_LOCATION || prop_id == JS_DOM_PROP_DOCUMENT) {
+    if (prop_id == JS_DOM_PROP_LOCATION) {
+        return dom_doc_has_browsing_context(doc)
+            ? dom_location_for_document(doc_to_proxy_item(doc)) : ItemNull;
+    }
+    if (prop_id == JS_DOM_PROP_DOCUMENT) {
         return doc_to_proxy_item(doc);
     }
     {
@@ -8053,9 +8075,17 @@ extern "C" Item dom_click_method_bridge(Item elem_item) {
     // D6.3.3: MouseEvent construction and dispatch can collect both JS carriers.
     RootFrame roots(2);
     Rooted<Item> element_root(roots, elem_item);
-    Rooted<Item> event_root(roots, js_create_click_mouse_event());
+    Rooted<Item> event_root(roots, ItemNull);
+    DomStyleRareExt* state = elem->ensure_ext();
+    if (!state) return ItemError;
+    // HTML click() suppresses re-entry on this element through dispatch and activation.
+    if (state->click_in_progress) return make_js_undefined();
+    state->click_in_progress = true;
+    event_root.set(js_create_click_mouse_event());
     // click() has a void return even when dispatch reports a canceled event.
-    Item result = dom_dispatch_event(element_root.get(), event_root.get());
+    Item result = item_is_error(event_root.get()) ? event_root.get()
+        : dom_dispatch_event(element_root.get(), event_root.get());
+    state->click_in_progress = false;
     return item_is_error(result) ? result : make_js_undefined();
 }
 
@@ -9899,6 +9929,7 @@ typedef enum JsDomReflectKind {
     X("formNoValidate", "formnovalidate", BOOL, 0, DOM_TAG_INPUT | DOM_TAG_BUTTON) \
     X("noModule", "nomodule", BOOL, 0, DOM_TAG_SCRIPT) \
     X("defer", "defer", BOOL, 0, DOM_TAG_SCRIPT) \
+    X("async", "async", BOOL, 0, DOM_TAG_SCRIPT) \
     X("autofocus", "autofocus", BOOL, 0, DOM_TAG_ANY) \
     X("open", "open", BOOL, 0, DOM_TAG_DETAILS) \
     X("defaultChecked", "checked", BOOL, 0, DOM_TAG_INPUT) \
@@ -10765,6 +10796,12 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
 
     if (const DomElementRef* aria_ref = dom_aria_ref_for_property(prop)) {
         return dom_aria_element_ref_get(elem, aria_ref);
+    }
+
+    if (dom_element_is_html_tag(elem, MARKUP_NAME_SCRIPT) && !strcmp(prop, "async")) {
+        bool force_async = !elem->ext || (!elem->ext->script_parser_inserted &&
+            !elem->ext->script_force_async_cleared);
+        return {.item = (force_async || elem->has_attribute("async")) ? ITEM_TRUE : ITEM_FALSE};
     }
 
     if (_is_tag(elem, "a") || _is_tag(elem, "area")) {
@@ -12542,6 +12579,10 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
         // assignment of a non-bool truthy value writes empty string, not the
         // raw value.
         if (_is_bool_reflected(elem, prop)) {
+            if (!strcmp(prop, "async") && dom_element_is_html_tag(elem, MARKUP_NAME_SCRIPT)) {
+                // the IDL setter clears force-async even when no attribute needs removing.
+                if (DomStyleRareExt* state = elem->ensure_ext()) state->script_force_async_cleared = true;
+            }
             const char* attr = _idl_to_attr_name(prop);
             if (!attr) attr = prop;
             // lowercase the attr name in case caller passed the camelCase form
@@ -12563,7 +12604,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
             // IDL writes are attribute writes too: refresh the engine's constraint mirrors
             dom_reinit_behavior_if_constraint_attr(elem, attr);
             dom_cssom_owner_attribute_changed(elem, attr);
-            dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+            dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent, attr);
             return value;
         }
 
@@ -12601,7 +12642,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
             snprintf(buf, sizeof(buf), "%ld", n);
             elem->set_attribute(int_attr, buf);
             if (canvas_dimension) dom_canvas_reset_context(elem_item);
-            dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+            dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent, int_attr);
             return value;
         }
 
@@ -12614,7 +12655,8 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
             _is_write_reflected(elem, prop, &string_attr)) {
             dom_element_set_attribute_ns(elem, "", string_attr, dom_to_attr_cstr(value));
             dom_cssom_owner_attribute_changed(elem, string_attr);
-            dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+            // reflected writes must identify the attribute for observers and src preparation.
+            dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent, string_attr);
             return value;
         }
 
@@ -18099,9 +18141,9 @@ static Item js_web_keyframe_property_names(Item frame, Pool* pool,
                 !strcmp(name, "composite")) continue;
         char css_name[128];
         dom_style_camel_to_css_prop(name, css_name, sizeof(css_name));
-        // Resolve aliases the same way as when parsing the keyframe value.
+        // property eligibility uses the parser's normalized animation track.
         const CssPropertyRuntimeMetadata* metadata = css_property_runtime_metadata(
-            css_property_code_from_name(css_name));
+            css_animation_property_target(css_property_code_from_name(css_name)));
         if (!metadata || metadata->animation_type == ANIM_VAL_NONE) continue;
         if (!lam::pool_grow_array(pool, &names, &capacity, *out_count + 1, 8))
             return ItemError;

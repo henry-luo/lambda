@@ -28,6 +28,10 @@ const idleCssCases = [
         @keyframes show{to{opacity:1}}`, sampleX: 50, expected: [255, 0, 0]},
     {name: 'no-fill CSS restores its underlying color', css: `#box{width:200px;height:100px;background:red;animation:reveal 80ms linear}
         @keyframes reveal{to{background-color:lime}}`, sampleX: 50, expected: [255, 0, 0]},
+    {name: 'no-fill CSS restores default opacity', css: `#box{width:200px;height:100px;background:red;animation:hide 80ms linear}
+        @keyframes hide{from{opacity:1}to{opacity:0}}`, sampleX: 50, expected: [255, 0, 0]},
+    {name: 'no-fill CSS restores declared opacity', css: `#box{width:200px;height:100px;background:red;opacity:.4;animation:hide 80ms linear}
+        @keyframes hide{from{opacity:1}to{opacity:0}}`, sampleX: 50, expected: [255, 153, 153]},
 ];
 const shorthandCases = [
     {name: 'background color shorthand', endpoint: 'background:lime', expected: [0, 255, 0]},

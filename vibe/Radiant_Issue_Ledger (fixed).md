@@ -14,6 +14,331 @@ are unchanged. Full evidence is under `../../lambda/temp/kianhup-style/`.
 
 ## Fixed issues
 
+<a id="ri-189"></a>
+
+### RI-189 — Expired no-fill effects retain undeclared opacity
+
+**Fixed 2026-11-21.** Native style ownership follows **D9.1.1v4 /
+D9.1.3v2**; the selected snapshot follows **D10.1.7**. No ruling changes.
+
+The new network/fade controls exposed a second, independent defect. An
+80ms linear fade-out with no fill and no authored opacity leaves the red
+probe almost white at 250ms, instead of restoring its initial opacity 1.
+A declared-opacity control restores correctly. The finish callback already
+requests recascade, but reset_non_inherited_style_cache omits opacity, so
+the retained InlineProp keeps the last active sample. Color restoration
+already works and is not the root cause.
+
+The existing reset now restores initial opacity through ensure_inline before
+current declarations and animation samples apply. This also gives removed
+opacity declarations a clean base without changing inheritance or forcing
+visibility. Default and declared no-fill controls pass in native and Chromium;
+all 15 block/flex/grid intrinsic-motion controls retain their implicit,
+explicit, authored, variable and inherited endpoints. The network-created
+fades now finish fully opaque as well. Layout integer-cast lint passes.
+
+Evidence: `temp/online-visual-round155/opacity-before.log`,
+`focused-qualified.log`, `lint.log`, and
+`test/online/render_capture_settle.test.cjs`. Complete motion conformance and
+automatic Web Animations playback remain outside this repair.
+
+<a id="ri-188"></a>
+
+### RI-188 — First script-created remote stylesheet is never requested
+
+**Fixed 2026-11-21.** Native resource ownership follows **D9.1.1v4 /
+D9.1.3v2**, with the retained export frame under **D10.1.7**.
+
+A local document with only inline CSS has no native resource manager. After a
+dynamic classic script creates a remote stylesheet link,
+`radiant_discover_document_resources` returned at its no-manager guard before
+visiting links. The link callback already called the shared
+`queue_resolved_http_resource`, which can initialize that manager, but was
+unreachable. The script and load event ran; the stylesheet was never requested.
+
+Discovery now visits links before checking the manager for later resource
+phases. It uses the existing queue, policy and transfer implementation; no
+runtime dependency is added to Radiant. The focused stylesheet control fails
+before repair and passes afterward, requests the CSS once and paints its blue
+probe. The shared control also passes in Chromium and MIR. The enclosing
+pre-Location batch passes 95 focused host checks. No source limit, deadline,
+clock or reference tolerance changes. This is independent of a page's remaining
+script/bootstrap failures.
+
+Evidence: `test/online/{dynamic_script_fixtures.cjs,render_dynamic_scripts.test.cjs}`
+(`stylesheet`), `temp/online-visual-round153/probe-stylesheet*`,
+`focused-candidate.log`, `focused-mir.log` and browser stylesheet results.
+
+
+<a id="ri-187"></a>
+
+### RI-187 — Snapshot downloads finish without publishing image state or callbacks
+
+**Fixed 2026-11-21.** Native resource ownership follows **D9.1.3v2 /
+D5.5.1**, retained realm binding **D6.4.1**, and fixed-frame export
+**D10.1.7**. No formal ruling changes.
+
+A650ms HTTP image finishes after the loader's250ms completion phase but
+within snapshot preparation's existing1000ms resource window. Preparation
+flushed the downloaded bytes without polling the document's native pending
+work. `DomImageSource` therefore retained an empty authoritative surface,
+which overrode the decoded embed image. Its load event and decode promise
+also remained queued after the initial JavaScript drain. The PNG was blank.
+An80ms control painted correctly and ran both callbacks; tracing the failing
+650ms case showed one completed resource and zero failures.
+
+Snapshot preparation now binds the retained document through the existing
+script-loop host, flushes resource processing, polls native pending work and
+pumps current tasks without advancing virtual time. It repeats within the
+same resource deadline and performs the final completion handoff under the
+same binding. No runtime dependency is added to Radiant, and no timeout,
+source limit, clock offset or forced visibility changes.
+
+All56 focused image/resource tests pass, including nine new controls for
+parsed, constructed, detached and picture images; failure and decode rejection;
+chained sources; an unrelated slow sibling; a script-free control; and a
+zero-time capture. Five initial cases fail before repair. All nine controls
+agree with Chromium on their completion pixels. The clock invariant compares
+completion against the last ordinary timer/rendering frame; both bootstrap
+and post-load completions are covered without requiring a later frame.
+Integer-cast lint and all three repository diff checks pass. No broad baseline
+is repeated. Evidence: `temp/online-visual-round151/`, `late-before.log`,
+`focused-final.log`, `browser-late-results.json`, and `late-clock-probe.log`.
+
+Current Jetty/Pelago pairs are inspected, but native pixels are identical with
+the prior renderer on those current pages. No live improvement or page
+clearance is attributed to this repair. Jetty's media/navigation and Pelago's
+consent state remain major differences. The repaired late-completion path has
+no remaining blocker; the full high-severity goal remains open.
+
+<a id="ri-186"></a>
+
+### RI-186 — Linear-gradient resolution discards a sole double-position color
+
+**Fixed 2026-11-21.** Native selected-style consumption belongs to
+**D9.1.3v2**, shared CSS providers to **D9.1.1v4**, and retained stop storage
+to **D5.5.1**. The linear-gradient resolver allocated stops only for two
+comma-separated color groups, despite its existing stop builder expanding a
+double-position color into two stops. It now permits one group and reuses
+that builder and its ownership path. Input's corresponding admission defect
+is repaired as LI-096. No formal ruling changes.
+
+Hera's saved DOM contains a dark `linear-gradient(#010a14 0% 100%)` underlay.
+Dropping it exposes white beneath a partially transparent radial layer. The
+same-source1200×800 comparison improves from13.6926% mean error /30.8646%
+changed area to2.0472% /2.4167%. The large light band disappears. This is
+diagnostic saved-source evidence: Hera's independent live text-reveal gap
+remains and no canonical row or major flag is cleared.
+
+All12 new shared PNG cases fail before repair; all12 pass afterward and
+agree with Chromium. The124 native CSS parser tests and25 existing PNG/color
+controls pass. Captures, admission limits and clocks are unchanged. No vendor
+edit or broad baseline run. Evidence: `temp/online-visual-round150/`,
+`saas_landing_463-{lambda,browser}.png`, `hera-after.{png,json}`,
+`gradient-{before,after}.log`, and `browser-gradient-results.json`.
+The repaired stop form has no remaining blocker; full-page clearance is open.
+
+<a id="ri-185"></a>
+
+### RI-185 — Sparse GIF ticks and completion select the wrong frame
+
+**Fixed 2026-11-21.** Native playback belongs to **D9.1.3v2**, finite
+capture selection to **D10.1.7**, and decoded-buffer ownership to **D5.5.1**.
+No formal ruling changes.
+
+The player advanced only one frame per scheduler tick. A two-frame GIF with
+100ms/200ms delays still displayed its second frame after a single 650ms tick,
+although the selected time is in the first frame of its third loop. Pauses,
+sparse UI ticks and timed exports could therefore display the wrong image.
+The renderer also treated the encoded repeat count as total plays, ignored
+the absence of a loop extension, and freed frame pixels on natural completion,
+restoring the initial still instead of holding the final frame.
+
+The player now samples the active loop and its frame deadlines directly in
+O(frame count), without replaying elapsed loops. Its diagnostic loop counter
+saturates before integer conversion. Encoded positive counts add the initial
+play, zero with an extension remains infinite, and no extension means one
+play. Forward fill retains decoded final pixels until the existing cancellation
+path releases the player and restores the cache-owned still. Completion frees
+the other frame buffers.
+
+All 26 native GIF tests pass. Five sparse-tick variants and two new
+repeat/completion tests fail before repair. Three of seven shared PNG controls
+fail with the previous qualified renderer; all seven pass after repair and
+agree with Chromium. Ten existing SVG image-motion controls and the layout
+integer-cast lint pass. No broad baseline or online sweep is repeated.
+
+This was found while reviewing Maple's apparent headline-font difference.
+The fresh asset is actually animated WebP, whose later-frame playback remains
+unsupported under LI-030. The GIF repair does not clear Maple or another
+high-severity page. Capture clocks, admission limits and comparison rows are
+unchanged. Evidence: `temp/online-visual-round149/`,
+`radiant/test/test_gif_player_gtest.cpp`, and
+`test/online/render_gif_playback.test.cjs`.
+
+<a id="ri-184"></a>
+
+### RI-184 — External script success never dispatches the element load event
+
+**Fixed 2026-11-21.** Host ownership follows **D9.1.1v4 / D9.1.3v2**;
+native event entry and precise roots follow **D6.4.1 / D6.3.3**. Youtrust's
+46,464-byte deferred consent SDK executes within the existing admission limit,
+but its script's onload callback never runs. The scheduler reported fetch
+errors without reporting successful external completion, leaving both the
+home and pricing pages without their large consent dialog.
+
+The scheduler now dispatches load after evaluation and its microtask checkpoint,
+including empty sources and runtime throws. Failed graph fetches retain error;
+inline classics/modules do not receive resource load events. currentScript is
+restored before the handler, while the parser's suspended head tail and write
+cursor remain suspended. A rooted original script target survives removal and
+forced layout. Shared completion dispatch enters the document's execution
+scope so native handler entry preserves bootstrap's pending mutations and
+stylesheet owners. A minimal external-script fixture otherwise loses its
+injected stylesheet unless an earlier CSSOM read publishes it.
+
+Ten focused HTTP cases pass for blocking, defer, async, module, runtime throw,
+empty source, self-removal, fetch failure and both inline kinds. They check
+event count/shape, execution and callback microtasks, currentScript, parser
+visibility, and pixels from evaluation and earlier bootstrap stylesheet writes.
+Seven lifecycle cases fail against the preceding release; five stylesheet
+checks fail against the initial unscoped completion implementation. Chromium
+controls confirm the lifecycle distinctions. Six existing inline-script and
+stylesheet tests pass, and the milestone baseline-js gate passes **630/630**.
+
+With the existing 1000ms settling interval and current matched browser references,
+home mean error falls **30.49% → 1.02%** and pricing **31.18% → 2.74%**.
+Both pages also clear against the older references. Their old animation origins
+were unrecorded, so the current matched pairs are published and the older pairs
+archived. Minor typography, focus and background layout differences remain.
+All other1065 comparison rows are preserved;
+inventory becomes **111 high, zero critical,956 low**. No source/transfer
+budget, capture clock or page condition changed (**D10.1.7**).
+Evidence: `temp/online-visual-round145/`,
+[report131](../test/online/comparison/repairs.html#round-131),
+[HTML script execution](https://html.spec.whatwg.org/multipage/scripting.html#execute-the-script-element).
+
+<a id="ri-183"></a>
+
+### RI-183 — image-set string sources never enter the resource queue
+
+**Fixed 2026-11-21.** Ownership follows **D9.1.1v4 / D9.1.3v2**.
+The existing image consumer accepts string sources in image-set, but resource
+discovery only visited URL-tagged values. Generic recursion reached the source
+string and ignored it, leaving a network-managed background permanently without
+bytes. The native HTTP image-set-string regression paints white before repair;
+an ordinary quoted url() control passes. This is an existing discovery defect,
+not a missing decoder or image-set selector.
+
+The shared visitor now uses the existing parsed image-set option helper, visits
+only each option's image and normalizes its string source to a borrowed URL
+value for the callback. type() strings remain metadata; declaration-relative
+spelling and the existing density/type selection are unchanged. Other URL,
+function, list and custom fallback traversal remains in place.
+
+After repair, three native GTests pass, including the new cached image-set
+export in the10-case image export matrix, the18-case priority matrix and the
+stylesheet-token guard. Six HTTP controls pass for image-set strings, ordinary
+quoted URLs, punctuation/encoded inline URLs, variables and inert templates.
+The image-set test checks green pixels and the stylesheet-relative request,
+and rejects a request for the MIME string. Integer lint passes. No full
+baseline, capture clock, source/transfer budget or page condition changed.
+The syntax follows [CSS Images4 §2.4](https://drafts.csswg.org/css-images-4/#image-set-notation).
+Evidence: `temp/online-visual-round144/resource-spelling-before.log`,
+`focused-native.log` and `focused-http.log`.
+
+A saved-style scan finds one high-page exposure in Conductor's webinar poster
+rule, not proof that this below-fold image causes its major difference.
+Overpass's portrait is an independent readiness observation: a read-only
+saved-source capture with the existing1000ms settling interval has the same
+pixels as the self-assignment diagnostic (0.78098% mean error). Its downloaded
+PNG paints correctly locally; no CSS publication or decoder patch is justified.
+No page clearance is claimed. All1067 comparison rows and browser references
+are preserved in [report130](../test/online/comparison/repairs.html#round-130).
+
+<a id="ri-182"></a>
+
+### RI-182 — CSS-only local documents cannot start their first network resource
+
+**Fixed 2026-11-21.** Native/input ownership follows **D9.1.1v4 /
+D9.1.3v2**. The selected-style traversal and URL callback required an existing
+resource manager. RI-181 let img/poster discovery create it, but a document
+whose first dependency was a CSS background still could not queue that
+resource. Its synchronous fallback did not consume the shared durable cache.
+
+The URL callback now uses the existing lazy queue helper with the absolute URL
+resolved against the declaration's stylesheet base. Selected-style traversal
+no longer requires a manager. Admission, active/inert selection, variable
+resolution and existing priority/transfer/wait budgets are preserved. The
+queue helper reports success only for a created or reused resource.
+
+Four new export cases fail before repair and pass afterward: inline background,
+stylesheet background, custom-property URL and pseudo-element background.
+The unchanged five img/poster cases, the resource-priority matrix and the
+stylesheet-token guard still pass (three GTests total). Evidence:
+`temp/online-visual-round143/background-before.log` and `focused-after.log`.
+Three focused HTTP base/template/variable-resource controls and integer lint
+also pass. The release paint control changes from0 to2993 red pixels for the
+same cached73×41 CSS image. Current matched1000ms Overpass still lacks its
+live hero (24.49% mean error); its saved-source portrait is independently
+unresolved (2.51% diagnostic error). No whole-page clearance or attribution
+of its live startup difference is claimed. No broad baseline was repeated.
+See [report129](../test/online/comparison/repairs.html#round-129).
+
+<a id="ri-181"></a>
+
+### RI-181 — Local HTML image/poster exports never initialize network discovery
+
+**Fixed 2026-11-21.** Under **D9.1.1v4 / D9.1.3v2**, native snapshot
+preparation returned when a local document had no resource manager. Only
+playable media could initialize one, leaving ordinary remote images and
+posters on a synchronous path that did not consume the shared durable cache.
+The unchanged ExportQueuesOrdinaryNetworkImagesBeforeInitialLayout test
+fails independently before repair; the starting host also fails the seeded
+SVG control. Resource queuing now initializes a manager lazily for an
+admitted HTTP dependency, and initial snapshot discovery includes images and
+posters. The existing wait limit and resource policy are unchanged.
+
+The unchanged five-case export regression now passes: natural SVG dimensions,
+explicit video dimensions, poster-only sizing, max-height and size containment.
+The priority-discovery matrix and stylesheet-token guard also pass. Integer
+lint passes. No full baseline was repeated. Evidence:
+`temp/online-visual-round141/export-isolated.log`, `export-cache-before.log`
+and `focused-final.log`. This local export repair alone clears no online page.
+
+<a id="ri-180"></a>
+
+### RI-180 — Authored fetchpriority never reaches resource scheduling
+
+**Fixed 2026-11-21.** Ownership follows **D9.1.1v4 / D9.1.3v2**.
+Discovery assigned fixed priorities to images, preload links, stylesheets and
+scripts; the early source prefetch path also ignored fetchpriority. A saved
+DOM scan finds hints on61 remaining high pages; this is exposure, not evidence
+that scheduling caused their full-page differences. Module scripts also
+lost their lower default when rediscovered through the DOM.
+
+One native helper parses high/low as ASCII case-insensitive enumerated
+keywords, shifting the existing destination default by one bounded scheduler
+rank. Missing, auto and invalid values retain the default. Both discovery
+and early prefetch use it. Dynamic image source requests pass their owner;
+passive decoding borrows an existing request without promoting a low hint
+back to normal. Shared URL identities retain the existing promotion logic.
+Input supplies the borrowed manager lookup and an atomics-free priority
+header; no runtime dependency or scheduler values change.
+
+The cache-backed native integration checks18 discovery cases plus missing
+lookup, passive reads, dynamic hints, shared identity and promotion. It and
+two existing loading controls pass (three GTests total); integer lint passes.
+No source/transfer budget, capture clock, site condition or vendor code changed.
+IDL fetchPriority reflection and complete fetch API priority support are not
+claimed. The keyword semantics follow the
+[HTML fetch priority definition](https://html.spec.whatwg.org/multipage/urls-and-fetching.html#fetch-priority-attributes).
+Evidence: `temp/online-visual-round140/priority-hints.json` and
+`temp/online-visual-round141/focused-final.log`. Three focused HTTP controls also
+pass. Current matched1000ms Aircall and Dayos pairs both load, with unchanged
+major differences (37.89% and62.33% mean error). No online clearance is claimed;
+see [report128](../test/online/comparison/repairs.html#round-128).
+
 <a id="ri-179"></a>
 
 ### RI-179 — Font inheritance overwrites local shorthand and re-evaluates ancestor declarations

@@ -211,6 +211,90 @@ static Item _iface_proto(Item global, const char* name) {
     return get_type_id(proto) == LMD_TYPE_MAP ? proto : ItemNull;
 }
 
+static Item location_document(Item receiver) {
+    NameRef name = mvp_lmd_internal_name(LMD_INTERNAL_LOCATION_DOCUMENT);
+    if (!name) return ItemError;
+    Item key = {.item = s2it(name)};
+    Item present = js_has_own_property(receiver, key);
+    if (item_is_error(present)) return present;
+    return present.item == ITEM_TRUE
+        ? js_get_key_default(receiver, key)
+        : js_throw_type_error("Illegal Location receiver");
+}
+
+static size_t location_member_index(Item callee) {
+    return (size_t)js_fn_native((JsFunction*)callee.function)->target.bits;
+}
+
+static Item location_component_get(Item callee, Item receiver, Item*, int, uint64_t*) {
+    size_t index = location_member_index(callee);
+    JS_ROOTS(roots, document, location_document(receiver));
+    if (item_is_error(document.get())) return document.get();
+    return js_get_key_cstr(document.get(), dom_location_component_name(index));
+}
+
+static Item location_component_set(Item callee, Item receiver, Item* args, int argc, uint64_t*) {
+    size_t index = location_member_index(callee);
+    JS_ROOTS(roots, value, argc ? args[0] : make_js_undefined(),
+        document, location_document(receiver));
+    if (item_is_error(document.get())) return document.get();
+    return dom_location_set_component(document.get(), index, value.get());
+}
+
+static const char* const location_methods[] = {"assign", "replace", "reload", "toString"};
+
+static Item location_method_call(Item callee, Item receiver, Item* args, int argc, uint64_t*) {
+    size_t index = location_member_index(callee);
+    JS_ROOTS(roots, document, location_document(receiver), method, ItemNull);
+    if (item_is_error(document.get())) return document.get();
+    method.set(js_get_key_cstr(document.get(), location_methods[index]));
+    return item_is_error(method.get()) ? method.get() : js_call_function(method.get(), document.get(), args, argc);
+}
+
+Item dom_location_for_document(Item document) {
+    RootFrame roots(8);
+    Rooted<Item> owner(roots, document), key(roots, ItemNull), object(roots, ItemNull);
+    Rooted<Item> prototype(roots, ItemNull), getter(roots, ItemNull), setter(roots, ItemNull);
+    Rooted<Item> descriptor(roots, ItemNull), name(roots, ItemNull);
+    NameRef cache_key = mvp_lmd_internal_name(LMD_INTERNAL_DOCUMENT_LOCATION);
+    if (!cache_key) return ItemError;
+    key.set((Item){.item = s2it(cache_key)});
+    Item present = js_has_own_property(owner.get(), key.get());
+    if (item_is_error(present)) return present;
+    if (present.item == ITEM_TRUE)
+        return js_get_key_default(owner.get(), key.get());
+
+    js_dom_install_interface(js_get_global_this(), "Location");
+    prototype.set(_iface_proto(js_get_global_this(), "Location"));
+    object.set(js_new_object());
+    js_set_prototype(object.get(), prototype.get());
+    NameRef record_key = mvp_lmd_internal_name(LMD_INTERNAL_LOCATION_DOCUMENT);
+    if (!record_key) return ItemError;
+    // private edges preserve identity and document ownership without exposing either through enumeration.
+    JS_RETURN_IF_ERROR(js_private_field_define(object.get(), (Item){.item = s2it(record_key)}, owner.get()));
+    for (size_t index = 0; index < dom_location_component_count(); index++) {
+        const char* member = dom_location_component_name(index);
+        name.set(js_name_item(member));
+        getter.set(js_new_native_payload_function(location_component_get, index, 0));
+        setter.set(strcmp(member, "origin") ? js_new_native_payload_function(location_component_set, index, 1) : ItemNull);
+        // Location's LegacyUnforgeable attributes are enumerable own accessors.
+        js_install_native_accessor(object.get(), name.get(), getter.get(), setter.get(), JSPD_NON_CONFIGURABLE);
+    }
+    descriptor.set(js_new_object());
+    js_set_key_cstr(descriptor.get(), "enumerable", (Item){.item = ITEM_TRUE});
+    js_set_key_cstr(descriptor.get(), "configurable", (Item){.item = ITEM_FALSE});
+    js_set_key_cstr(descriptor.get(), "writable", (Item){.item = ITEM_FALSE});
+    for (size_t index = 0; index < sizeof(location_methods) / sizeof(location_methods[0]); index++) {
+        name.set(js_name_item(location_methods[index]));
+        getter.set(js_new_native_payload_function(location_method_call, index, index < 2 ? 1 : 0));
+        js_set_function_name(getter.get(), name.get());
+        js_set_key_cstr(descriptor.get(), "value", getter.get());
+        JS_RETURN_IF_ERROR(js_object_define_property(object.get(), name.get(), descriptor.get()));
+    }
+    JS_RETURN_IF_ERROR(js_private_field_define(owner.get(), key.get(), object.get()));
+    return object.get();
+}
+
 static Item dom_install_interface_members(Item global, const char* name,
         void (*install_members)(Item)) {
     JS_ROOTS(roots, global_root, global, prototype_root, ItemNull);
@@ -755,6 +839,7 @@ static void _install_node_iface(Item global) {
         _define_iface_int_constant(proto_root.get(), node_constants[i].name,
             node_constants[i].value);
     }
+    js_set_prototype(ctor_root.get(), js_get_key_cstr(global_root.get(), "EventTarget"));
     js_set_key_cstr(global_root.get(), "Node", ctor_root.get());
 }
 
@@ -1439,8 +1524,21 @@ extern "C" void dom_install_collection_globals(void) {
         // `window` left WebIDL brand checks such as event.view instanceof Window
         // unable to enter pointer-driven editor paths.
         js_set_prototype(global, window_proto);
+        // retire only unmaterialized standalone globals; Window now inherits these methods.
+        const char* event_methods[] = {"addEventListener", "removeEventListener", "dispatchEvent"};
+        RootFrame roots(1);
+        Rooted<Item> key(roots, ItemNull);
+        for (const char* name : event_methods) {
+            key.set(js_name_item(name));
+            Item stored = ItemNull;
+            if (js_own_shape_slot_status_key(global, key.get(), &stored, nullptr) == JS_SHAPE_SLOT_DATA &&
+                    stored.item == ITEM_JS_LAZY_GLOBAL_SENTINEL)
+                js_ordinary_delete(global, name, strlen(name));
+        }
     }
     _install_node_iface(global);
+    // Node event methods must inherit the same overridable EventTarget surface.
+    _link_iface_proto(global, "Node", "EventTarget");
     js_dom_install_interface(global, "CharacterData");
     _link_iface_proto(global, "CharacterData", "Node");
     // text nodes must inherit ChildNode's CharacterData methods, like Comment.

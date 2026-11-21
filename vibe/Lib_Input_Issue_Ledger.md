@@ -15,6 +15,14 @@ Resolved records are in the [fixed issue ledger](<Lib_Input_Issue_Ledger (fixed)
 
 ## Open issues
 
+<a id="li-096"></a>
+
+### LI-096 — FIXED
+
+Gradient validation counts the expanded stops of a double-position color,
+including a sole color group and radial geometry preludes. See the
+[gradient stop-count repair](<Lib_Input_Issue_Ledger (fixed).md#li-096>).
+
 <a id="li-095"></a>
 
 ### LI-095 — FIXED
