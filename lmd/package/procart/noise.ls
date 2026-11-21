@@ -147,9 +147,13 @@ pub fn simplex2(p, x: float, y: float) float^ {
 }
 
 // the second and third simplex corners, by the rank order of the offsets.
+// the six permutations are immutable, so sampling needn't allocate a corner array.
+let CORNER_ORDER = [[1, 0, 0, 1, 1, 0], [1, 0, 0, 1, 0, 1], [0, 0, 1, 1, 0, 1],
+    [0, 0, 1, 0, 1, 1], [0, 1, 0, 0, 1, 1], [0, 1, 0, 1, 1, 0]]
 fn order3(x: float, y: float, z: float) array {
-    if (x >= y) (if (y >= z) [1, 0, 0, 1, 1, 0] else if (x >= z) [1, 0, 0, 1, 0, 1] else [0, 0, 1, 1, 0, 1])
-    else (if (y < z) [0, 0, 1, 0, 1, 1] else if (x < z) [0, 1, 0, 0, 1, 1] else [0, 1, 0, 1, 1, 0])
+    let index = if (x >= y) (if (y >= z) 0 else if (x >= z) 1 else 2)
+        else (if (y < z) 3 else if (x < z) 4 else 5);
+    CORNER_ORDER[index]
 }
 
 // F3 = 1/3 and G3 = 1/6, as their binary64 values.
@@ -372,4 +376,11 @@ pub fn field(gen, width: int, height: int) array {
     else if (gen.warp == null and period is (number[2] | number[3]) and width>0 and height>0)
         [for (y in 0 to (height-1)) periodic_row(gen,width,float(y))]
     else [for (y in 0 to (height - 1)) [for (x in 0 to (width - 1)) sample(gen, float(x), float(y))]]
+}
+
+// sample a rectangular grid at caller-supplied coordinates while sharing each row's octave work.
+pub fn field_at(gen, xs:float[], ys:float[]) array^ {
+    if (len(xs) > 0 and gen.warp == null and gen.period == null)
+        [for (y in ys) field_row(gen, len(xs), y, xs)^]
+    else [for (y in ys) [for (x in xs) sample(gen, x, y)^]]
 }

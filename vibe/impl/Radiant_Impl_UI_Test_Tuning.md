@@ -7,6 +7,62 @@
 
 ## Current checkpoint
 
+- Continuation started 2026-11-21 on `master` at `3b4d200c3`, with Radiant
+  at `fdc8862` in `/Users/henry/Projects/lambda`. The eight named Scene3D
+  and demo-launch cases must each finish below 5 s in the existing parallel
+  `debug_native` View batch. All runner and event fixtures remain at HEAD.
+- The clean debug control at
+  `temp/radiant-scene3d-tuning/control-debug/test_summary.json` passed 283
+  cases with one skip in 32.626 s. The eight cases ranged from about 4.5 to
+  12.795 s. Optimized profiles in `release-control/` show separate costs in
+  cold Lambda authoring, Scene3D reprojection, draw work and document loads.
+- The first production pass reads flat floating-point uploads without
+  boxing every lane, reuses available GL resource slots and skips copying
+  multisample depth when no forward transparent draw reads it. Meadow
+  retains seed-owned scenery and only remodels plants whose climate response
+  changes (**D5.5.2**, **D10.1.7**, **S12.1.3**). The exact coverage replay
+  passed in 1.288 s in an optimized run, down from 2.092 s with the
+  control. Meadow composition and environment goldens match.
+- Scene3D updates lighting and visibility in retained draw records and
+  samples hierarchies in parent order. The renderer indexes declarations
+  and animation targets, retains local transforms across clock ticks, and
+  binds shared shadow and material inputs once per pass where possible.
+  Snapshot readback and presentation retain their frame boundaries
+  (**D5.5.2**, **D10.1.7**, GPU Compositor **C4**). Radiant keeps one
+  interaction invariant check at each transition (**D1.10**).
+- The DFG integration reuses Hammersley directions and roughness-dependent
+  half-vectors. An optimized standalone comparison matched all 1,024
+  floating-point channels bit for bit and reduced median user CPU time
+  from 11.6 to 6.0 ms per table (**D10.1.7**).
+- Midtown assembles near and far terrain with packed gathers and only
+  carves vertices in the road corridor. It decodes the minimap into its
+  native raster. The live view writes its lighting controls as DOM text
+  while the scene value retains typed settings for validation. Paint
+  visits only the pixels each seeded grain can touch.
+  Hamster skips unchanged care and palette style writes
+  (**S8.2.4v3**, **S10.2.1**, **S10.2.4**, **S9.1.7v2**, **D9.5.6v2**).
+- The scratch checks in `temp/radiant-scene3d-tuning/` verify exact geometry
+  for all Midtown terrain chunks and the far mesh, 20 brush masks, and six
+  Lambda goldens. The Scene3D appearance probe verifies resource reuse, a
+  rejected pose, exact recovery, and structural reprojection.
+- Paired optimized replays of the clean and tuned sources used 27.936
+  and 25.562 s of CPU time across seven cases. Midtown desktop took
+  2.964 and 2.635 s wall time, and Meadow took 1.985 and 1.054 s.
+  These runs precede the separate DFG integration measurement.
+  See `temp/radiant-scene3d-tuning/release-comparison.log`.
+- The 2026-11-22 rerun kept direct typed exposure edits on the projection
+  validation path. `TypedScalarEditsInvalidateWithoutReplacingTheBackingElement`
+  passed on its own and in the full Scene3D unit suite.
+- The two final View batches took 33.037 and 34.915 s with 283 passes and
+  one skip each. Meadow took 2.525–2.890 s. The other seven cases took
+  5.825–8.952 s. See `debug-dfg-1/` and `debug-dfg-2/`. The 5 s case
+  target remains open under [RI-196](../Radiant_Issue_Ledger.md#ri-196).
+- The final full Radiant debug baseline in `debug-baseline-final/` passed
+  with 8,174 passes, 298 layout partials, 20 skips and zero failures. The
+  DFG reference check and the Radiant integer-cast lint passed.
+
+### Previous tuning checkpoint
+
 - Updated 2026-11-21 on `master` at `d52f93d87` in `/Users/henry/Projects/lambda`.
 - Goal is all nine reported View cases below 5 s and the complete View batch
   below 38.3 s with `debug_native` under the original parallel runner. Change

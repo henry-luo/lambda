@@ -404,7 +404,7 @@ pub fn clips() any^ => [
 
 let SKY = s.environment('sky', {id: "sky", 'sun-direction': LOOKS.day.sun, 'sun-intensity': 12.0}) ^ { null }
 // ---- the whole scene
-pub fn scene(st) element {
+pub fn scene(st, attributes = {}) element {
     let look = LOOKS[st.look];
     s.scene([
         // 24 substeps of 1/120 s let a frame as slow as 200 ms (a debug build or a busy machine) catch up;
@@ -428,7 +428,7 @@ pub fn scene(st) element {
         background: look.background, environment: "sky", 'environment-intensity': look.env_i, 'tone-mapping': 'aces',
         // a full-window scene renders at one pixel per CSS pixel and is upsampled on the GPU for dense displays
         'max-pixel-ratio': 1.0,
-        exposure: look.exposure, tabindex: "0", role: "img", 'aria-label': "Lumen Bay, a city to drive around in 3D"})
+        exposure: look.exposure, tabindex: "0", role: "img", 'aria-label': "Lumen Bay, a city to drive around in 3D", *: attributes})
 }
 
 // the attribute edits that switch the lighting look, applied once per change

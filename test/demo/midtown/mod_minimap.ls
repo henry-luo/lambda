@@ -32,12 +32,14 @@ pub fn pan(pose, dx, dy) any^ {
      z: u.clamp(pose.z - (pose.c * dy - pose.s * dx) / squared_scale, REGION.z0, REGION.z1), turn: pose.turn}
 }
 
-pub pn load_plan() {
+pub pn load_plan() element^ {
     let uri = url_resolve(resources.entry_uri()^, "assets/minimap.png")
     let bytes = input(uri, 'binary')^
-    let pixels = load(bytes)^
-    let raster = img.from_array(pixels)^
-    return raster
+    // keep the PNG in native raster storage instead of copying it through a numeric tensor.
+    let decoded = lambda.sys.image_decode(bytes, {normalize_orientation: false})^
+    let raster = decoded.frames[0].raster
+    if (raster is element) { return raster }
+    raise error("Midtown: the minimap image has no raster frame")
 }
 
 pub fn frame(plan, pose) any^ {

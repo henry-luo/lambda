@@ -111,17 +111,22 @@ pub fn generate(doc) map^ {
     let climate=env.sample(env.from_document(doc)^)^
     let models = [for (o in objects) specimen(o,climate)^]
     let instances=assemble(objects,models,ground);
+    let resources = unique([for (m in models) *m.resources]);
     {*:ground,seed:doc.seed,objects:objects,specimens:models,instances:instances,environment:climate,
-     parts:[for (item in instances) *item.parts],resources:unique([for (m in models) *m.resources]),
+     parts:[for (item in instances) *item.parts],resources:resources,scenery:scenery(ground,resources)^,
      counts:map([for (kind in ["flower","tree","stone","grass"]) (kind,len([for (o in objects where o.kind == kind) o]))] )}
 }
 // resample poses from the same keys; terrain, placement and legacy architecture stay retained.
 pub fn conditions(model,config) map^ {
     let climate=env.sample(config)^
-    let models=[for (i,o in model.objects) if (o.generator=="plant.herb") specimen(o,climate)^ else model.specimens[i]]
-    let instances=[for (i,o in model.objects) if (o.generator=="plant.herb")
-        {*:assemble([o],[models[i]],model)[0],id:model.instances[i].id} else model.instances[i]];
-    {*:model,environment:climate,specimens:models,instances:instances,parts:[for (item in instances) *item.parts]}
+    let changed=[for (i,o in model.objects) o.generator=="plant.herb" and
+        env.response(model.specimens[i].species,climate)!=model.specimens[i].response];
+    if (not any(changed)) {*:model,environment:climate} else {
+        let models=[for (i,o in model.objects) if (changed[i]) specimen(o,climate)^ else model.specimens[i]]
+        let instances=[for (i,o in model.objects) if (changed[i])
+            {*:assemble([o],[models[i]],model)[0],id:model.instances[i].id} else model.instances[i]];
+        {*:model,environment:climate,specimens:models,instances:instances,parts:[for (item in instances) *item.parts]}
+    }
 }
 
 fn ground_mesh(model) element^ {
@@ -147,21 +152,31 @@ fn ground_sides(model) element^ {
         s.material('lambert',{color:"#8a7757",side:'double'}))
 }
 
+// ground and prototype buffers are owned by the seed, independent of weather and layer visibility.
+fn scenery(ground,resources) map^ => {
+    fixed:[s.resources([geometry.sphere("round",10,16),s.box([1.0,1.0,1.0],{id:"rain-drop"}),
+        *botanical.resources(),grass.geometry(),*resources]),ground_mesh(ground)^,ground_sides(ground)^],
+    pond:if (ground.pond != null) pond.scene(ground.pond) else []}
+
 pub fn home() map^ => camera.prepare({position:[26.0,21.0,29.0],target:[0.0,0.7,0.0],fov:40.0})
-fn organism(item,climate) element {
-    let local=env.rooted(item.parts,item.root);
+fn organism(item,windy) element^ {
+    // calm batches already carry world matrices at a zero pivot.
+    let local=if (windy) env.rooted(item.parts,item.root)^ else item.parts;
     <group id:item.id,position:item.root,'data-species':item.species,
         'data-openness':string(if (item.response != null) round(item.response.openness*1000.0)/1000.0 else 1.0),
-        *viewer.meshes(local,{'cast-shadow':true,'receive-shadow':true})>
+        *viewer.meshes(local,{'cast-shadow':true,'receive-shadow':true})^>
 }
 fn atmosphere(model,motion) array^ {
-    let e=model.environment
-    let drops=[for (i in 0 to 95,let key=rng.at(rng.derive(rng.key(model.seed),"rain"),i))
-        s.transform([rng.between(key,-model.width/2.0,model.width/2.0),rng.between(rng.at(key,1),0.0,9.0),
-            rng.between(rng.at(key,2),-model.depth/2.0,model.depth/2.0)],[0.0,0.0,-0.12],[0.015,0.22,0.015])^];
-    [*(if (e.weather.rain>0.0) [<group id:"meadow-rain",'data-weather':"rainy",
+    let e=model.environment;
+    [*(if (e.weather.rain>0.0) {
+      let rain_key=rng.derive(rng.key(model.seed),"rain")
+      let drops=[for (i in 0 to 95,let key=rng.at(rain_key,i))
+          s.transform([rng.between(key,-model.width/2.0,model.width/2.0),rng.between(rng.at(key,1),0.0,9.0),
+              rng.between(rng.at(key,2),-model.depth/2.0,model.depth/2.0)],[0.0,0.0,-0.12],[0.015,0.22,0.015])^];
+      [<group id:"meadow-rain",'data-weather':"rainy",
         <mesh geometry:"rain-drop",instances:drops,s.material('basic',{color:"#b0c9cf",opacity:0.5,transparent:true})>>,
-        s.clip("rainfall",[s.track("meadow-rain.position",[0.0,1.0],[0.0,0.0,0.0,0.0,-9.0,0.0],'vector')],{duration:1.0,autoplay:motion})] else []),
+        s.clip("rainfall",[s.track("meadow-rain.position",[0.0,1.0],[0.0,0.0,0.0,0.0,-9.0,0.0],'vector')],{duration:1.0,autoplay:motion})]
+      } else []),
      *(if (e.weather.fog>0.0) [for (i in 0 to 2)
         <mesh geometry:"round",position:[float(i-1)*6.0,0.4,0.0],scale:[9.0,0.8,13.0],'data-weather':"foggy",
             s.material('basic',{color:e.background,opacity:e.weather.fog*(0.12+e.config.humidity*0.12),transparent:true,side:'double'})>] else [])]
@@ -176,19 +191,18 @@ fn scene_frame(model,children,lens) element {
          style:"display:block;width:100%;height:auto;touch-action:none"})
 }
 pub fn viewport(model,visibility={},motion=true,lens=home()^) element^ {
-    let e=model.environment
+    let e=model.environment,windy=e.wind.speed>0.0
     let visible=[for (item in model.instances where ((visibility[item.kind] != false and len(item.parts)>0) ^ { false })) item]
     // calm plants batch by species; wind retains a separate root pivot for each specimen.
-    let display=if (e.wind.speed>0.0) visible else [for (item in visible group by item.species as species into batch)
+    let display=if (windy) visible else [for (item in visible group by item.species as species into batch)
         {*:batch[0],root:[0.0,0.0,0.0],parts:[for (instance in batch) *instance.parts]}]
-    let tracks=if (e.wind.speed<=0.0) [] else [for (item in visible where item.kind != "stone")
+    let tracks=if (not windy) [] else [for (item in visible where item.kind != "stone")
         env.wind_track(item.id,e,item.key,env.response(item.species,e).flexibility)];
     scene_frame(model,[
         *env.lights(e,20.0),
-        s.resources([geometry.sphere("round",10,16),s.box([1.0,1.0,1.0],{id:"rain-drop"}),*botanical.resources(),grass.geometry(),*model.resources]),
-        ground_mesh(model)^,ground_sides(model),
-        *(if (model.pond != null and visibility.pond != false) pond.scene(model.pond) else []),
-        <group id:"meadow-model",*[for (item in display) organism(item,e)]>,
+        *model.scenery.fixed,
+        *(if (visibility.pond != false) model.scenery.pond else []),
+        <group id:"meadow-model",*[for (item in display) organism(item,windy)^]>,
         *(if (len(tracks)>0) [s.clip("meadow-wind",tracks,{duration:8.0,autoplay:motion})] else []),*atmosphere(model,motion)
     ],lens)
 }

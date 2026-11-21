@@ -49,8 +49,11 @@ pub pn life(owner,st) {
     scene_dom.show(owner,"pet-detail",h != null)^
     if ((h != null)^) {
         for (key in ["food","water","energy","comfort","bond"]) {
-            dom.style_set_property(scene_dom.node(owner,"bar-" ++ key),"width",percent(h[key])^)
-            scene_dom.text(owner,"need-" ++ key,percent(h[key]))
+            let value = percent(h[key])^
+            let meter = scene_dom.node(owner,"bar-" ++ key)
+            // assigning the current width still invalidates layout.
+            if ((dom.style_get_property(meter,"width") != value)^) dom.style_set_property(meter,"width",value)
+            scene_dom.text(owner,"need-" ++ key,value)
         }
         scene_dom.text(owner,"pet-age","DAY " ++ string(round(h.age*10)/10))^
         scene_dom.text(owner,"pet-activity",if (h.activity == "waiting") "Waiting for a clear path…" else if (h.activity == "walking") "Finding a little adventure…" else if (h.activity == "sleep") "Dreaming in the sleep nook…"
@@ -126,8 +129,8 @@ pub pn sync(owner,previous,st) {
     for (entry in cage.catalog) scene_dom.attr(scene_dom.node(owner,"tool-" ++ entry.kind),"aria-pressed",st.tool == entry.kind)
     for (entry in items.catalog) scene_dom.attr(scene_dom.node(owner,"item-" ++ entry.kind),"aria-pressed",st.item_tool == entry.kind)
     for (tab in ["modules","furnishings"]) scene_dom.attr(scene_dom.node(owner,"tab-" ++ tab),"aria-selected",st.tab == tab)
-    dom.style_set_property(scene_dom.node(owner,"module-palette"),"display",if (st.tab == "modules") "grid" else "none")
-    dom.style_set_property(scene_dom.node(owner,"item-palette"),"display",if (st.tab == "furnishings") "grid" else "none")
+    scene_dom.show(owner,"module-palette",st.tab == "modules","grid")^
+    scene_dom.show(owner,"item-palette",st.tab == "furnishings","grid")^
     for (id,pressed in {select:st.tool == "select" and st.item_tool == "",delete:st.tool == "delete",move:st.moving,'floor-0':st.level == 0,'floor-1':st.level == 1,play:st.playing,follow:st.follow})
         scene_dom.attr(scene_dom.node(owner,string(id)),"aria-pressed",pressed)
     for (key,value in {selected:st.selected,pet:st.pet_selected,modules:len(st.modules),residents:len(st.pets),playing:st.playing,
