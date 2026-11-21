@@ -1129,6 +1129,7 @@ LAMBDA_RT_API Item js_new_error_with_name(Item error_name, Item message);
 LAMBDA_RT_API Item js_new_error_with_name_cstr(const char* error_name, const char* message);
 Item js_new_error_with_name_stack(Item error_name, Item message, Item stack_str);
 Item js_error_materialize_stack(Item error_obj);
+Item js_error_materialize_stack_for(Item error_obj, Item display_obj);
 
 /**
  * ES2021: Create AggregateError with errors array and message.
@@ -1331,6 +1332,7 @@ Item js_set_with_binding_base(Item scope_obj, Item key, Item value, int64_t stri
 // URL constructor
 Item js_url_construct(Item input);
 Item js_url_get_component(Item receiver, const char* name);
+Item js_url_search_params_update(Item params);
 Item js_url_construct_with_base(Item input, Item base);
 Item js_readable_stream_new(Item underlying_source);
 Item js_writable_stream_new(Item underlying_sink);
@@ -1545,6 +1547,7 @@ Item js_text_decoder_decode_method(Item decoder, Item* args, int argc);
 Item js_weakmap_new(void);
 Item js_weakset_new(void);
 Item js_weakref_new(Item target);
+Item js_weakref_deref(Item receiver);
 Item js_finalization_registry_new(Item cleanup_callback);
 Item js_weakmap_new_with_iter(Item iterable);
 Item js_weakset_new_with_iter(Item iterable);

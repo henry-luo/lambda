@@ -9330,7 +9330,8 @@ JS_GLOBAL_UNARY_BODY(js_intrinsic_global_request_animation_frame_body,
     js_requestAnimationFrame(arg0))
 JS_GLOBAL_UNARY_BODY(js_intrinsic_global_structured_clone_body,
     js_structuredClone(arg0))
-JS_GLOBAL_BINARY_BODY(js_intrinsic_global_fetch_body, js_fetch(arg0, arg1))
+JS_GLOBAL_BINARY_BODY(js_intrinsic_global_fetch_body, argc > 0 ? js_fetch(arg0, arg1)
+    : js_promise_reject(js_error_lane_payload(js_throw_type_error("fetch requires an input"))))
 JS_GLOBAL_UNARY_BODY(js_intrinsic_global_atob_body, js_atob(arg0))
 JS_GLOBAL_UNARY_BODY(js_intrinsic_global_btoa_body, js_btoa(arg0))
 

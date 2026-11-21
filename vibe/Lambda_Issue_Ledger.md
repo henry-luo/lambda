@@ -17,6 +17,24 @@
 > Semantic and design rulings are cited by `S#` / `D#` per CLAUDE.md rule 17;
 > where no formal ruling covers a point, the vibe ledger ID is given.
 
+<a id="online-framerauth-layout-timeout"></a>
+## FramerAuth startup reaches the capture deadline after native startup repairs
+
+**OPEN, 2026-11-20; root cause unconfirmed.** After JS03-L3 and JS13-L27,
+the current FramerAuth (`https://framerauth.com/`) diagnostic no longer logs
+the former Framer fatal TypeError, but repeated layout work reaches the
+unchanged 150-second outer capture deadline. No PNG is produced. The output
+reports more than 30,000 block-content entries during startup. This resembles
+the current Primer/Dock geometry-reconciliation stalls, but a shared cause is
+not established. Native/host ownership follows **D9.1.1v4 / D9.1.3v2**.
+
+The prior canonical high-severity pair is retained and the failed current
+attempt is explicitly reported as a diagnostic. This blocks a new FramerAuth
+comparison, not the independent title/stack repairs. Do not raise timeouts,
+disable script layout or claim an elapsed-time improvement over a renderer
+that exits the client path early with an error. Evidence:
+`temp/online-visual-round118/saas_landing_207/`.
+
 <a id="durable-scratch-spool-amplification"></a>
 Scratch spool durability amplification was fixed and moved to the
 [fixed ledger](<Lambda_Issue_Ledger (fixed).md#durable-scratch-spool-amplification>).
@@ -657,6 +675,14 @@ qualified release pin
 The later exception is reproduced by the captured bootstrap in a minimal HTML
 host after retaining its script URL; its root cause remains unconfirmed.
 
+**2026-11-20 recheck:** the exact retained consent bootstrap with its original
+script URL now completes with `airgap.initialized === true` on the installed
+renderer. The former later TypeError is no longer reproducible in that reduction;
+it is not an outstanding diagnosis target. Coda's retained native page instead
+shows an API 403 response. This recheck does not establish the cause of that
+response or clear its visual comparison. Evidence:
+`temp/online-visual-round113/airgap-state.log` (**D8.4.4 / D9.1.3v2**).
+
 An independent Influx diagnosis confirms authored body visibility:hidden whose
 277,099-byte deferred module is skipped by the unchanged 131,072-byte admission
 limit. Its theme callback normally reveals the body. No limit increase or
@@ -679,6 +705,21 @@ their load ordering remain open.
 **Task blocker:** no for independent layout repairs. Host/DOM ownership follows
 **D9.1.3v2**, shared tier contracts **D8.4.4**, and capture timing **D10.1.7**.
 No formal ruling or capture budget changes.
+
+**2026-11-20 Aircall follow-up:** its 27,863-byte OneTrust stub executes, receives
+the domain configuration (HTTP 200, 7,140 bytes) and geolocation (HTTP 200,
+59 bytes), and appends `otBannerSdk.js`. The current host preparation callback
+handles inline classics and excludes elements with `src`; dynamic external
+execution remains open. The consent dialog is still absent in the current
+1000ms capture. JS13-L22 separately repairs the inconsistent HTTP user agent;
+Aircall's before/after native pixels are identical, so that repair is not a
+visual clearance. Both independent endpoint profiles receive the same bot flag.
+Evidence: `temp/online-visual-round111/aircall-sdk-probe.log` and paired captures. The exact
+SDK fetched with the shared HTTP profile in round116 is 585747 bytes, above the
+unchanged 128 KiB pre-layout async/defer cap. This is an additional admission
+barrier, not evidence that implementing download alone would restore the dialog.
+No partial synchronous append loader or budget increase was adopted.
+
 
 On the original renderer, a newly created classic script with text assigned through HTMLScriptElement.text
 and appended to document.head never executes. The standalone inline-script.html

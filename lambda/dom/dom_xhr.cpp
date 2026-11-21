@@ -23,6 +23,7 @@
 #include "../lambda.hpp"
 #include "lambda/input/input.hpp"
 #include "lambda/network/cookie_jar.h"
+#include "lambda/network/http_client.h"
 #include "radiant/radiant.hpp"
 #include "lib/log.h"
 #include "lib/mem.h"
@@ -941,7 +942,7 @@ extern "C" Item js_xhr_send(Item body_arg) {
     config.verify_ssl = false;
     config.enable_compression = true;
     config.cookie_jar = xhr_profile_cookie_jar();
-    config.user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:139.0) Gecko/20100101 Firefox/139.0";
+    config.user_agent = RADIANT_HTTP_CLIENT_USER_AGENT;
 
     // body
     const char* body_str = xhr->request_body;

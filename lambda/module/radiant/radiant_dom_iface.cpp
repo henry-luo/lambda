@@ -1468,6 +1468,7 @@ RADIANT_DOC_GET_FN(radiant_doc_get_document_element, "documentElement")
 RADIANT_DOC_GET_FN(radiant_doc_get_body, "body")
 RADIANT_DOC_GET_FN(radiant_doc_get_head, "head")
 RADIANT_DOC_GET_FN(radiant_doc_get_title, "title")
+RADIANT_DOC_SET_FN(radiant_doc_set_title, "title")
 RADIANT_DOC_GET_FN(radiant_doc_get_cookie, "cookie")
 RADIANT_DOC_SET_FN(radiant_doc_set_cookie, "cookie")
 RADIANT_DOC_GET_FN(radiant_doc_get_url, "URL")
@@ -1578,7 +1579,7 @@ static const JubeMemberBind radiant_document_members[] = {
     DOC_FIELD("document_element", "documentElement", radiant_doc_get_document_element),
     DOC_FIELD("body", NULL, radiant_doc_get_body),
     DOC_FIELD("head", NULL, radiant_doc_get_head),
-    DOC_FIELD("title", NULL, radiant_doc_get_title),
+    DOC_FIELD_SET("title", NULL, radiant_doc_get_title, radiant_doc_set_title),
     {"cookie", NULL, radiant_doc_get_cookie, radiant_doc_set_cookie, NULL, NULL, 0},
     DOC_FIELD("url", "URL", radiant_doc_get_url),
     DOC_FIELD("href", NULL, radiant_doc_get_href),

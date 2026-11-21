@@ -179,7 +179,8 @@ test('HTML template contents neither activate nor acquire document resources', a
     assert.match(log, /TEMPLATE_RESOURCE_CONTROL true true/);
     assert.deepEqual(rgb(image, 40, 40), [0, 128, 0]);
     assert(!requests.some(row => row.run === 'inert-template' && row.path.startsWith('/inert/')),
-        'inert stylesheet, script, image and inline CSS must not enter resource discovery');
+        'inert stylesheet, script, image and inline CSS must not enter resource discovery: ' +
+        JSON.stringify(requests.filter(row => row.run === 'inert-template')));
 });
 
 for (const run of ['capacity', 'variable', 'pseudo', 'activation', 'dynamic-sheet']) {

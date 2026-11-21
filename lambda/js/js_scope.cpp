@@ -566,19 +566,15 @@ typedef TypedHashMap<JsFieldInitializerEntry,
     HashMapIntegralMemberKeyOps<JsFieldInitializerEntry, &JsFieldInitializerEntry::field_id>>
     JsFieldInitializerMap;
 
-JsFunctionNode* js_script_field_initializer_ensure(JsScript* script,
-        JsFieldDefinitionNode* field, JsStaticBlockNode* block) {
-    if (!script || !script->pool || (!block && (!field || !field->value))) return NULL;
-    AstNode* member = block ? (AstNode*)block : (AstNode*)field;
-    AstNodeId field_id = ast_index_find(&script->ast_index, member);
-    if (field_id == AST_NODE_ID_INVALID) return NULL;
-    if (!script->field_initializers)
-        script->field_initializers = JsFieldInitializerMap::create(8);
-    if (!script->field_initializers) return NULL;
-    JsFieldInitializerEntry key = {field_id, NULL};
-    const JsFieldInitializerEntry* found = JsFieldInitializerMap::get(
-        script->field_initializers, key);
-    if (found) return found->function;
+static bool js_script_has_field_initializer(AstNode* node) {
+    return node && (node->node_type == JS_AST_NODE_STATIC_BLOCK ||
+        (node->node_type == AST_NODE_FIELD && ((JsFieldDefinitionNode*)node)->value));
+}
+
+static JsFunctionNode* js_script_create_field_initializer(JsScript* script, AstNode* member) {
+    JsStaticBlockNode* block = member->node_type == JS_AST_NODE_STATIC_BLOCK
+        ? (JsStaticBlockNode*)member : NULL;
+    JsFieldDefinitionNode* field = block ? NULL : (JsFieldDefinitionNode*)member;
     Pool* overlay_pool = js_script_execution_pool(script);
     JsFunctionNode* function = (JsFunctionNode*)pool_calloc(overlay_pool, sizeof(JsFunctionNode));
     JsBlockNode* body = (JsBlockNode*)pool_calloc(overlay_pool, sizeof(JsBlockNode));
@@ -607,11 +603,62 @@ JsFunctionNode* js_script_field_initializer_ensure(JsScript* script,
         function->vars = body->vars;
         body->vars = NULL;
     } else result->argument = field->value;
-    if (!ast_index_append_profile(&script->ast_index, (AstNode*)function,
-            member, script->profile)) return NULL;
-    key.function = function;
-    JsFieldInitializerMap::set(script->field_initializers, key);
-    return JsFieldInitializerMap::oom(script->field_initializers) ? NULL : function;
+    return function;
+}
+
+static bool js_script_prepare_field_initializers(JsScript* script) {
+    const AstNodeId original_count = script->ast_index.count;
+    uint32_t count = 0;
+    for (AstNodeId id = 0; id < original_count; id++) {
+        JsFieldInitializerEntry key = {id, NULL};
+        if (js_script_has_field_initializer(script->ast_index.nodes[id]) &&
+                !JsFieldInitializerMap::get(script->field_initializers, key)) count++;
+    }
+    if (!count) return true;
+    AstIndexFragment* fragments = (AstIndexFragment*)mem_calloc(count,
+        sizeof(AstIndexFragment), MEM_CAT_JS_RUNTIME);
+    if (!fragments) return false;
+    uint32_t prepared = 0;
+    for (AstNodeId id = 0; id < original_count; id++) {
+        AstNode* member = script->ast_index.nodes[id];
+        JsFieldInitializerEntry key = {id, NULL};
+        if (!js_script_has_field_initializer(member) ||
+                JsFieldInitializerMap::get(script->field_initializers, key)) continue;
+        JsFunctionNode* function = js_script_create_field_initializer(script, member);
+        if (!function) { mem_free(fragments); return false; }
+        fragments[prepared++] = {(AstNode*)function, member};
+    }
+    // wrappers contain metadata only; each class evaluation still creates its own capture environment.
+    // publishing once avoids rescanning the whole bundle for every field (D8.2.4).
+    bool ok = ast_index_append_profile_batch(&script->ast_index, fragments, prepared, script->profile);
+    if (ok) {
+        for (uint32_t i = 0; i < prepared; i++) {
+            JsFieldInitializerEntry entry = {ast_index_find(&script->ast_index, fragments[i].parent),
+                (JsFunctionNode*)fragments[i].root};
+            JsFieldInitializerMap::set(script->field_initializers, entry);
+            if (JsFieldInitializerMap::oom(script->field_initializers)) { ok = false; break; }
+        }
+    }
+    mem_free(fragments);
+    return ok;
+}
+
+JsFunctionNode* js_script_field_initializer_ensure(JsScript* script,
+        JsFieldDefinitionNode* field, JsStaticBlockNode* block) {
+    if (!script || !script->pool || (!block && (!field || !field->value))) return NULL;
+    AstNode* member = block ? (AstNode*)block : (AstNode*)field;
+    AstNodeId field_id = ast_index_find(&script->ast_index, member);
+    if (field_id == AST_NODE_ID_INVALID) return NULL;
+    if (!script->field_initializers)
+        script->field_initializers = JsFieldInitializerMap::create(8);
+    if (!script->field_initializers) return NULL;
+    JsFieldInitializerEntry key = {field_id, NULL};
+    const JsFieldInitializerEntry* found = JsFieldInitializerMap::get(script->field_initializers, key);
+    if (!found) {
+        if (!js_script_prepare_field_initializers(script)) return NULL;
+        found = JsFieldInitializerMap::get(script->field_initializers, key);
+    }
+    return found ? found->function : NULL;
 }
 
 struct JsAstCallableEntry {

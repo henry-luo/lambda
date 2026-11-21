@@ -422,14 +422,38 @@ static Item string_method(Context*, MvpLmdProgram*, Item* args, uint64_t count, 
         mvp_lmd_string_range(source.get(), position, it2d(second.get()), method == LMD_METHOD_STRING_SLICE);
 }
 
+static Item error_stack_accessor(Context*, MvpLmdProgram* program, Item* args, uint64_t count,
+        Item self, Item receiver, Item) {
+    RootFrame roots(4);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> owner(roots, receiver), key(roots, js_name_item("stack")),
+        value(roots, count ? args[0] : Item{.item = ITEM_JS_UNDEFINED}), carrier(roots, ItemNull);
+    if ((intptr_t)((MvpLmdNativeCallable*)self.function)->state) {
+        JsPropertyDescriptor descriptor = {};
+        descriptor.flags = JS_PD_HAS_VALUE | JS_PD_HAS_WRITABLE | JS_PD_WRITABLE |
+            JS_PD_HAS_ENUMERABLE | JS_PD_HAS_CONFIGURABLE;
+        js_pd_set_configurable(&descriptor, true);
+        descriptor.value = value.get();
+        Item status = mvp_lmd_define_own_property(owner.get(), key.get(), &descriptor);
+        return status.item == ITEM_FALSE ? mvp_lmd_fail(LMD_MVP_TYPE, 0) : status;
+    }
+    MvpLmdLibraryState* state = mvp_lmd_program_library(program);
+    key.set(Item{.item = s2it(state->error_data_key)});
+    carrier.set(mvp_lmd_property_with_receiver(owner.get(), key.get(), ItemNull,
+        LMD_PROP_GET, owner.get()));
+    return item_is_error(carrier.get()) ? carrier.get()
+        : js_error_materialize_stack_for(carrier.get(), owner.get());
+}
+
 static Item error_construct(Context*, MvpLmdProgram* program, Item* args, uint64_t count,
         Item self, Item, Item target) {
     MvpLmdClass* cls = mvp_lmd_class_record(self);
     MvpLmdLibraryState* state = mvp_lmd_program_library(program);
     bool aggregate = cls == &state->errors[LMD_ERROR_AGGREGATE];
-    RootFrame roots(4);
+    RootFrame roots(6);
     if (!roots.valid()) return ItemError;
-    Rooted<Item> object(roots, ItemNull), prototype(roots, ItemNull), text(roots, ItemNull), list(roots, ItemNull);
+    Rooted<Item> object(roots, ItemNull), prototype(roots, ItemNull), text(roots, ItemNull),
+        list(roots, ItemNull), getter(roots, ItemNull), setter(roots, ItemNull);
     // GetPrototypeFromConstructor precedes message conversion and preserves the
     // native Error brand while keeping the live JS prototype independent (D3.1.5).
     prototype.set(mvp_lmd_class_values(cls)[1]);
@@ -446,7 +470,11 @@ static Item error_construct(Context*, MvpLmdProgram* program, Item* args, uint64
     // a newTarget supplies ancestry, but only native Error allocation supplies [[ErrorData]].
     if (!state->error_data_key)
         state->error_data_key = mvp_lmd_internal_name(LMD_INTERNAL_ERROR);
-    if (!state->error_data_key || !map_shape_set(object.get().map, state->error_data_key, Item{.item = ITEM_TRUE}))
+    // the private native carrier owns the raw trace; public properties stay nominal.
+    list.set(js_new_error_with_name_stack(js_name_item("Error"),
+        Item{.item = ITEM_JS_UNDEFINED}, Item{.item = ITEM_JS_UNDEFINED}));
+    if (item_is_error(list.get())) return list.get();
+    if (!state->error_data_key || !map_shape_set(object.get().map, state->error_data_key, list.get()))
         return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     if (prototype.get().item != mvp_lmd_class_values(cls)[1].item) {
         Item linked = mvp_lmd_set_prototype(object.get(), prototype.get());
@@ -481,6 +509,20 @@ static Item error_construct(Context*, MvpLmdProgram* program, Item* args, uint64
         Item stored = mvp_lmd_named_set(object.get(), "errors", list.get(), JSPD_NON_ENUMERABLE);
         if (item_is_error(stored)) return stored;
     }
+    // delay name/message reads until stack access, including subclass accessors.
+    getter.set(mvp_lmd_native_function(program, nullptr, error_stack_accessor, 0, "get stack"));
+    setter.set(mvp_lmd_native_function(program, (void*)1, error_stack_accessor, 1, "set stack"));
+    if (item_is_error(getter.get())) return getter.get();
+    if (item_is_error(setter.get())) return setter.get();
+    text.set(js_name_item("stack"));
+    JsPropertyDescriptor stack_descriptor = {};
+    stack_descriptor.flags = JS_PD_HAS_GET | JS_PD_HAS_SET | JS_PD_HAS_ENUMERABLE | JS_PD_HAS_CONFIGURABLE;
+    js_pd_set_configurable(&stack_descriptor, true);
+    stack_descriptor.getter = getter.get();
+    stack_descriptor.setter = setter.get();
+    Item defined = mvp_lmd_define_own_property(object.get(), text.get(), &stack_descriptor);
+    if (item_is_error(defined)) return defined;
+    if (defined.item == ITEM_FALSE) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
     return object.get();
 }
 

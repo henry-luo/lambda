@@ -631,6 +631,13 @@ int ast_index_compiler_pass(void* opaque);
 // analysis facts already published for earlier REPL inputs (D8.2.4).
 bool ast_index_append_profile(AstIndex* index, AstNode* root, AstNode* parent,
                               const LangProfile* profile);
+typedef struct AstIndexFragment {
+    AstNode* root;
+    AstNode* parent;
+} AstIndexFragment;
+// publish related extensions together; derived query tables rebuild once before use.
+bool ast_index_append_profile_batch(AstIndex* index, const AstIndexFragment* fragments,
+                                   uint32_t count, const LangProfile* profile);
 void ast_index_destroy(AstIndex* index);
 bool ast_index_publish_scope(AstIndex* index, NameScope* scope);
 AstNodeId ast_index_find(const AstIndex* index, const AstNode* node);

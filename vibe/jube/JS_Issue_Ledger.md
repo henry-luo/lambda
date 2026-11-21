@@ -26,6 +26,35 @@ take an `L` suffix (`JS05-L1`) so the two numbering spaces cannot collide.
 
 ## 3. Value model, memory & GC interop (JS03)
 
+### JS03-L3 — Nominal Error instances omit captured stacks — **FIXED FOR LAZY STACK ACCESS**
+
+**2026-11-20.** Nominal objects retain their representation under **D3.1.5**;
+shared JavaScript behavior follows **D8.4.4**, with precise owners under
+**D5.5.1 / D6.3.3**. MVP Error constructors created nominal maps without stack
+storage, while native Error carriers already captured raw frame data. React's
+component-stack probe on Hera therefore failed at `error.stack.trim()` while
+trying to report an earlier error.
+
+The existing private Error-data slot now retains a native carrier for its raw
+trace. A configurable, non-enumerable stack accessor delegates to the shared
+materializer using the nominal instance's display properties. Construction
+does not read subclass name/message accessors. Assignment replaces the stack
+accessor with an own data property. Nominal ancestry, cause and AggregateError
+entries remain in their existing representation. No parallel formatter or
+fabricated frame text is introduced.
+
+Five native controls pass in AUTO, AST and MIR, and the five shared Chromium
+controls pass. They cover constructor/call forms, all seven ordinary error
+types, AggregateError, implicit and asynchronous exceptions, subclasses,
+descriptor mutation, component probes and collection during a lazy name getter.
+The renderer control confirms that getter actually invokes GC. Four initial
+controls fail on the prior qualified renderer. Exact frame formatting and
+broader prepareStackTrace/realm conformance are outside this qualification.
+
+Hera's five traced nullish stack-member failures disappear, exposing the
+independent strict title write addressed by JS13-L27. Evidence:
+`temp/online-visual-round118/` and `test/online/render_error_stack.test.cjs`.
+
 ### JS03-L2 — iframe load crashes under forced collection in current-source host — **OPEN**
 
 Found 2026-11-12 during the online visual comparison gate. Precise ownership
@@ -506,6 +535,26 @@ Grounded in the current code; candidates for cleanup, not necessarily bugs.
 
 ## 10. Standard Built-in Library (JS10)
 
+### JS10-L1 — Locale-aware currency formatting is unavailable — **FEATURE GAP**
+
+**2026-11-20.** Shared JavaScript semantics follow **D8.4.4**. Native NumberFormat
+currently implements an English decimal profile and rejects other style values.
+Getsafe's current 1040-byte inline number-formatting initializer uses
+`new Intl.NumberFormat(locale, {style:'currency', currency:code, ...})`. Its
+currency branch throws before the initializer finishes. The exact EUR/de-DE
+reduction reproduces the RangeError. Both the prior qualified renderer and the
+intermediate CSS repair candidate log that exception and produce identical
+blank live PNGs. Its relation to every later startup step is not established.
+
+A general locale/currency implementation exceeds this round's native layout
+repairs. No currency symbols are hard-coded, valid options ignored, or formatter
+results fabricated to let the page proceed. The broad Intl qualification remains
+partial and Getsafe stays high. Evidence: `temp/online-visual-round116/`, especially
+`getsafe-number-format-32.js`, `currency-gap.js/.log` and the matched-policy live
+before/current captures. RI-166/RI-167/RI-168 separately repair native CSS defects
+and restore the cookie panel in its frozen source.
+
+
 ### JS10 known issues
 
 1. **Catalog indexes are fixed-capacity construction structures.** Owner/property and ID lookups use bounded open-addressed indexes built from the catalog. They are absent from ordinary property reads, but realm construction should still profile collision and startup cost as the catalog grows.
@@ -545,6 +594,324 @@ Grounded in the current code; candidates for cleanup, not necessarily bugs.
 9. **The NULL-buffer `.buffer` synthesis path is vestigial.** `js_typed_array_new` now always allocates and wraps a backing `JsArrayBuffer` eagerly (`:2100`), so the exotic-gate fallback that lazily synthesizes a buffer for a `ta->buffer == NULL` array (`js_runtime.cpp:3283`) should be unreachable for engine-constructed arrays; it survives as a guard for exotic construction paths and could be demoted to an assert.
 
 ## 13. Web Platform: DOM, CSSOM, Events & Fetch (JS13)
+
+### JS13-L28 — createDocument discards the root namespace — **FIXED FOR ROOT IDENTITY**
+
+**2026-11-20.** Namespace and document ownership use **D9.1.1v4 / D9.1.3v2**.
+The existing DOMImplementation operation ignored namespaceURI and built the
+root directly. A requested SVG document therefore exposed a null root
+namespace, preventing its SVG title operation. The shared foreign-XML factory
+now uses the existing namespace-aware element factory, and createDocument
+passes its namespace argument. The previous public helper remains an
+unchanged wrapper for namespace-less callers. The SVG title control now passes
+on native and Chromium. Doctype adoption and complete QName validation are
+not qualified by this repair. Evidence: `temp/online-visual-round118/`.
+
+### JS13-L27 — Document.title is published without a setter — **FIXED**
+
+**2026-11-20.** The shared DOM/host boundary follows **D8.4.4 / D9.5.6v2**;
+native documents retain ownership under **D9.1.3v2**. The Document catalog
+published title as getter-only. Hera's strict assignment therefore returned
+false from Set and threw, causing the client root to fail. The older backend
+also stored a realm-wide cached value that the document getter did not read.
+
+The catalog now publishes its setter. The backend edits the document's real
+title node through existing mutation helpers, creates one under an available
+HTML head or SVG root when necessary, and uses the first applicable title.
+The getter shares that lookup and the existing ASCII whitespace normalizer.
+Foreign-document writes remain scoped to their own document. Readonly URL and
+receiver-brand checks remain effective; no page condition or capture-policy
+change is introduced.
+
+All five strict title controls fail before repair and pass afterward, alongside
+the same five Chromium groups. The shared fixture helper was extracted for
+title/error/stream controls; all seven stream controls still pass. In total,
+17 final native controls pass, plus ten additional AST/MIR stack checks and
+ten Chromium groups. Broad baselines are not repeated.
+
+Hera now loads without its fatal TypeError and restores the blue background
+and logo. Its matching 1000ms browser/native pair has 1.53% mean error versus
+the retained 66.07% historical comparison. The primary animated headline
+remains absent, so this is an actual repair with a remaining major omission,
+not a page clearance. Evidence: `temp/online-visual-round118/`.
+
+Pitch News also restores its main heading and article layout. A current prior
+renderer control at the same 1000ms post-load origin remains blank and reports
+the fatal TypeError. The repaired matching pair has 2.48% mean error and 0.85%
+changed area; its former manual major omission is resolved. Comand restores
+its headline and foreground card but retains a major video omission. A related
+FramerAuth check reaches the unchanged 150-second outer deadline while repeating
+layout work; it is not imported as a successful capture. Historical selected
+captures lacked origin metadata, so the refreshed origins are audited separately
+from the current prior-renderer controls.
+
+### JS13-L26 — Removing absent attributes publishes phantom mutations — **FIXED**
+
+**2026-11-20.** The shared DOM operation follows **D8.4.4 / D9.5.6v2**.
+`removeAttribute` notified observers, custom-element reactions and the host's
+layout invalidation path even when the attribute did not exist. Ten removals
+of one attribute produced ten mutation records; `removeAttributeNS` already
+correctly produced one. Primer's current startup also repeatedly removed
+absent id/srcset/sizes attributes while reading geometry.
+
+The ordinary operation now checks the existing native presence predicate
+before removal and notification. This preserves HTML name normalization and
+distinguishes a present empty attribute from an absent one. No callback or
+invalidation policy changes for successful removals.
+
+**13 focused renderer checks pass**, covering metadata writes, real and absent
+removals, empty attributes, custom-element callbacks and observer startup.
+Repeated absent removals retain the single-removal control's layout count.
+The ordinary-removal regression fails on the preceding qualified renderer;
+the namespace-aware control passes there.
+
+Primer's absent-removal warnings fall from 14 to zero, but both current live
+runs still hit the unchanged 120-second script watchdog and produce identical
+orange PNGs. This fix does not clear Primer or establish a live performance
+improvement. Dock's preceding diagnostic reaches the outer 150-second limit;
+its prior canonical pair is retained. Further profiling targets the remaining
+full-document reconciliations. Evidence: `temp/online-visual-round117/` and
+`test/online/render_dataset_metadata.test.cjs`. Broad baselines are not repeated.
+
+### JS13-L25 — Asynchronous readable pulls report EOF before producing data — **FIXED FOR PENDING DEFAULT READS**
+
+**2026-11-20.** Shared semantics follow **D8.4.4**, and pending values follow
+**D5.5.1 / D6.3.3**. The [Streams read contract](https://streams.spec.whatwg.org/#readable-stream-default-reader-read)
+requires an empty readable queue to retain a pending request, not signal EOF.
+
+The reader invoked pull and immediately returned done:true when the queue was
+still empty. Dropbox's gRPC decoder wraps Response.body in an asynchronous pull;
+its first await therefore caused a false premature EOF before frame decoding.
+Two focused controls fail before repair, including that framed-decoder shape.
+
+Reads now retain promises in a traced private queue. Enqueue, close and error
+settle pending requests; startup completion gates pull, and pull promises
+serialize subsequent requests. Original rejection values reach pending and
+future reads. Consumed queue entries release their references. The existing
+controller and Response byte path are reused, with an appended private-name ID
+and no public runtime-state or host-API layout change. Full byte-stream/BYOB,
+locking, cancellation, backpressure and piping conformance remain unqualified.
+
+**34 focused native checks, seven MIR stream cases and seven Chromium fixture
+groups pass.** They cover async/concurrent pulls, delayed push/close, async
+startup, errors, callback GC and binary frame decoding. The actual Dropbox
+capture now has zero gRPC request errors and zero premature-EOF messages, versus
+eight gRPC failures in the prior pair. Its native image remains pixel-identical:
+the pale-versus-blue hero composition is a separate, unresolved difference.
+No capture duration, transfer limits or page conditions change. Broad baselines
+are not repeated. Existing Node-module golden probes could not resolve assert
+or stream on either the prior or current host, so they are not counted as
+passing verification. Evidence: `temp/online-visual-round115/` and
+`test/online/comparison/repairs.html#round-111`.
+
+### JS13-L24 — URL query and search-parameter records diverge — **FIXED FOR QUERY/HREF BINDING**
+
+**2026-11-20.** Shared semantics follow **D8.4.4**; precise ownership follows
+**D5.5.1 / D6.3.3**, and the appended host API slot follows **D9.5.4**.
+The [URL query update contract](https://url.spec.whatwg.org/#urlsearchparams-update)
+requires parameter mutations to update the owning URL.
+
+The global URL stored an independent URLSearchParams snapshot. Coframe's
+`url.searchParams.set('config', ...)` therefore fetched a queryless URL, which
+returned HTTP 400 / 53 bytes instead of the project's configuration. Mutators
+now use the existing serializer and notify their owner through a traced private
+edge. URL.search and URL.href replacements refresh the same parameter object;
+record parsing and serialization share the constructor path. Both arguments are
+rooted before coercion, and private owner state survives GC and public shadows.
+Standalone parameter objects remain unbound. Input LI-086 separately normalizes
+default ports in parsed records.
+
+Five native/Chromium fixture groups pass: mutations and form encoding, query/href
+replacement and invalid-URL atomicity, no-op normalization, private state and
+frozen URL owners, and collection during string conversion. The wire-observed
+configuration round trip passes in AST and MIR. The exact SDK request now
+returns HTTP 200 / 692816 bytes, and the actual page runs Coframe watchers.
+Other URL component setters and full URL/IDL/WPT conformance remain unqualified.
+No page condition, capture budget or timer change is introduced. Dropbox remains
+high because its large hero composition still differs. Evidence:
+`temp/online-visual-round114/` and `test/online/comparison/repairs.html#round-110`.
+
+### JS13-L23 — Fetch rejects coercible URLs and truncates long addresses — **FIXED FOR STRING INPUT**
+
+**2026-11-20.** Shared semantics follow **D8.4.4**, network ownership
+**D9.1.3v2**, and retained values **D5.5.1 / D6.3.3**.
+
+Fetch used the string-only `js_item_to_cstr` helper instead of converting the
+string arm of RequestInfo, and copied input, resolved and effective URLs through
+2048-byte buffers. A URL object failed before HTTP; long paths and redirects
+lost their tails. Four local controls fail before repair.
+
+Fetch now converts once, preserves the original conversion exception as a
+promise rejection, and snapshots the full URL into worker-owned memory before
+option getters run. Resolution retains existing admission checks, and curl's
+final effective address is copied before handle cleanup. Missing input rejects
+asynchronously. The separate Request-valued arm remains unsupported rather than
+being coerced to a fake URL.
+
+All 22 HTTP session controls and five live-URL groups pass with the final release
+host; all 12 changed-input and URL groups pass through MIR. Coverage includes
+4KB URLs and redirects, original exception identity, missing input, and the
+live-query wire request. Five URL groups also pass Chromium; 37 Input URL tests
+pass for LI-086. Broad baselines were not repeated. The native page now obtains
+Coframe configuration, but its gRPC errors and hero difference remain unresolved.
+Evidence: `temp/online-visual-round114/`.
+
+### JS13-L22 — Script HTTP requests lose the shared client profile — **RESOLVED**
+
+**2026-11-20.** Shared browser semantics follow **D8.4.4** and network/host
+ownership **D9.1.3v2**. No formal ruling changes.
+
+The document and resource downloaders use Input's shared HTTP client profile,
+but the fetch worker omitted `CURLOPT_USERAGENT`; asynchronous XHR uses that
+same worker. Synchronous XHR independently supplied a different literal profile.
+A local server control observes all five request kinds in one document: document
+and image agree, fetch and asynchronous XHR have no user agent, and synchronous
+XHR differs. The control fails before repair.
+
+Fetch now sets the existing `RADIANT_HTTP_CLIENT_USER_AGENT`; synchronous XHR
+uses the same definition. No new identity string is introduced. All **15 HTTP
+session controls pass**, including the new wire-observed identity comparison,
+cookies, redirects, independent sessions, image readiness and layout exports.
+No public state layout, deadline or capture policy changes; broad baselines
+were not repeated for this focused transport repair.
+
+Aircall's current native image is pixel-identical before and after this fix,
+and remains high severity. Its small consent loader executes and receives its
+configuration and geolocation through successful XHRs, then appends an external
+SDK. That remaining dynamic-script preparation gap is tracked separately in
+`online-dynamic-script-preparation`. Independent endpoint requests with either
+profile receive the same bot flag, so that flag does not prove the overlay's
+cause. Evidence: `temp/online-visual-round111/` (before/after local controls,
+request traces, matching-frame native/browser pairs and installed release pin).
+
+### JS13-L21 — NodeIterator-dependent sanitization fails — **RESOLVED**
+
+**2026-11-20.** Shared traversal semantics follow **D8.4.4**, host ownership
+**D9.1.3v2**, and precise state ownership **D6.3.3 / D5.5.1**. No formal ruling
+changes. The [DOM traversal contract](https://dom.spec.whatwg.org/#interface-nodeiterator)
+defines the cursor and removal adjustment; TreeWalker is not an alias.
+
+Dropbox's DOMPurify failed at `es.call` (bundle bytes 4,207,252–4,207,259),
+where `es` was the parsed document's missing `createNodeIterator`. Prior native
+main/parsed-document probes and an AST-only render confirmed the gap independently
+of MIR promotion. React's stack and missing ErrorEvent failures obscured it.
+
+The realm now installs NodeIterator and Document.createNodeIterator for main
+and parsed documents. It reuses the existing traversal filter, with distinct
+bidirectional reference and in-flight candidate pointers. Pre-removal adjusts
+both pointers and preserves iterator roots inside removed subtrees. Private
+cursor state uses the existing WeakMap ephemeron machinery; a precisely rooted
+weak registry tracks live iterators without keeping abandoned ones alive.
+Collected registry entries are pruned. No author-visible cursor fields,
+TreeWalker alias, sanitizer bypass, page conditions or capture-budget changes
+are introduced. The appended realm root is included in the shared trace/reset
+span; all four native Node modules were rebuilt for the state layout.
+
+Seven focused fixture groups cover root inclusion, direction changes, masks,
+callback receivers and coercion, readonly properties, reentrancy and exceptions,
+reference/candidate removal, collection during callbacks, detached roots and
+parsed-document sanitization. The final fixtures pass Chromium headless shell;
+all **36 selected native CLI tests pass**, including existing globals, cloning,
+observers and interruption controls. The earlier renderer fails the original valid missing-interface controls.
+Full WPT/interface conformance is not claimed.
+
+Dropbox now renders its heading, supporting copy, primary action and product
+image. Its current Chromium pair shows a different, blue centered hero, while
+native shows a pale split hero. Coframe reports missing project configuration
+and native gRPC requests report premature EOF; the remaining composition's cause
+is unconfirmed. Dropbox remains high; the repaired omission is not described
+as a visual parity clearance. Evidence: `temp/online-visual-round113/`, qualified
+release `29e40dcacead3b6a87bba2872664387e09dcf0e5403050b0a7cce389ce8cd7cf`.
+
+### JS13-L20 — Resource load events incorrectly reach Window — **RESOLVED**
+
+**2026-11-20.** Shared event semantics follow **D8.4.4** and the host boundary
+**D9.1.3v2**. The DOM Standard's [Document parent algorithm](https://dom.spec.whatwg.org/#interface-document)
+returns no parent for `load`, including capture and synthetic bubbling.
+No formal ruling changes.
+
+The propagation builder appended Window after Document for every event type.
+Dropbox's Web Vitals callback waits for the document to become complete and
+registers another capturing window load listener when it is still loading.
+Resource load events incorrectly reached that callback, doubling registrations
+until the diagnostic recorded **131,072 load listeners on Window**. A longer
+run reached SIGBUS after heavy listener growth; its exact crash site was not
+independently isolated.
+
+The shared path builder now stops the Document-to-Window edge for `load`.
+Document listeners, direct Window dispatch and other event types keep their
+existing paths. The new control fails with the prior renderer and passes after
+repair for both bubbling settings; the identical fixtures pass Chromium.
+Existing ordinary-exception and one-second interruption controls also pass.
+Their stale `1s` log expectation was updated to the exact `1000ms` emitted by
+both before and after renderers; the timeout itself is unchanged.
+
+Dropbox now exits successfully in **8.28s**, without the former watchdog or
+SIGBUS, using the unchanged 1000ms settling window. Its current image is blank:
+application errors remain and the page stays high severity. This is an execution
+repair, not a visual clearance. The installed release includes this repair and
+JS13-L19. Evidence: `temp/online-visual-round109/` (callback source/span,
+listener-growth notices, before/after controls and the current diagnostic pair).
+
+### JS13-L19 — Class initializer metadata repeatedly republishes whole bundles — **RESOLVED**
+
+**2026-11-20.** Stable AST identity and derived facts follow **D8.2.4**;
+shared JavaScript semantics follow **D8.4.4**. No formal ruling changes.
+
+Two release profiles of Dropbox startup show class evaluation repeatedly
+entering `js_script_field_initializer_ensure`, appending one synthetic initializer
+definition, and rebuilding the complete AST query tables. Each field rescans
+the bundle although its existing node IDs remain unchanged.
+
+The execution overlay now prepares the script's initializer definitions together
+and publishes their query tables once. The existing single-fragment API delegates
+to the shared batch operation. Initializer expressions still execute when the
+class or instance is evaluated, with that evaluation's captured environment.
+All **276 script/ownership tests pass**, including AST/MIR capture and static-block
+ordering controls. A local release fixture with 12,000 unused functions and 768
+fields completes correctly in both versions (one paired measurement: 14.0s before,
+8.5s after). The subsequent native page profile no longer has this indexing hot
+path. Broad baselines have not been run for this candidate.
+
+Dropbox remains high severity. The initial candidate reached a later SIGBUS
+after heavy listener registration/dispatch; JS13-L20 subsequently removed that
+growth and the current native run completes, but its image remains blank. Both
+repairs are installed; no canonical pair or page clearance is published.
+Evidence: `temp/online-visual-round109/`,
+including normalized link-map qualification, before/after samples, focused test
+logs, the local fixture, and the failed native/current browser pair.
+
+### JS13-L18 — Loader rewrites mutate author globals — **RESOLVED**
+
+**2026-11-20.** Shared realm semantics follow **D8.4.4**, host ownership
+**D9.1.3v2**, retained source ownership **D5.5.1**. No formal ruling changes.
+
+The document loader ran a library-specific global synchronization snippet after
+each scheduled script. It read and wrote jQuery/$ properties, manufactured an
+alias when the author defined only one export, and copied a lexical binding onto
+window. A separate text scan appended window assignments for function names,
+including named lexical function expressions. Those assignments invoked unrelated
+global setters. The realm's existing binding and declaration machinery already
+handles ordinary global properties, vars and function declarations.
+
+Both rewrites and their now-unused generated-source owner are removed. Author
+source reaches declaration instantiation unchanged; ordinary globals and authored
+aliases continue through the existing realm. Five focused controls fail with the
+prior renderer. All eleven controls pass in **both AST and MIR**, and the same
+fixtures pass in Chromium. All **37 existing inline-script/HTTP resource/session
+checks** pass; two lifecycle UI replays pass five assertions. Admission limits,
+resource deadlines and selected capture times are unchanged. No public state
+layout or vendor code changes. Broad baselines are not repeated for this repair.
+
+Dropbox's historical global-sync exception motivated the investigation, but is
+not by itself proof that these rewrites caused its main content omission. The
+current native diagnostic still omits the hero and reaches the existing 120s
+JavaScript watchdog after AST construction. Its remaining execution stall is
+unconfirmed; no page clearance or canonical capture replacement is attributed. Evidence: Lambda
+`temp/online-visual-round108/` (before controls, shared browser fixtures, tier
+logs, HTTP checks and lifecycle replays). Early sandbox diagnostics stuck before
+JavaScript in dyld are excluded from the failure evidence.
+
 
 ### JS13-L17 — Canvas gradient paint objects are absent — **FEATURE GAP**
 

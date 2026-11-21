@@ -1412,14 +1412,25 @@ extern "C" int ast_index_compiler_pass(void* opaque) {
 
 bool ast_index_append_profile(AstIndex* index, AstNode* root, AstNode* parent,
         const LangProfile* profile) {
-    if (!index || !root) return false;
+    AstIndexFragment fragment = {root, parent};
+    return ast_index_append_profile_batch(index, &fragment, 1, profile);
+}
+
+bool ast_index_append_profile_batch(AstIndex* index, const AstIndexFragment* fragments,
+        uint32_t count, const LangProfile* profile) {
+    if (!index || (count && !fragments)) return false;
     // A fragment can share a declaration node with an earlier AST edge. Do
     // not rebuild the table: its IDs/facts are the identity held by promoted
     // definitions and by the P3 const pass.
-    if (ast_index_find(index, root) != AST_NODE_ID_INVALID) return true;
-    bool appended = ast_index_walk_root(index, root, parent, profile);
-    if (appended) ast_index_mark_published(index);
-    return appended && index->graph_published;
+    bool changed = false;
+    for (uint32_t i = 0; i < count; i++) {
+        if (!fragments[i].root) return false;
+        if (ast_index_find(index, fragments[i].root) != AST_NODE_ID_INVALID) continue;
+        if (!ast_index_walk_root(index, fragments[i].root, fragments[i].parent, profile)) return false;
+        changed = true;
+    }
+    if (changed) ast_index_mark_published(index);
+    return index->graph_published;
 }
 
 void ast_index_destroy(AstIndex* index) {

@@ -588,6 +588,8 @@ struct JubeHostScriptAPI {
     Item (*iterator_prototype)(void);
     // Shared WebIDL sequence-of-string-pairs / record conversion, before host validation.
     Item (*string_pairs_from_init)(Item source, bool byte_strings);
+    // associated global URL records observe the shared parameter-list mutations.
+    Item (*url_search_params_update)(Item params);
 };
 
 // ---------------------------------------------------------------------------

@@ -365,9 +365,14 @@
     {
       "label": "saas_landing_678",
       "url": "https://pitch.com/news",
-      "manual_major_remaining": "The header is partly present, but the large main heading and article/media region remain absent. A small score change crossed below the coarse threshold without resolving that visual omission.",
+      "manual_major_remaining": "",
       "reviewed_at": "2026-11-17T12:36:43.827186+00:00",
-      "evidence": "comparison/repairs.html#round-70"
+      "evidence": "comparison/repairs.html#round-70",
+      "resolved_previous_manual_major_remaining": "The header is partly present, but the large main heading and article/media region remain absent. A small score change crossed below the coarse threshold without resolving that visual omission.",
+      "resolved_at": "2026-11-20T13:31:07.541Z",
+      "resolution": "The current prior renderer still produces a blank page and fatal TypeError at the same 1000ms post-load frame. The repaired renderer restores the main heading and article layout. Remaining icon and gradient details are below this major-only review scope.",
+      "resolution_evidence": "comparison/repairs.html#round-114",
+      "resolved_capture_settle_ms": 1000
     },
     {
       "label": "webkit_blog",
@@ -459,16 +464,41 @@
     {
       "label": "saas_landing_299",
       "url": "https://www.dropbox.com/",
-      "manual_major_remaining": "The complete main hero content and product screenshot remain absent.",
+      "manual_major_remaining": "Main hero content and product screenshot render. Coframe configuration/watchers and gRPC response decoding now succeed without the prior missing-config or premature-EOF errors. Chromium still shows a blue centered hero while Lambda shows a pale split hero; the remaining large composition difference is unconfirmed.",
       "reviewed_at": "2026-11-18T04:43:31.020Z",
-      "evidence": "comparison/repairs.html#round-83"
+      "evidence": "comparison/repairs.html#round-83",
+      "rechecks": [
+        {
+          "rechecked_at": "2026-11-20T10:24:07.715Z",
+          "evidence": "comparison/repairs.html#round-109",
+          "previous_manual_major_remaining": "The complete main hero content and product screenshot remain absent.",
+          "manual_major_remaining": "Main hero content and product screenshot now render. The fresh Chromium pair has a blue centered hero while Lambda has a pale split hero; the remaining large composition difference is under investigation."
+        },
+        {
+          "rechecked_at": "2026-11-20T11:26:36.388Z",
+          "evidence": "comparison/repairs.html#round-110",
+          "previous_manual_major_remaining": "Main hero content and product screenshot now render. The fresh Chromium pair has a blue centered hero while Lambda has a pale split hero; the remaining large composition difference is under investigation.",
+          "manual_major_remaining": "Main hero content and product screenshot render, and Coframe now loads its configuration and runs its watchers. Chromium still shows a blue centered hero while Lambda shows a pale split hero; the remaining composition difference and native gRPC premature-EOF errors are under investigation."
+        },
+        {
+          "rechecked_at": "2026-11-20T11:39:52.970Z",
+          "evidence": "comparison/repairs.html#round-111",
+          "previous_manual_major_remaining": "Main hero content and product screenshot render, and Coframe now loads its configuration and runs its watchers. Chromium still shows a blue centered hero while Lambda shows a pale split hero; the remaining composition difference and native gRPC premature-EOF errors are under investigation.",
+          "manual_major_remaining": "Main hero content and product screenshot render. Coframe configuration/watchers and gRPC response decoding now succeed without the prior missing-config or premature-EOF errors. Chromium still shows a blue centered hero while Lambda shows a pale split hero; the remaining large composition difference is unconfirmed."
+        }
+      ]
     },
     {
       "label": "saas_landing_378",
       "url": "https://andopen.co/",
-      "manual_major_remaining": "Large colored hero shapes remain absent, changing the main composition; the embedded demonstration also shows a different frame.",
+      "manual_major_remaining": "",
       "reviewed_at": "2026-11-18T04:43:31.020Z",
-      "evidence": "comparison/repairs.html#round-83"
+      "evidence": "comparison/repairs.html#round-83",
+      "resolved_at": "2026-11-20T07:29:33.528406+00:00",
+      "resolution": "All large colored shapes, main heading, copy, primary action and demonstration are present. Browser cookie UI and video frame differ. Revalidation only; no new native-fix attribution.",
+      "resolution_evidence": "comparison/repairs.html#round-103",
+      "resolved_previous_manual_major_remaining": "Large colored hero shapes remain absent, changing the main composition; the embedded demonstration also shows a different frame.",
+      "resolved_capture_settle_ms": 1000
     },
     {
       "label": "saas_landing_382",
@@ -504,6 +534,13 @@
       "manual_major_remaining": "The complete client-created top navigation and brand remain absent, shifting the otherwise restored hero upward.",
       "reviewed_at": "2026-11-20T05:45:28.245309+00:00",
       "evidence": "comparison/repairs.html#round-102"
+    },
+    {
+      "label": "saas_landing_463",
+      "url": "https://hera.travel/",
+      "manual_major_remaining": "The primary animated headline remains absent in the matched browser/native frame, despite the restored blue background and logo.",
+      "reviewed_at": "2026-11-20T13:31:07.541Z",
+      "evidence": "comparison/repairs.html#round-114"
     }
   ]
 }

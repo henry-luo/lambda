@@ -313,6 +313,7 @@ struct JsDomState : RootVector {
     Item custom_element_states = {};
     Item custom_element_construction = {};
     Item custom_element_reactions = {};
+    Item node_iterators = {};
     uint64_t web_animation_sequence = 0;
     bool media_poll_running = false;
     bool design_mode = false;
