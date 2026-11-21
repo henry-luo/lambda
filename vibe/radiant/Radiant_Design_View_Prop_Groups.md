@@ -99,9 +99,12 @@ The normal selector matcher and active stylesheet checks determine eligibility f
 
 An element reads its private pseudo tree when present and otherwise reads the selected shared tree. Adding a conflicting declaration or requesting a writable slot materializes the shared tree in the node's pool before applying the override. Layout and pseudo CSSOM use this same lookup, including when a pseudo generates no box. The physical source document keeps a shared snapshot available after adoption. Recascade clears the node's shared indexes, and retained generated boxes follow the existing borrow-retirement path when a private tree is replaced (D5.5.1, D5.5.3, DV9c). [Matching path](../../radiant/radiant/css_cascade.cpp) · [Storage and promotion](../../lambda-input/lambda/input/css/dom_element.cpp) · [Pseudo CSSOM](../../radiant/radiant/css_prop_table.cpp)
 
-### DV6.5 — Retire WebKit box display in Radiant
+<a id="dv65--retire-webkit-box-display-in-radiant"></a>
+### DV6.5v2 — Normalize WebKit box syntax at CSS input
 
-Radiant rejects `display: -webkit-box` and `display: -webkit-inline-box` before cascade, so a valid fallback declaration can win. Use `flex` or `inline-flex` with `flex-direction` for flex layout, and the unprefixed `line-clamp` for clamped text. The shared CSS property metadata still accepts `-webkit-box-orient` and `-webkit-line-clamp` for declaration and computed style inspection. Neither prefixed property affects Radiant layout (D9.1.1v4, D9.1.3v2).
+Under D10.1.9 and D9.1.3v2, Input accepts `display: -webkit-box` and `display: -webkit-inline-box` as `flex` and `inline-flex`. The parser maps `-webkit-box-orient` to `flex-direction` and `-webkit-line-clamp` to `line-clamp`. Use `row` for `horizontal` or `inline-axis` and `column` for `vertical` or `block-axis`.
+
+When one declaration block supplies a vertical legacy orientation and a valid count that does not depend on substitution, Input emits `flow-root` or `inline-block` for the legacy display. The parser uses declaration order and `!important` to select the local clamp and orientation. Declarations split across blocks follow the cascade of their standard equivalents. Custom properties used for a normalized direction supply a standard `flex-direction` value. Prefixed CSSOM property names access the canonical declarations.
 
 The four-byte `DisplayValue` holds the outer role and the inner mode. `DisplayInner` packs the standard `list-item` modifier into its high bit. The same representation works for published and animated display. The CSS-wide values `initial` and `unset` resolve to inline flow. [Display storage](../../lambda-input/lambda/input/css/dom_element.hpp) · [Display resolution](../../radiant/radiant/css_display.cpp)
 

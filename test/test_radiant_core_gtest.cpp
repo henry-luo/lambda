@@ -587,7 +587,7 @@ TEST(LineClampGrammar, RejectsNonIntegerTokensAndRetainsCalculatedCounts) {
     pool_destroy(pool);
 }
 
-TEST(LegacyBoxGrammar, RejectsLegacyDisplayAndValidatesPrefixedOrientation) {
+TEST(LegacyBoxGrammar, NormalizesLegacyDisplayAndValidatesPrefixedOrientation) {
     Pool* pool = pool_create(); ASSERT_NE(pool, nullptr);
     const char* valid[] = {"horizontal", "vertical", "inline-axis", "block-axis",
         "inherit", "initial", "unset", "revert-layer", "var(--axis)"};
@@ -601,10 +601,14 @@ TEST(LegacyBoxGrammar, RejectsLegacyDisplayAndValidatesPrefixedOrientation) {
         SCOPED_TRACE(value);
         EXPECT_EQ(css_parse_property_declaration("-webkit-box-orient",18,value,strlen(value),pool),nullptr);
     }
-    const char* displays[] = {"-webkit-box", "-webkit-inline-box"};
-    for (const char* value : displays) {
-        SCOPED_TRACE(value);
-        EXPECT_EQ(css_parse_property_declaration("display",7,value,strlen(value),pool),nullptr);
+    const struct { const char* source; CssEnum expected; } displays[] = {
+        {"-webkit-box", CSS_VALUE_FLEX}, {"-webkit-inline-box", CSS_VALUE_INLINE_FLEX}
+    };
+    for (const auto& display : displays) {
+        CssDeclaration* declaration = css_parse_property_declaration("display", 7,
+            display.source, strlen(display.source), pool);
+        ASSERT_NE(declaration, nullptr);
+        EXPECT_TRUE(css_value_keyword_equals(declaration->value, display.expected));
     }
     pool_destroy(pool);
 }
@@ -4831,7 +4835,7 @@ TEST_F(StyleEpochTest, LineClampComputedCountsUseDeclarationOwnersWithoutRetaine
     }
 }
 
-TEST_F(StyleEpochTest, LegacyDisplayFallsBackAndPrefixedOrientationRemainsInspectable) {
+TEST_F(StyleEpochTest, LegacyDisplayUsesStandardLayoutAndPrefixedOrientationRemainsInspectable) {
     ASSERT_TRUE(css_property_system_init(doc.document_pool));
     const CssProperty* orientation = css_property_get_by_name("-webkit-box-orient");
     ASSERT_NE(orientation, nullptr);
@@ -4840,14 +4844,15 @@ TEST_F(StyleEpochTest, LegacyDisplayFallsBackAndPrefixedOrientationRemainsInspec
     ASSERT_NE(child, nullptr); ASSERT_TRUE(parent->append_child(child));
     ASSERT_TRUE(parent->set_attribute("style", "-webkit-box-orient:vertical"));
     const struct Case { const char* style; const char* axis; const char* display; } cases[] = {
-        {"display:block;display:-webkit-box", "horizontal", "block"},
-        {"display:flex;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2", "vertical", "flex"},
+        {"display:block;display:-webkit-box", "horizontal", "flex"},
+        {"display:flex;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2", "vertical", "flow-root"},
         {"display:inline-flex;display:-webkit-inline-box;-webkit-box-orient:vertical", "vertical", "inline-flex"},
-        {"display:grid;display:-webkit-box;-webkit-box-orient:inline-axis", "horizontal", "grid"},
+        {"display:grid;display:-webkit-box;-webkit-box-orient:inline-axis", "horizontal", "flex"},
+        {"display:-webkit-box;display:grid", "horizontal", "grid"},
         {"display:block;-webkit-box-orient:block-axis", "vertical", "block"},
         {"display:block;-webkit-box-orient:inherit", "vertical", "block"},
         {"display:block;-webkit-box-orient:unset", "horizontal", "block"},
-        {"display:flex;--axis:block-axis;-webkit-box-orient:var(--axis)", "vertical", "flex"},
+        {"display:flex;--axis:column;-webkit-box-orient:var(--axis)", "vertical", "flex"},
         {"display:flex;--axis:invalid;-webkit-box-orient:var(--axis)", "horizontal", "flex"},
         {"display:flow-root;-webkit-box-orient:vertical;-webkit-line-clamp:2", "vertical", "flow-root"}
     };

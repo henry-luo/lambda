@@ -126,6 +126,13 @@ See the [fixed record](<Lambda_Issue_Ledger (fixed).md#lr12-67>).
 The host baseline exercises real stylesheet owners and standard line clamping.
 See the [fixed record](<Lambda_Issue_Ledger (fixed).md#lr12-68>).
 
+<a id="lr12-69"></a>
+
+## LR12-69 — FIXED
+
+Parser-head staging publishes child arrivals to mutation observers. See the
+[load-time cascade repair](<Lambda_Issue_Ledger (fixed).md#lr12-69>).
+
 <a id="lr12-64"></a>
 
 ## LR12-64 — FIXED

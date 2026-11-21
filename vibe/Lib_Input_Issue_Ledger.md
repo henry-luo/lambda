@@ -15,6 +15,13 @@ Resolved records are in the [fixed issue ledger](<Lib_Input_Issue_Ledger (fixed)
 
 ## Open issues
 
+<a id="li-097"></a>
+
+### LI-097 — FIXED
+
+CSS input normalizes WebKit box declarations under D10.1.9. See the
+[normalization record](<Lib_Input_Issue_Ledger (fixed).md#li-097>).
+
 <a id="li-096"></a>
 
 ### LI-096 — FIXED

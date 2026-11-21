@@ -2656,11 +2656,11 @@ TEST_F(MotionCascadeTest, PseudoCalculatedCountsUseTheirDeclarationFonts) {
         ASSERT_TRUE(css_prop_serialize_computed(&element, property, 1, computed, sizeof(computed)));
         EXPECT_STREQ(computed, expected);
     };
-    expect(CSS_PROPERTY_LINE_CLAMP, "10");
+    expect(CSS_PROPERTY_LINE_CLAMP, "5");
     expect(CSS_PROPERTY_WEBKIT_LINE_CLAMP, "5");
     expect(CSS_PROPERTY_HYPHENATE_LIMIT_CHARS, "5 3");
     apply("font-size:7px", &element, 1);
-    expect(CSS_PROPERTY_LINE_CLAMP, "14");
+    expect(CSS_PROPERTY_LINE_CLAMP, "7");
     expect(CSS_PROPERTY_WEBKIT_LINE_CLAMP, "7");
     expect(CSS_PROPERTY_HYPHENATE_LIMIT_CHARS, "7 4");
     apply("line-clamp:inherit", &element, 1);
@@ -2669,7 +2669,7 @@ TEST_F(MotionCascadeTest, PseudoCalculatedCountsUseTheirDeclarationFonts) {
     size_t before_bytes = 0, before_count = 0;
     pool_get_stats(pool, &before_bytes, &before_count);
     for (unsigned read = 0; read < 128; read++) {
-        expect(CSS_PROPERTY_LINE_CLAMP, "80");
+        expect(CSS_PROPERTY_LINE_CLAMP, "40");
         expect(CSS_PROPERTY_WEBKIT_LINE_CLAMP, "40");
         expect(CSS_PROPERTY_HYPHENATE_LIMIT_CHARS, "60");
     }

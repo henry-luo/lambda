@@ -60,6 +60,20 @@ pub pn life(owner,st) {
     (scene_dom.text(owner,"day-label","DAY " ++ string(1+int(floor(st.elapsed/120)))))^
     for (key in ["food","water","clean"]) scene_dom.text(owner,"supply-" ++ key,percent(st[key]))
 }
+pn sync_grid(owner,previous,st) {
+    if (previous != null and previous.modules == st.modules and previous.level == st.level and previous.selected == st.selected) { return null }
+    let previous_cells = if (previous == null) [] else ((ui.grid(previous)) ^ { [] })
+    for (index,cell in ((ui.grid(st)) ^ { [] }) where cell != previous_cells[index]) {
+        let prior = previous_cells[index]
+        let node = scene_dom.node(owner,cell.id)
+        for (key,value in cell where key is string or key is symbol) scene_dom.attr(node,string(key),value)
+        let children = (content(cell)) ^ { [] }
+        let prior_children = if (prior == null) [] else ((content(prior)) ^ { [] })
+        // selection changes keep the existing label and port nodes in place.
+        if (prior == null or children != prior_children)
+            dom.set_inner_html(node,join([for (child in children) format(child,'xml')],""))
+    }
+}
 pub pn sync(owner,previous,st) {
     if (previous == null or previous.modules != st.modules)
         scene_dom.replace(scene_dom.node(owner,"cage-modules"),[for (m in st.modules) scene.module_tree(st.modules,m,st)])^
@@ -70,12 +84,7 @@ pub pn sync(owner,previous,st) {
     if (previous == null or [for (h in previous.pets) [h.id,h.coat]] != [for (h in st.pets) [h.id,h.coat]])
         dom.set_inner_html(scene_dom.node(owner,"resident-list"),join([for (row in ui.residents(st)) format(row,'xml')],""))
     for (h in st.pets) scene_dom.attr(scene_dom.node(owner,"choose-" ++ h.id),"aria-pressed",h.id == st.pet_selected)
-    // retain each cell button: replacing the grid discards focus and loses the next keyboard shortcut.
-    for (cell in ((ui.grid(st)) ^ { [] })) {
-        let node = scene_dom.node(owner,cell.id)
-        for (key,value in cell where key is string or key is symbol) scene_dom.attr(node,string(key),value)
-        dom.set_inner_html(node,join([for (child in ((content(cell)) ^ { [] })) format(child,'xml')],""))
-    }
+    sync_grid(owner,previous,st)^
     for (m in st.modules) scene_dom.attr(dom.query_selector(scene_dom.node(owner,m.id ++ "-floor"),"material"),"color",if (m.id == st.selected) "#f1d38d" else "#e5d1a7")
     for (entry in cage.catalog) scene_dom.attr(scene_dom.node(owner,"tool-" ++ entry.kind),"aria-pressed",st.tool == entry.kind)
     for (entry in items.catalog) scene_dom.attr(scene_dom.node(owner,"item-" ++ entry.kind),"aria-pressed",st.item_tool == entry.kind)
