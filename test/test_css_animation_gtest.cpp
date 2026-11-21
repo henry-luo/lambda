@@ -4435,17 +4435,27 @@ protected:
     }
 
     struct MockElement {
-        uint8_t buf[4096];
-        InlineProp in_line;
-        DomStyleExt props;
+        DomElement element = {};
+        InlineProp in_line = {};
+        DomStyleExt props = {};
+        AnimationScheduler* scheduler = nullptr;
+
+        ~MockElement() {
+            if (!scheduler) return;
+            // retire effects before their stack-backed target and style storage expire.
+            for (AnimationInstance* effect = scheduler->first; effect; effect = effect->next) {
+                if (effect->target == &element) effect->suppress_cancel_event = true;
+            }
+            animation_scheduler_remove_by_target(scheduler, &element);
+        }
     };
 
     DomElement* createMockElement(MockElement* mock) {
-        memset(mock, 0, sizeof(*mock));
-        DomElement* element = (DomElement*)mock->buf;
+        mock->scheduler = scheduler;
+        DomElement* element = &mock->element;
         element->node_type = DOM_NODE_ELEMENT;
         element->doc = lam::up(&doc);
-        ((ViewSpan*)element)->in_line = lam::view_ref(&mock->in_line);
+        element->in_line = lam::view_ref(&mock->in_line);
         element->style_ext = lam::own(&mock->props);
         return element;
     }
@@ -4546,8 +4556,6 @@ protected:
 };
 
 TEST_F(AnimationTickTest, QueryMeasurementAndSkippedContentsDeferNewMotion) {
-    MockElement mock;
-    DomElement* element = createMockElement(&mock);
     DomElement parent = {};
     parent.node_type = DOM_NODE_ELEMENT;
     parent.display.outer = CSS_VALUE_BLOCK;
@@ -4555,6 +4563,8 @@ TEST_F(AnimationTickTest, QueryMeasurementAndSkippedContentsDeferNewMotion) {
     BlockProp block = BLOCK_PROP_DEFAULT;
     TestBlockContainment containment(block);
     parent.blk = lam::view_prop(&block);
+    MockElement mock;
+    DomElement* element = createMockElement(&mock);
     element->parent = lam::up(static_cast<DomNode*>(&parent));
     opacityKeyframes();
     setAnimationStyle(element, "animation:schedulerFade 1s linear forwards;transition:opacity 1s linear");
@@ -4578,8 +4588,6 @@ TEST_F(AnimationTickTest, QueryMeasurementAndSkippedContentsDeferNewMotion) {
 }
 
 TEST_F(AnimationTickTest, SkippedEffectsDeferLifecycleAndCatchUpOnActivation) {
-    MockElement mock;
-    DomElement* element = createMockElement(&mock);
     DomElement parent = {};
     parent.node_type = DOM_NODE_ELEMENT;
     parent.display.outer = CSS_VALUE_BLOCK;
@@ -4587,6 +4595,8 @@ TEST_F(AnimationTickTest, SkippedEffectsDeferLifecycleAndCatchUpOnActivation) {
     BlockProp block = BLOCK_PROP_DEFAULT;
     TestBlockContainment containment(block);
     parent.blk = lam::view_prop(&block);
+    MockElement mock;
+    DomElement* element = createMockElement(&mock);
     element->parent = lam::up(static_cast<DomNode*>(&parent));
     parent.set_styles_resolved(true);
     setAnimationStyle(element, "opacity:0");
@@ -4640,10 +4650,10 @@ TEST_F(AnimationTickTest, PausedEffectSamplesAndResumesFromFrozenTime) {
 }
 
 TEST_F(AnimationTickTest, BackgroundPositionStepsPauseAndMixedUnitsReachPaintOffsets) {
-    MockElement mock;
-    DomElement* element = createMockElement(&mock);
     BoundaryProp boundary = {};
     BackgroundProp background = {};
+    MockElement mock;
+    DomElement* element = createMockElement(&mock);
     element->bound = lam::view_prop(&boundary);
     boundary.background = lam::own(&background);
     ASSERT_NE(parsedKeyframes("sheet{from{background-position-x:0px;background-position-y:0%}"
@@ -4672,10 +4682,10 @@ TEST_F(AnimationTickTest, BackgroundPositionStepsPauseAndMixedUnitsReachPaintOff
 }
 
 TEST_F(AnimationTickTest, BackgroundPositionPercentageRemainsRelativeToImageFreeSpace) {
-    MockElement mock;
-    DomElement* element = createMockElement(&mock);
     BoundaryProp boundary = {};
     BackgroundProp background = {};
+    MockElement mock;
+    DomElement* element = createMockElement(&mock);
     element->bound = lam::view_prop(&boundary);
     boundary.background = lam::own(&background);
     ASSERT_NE(parsedKeyframes("position{from{background-position-x:100%}to{background-position-x:40px}}", "position"), nullptr);
@@ -4689,12 +4699,12 @@ TEST_F(AnimationTickTest, BackgroundPositionPercentageRemainsRelativeToImageFree
 }
 
 TEST_F(AnimationTickTest, IndividualTransformsAnimateTogetherAndRetainIndependentSnapshots) {
-    MockElement mock;
-    DomElement* element = createMockElement(&mock);
     TransformProp transform = {};
     IndividualTransformProp individual = {};
     transform.individual = lam::own(&individual);
     FontProp font = {};
+    MockElement mock;
+    DomElement* element = createMockElement(&mock);
     font.font_size = 16.0f;
     setTransformContext(element, &transform, &font);
     individual.values[0].type = TRANSFORM_TRANSLATE;
@@ -4722,15 +4732,15 @@ TEST_F(AnimationTickTest, IndividualTransformsAnimateTogetherAndRetainIndependen
 }
 
 TEST_F(AnimationTickTest, WebCancellationRestoresAllTransformSlotsBeforeSameTimeSeek) {
-    MockElement mock;
-    DomElement* element = createMockElement(&mock);
     TransformProp transform = {};
     IndividualTransformProp individual = {};
     transform.individual = lam::own(&individual);
     FontProp font = {};
+    TransformFunction underlying = {};
+    MockElement mock;
+    DomElement* element = createMockElement(&mock);
     font.font_size = 16.0f;
     setTransformContext(element, &transform, &font);
-    TransformFunction underlying = {};
     underlying.type = TRANSFORM_TRANSLATE;
     underlying.params.translate.x = 7.0f;
     transform.functions = lam::shared(&underlying);
@@ -4772,10 +4782,10 @@ TEST_F(AnimationTickTest, WebCancellationRestoresAllTransformSlotsBeforeSameTime
 }
 
 TEST_F(AnimationTickTest, DiscreteBackgroundImagesResolveStylesheetUrlsAndRestoreOnCancel) {
-    MockElement mock;
-    DomElement* element = createMockElement(&mock);
     BoundaryProp boundary = {};
     BackgroundProp background = {};
+    MockElement mock;
+    DomElement* element = createMockElement(&mock);
     background.image = pool_strdup(pool, "authored.png");
     element->bound = lam::view_prop(&boundary);
     boundary.background = lam::own(&background);
@@ -4805,10 +4815,10 @@ TEST_F(AnimationTickTest, DiscreteBackgroundImagesResolveStylesheetUrlsAndRestor
 }
 
 TEST_F(AnimationTickTest, FilterListsPadIdentityInterpolateMathAndRestoreOnCancel) {
-    MockElement mock;
-    DomElement* element = createMockElement(&mock);
     FilterProp filter = {};
     FilterFunction authored = {};
+    MockElement mock;
+    DomElement* element = createMockElement(&mock);
     authored.type = FILTER_BRIGHTNESS;
     authored.params.amount = .8f;
     filter.functions = lam::own(&authored);
@@ -4837,9 +4847,9 @@ TEST_F(AnimationTickTest, FilterListsPadIdentityInterpolateMathAndRestoreOnCance
 }
 
 TEST_F(AnimationTickTest, FilterListsUseDiscreteMismatchAndIdentityForShorterTail) {
+    FilterProp filter = {};
     MockElement mock;
     DomElement* element = createMockElement(&mock);
-    FilterProp filter = {};
     element->set_filter_prop(&filter);
     ASSERT_NE(parsedKeyframes("filters{0%{filter:brightness(.5)}50%{filter:brightness(1) saturate(3)}"
         "100%{filter:contrast(2)}}", "filters"), nullptr);
@@ -5315,10 +5325,10 @@ TEST_F(AnimationTickTest, TransitionRestyleRetargetsCancelsAndReleasesCompletedE
 }
 
 TEST_F(AnimationTickTest, CalculatedTimeAndPiecewiseAnimationRetainClockAcrossCurveChanges) {
-    MockElement mock;
-    DomElement* element = createMockElement(&mock);
     TransformProp transform = {};
     FontProp font = {};
+    MockElement mock;
+    DomElement* element = createMockElement(&mock);
     font.font_size = 10.0f;
     setTransformContext(element, &transform, &font);
     ASSERT_NE(parsedKeyframes("motion{from{opacity:0;transform:translateX(0px)}"
@@ -5629,13 +5639,13 @@ TEST_F(AnimationTickTest, NeutralOpacityAndColorEndpointsKeepUnderlyingValues) {
     };
     for (const auto& test_case : cases) {
         SCOPED_TRACE(test_case.rule);
+        BoundaryProp boundary = {};
+        BackgroundProp background = {};
         MockElement mock;
         DomElement* element = createMockElement(&mock);
         mock.in_line.opacity = .2f;
         mock.in_line.color = Color{0xFF008000};
         mock.in_line.has_color = true;
-        BoundaryProp boundary = {};
-        BackgroundProp background = {};
         background.color = Color{0xFF008000};
         boundary.background = lam::own(&background);
         element->bound = lam::view_prop(&boundary);
@@ -5714,9 +5724,9 @@ TEST(CssContainerIdentity, FlatTreeParentUsesShadowHostsAndNamedSlotAssignments)
 }
 
 TEST_F(AnimationTickTest, MissingStopsUsePropertyIntervalsAndInteriorNeutralEndpoints) {
+    BlockProp sizing = {};
     MockElement mock;
     DomElement* element = createMockElement(&mock);
-    BlockProp sizing = {};
     sizing.given_width = 80.0f;
     element->blk = lam::view_prop(&sizing);
     mock.in_line.opacity = .8f;
@@ -5762,9 +5772,9 @@ TEST_F(AnimationTickTest, LengthCompositionUsesAuthoredEndpointsBeforeInterpolat
     };
     for (const auto& sample : cases) {
         SCOPED_TRACE(sample.rule);
+        BlockProp sizing = {};
         MockElement mock;
         DomElement* element = createMockElement(&mock);
-        BlockProp sizing = {};
         sizing.given_width = 40.0f;
         element->blk = lam::view_prop(&sizing);
         CssAnimProp config = defaultAnimProp("compose", 1.0f);
@@ -5830,10 +5840,10 @@ TEST_F(AnimationTickTest, NeutralTransformsCopyUnderlyingListsAndPadWithIdentity
         {false, false}, {true, false}, {false, true}, {true, true}
     };
     for (const auto& sample : cases) {
-        MockElement mock;
-        DomElement* element = createMockElement(&mock);
         TransformProp transform = {};
         TransformFunction source = {};
+        MockElement mock;
+        DomElement* element = createMockElement(&mock);
         source.type = TRANSFORM_TRANSLATEX;
         source.params.translate.x = 10.0f;
         source.translate_x_percent = source.translate_y_percent = NAN;
@@ -5871,10 +5881,10 @@ TEST_F(AnimationTickTest, TypedTransformEndpointsKeepUnitsAndPercentageComponent
     };
     for (const auto& test_case : cases) {
         SCOPED_TRACE(test_case.rule);
-        MockElement mock;
-        DomElement* element = createMockElement(&mock);
         TransformProp transform = {};
         FontProp font = {};
+        MockElement mock;
+        DomElement* element = createMockElement(&mock);
         font.font_size = 10.0f;
         setTransformContext(element, &transform, &font);
         StrBuf* content = strbuf_new();
@@ -5911,10 +5921,10 @@ TEST_F(AnimationTickTest, TransformMathSpatialPrimitivesAndMatricesSampleCompute
     };
     for (const auto& sample : cases) {
         SCOPED_TRACE(sample.to);
-        MockElement mock;
-        DomElement* element = createMockElement(&mock);
         TransformProp transform = {};
         FontProp font = {};
+        MockElement mock;
+        DomElement* element = createMockElement(&mock);
         font.font_size = 10.0f;
         setTransformContext(element, &transform, &font);
         StrBuf* content = strbuf_new();
@@ -5967,10 +5977,10 @@ TEST_F(AnimationTickTest, SpatialRotationPerspectiveAndMatrixPairsInterpolateThe
     };
     for (const auto& sample : cases) {
         SCOPED_TRACE(sample.to);
-        MockElement mock;
-        DomElement* element = createMockElement(&mock);
         TransformProp transform = {};
         FontProp font = {};
+        MockElement mock;
+        DomElement* element = createMockElement(&mock);
         setTransformContext(element, &transform, &font);
         StrBuf* content = strbuf_new();
         strbuf_append_format(content, "spatialPair{from{transform:%s}to{transform:%s}}", sample.from, sample.to);
@@ -6004,10 +6014,10 @@ TEST_F(AnimationTickTest, PercentageMathAndMatrixSuffixesFollowTheUsedReferenceB
     };
     for (const auto& sample : cases) {
         SCOPED_TRACE(sample.to);
-        MockElement mock;
-        DomElement* element = createMockElement(&mock);
         TransformProp transform = {};
         FontProp font = {};
+        MockElement mock;
+        DomElement* element = createMockElement(&mock);
         font.font_size = 10.0f;
         setTransformContext(element, &transform, &font);
         // effects resolve before initial layout has assigned the element's dimensions.
@@ -6047,10 +6057,10 @@ TEST_F(AnimationTickTest, PercentageMathAndMatrixSuffixesFollowTheUsedReferenceB
 }
 
 TEST_F(AnimationTickTest, ComputedTransformMathSnapshotsSurviveTheirSourcePool) {
-    MockElement mock;
-    DomElement* element = createMockElement(&mock);
     TransformProp transform = {};
     FontProp font = {};
+    MockElement mock;
+    DomElement* element = createMockElement(&mock);
     font.font_size = 10.0f;
     setTransformContext(element, &transform, &font);
     Pool* source_pool = pool_create();
@@ -6069,10 +6079,10 @@ TEST_F(AnimationTickTest, ComputedTransformMathSnapshotsSurviveTheirSourcePool) 
 }
 
 TEST_F(AnimationTickTest, SingularMatrixSuffixSelectsTheEntireTransformDiscretely) {
-    MockElement mock;
-    DomElement* element = createMockElement(&mock);
     TransformProp transform = {};
     FontProp font = {};
+    MockElement mock;
+    DomElement* element = createMockElement(&mock);
     font.font_size = 10.0f;
     setTransformContext(element, &transform, &font);
     ASSERT_NE(parsedKeyframes("singular{from{transform:rotate(0deg) matrix(0,0,0,0,0,0)}"
@@ -6099,13 +6109,14 @@ TEST_F(AnimationTickTest, TransformValueCachesRefreshPerElementAndOwnInheritedLi
     CssKeyframes* keyframes = parsedKeyframes(
         "transformContext{from{transform:translateX(1em)}to{transform:var(--motion)}}", "transformContext");
     ASSERT_NE(keyframes, nullptr);
-    MockElement mocks[2];
     FontProp fonts[2] = {};
     TransformProp transforms[2] = {};
+    MockElement parent_mock, child_mock;
+    MockElement* mocks[] = {&child_mock, &parent_mock};
     DomElement* elements[2] = {};
     AnimationInstance* instances[2] = {};
     for (int index = 0; index < 2; index++) {
-        elements[index] = createMockElement(&mocks[index]);
+        elements[index] = createMockElement(mocks[index]);
         elements[index]->font = lam::view_prop(&fonts[index]);
         elements[index]->style_ext->transform = lam::view_prop(&transforms[index]);
         fonts[index].font_size = index == 0 ? 10.0f : 20.0f;
@@ -6171,11 +6182,11 @@ TEST_F(AnimationTickTest, PhysicalSidesApplyColorAndLengthSamplesToConsumerField
     };
     for (size_t family = 0; family < sizeof(families) / sizeof(families[0]); family++) {
         for (int side = CSS_BOX_SIDE_TOP; side <= CSS_BOX_SIDE_LEFT; side++) {
-            MockElement mock;
-            DomElement* element = createMockElement(&mock);
             BoundaryProp boundary = {};
             BorderProp border = {};
             PositionProp position = {};
+            MockElement mock;
+            DomElement* element = createMockElement(&mock);
             element->bound = lam::view_prop(&boundary);
             boundary.border = lam::own(&border);
             element->position = lam::view_prop(&position);
@@ -6229,11 +6240,11 @@ TEST_F(AnimationTickTest, PhysicalSidesApplyColorAndLengthSamplesToConsumerField
 }
 
 TEST_F(AnimationTickTest, PhysicalSideTransitionsGrowTracksAndKeepRetargetSnapshots) {
-    MockElement mock;
-    DomElement* element = createMockElement(&mock);
     BoundaryProp boundary = {};
     BorderProp border = {};
     PositionProp position = {};
+    MockElement mock;
+    DomElement* element = createMockElement(&mock);
     element->bound = lam::view_prop(&boundary);
     boundary.border = lam::own(&border);
     element->position = lam::view_prop(&position);
@@ -6360,13 +6371,13 @@ TEST_F(AnimationTickTest, TypedValueCachesStayPerElementAndRefreshVariables) {
 }
 
 TEST_F(AnimationTickTest, SkippedComputedReadsRefreshInheritedEndpointsAndPreserveEvents) {
+    BlockProp block = BLOCK_PROP_DEFAULT;
+    TestBlockContainment containment(block);
     MockElement parent_mock, child_mock;
     DomElement* parent = createMockElement(&parent_mock);
     DomElement* child = createMockElement(&child_mock);
     parent->display = {CSS_VALUE_BLOCK, CSS_VALUE_FLOW};
     child->parent = lam::up(static_cast<DomNode*>(parent));
-    BlockProp block = BLOCK_PROP_DEFAULT;
-    TestBlockContainment containment(block);
     parent->blk = lam::view_prop(&block);
     ASSERT_NE(parsedKeyframes("hiddenRead{from{opacity:.2}to{opacity:var(--end)}}", "hiddenRead"), nullptr);
     setAnimationStyle(parent, "--end:.8");
@@ -6430,14 +6441,14 @@ TEST_F(AnimationTickTest, TypedLengthsResolvePerElementAndRefreshAfterRelayout) 
     CssKeyframes* keyframes = keyframe_registry_find(registry, "units");
     ASSERT_NE(keyframes, nullptr);
 
-    MockElement mocks[2];
     BlockProp blocks[2] = {};
     FontProp fonts[2] = {};
     BoundaryProp boundaries[2] = {};
     PositionProp positions[2] = {};
+    BlockContext parent = {};
+    MockElement mocks[2];
     DomElement* elements[2] = {};
     AnimationInstance* instances[2] = {};
-    BlockContext parent = {};
     parent.content_width = 200.0f;
     parent.content_height = parent.given_height = 100.0f;
     layout.block.parent = lam::up(&parent);
@@ -6485,9 +6496,9 @@ TEST_F(AnimationTickTest, TypedLengthsResolvePerElementAndRefreshAfterRelayout) 
 }
 
 TEST_F(AnimationTickTest, WebLengthEffectsInvalidateWithoutDomMutations) {
+    BlockProp block = {};
     MockElement mock;
     DomElement* element = createMockElement(&mock);
-    BlockProp block = {};
     element->blk = lam::view_prop(&block);
     block.given_width = 40.0f;
     CssAnimatedProp properties[2] = {};
@@ -6525,9 +6536,9 @@ TEST_F(AnimationTickTest, WebLengthEffectsInvalidateWithoutDomMutations) {
 }
 
 TEST_F(AnimationTickTest, TransformAnimationMarksDocumentOwnedList) {
+    TransformProp transform = {};
     MockElement mock;
     DomElement* element = createMockElement(&mock);
-    TransformProp transform = {};
     element->style_ext->transform = lam::view_prop(&transform);
 
     TransformFunction keyframe_function = {};

@@ -15,6 +15,13 @@ Resolved records are in the [fixed issue ledger](<Lib_Input_Issue_Ledger (fixed)
 
 ## Open issues
 
+<a id="li-095"></a>
+
+### LI-095 — FIXED
+
+Default-constructed document services start with an empty tag-name map. See the
+[fixed record](<Lib_Input_Issue_Ledger (fixed).md#li-095>).
+
 <a id="li-094"></a>
 
 ### LI-094 — `:modal` still matches after removal of the dialog's `open` attribute

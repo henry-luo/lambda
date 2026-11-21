@@ -107,14 +107,24 @@ both fail at the same line. This blocks linking the host for verification.
 
 <a id="lr12-66"></a>
 
-## LR12-66 — Two host tests still access containment fields on `BlockProp`
+## LR12-66 — FIXED
 
-**OPEN**, reproduced on 2026-11-21 at Lambda `017c686351` and Radiant `4871cce`
-(D9.1.3v2, DV4.2). The `debug_native` targets for `test_css_animation_gtest`
-and `test_rdt_vector_gtest` still access `computed_containment` and `contain_paint`
-directly on `BlockProp`. Radiant now stores these fields in `BlockContainmentProp`.
-The original sources and the extension rename both fail to compile these tests.
-[Animation test](../test/test_css_animation_gtest.cpp#L2225) · [Vector test](../test/test_rdt_vector_gtest.cpp#L523)
+The host tests now use the optional containment and fragment-geometry groups.
+See the [fixed record](<Lambda_Issue_Ledger (fixed).md#lr12-66>).
+
+<a id="lr12-67"></a>
+
+## LR12-67 — FIXED
+
+The animation fixture retires effects before destroying their mock targets.
+See the [fixed record](<Lambda_Issue_Ledger (fixed).md#lr12-67>).
+
+<a id="lr12-68"></a>
+
+## LR12-68 — FIXED
+
+The host baseline exercises real stylesheet owners and standard line clamping.
+See the [fixed record](<Lambda_Issue_Ledger (fixed).md#lr12-68>).
 
 <a id="lr12-64"></a>
 
@@ -3822,19 +3832,9 @@ automation tests pass. This failure is separate from the Input LI-076 constraine
 error contract failure and is not a sync performance acceptance case.
 
 
-## Online form baseline failures reproduced on prior renderer — 2026-11-21
+## Online form baseline failures — FIXED
 
 <a id="online-form-baseline-20261121"></a>
 
-**Status:** OPEN investigation; not a blocker for independent native grid
-repairs. Shared DOM/script ownership follows **D8.4.4 / D9.5.6v2**; snapshot
-policy follows **D10.1.7**. The round136 17-category layout milestone records
-two form failures: `option-text-setter` (required pass missing) and
-`input-type-button` (element agreement 100% to 25%). Both reproduce in a
-focused form run with the previous qualified round134 renderer, with the
-same names and scores. That establishes that RI-176/177 did not introduce
-them; the runtime/reference cause remains unisolated. The preceding broad
-milestone131 predates script-harness and Node-interface repairs. No reference,
-assertion, classification, test harness or tolerance is changed to mask the
-failures. Evidence: `temp/online-visual-round136/layout-baseline-results.txt`,
-`form-regressions.log`, `form-prior.log` and `form-prior-results.json`.
+Fresh Chromium captures and the repaired DOM methods qualify both fixtures.
+See the [fixed record](<Lambda_Issue_Ledger (fixed).md#online-form-baseline-20261121>).

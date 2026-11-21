@@ -1423,7 +1423,9 @@ TEST_F(RadiantDocumentTest, InteractionColorsRepaintLeafAncestorsAndInheritedCur
 TEST_F(RadiantDocumentTest, UnstyledMetadataPreservesGeometryAndCssDependenciesReflow) {
     DomElement* result = load_script_source(
         "<!doctype html><style id=theme>#result{width:40px;height:20px}"
-        "[data-sized] #result{width:80px}</style><link id=sheet><div id=outer><div id=result></div></div>");
+        "[data-sized] #result{width:80px}</style>"
+        "<link id=sheet rel=stylesheet href=xhtml_names.css>"
+        "<link id=hint rel=preload as=style><div id=outer><div id=result></div></div>");
     ASSERT_NE(result, nullptr);
     ASSERT_NE(radiant_document_ensure_state(document, "metadata-layout-test"), nullptr);
     ASSERT_TRUE(layout_update_document(&ui, document));
@@ -1449,8 +1451,13 @@ TEST_F(RadiantDocumentTest, UnstyledMetadataPreservesGeometryAndCssDependenciesR
     for (const char* id : {"theme", "sheet"}) {
         DomElement* owner = dom_find_element_by_id(document->root->as_element(), id);
         ASSERT_NE(owner, nullptr);
+        ASSERT_NE(dom_cssom_element_sheet(owner), nullptr);
         EXPECT_FALSE(dom_set_non_style_metadata(owner, "data-revision", "true"));
     }
+    // preload links have no stylesheet lifecycle to invalidate on metadata writes.
+    DomElement* hint = dom_find_element_by_id(document->root->as_element(), "hint");
+    ASSERT_NE(hint, nullptr);
+    EXPECT_TRUE(dom_set_non_style_metadata(hint, "data-revision", "true"));
 }
 
 TEST_F(RadiantDocumentTest, AttrValuesKeepMetadataStyleInvalidation) {

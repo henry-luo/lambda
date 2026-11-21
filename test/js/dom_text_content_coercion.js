@@ -19,3 +19,10 @@ text.data = null;
 console.log(JSON.stringify(text.data));
 text.nodeValue = null;
 console.log('empty:' + text.data.length);
+
+var option = document.createElement('option');
+host.appendChild(option);
+option.text = 'label';
+console.log('option text:' + option.textContent);
+option.text = '';
+console.log('empty option:' + (option.firstChild === null));

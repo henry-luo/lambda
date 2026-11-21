@@ -6,6 +6,21 @@ remain in the [active issue ledger](Lib_Input_Issue_Ledger.md).
 
 ## Fixed issues
 
+<a id="li-095"></a>
+
+### LI-095 — Default document construction left the tag-name map uninitialized
+
+**Fixed 2026-11-21.** The document owns its lazy tag-name map under **D5.5.1 /
+D9.1.3v2**. With Input `5af070c`, a placement-construction probe over nonzero
+storage left the `tag_name_overrides` pointer bytes untouched. Document teardown
+passed that indeterminate pointer to `hashmap_free`, crashing
+`SvgFilterTest.ComponentTransferUsesStraightChannelsAndRemappedAlpha` and
+`SecondaryViewTest.PictureSelectionPrecedesFallbackAndPreservesDataUrlCommas`.
+The member now starts null on ordinary C++ construction, as it already does on
+the factory's zeroed storage. The probe passes with the initializer. All 250
+vector and 180 selected paged-media tests pass. Evidence is in Lambda's
+`temp/radiant-baseline-build-fix/`, including the probe and crash reports.
+
 <a id="li-093"></a>
 
 ### LI-093 — Namespace lookup ignores an element's expanded name

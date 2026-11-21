@@ -6409,10 +6409,12 @@ static bool dom_replace_text_content(DomElement* elem, const char* text) {
     if (!elem || !text) return false;
     // replace-all owns a single childList record, including both removed and added nodes.
     RootFrame roots(2);
-    Rooted<Item> parent(roots, dom_wrap_element(elem));
+    // copy borrowed text before wrapping the parent can collect its source.
+    bool has_text = *text != '\0';
     Rooted<Item> replacement(roots, js_name_item(text));
+    Rooted<Item> parent(roots, dom_wrap_element(elem));
     Item argument = replacement.get();
-    if (item_is_error(dom_replace_children(parent.get(), &argument, *text ? 1 : 0))) return false;
+    if (item_is_error(dom_replace_children(parent.get(), &argument, has_text ? 1 : 0))) return false;
     // Stylesheet text changes CSS globally; ordinary text is subtree-local.
     DomJsMutationKind kind = elem->tag_name() && str_icmp_cstr(elem->tag_name(), "style") == 0
         ? DOM_JS_MUTATION_STYLE : DOM_JS_MUTATION_TEXT;
@@ -8052,7 +8054,9 @@ extern "C" Item dom_click_method_bridge(Item elem_item) {
     RootFrame roots(2);
     Rooted<Item> element_root(roots, elem_item);
     Rooted<Item> event_root(roots, js_create_click_mouse_event());
-    return dom_dispatch_event(element_root.get(), event_root.get());
+    // click() has a void return even when dispatch reports a canceled event.
+    Item result = dom_dispatch_event(element_root.get(), event_root.get());
+    return item_is_error(result) ? result : make_js_undefined();
 }
 
 #define JS_DOM_EVENT_LISTENER_BRIDGE(name, operation) \
@@ -9102,27 +9106,8 @@ extern "C" void dom_set_option_selected_dirty(void* dom_elem, bool selected) {
 }
 
 extern "C" void dom_set_option_text_bridge(void* dom_elem, const char* value) {
-    DomElement* elem = (DomElement*)dom_elem;
-    if (!elem) return;
-    const char* sv = value ? value : "";
-    DomNode* child = elem->first_child;
-    while (child) {
-        DomNode* next = child->next_sibling;
-        child->parent = nullptr;
-        child->next_sibling = nullptr;
-        child->prev_sibling = nullptr;
-        child = next;
-    }
-    elem->first_child = nullptr;
-    elem->last_child = nullptr;
-    DomText* tn = DomText::create_copy(sv, strlen(sv), elem);
-    if (tn) {
-        tn->parent = lam::up(elem);
-        elem->first_child = lam::own(tn);
-        elem->last_child = lam::up(tn);
-    }
-    // option.text replaces children, so publish a structural mutation instead of an attribute record.
-    dom_mutation_notify();
+    // the shared replacement also updates the backing tree and leaves no child for empty text.
+    dom_replace_text_content(static_cast<DomElement*>(dom_elem), value ? value : "");
 }
 
 // For a <select required> element, returns true iff no <option> is
