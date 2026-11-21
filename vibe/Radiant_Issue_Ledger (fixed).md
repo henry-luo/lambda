@@ -14,6 +14,25 @@ are unchanged. Full evidence is under `../../lambda/temp/kianhup-style/`.
 
 ## Fixed issues
 
+<a id="ri-197"></a>
+
+### RI-197 — Native test harnesses failed to link in the full test build
+
+**Fixed, 2026-11-22.** `make build-test` failed on macOS arm64 because the
+input-value test lacked stylesheet helpers and the custom-layout and
+state-store tests linked Radiant's archive alongside conflicting host stubs.
+The isolated tests now link their actual native sources, including shared
+render-tree and effect queries; stylesheet tests link the real resource and
+mutation helpers and resolve fixtures from the Radiant owner checkout. Native
+and host ownership follows **D9.1.1v4 / D9.1.3v2**. A separate TOML test
+compile error was fixed by supplying its required mutable input buffer.
+
+The three affected Radiant test executables pass, as does the focused TOML
+case. `make test-layout-baseline` passes with 5,632 passed, 292 partial and
+12 skipped; `make test-radiant-baseline` passes with 8,176 passed, 296 partial
+and 20 skipped. The targeted Radiant integer-cast lint also passes. Evidence:
+`temp/layout-baseline-build/`.
+
 <a id="ri-195"></a>
 
 ### RI-195 — Headless Scene3D fixtures bypass the device mixer

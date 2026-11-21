@@ -20,6 +20,13 @@ observations still require re-verification. Add new Radiant issues here.
 
 ## Open issues
 
+<a id="ri-197"></a>
+
+### RI-197 — FIXED
+
+The native test harness link failures are recorded in the
+[fixed issue ledger](Radiant_Issue_Ledger%20%28fixed%29.md#ri-197).
+
 <a id="ri-196"></a>
 
 ### RI-196 — Interactive Scene3D View cases exceed the parallel debug budget
