@@ -20,7 +20,8 @@ fn normalized(rows) array {
     let lo = min(flat)
     let hi = max(flat)
     let span = if (hi - lo > 0.000001) hi - lo else 1.0;
-    as_float([for (row in rows) [for (v in row) (v - lo) / span]])
+    // Normalize the packed plane without rebuilding and boxing each row.
+    reshape((flat - lo) / span, shape(rows))
 }
 
 // tileable fractal noise of the given size: the period equals the size, so the paper repeats

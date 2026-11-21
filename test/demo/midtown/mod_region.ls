@@ -39,13 +39,13 @@ fn vertex(k, h) any^ {
     let r = if (city.inside_city(x, z)) null else roads.road_at(x, z);
     {h: carved(h, r), drop: drops(r), road: if (r == null) 99.0 else abs(r.lat)}
 }
-// the corridor index's 32 m cells hold whole 10 m columns of vertices: (i * 10) div 32 is the cell column
-let FAR_AWAY = {drop: false, road: 99.0}
+// The corridor index's 32 m cells exclude most vertices. Reuse the natural
+// height there without allocating a per-vertex record.
 let CARVED = [for (k, h in land.NATURAL, let cell = ((k div land.NX) * 10 div 32) * cells.CNX + (k % land.NX) * 10 div 32)
-    if (roads.CELL_HAS_ROAD[cell]) vertex(k, h) else {*: FAR_AWAY, h: h}]
-pub let HEIGHT = [for (c in CARVED) c.h]
-pub let DROPPED = [for (c in CARVED) c.drop]
-pub let ROAD_GAP = [for (c in CARVED) c.road]
+    if (roads.CELL_HAS_ROAD[cell]) vertex(k, h) else null]
+pub let HEIGHT = [for (k, c in CARVED) if (c == null) land.NATURAL[k] else c.h]
+pub let DROPPED = [for (c in CARVED) if (c == null) false else c.drop]
+pub let ROAD_GAP = [for (c in CARVED) if (c == null) 99.0 else c.road]
 
 // the terrain height anywhere: carved inside the near grid, natural beyond
 pub fn terrain(x, z) any^ => if (not land.in_near(x, z)) land.natural_at(x, z)
@@ -83,8 +83,9 @@ fn railed(k, side) any^ => (let p = roads.LOOP.samples[k], p.kind == "road" and 
 fn rail_runs(side) any^ {
     let n = len(roads.LOOP.samples)^
     let flags = [for (k in 0 to (n - 1)) railed(k, side)]
-    let starts = [for (k in 0 to (n - 1) where flags[k] and (k == 0 or not flags[k - 1])) k];
-    [for (a in starts) (let ends = [for (k in a to (n - 1) where flags[k] and (k == n - 1 or not flags[k + 1])) k], [max(0, a - 2), min(n - 1, ends[0] + 2), side])]
+    let starts = [for (k in 0 to (n - 1) where flags[k] and (k == 0 or not flags[k - 1])) k]
+    let ends = [for (k in 0 to (n - 1) where flags[k] and (k == n - 1 or not flags[k + 1])) k];
+    [for (run, a in starts) [max(0, a - 2), min(n - 1, ends[run] + 2), side]]
 }
 pub let RAILS = [*rail_runs(1.0)^, *rail_runs(-1.0)^]
 pub let SOLIDS = [

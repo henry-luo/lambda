@@ -119,16 +119,24 @@ pub let COLUMNS = [for (i in 0 to (NX - 1), let x = X0 + i * STEP) {x: x, cz: co
 // the coastline and beach weight above many x at once, from the near grid's column table
 let COLUMN_CZ = [for (c in COLUMNS) c.cz]
 let COLUMN_SAND = [for (c in COLUMNS) c.sand]
-pub fn columns_at(xs) any^ => (let i = round(vmin(vmax((xs - X0) / STEP, 0.0), NX - 1.0)), [[for (k in i) COLUMN_CZ[k]], [for (k in i) COLUMN_SAND[k]]])
+pub fn columns_at(xs) any^ => (let i = round(vmin(vmax((xs - X0) / STEP, 0.0), NX - 1.0)), [COLUMN_CZ[i], COLUMN_SAND[i]])
 let COARSE = if (HILLS == null) [] else [for (row in noise.field(HILLS, LNX, LNZ) ^ { [] }, n in row) n]
-fn fill(k) => (let i = k % NX, let j = k div NX, let a = (j div 2) * LNX + i div 2, let di = i % 2, let dj = (j % 2) * LNX,
-    (COARSE[a] + COARSE[a + di] + COARSE[a + dj] + COARSE[a + dj + di]) / 4.0)
 // the whole grid at once, as arrays in vertex order
-pub let GX = [for (j in 0 to (NZ - 1), c in COLUMNS) c.x]
-pub let GZ = [for (j in 0 to (NZ - 1), c in COLUMNS) Z0 + j * STEP]
-pub let GCZ = [for (j in 0 to (NZ - 1), c in COLUMNS) c.cz]
-pub let GSAND = [for (j in 0 to (NZ - 1), c in COLUMNS) c.sand]
-pub let NATURAL = natural(GX, GZ, [for (k in 0 to (NX * NZ - 1)) fill(k)], GCZ, GSAND) ^ { [] }
+let VERTICES = 0 to (NX * NZ - 1)
+let COL = VERTICES % NX
+let ROW = VERTICES div NX
+pub let GX = X0 + COL * STEP
+pub let GZ = Z0 + ROW * STEP
+pub let GCZ = COLUMN_CZ[COL]
+pub let GSAND = COLUMN_SAND[COL]
+// Gather the four lattice samples in vertex order and add in the same order
+// as the point formula, with zero strides at the existing lattice points.
+let LATTICE_BASE = (ROW div 2) * LNX + COL div 2
+let LATTICE_DX = COL % 2
+let LATTICE_DZ = (ROW % 2) * LNX
+let NEAR_NOISE = (COARSE[LATTICE_BASE] + COARSE[LATTICE_BASE + LATTICE_DX] +
+    COARSE[LATTICE_BASE + LATTICE_DZ] + COARSE[LATTICE_BASE + LATTICE_DZ + LATTICE_DX]) / 4.0
+pub let NATURAL = natural(GX, GZ, NEAR_NOISE, GCZ, GSAND) ^ { [] }
 
 // a value of a near-grid array at (x, z), linear over the two triangles each cell is cut into
 // (corners a=(i,j), b=(i+1,j), c=(i,j+1), d=(i+1,j+1); the cut runs from b to c)
@@ -148,7 +156,7 @@ pub fn grid_many(values, xs, zs) any^ {
     let i = floor(gx), j = floor(gz)
     let fx = gx - i, fz = gz - j
     let a = j * NX + i
-    let va = [for (k in a) values[k]], vb = [for (k in a) values[k + 1]], vc = [for (k in a) values[k + NX]], vd = [for (k in a) values[k + NX + 1]]
+    let va = values[a], vb = values[a + 1], vc = values[a + NX], vd = values[a + NX + 1]
     let lower = step(1.0 - fx - fz);
     lower * (va + (vb - va) * fx + (vc - va) * fz) + (1.0 - lower) * (vd + (vc - vd) * (1.0 - fx) + (vb - vd) * (1.0 - fz))
 }

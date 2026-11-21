@@ -270,6 +270,7 @@ let SKY_NOISE = noise.make(rng.derive(rng.key([city.SEED, "sky"]), "clouds"), {k
 let BALL_N = BALL.normals
 let SKY_N = (len(BALL_N) div 3) ^ { 0 }
 let SKY_Y = [for (i in 0 to (SKY_N - 1)) BALL_N[3 * i + 1]]
+let SKY_GRADIENT = land.clamp01(SKY_Y * 1.6)
 // The altitude fades make cloud coverage zero outside the horizon band.
 // Avoid the four-octave noise lookup for vertices the sky cannot use.
 let CLOUD = [for (i in 0 to (SKY_N - 1), let y = SKY_Y[i])
@@ -279,10 +280,9 @@ let CLOUD = [for (i in 0 to (SKY_N - 1), let y = SKY_Y[i])
     }]
 fn sky_dome(name) any^ {
     let look = LOOKS[name]
-    let k = land.clamp01(SKY_Y * 1.6)
-    let sky = [for (c in 0 to 2) look.horizon[c] + (look.zenith[c] - look.horizon[c]) * k]
+    let sky = [for (c in 0 to 2) look.horizon[c] + (look.zenith[c] - look.horizon[c]) * SKY_GRADIENT]
     let tone = [for (c in 0 to 2) sky[c] + (look.clouds[c] - sky[c]) * CLOUD];
-    s.mesh(s.geometry([for (x in BALL.positions) x], {id: "g-sky-" ++ name, normals: BALL.normals, indices: BALL.indices, colors: flatten(transpose(tone))}), "m-sky",
+    s.mesh(s.geometry(BALL.positions, {id: "g-sky-" ++ name, normals: BALL.normals, indices: BALL.indices, colors: flatten(transpose(tone))}), "m-sky",
         {id: "sky-" ++ name, visible: false, 'cast-shadow': false, 'receive-shadow': false, 'frustum-culling': false})
 }
 // the barrier, the promenade and sea wall, the water, and the sky domes around everything

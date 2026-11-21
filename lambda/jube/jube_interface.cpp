@@ -887,7 +887,7 @@ extern "C" bool jube_publish_prototype_member(const JubeTypeDef* type,
     return true;
 }
 
-static Item jube_type_prototype_for(JubeTypeRecord* trec) {
+static Item jube_type_prototype_for(JubeTypeRecord* trec, Item prototype = ItemNull) {
     if (jube_cached_root_is_current(trec->prototype_rooted,
                                     trec->prototype_root_owner,
                                     trec->prototype_root_generation)) {
@@ -906,8 +906,14 @@ static Item jube_type_prototype_for(JubeTypeRecord* trec) {
     // constructor .prototype identity (instanceof) survives the conversion.
     // A seed returning a non-map means "this type has no prototype" (style
     // objects): record ItemNull, publish nothing, register no root.
-    if (trec->binding && trec->binding->prototype_seed) {
-        trec->prototype = trec->binding->prototype_seed();
+    if (get_type_id(prototype) == LMD_TYPE_MAP) {
+        trec->prototype = prototype;
+    } else if (trec->binding && trec->binding->prototype_seed) {
+        Item seed = trec->binding->prototype_seed();
+        // A lazy constructor may have published the type while obtaining its seed.
+        if (jube_cached_root_is_current(trec->prototype_rooted,
+                trec->prototype_root_owner, trec->prototype_root_generation)) return trec->prototype;
+        trec->prototype = seed;
         if (get_type_id(trec->prototype) != LMD_TYPE_MAP) {
             trec->prototype = ItemNull;
             trec->prototype_absent = true;
@@ -967,6 +973,12 @@ extern "C" Item jube_type_prototype(const JubeTypeDef* type) {
     JubeTypeRecord* trec = jube_record_for_type((const void*)type);
     if (!trec) return ItemNull;
     return jube_type_prototype_for(trec);
+}
+
+extern "C" Item jube_seed_type_prototype(const JubeTypeDef* type, Item prototype) {
+    JubeTypeRecord* trec = jube_record_for_type((const void*)type);
+    if (!trec || get_type_id(prototype) != LMD_TYPE_MAP) return ItemError;
+    return jube_type_prototype_for(trec, prototype);
 }
 
 extern "C" int jube_member_get_by_ordinal(Item receiver, int slot,

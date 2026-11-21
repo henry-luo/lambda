@@ -1112,18 +1112,20 @@ TEST_F(GCHeapTest, ObjectInteriorPointerNotManaged) {
 
 TEST_F(GCHeapTest, OwnershipTracksFreshSlotsAfterRepeatedRangeQueries) {
     gc_object_zone_t* zone = gc->object_zone;
-    void* first = gc_object_zone_alloc(zone, 32, LMD_TYPE_STRING, &gc->all_objects);
+    void* first = gc_heap_alloc(gc, 32, LMD_TYPE_STRING);
     ASSERT_NE(first, nullptr);
     gc_object_slab_t* slab = zone->fresh_slabs[gc_object_zone_class_index(32)];
     ASSERT_NE(slab, nullptr);
     uint8_t* next = slab->base + slab->next_fresh * slab->slot_size + sizeof(gc_header_t);
     EXPECT_TRUE(gc_object_zone_owns(zone, first));
     EXPECT_FALSE(gc_object_zone_owns(zone, next));
+    EXPECT_FALSE(gc_is_managed(gc, next));
     EXPECT_FALSE(gc_object_zone_owns(zone, (uint8_t*)first + 1));
 
     // a remembered range must still consult the current allocation watermark.
-    ASSERT_EQ(gc_object_zone_alloc(zone, 32, LMD_TYPE_STRING, &gc->all_objects), next);
+    ASSERT_EQ(gc_heap_alloc(gc, 32, LMD_TYPE_STRING), next);
     EXPECT_TRUE(gc_object_zone_owns(zone, next));
+    EXPECT_TRUE(gc_is_managed(gc, next));
     EXPECT_FALSE(gc_object_zone_owns(zone, next - sizeof(gc_header_t)));
     EXPECT_FALSE(gc_object_zone_owns(zone, next + 1));
 

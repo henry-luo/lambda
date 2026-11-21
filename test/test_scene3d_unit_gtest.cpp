@@ -10868,6 +10868,10 @@ protected:
         attr(camera, "position", "0 0 0"); attr(camera, "target", "0 0 -1");
     }
     void TearDown() override { Scene3dAgentTest::TearDown(); audio_bus_set_offline(previous_offline); }
+    void use_device_output() {
+        // test the device-bound mixer with a hidden window and the bus kept offline.
+        ui.headless = false;
+    }
     void fake_speech() { ASSERT_TRUE(speech_engine.use_fake()); }
     DomElement* speaker(const char* id = "speaker", DomElement* parent = nullptr) {
         auto* source = element("audio-source", parent ? parent : root);
@@ -11088,6 +11092,7 @@ TEST_F(Scene3dCaptureTest, UnactivatedNetworkInputCanRouteButCannotMonitorRewire
     radiant_audio_note_activation(&doc); ASSERT_TRUE(radiant_capture_monitor(&doc, token, .5f)); input(4); pcm(.25f, -.125f, 4);
 }
 TEST_F(Scene3dCaptureTest, OutputLossRetainsTheNamedBindingAndInputWhileReenableRestoresTheBus) {
+    use_device_output();
     auto* bus = element("audio-bus", root); attr(bus, "id", "mic"); attr(bus, "gain", ".25"); attr(bus, "smoothing", "0");
     RootFrame roots(1); Rooted<Item> packet(roots, read_audio()); auto route = bus_identity(packet.get(), "mic"); acquire();
     ASSERT_FALSE(item_is_error(provider_route("capture", token, "mic", route))); ASSERT_TRUE(radiant_capture_monitor(&doc, token, .5f)); input(0);
@@ -11507,6 +11512,7 @@ TEST_F(Scene3dAudioTest, OfflineAuthoredGainAndRoutingEditsDoNotPublishToAnUnact
     url_destroy(doc.url); doc.url = lam::own(local);
 }
 TEST_F(Scene3dAudioTest, LiveDeviceMixAndRetirementLeaveExplicitRenderClocksAndReadersUntouched) {
+    use_device_output();
     speaker(); ASSERT_FALSE(item_is_error(upload())); ASSERT_FALSE(item_is_error(transport("play"))); RootFrame roots(3);
     Rooted<Item> packet(roots, read_audio()), job(roots, render_open(packet.get())), output(roots, ItemNull); ASSERT_FALSE(item_is_error(job.get())); auto id = render_id(job.get());
     float live[8 * 2]; audio_bus_mix(live, 8); EXPECT_NEAR(live[1], .5f, 1e-6); EXPECT_EQ(radiant_audio_frame(&doc), 8u);
@@ -11649,9 +11655,13 @@ TEST_F(Scene3dAudioTest, QueueCapacityRejectsOverflowAndCancellationReleasesPrep
     attr(source, "spatial", "3d"); ASSERT_FALSE(item_is_error(queue(packet.get(), "play", 17, 3)));
 }
 TEST_F(Scene3dAudioTest, DeviceLossAndRemovedSourcesCancelFutureCuesAndDoNotReplayThem) {
+    use_device_output();
     auto* source = speaker(); ASSERT_FALSE(item_is_error(upload())); RootFrame roots(2); Rooted<Item> packet(roots, read_audio()), result(roots, ItemNull);
     ASSERT_FALSE(item_is_error(queue(packet.get(), "play", 100))); audio_bus_retire_output(); result.set(read_audio()); ASSERT_FALSE(item_is_error(result.get()));
-    EXPECT_EQ(cue_count(result.get(), "cue_pending"), 0u); EXPECT_STREQ(cue_row(result.get(), "cue_history").get("status").asString()->chars, "device_lost");
+    EXPECT_EQ(cue_count(result.get(), "cue_pending"), 0u);
+    auto* status = cue_row(result.get(), "cue_history").get("status").asString();
+    ASSERT_NE(status, nullptr);
+    EXPECT_STREQ(status->chars, "device_lost");
     EXPECT_EQ(ItemReader(item_attr(result.get(), "document_players").to_const()).asUInt64(), 2u); EXPECT_FALSE(radiant_audio_frames_pending(&doc));
     ASSERT_FALSE(item_is_error(queue(packet.get(), "play", 100, 2))); ASSERT_TRUE(root->remove_child(source)); doc.advance_mutation_epoch();
     result.set(read_audio()); ASSERT_FALSE(item_is_error(result.get())); EXPECT_EQ(cue_count(result.get(), "cue_pending"), 0u);
@@ -11819,6 +11829,7 @@ TEST_F(Scene3dAudioTest, InvalidDescriptionsPreserveOldAudioAndStillAllowStop) {
     attr(source, "gain", "1"); ASSERT_FALSE(item_is_error(transport("play"))); pcm(0, .5f);
 }
 TEST_F(Scene3dAudioTest, DeviceRetirementAndDetachedSourcesReleaseNativeReaders) {
+    use_device_output();
     auto* source = speaker(); ASSERT_FALSE(item_is_error(upload())); ASSERT_FALSE(item_is_error(transport("play"))); pcm(0, .5f);
     audio_bus_retire_output(); RootFrame roots(1); Rooted<Item> packet(roots, read_audio());
     EXPECT_STREQ(source_row(packet.get()).get("state").asString()->chars, "error");

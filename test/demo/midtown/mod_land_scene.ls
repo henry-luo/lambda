@@ -63,9 +63,12 @@ let TILE_COLS = (land.NX - 2) div lm.CHUNK_X + 1
 let TILES = len(lm.CHUNKS)
 fn tile(p) => (let c = int(floor((p.x - land.X0) / TILE_W)) ^ { 0 }, let r = int(floor((p.z - land.Z0) / TILE_D)) ^ { 0 }, r * TILE_COLS + c)
 fn matrix(p) any^ => t.compose([p.x, p.y, p.z], u.quat(p.yaw), [p.s, p.s, p.s])
-fn instanced(id, geometry_id, material, items, options = {}) any^ => (let tiled = [for (p in items) {tile: tile(p), m: matrix(p)^}],
-    [for (q in 0 to (TILES - 1), let mine = [for (e in tiled where e.tile == q) e.m] where len(mine) > 0)
-        s.mesh(geometry_id, material, {id: id ++ "-" ++ string(q), instances: mine, *: options})])
+fn instanced(id, geometry_id, material, items, options = {}) any^ {
+    let tiled = [for (p in items, let q = tile(p) where (q >= 0 and q < TILES)^) {tile: q, m: matrix(p)^}];
+    // one partition preserves instance order without scanning every tree for each tile.
+    [for (e in tiled group by e.tile as q into members order by q)
+        s.mesh(geometry_id, material, {id: id ++ "-" ++ string(q), instances: [for (member in members) member.m], *: options})]
+}
 fn placed_copies(b, items) any^ => m.merge([for (p in items) m.yawed(b, p.x, p.y, p.z, p.heading)^])
 // the vegetation buffers, among the scene's shared resources because the city's street trees use them too
 pub fn tree_geometry() any^ => [m.geometry("g-pine", sm.pine()), m.geometry("g-broad", sm.broadleaf()), m.geometry("g-bush", sm.bush())]

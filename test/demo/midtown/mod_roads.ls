@@ -151,8 +151,12 @@ pub fn road_at(x, z) any^ {
     else {
         let ids = cells.at(CELL_SEGMENTS, x, z);
         if (len(ids) == 0) null
-        else (let d2 = [for (n in ids) seg_d2(x, z, n)], let least = min(d2),
-            if (least > REACH * REACH) null else project(x, z, SEGMENTS[ids[[for (i, d in d2 where d == least) i][0]]]))
+        else {
+            let distances = [for (n in ids) seg_d2(x, z, n)]
+            // argmin keeps the first tied segment without a second filtering pass.
+            let nearest = argmin(distances)^;
+            if (distances[nearest] > REACH * REACH) null else project(x, z, SEGMENTS[ids[nearest]])
+        }
     }
 }
 // is arc length s of the loop inside a structure of this kind, more than `margin` from its ends?
@@ -164,8 +168,7 @@ pub fn nearest_lane(x, z, heading) any^ {
     let r = road_at(x, z)^
     let rd = if (r == null) LOOP else ROADS[r.r]
     let pts = LOOP.samples^
-    let k = if (r != null) r.k else reduce([for (q, p in pts) q], (best, q) any^ =>
-        if (u.dist2(pts[q].x, pts[q].z, x, z)^ < u.dist2(pts[best].x, pts[best].z, x, z)^) q else best)
+    let k = if (r != null) r.k else argmin([for (p in pts) u.dist2(p.x, p.z, x, z)^])^
     let p = rd.samples[k]
     let h = if (cos(heading - p.heading) >= 0.0) p.heading else u.wrap(p.heading + u.PI)
     let side = u.right(h);

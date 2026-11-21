@@ -69,12 +69,12 @@ pub fn sweep(points,radius,segments,capped,distances=null,path_frames=null) map 
 }
 // concatenate indexed buffers once; offsets depend on vertices, not float entries.
 pub fn merge(buffers) map {
-    let ends=math.cumsum([for (b in buffers) len(b.positions) div 3]);
+    let offsets=math.cumsum([0,*[for (b in buffers) len(b.positions) div 3]]);
     {positions:[for (b in buffers) *b.positions],normals:[for (b in buffers) *b.normals],
      *:(if (len(buffers)>0 and all([for (b in buffers) b.uvs != null])) {uvs:[for (b in buffers) *b.uvs]} else {}),
      // vertex colours survive like UVs, only when every part carries them
      *:(if (len(buffers)>0 and all([for (b in buffers) b.colors != null])) {colors:[for (b in buffers) *b.colors]} else {}),
-     indices:[for (i,b in buffers) for (index in b.indices) index+(if (i == 0) 0 else ends[i-1])]}
+     indices:[for (i,b in buffers) *(b.indices + offsets[i])]}
 }
 // a curved blade shares the same sampled surface between petals, feathers and fins.
 pub fn blade(rows=6,columns=4,bend=0.16,bulge=0.06) map {

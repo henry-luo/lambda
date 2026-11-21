@@ -49,7 +49,10 @@ extern "C" Item dom_realm_constructor(const char* ctor_name) {
 }
 
 extern "C" Item dom_realm_constructor_prototype(const char* ctor_name) {
-    Item ctor = dom_realm_constructor(ctor_name);
+    if (!dom_realm_active() || !ctor_name) return ItemNull;
+    Item ctor = js_css_declaration_constructor(ctor_name, strlen(ctor_name));
+    if (ctor.item == ItemNull.item) ctor = dom_realm_constructor(ctor_name);
+    if (item_is_error(ctor)) return ctor;
     if (ctor.item == ItemNull.item) return ItemNull;
     Item proto = js_get_key_cstr(ctor, "prototype");
     return get_type_id(proto) == LMD_TYPE_MAP ? proto : ItemNull;

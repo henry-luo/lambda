@@ -20,6 +20,14 @@ observations still require re-verification. Add new Radiant issues here.
 
 ## Open issues
 
+<a id="ri-191"></a>
+
+### RI-191 — FIXED
+
+The Scene3D mixer and device-loss tests use a device-bound submix with
+hardware output disabled. See the
+[Scene3D audio fixture repair](<Radiant_Issue_Ledger (fixed).md#ri-191>).
+
 <a id="ri-190"></a>
 
 ### RI-190 — FIXED

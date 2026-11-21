@@ -229,6 +229,9 @@ enum JsRealmSlotId {
     JS_REALM_SLOT_DOM_EXCEPTION_CONSTRUCTOR,
     JS_REALM_SLOT_DOM_EXCEPTION_PROTOTYPE,
     JS_REALM_SLOT_PERFORMANCE_RESOURCE_TIMING_CONSTRUCTOR,
+#define CSS_DECLARATION_INTERFACE(kind, name, host, metadata) JS_REALM_SLOT_##host,
+#include "lambda/input/css/css_declaration_interfaces.def"
+#undef CSS_DECLARATION_INTERFACE
     JS_REALM_SLOT_COUNT,
 };
 

@@ -22,10 +22,10 @@ pub fn frame(direction) {
 fn around(f, angle) => mix3(f.u, f.v, cos(angle), sin(angle))
 
 pub fn merge(parts) {
-    let counts = [for (m in parts) len(m.p)]
-    let offsets = [for (k in 0 to (len(parts) - 1)) sum(slice(counts, 0, k))];
+    // Each part starts at the number of vertices in the preceding parts.
+    let offsets = math.cumsum([0, *[for (m in parts) len(m.p)]]);
     {p: [for (m in parts, v in m.p) v], n: [for (m in parts, v in m.n) v],
-     i: [for (k, m in parts, index in m.i) index + offsets[k]]}
+     i: [for (k, m in parts) *(m.i + offsets[k])]}
 }
 // the port side is the starboard side reflected in z, with its triangles rewound
 pub fn mirrored(m) => {p: [for (v in m.p) rig.mirror_point(v)], n: [for (v in m.n) rig.mirror_point(v)],
@@ -55,11 +55,13 @@ pub fn cylinder(a, b, r, k = 24, r2 = null, caps = true) {
 // a tyre: a torus around the axle, its tube flattened to an oval section
 pub fn torus(center, axis, big, radial, axial, k = 56, m = 18) {
     let f = frame(axis)
-    let rings = [for (i in 0 to k) around(f, TAU * i / k)];
-    {p: [for (d in rings, j in 0 to m, let phi = TAU * j / m)
-            rig.add(center, rig.add(rig.scale(d, big + radial * cos(phi)), rig.scale(f.w, axial * sin(phi))))],
-     n: [for (d in rings, j in 0 to m, let phi = TAU * j / m)
-            rig.unit(rig.add(rig.scale(d, cos(phi) / radial), rig.scale(f.w, sin(phi) / axial)))],
+    let rings = [for (i in 0 to k) around(f, TAU * i / k)]
+    // Reuse the tube cross-section around the axle.
+    let section = [for (j in 0 to m, let phi = TAU * j / m, let c = cos(phi), let s = sin(phi))
+        {radius: big + radial * c, rise: rig.scale(f.w, axial * s),
+         slope: c / radial, axis_normal: rig.scale(f.w, s / axial)}];
+    {p: [for (d in rings, q in section) rig.add(center, rig.add(rig.scale(d, q.radius), q.rise))],
+     n: [for (d in rings, q in section) rig.unit(rig.add(rig.scale(d, q.slope), q.axis_normal))],
      i: [for (i in 0 to (k - 1), j in 0 to (m - 1), let a = i * (m + 1) + j, let b = a + m + 1) *[a, b, a + 1, a + 1, b, b + 1]]}
 }
 // an oriented box: half extents along the frame's u, v and w

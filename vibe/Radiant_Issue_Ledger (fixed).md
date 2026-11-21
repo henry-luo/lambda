@@ -14,6 +14,29 @@ are unchanged. Full evidence is under `../../lambda/temp/kianhup-style/`.
 
 ## Fixed issues
 
+<a id="ri-191"></a>
+
+### RI-191 — Headless Scene3D fixtures bypass the device mixer
+
+**Fixed 2026-11-21.** The full host selects headless mode at runtime under
+**D9.2.1v2**. Output and capture capabilities follow **D11.3.1** and **D11.3.2**.
+
+After Radiant `4b0cdad`, headless documents use virtual submixes. Device
+mixing and retirement skip them, so three Scene3D tests failed audio
+assertions and a fourth crashed while reading a missing cue history status.
+The GTest runner reported all 32 cases in that worker as failed because the
+process exited before writing its JSON report. It had already passed 30.
+
+The four tests now select a device-bound submix before creating any audio
+state. They use a hidden graphics window and the offline audio bus. The cue
+test requires a status before reading it. [Scene3D unit fixture](../test/test_scene3d_unit_gtest.cpp)
+
+The macOS ARM64 debug build passes the four tests in three consecutive
+runs, the headless document-audio control, and all 656 Scene3D native cases
+through the baseline runner. `make run-radiant-baseline` records 8,172 passes,
+298 partial results, 20 skips and zero failures. Evidence is under
+`temp/scene3d-unit-regressions/`.
+
 <a id="ri-190"></a>
 
 ### RI-190 — CSS resource discovery repeatedly scans the DOM for a base URL

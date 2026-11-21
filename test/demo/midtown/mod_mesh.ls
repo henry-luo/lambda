@@ -32,7 +32,19 @@ pub fn hexa(lo, hi, bottom = true) => merge([
     *[for (k in 0 to 3, let m = (k + 1) % 4) quad(lo[k], lo[m], hi[m], hi[k])],
     quad(hi[0], hi[1], hi[2], hi[3]), *(if (bottom) [quad(lo[0], lo[3], lo[2], lo[1])] else [])])
 pub fn ring(x0, z0, x1, z1, y) => [[x0, y, z1], [x1, y, z1], [x1, y, z0], [x0, y, z0]]
-pub fn cuboid(x0, y0, z0, x1, y1, z1, bottom = true) => hexa(ring(x0, z0, x1, z1, y0), ring(x0, z0, x1, z1, y1), bottom)
+let UNIT_BOTTOM = ring(0.0, 0.0, 1.0, 1.0, 0.0)
+let UNIT_TOP = ring(0.0, 0.0, 1.0, 1.0, 1.0)
+let CLOSED_BOX = hexa(UNIT_BOTTOM, UNIT_TOP)
+let OPEN_BOX = hexa(UNIT_BOTTOM, UNIT_TOP, false)
+pub fn cuboid(x0, y0, z0, x1, y1, z1, bottom = true) {
+    if ((x0 < x1 and y0 < y1 and z0 < z1) ^ { false }) {
+        // Axis-aligned boxes share topology, normals and UVs. Substitute the
+        // authored endpoints directly to preserve their exact coordinates.
+        let box = if (bottom) CLOSED_BOX else OPEN_BOX
+        let lo = [x0, y0, z0], hi = [x1, y1, z1];
+        {*: box, positions: [for (i, coord in box.positions) if (coord == 0.0) lo[i % 3] else hi[i % 3]]}
+    } else hexa(ring(x0, z0, x1, z1, y0), ring(x0, z0, x1, z1, y1), bottom)
+}
 // a box centred on (x, z) with its base at y0
 pub fn block(x, y0, z, w, h, d) => cuboid(x - w / 2.0, y0, z - d / 2.0, x + w / 2.0, y0 + h, z + d / 2.0)
 
@@ -73,9 +85,12 @@ pub fn rooftop(b) {
 pub fn ground_quad(x0, z0, x1, z1, y, tile) => quad([x0, y, z1], [x1, y, z1], [x1, y, z0], [x0, y, z0],
     [x0 / tile, 0.0 - z1 / tile, x1 / tile, 0.0 - z1 / tile, x1 / tile, 0.0 - z0 / tile, x0 / tile, 0.0 - z0 / tile])
 // a raised slab: top with world UVs and plain curb faces
-pub fn slab(x0, z0, x1, z1, y0, y1, tile) => merge([ground_quad(x0, z0, x1, z1, y1, tile),
-    *[for (k in 0 to 3, let lo = ring(x0, z0, x1, z1, y0), let hi = ring(x0, z0, x1, z1, y1), let m = (k + 1) % 4)
-        quad(lo[k], lo[m], hi[m], hi[k], [0.0, 0.0, 0.25, 0.0, 0.25, 0.02, 0.0, 0.02])]])
+pub fn slab(x0, z0, x1, z1, y0, y1, tile) {
+    let lo = ring(x0, z0, x1, z1, y0), hi = ring(x0, z0, x1, z1, y1);
+    merge([ground_quad(x0, z0, x1, z1, y1, tile),
+        *[for (k in 0 to 3, let m = (k + 1) % 4)
+            quad(lo[k], lo[m], hi[m], hi[k], [0.0, 0.0, 0.25, 0.0, 0.25, 0.02, 0.0, 0.02])]])
+}
 // a ramp wedge rising along its heading; the low lip sits on the lot
 pub fn wedge(r, base) {
     let f = u.forward(r.heading), side = u.right(r.heading)

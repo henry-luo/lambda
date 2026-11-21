@@ -926,11 +926,17 @@ int gc_heap_maybe_force_collect(gc_heap_t* gc, const char* site) {
     return 1;
 }
 
+static inline size_t gc_object_cache_index(uintptr_t address) {
+    return ((address >> 4) ^ (address >> 12)) & (GC_OBJECT_CACHE_SIZE - 1);
+}
+
 static inline void* gc_record_small_allocation(gc_heap_t* gc, void* ptr, size_t size) {
     if (ptr) {
         gc->total_allocated += sizeof(gc_header_t) + size;
         gc->object_count++;
         assert_raw_item_pointer(ptr);
+        // Fresh slots can replace addresses rejected by a previous collection.
+        gc->object_cache[gc_object_cache_index((uintptr_t)ptr)] = (uintptr_t)ptr;
     }
     return ptr;
 }
@@ -971,6 +977,9 @@ void* gc_heap_alloc(gc_heap_t* gc, size_t size, uint16_t type_tag) {
 
     void* large_ptr = (void*)(header + 1);
     assert_raw_item_pointer(large_ptr);
+    uintptr_t address = (uintptr_t)large_ptr;
+    size_t bucket = gc_object_cache_index(address);
+    if (gc->object_cache[bucket] == (address | 1)) gc->object_cache[bucket] = 0;
     return large_ptr;
 }
 
@@ -1610,23 +1619,24 @@ static int gc_bump_block_owns_exact(gc_heap_t* gc, void* ptr) {
 // index, while large objects are individually freed and never cached.
 static int gc_lookup_object(gc_heap_t* gc, void* ptr, size_t bucket) {
     void* bump_block = NULL;
-    if (gc_object_zone_owns_or_foreign(gc->object_zone, ptr, &bump_block) ||
-            (bump_block && gc_bump_block_slot_exact(gc, (gc_bump_block_t*)bump_block, (uint8_t*)ptr))) {
-        gc->object_cache[bucket] = ptr;
-        return 1;
-    }
-    if (bump_block) return 0;
-    if (gc_large_object_contains(gc, ptr)) return 1;
-    // Every bump block registers its range, so only a zone-less heap walks them.
-    return !gc->object_zone && gc_bump_block_owns_exact(gc, ptr);
+    bool owned = gc_object_zone_owns_or_foreign(gc->object_zone, ptr, &bump_block) ||
+        (bump_block && gc_bump_block_slot_exact(gc, (gc_bump_block_t*)bump_block, (uint8_t*)ptr)) ||
+        (!gc->object_zone && gc_bump_block_owns_exact(gc, ptr));
+    if (!owned && !bump_block && gc_large_object_contains(gc, ptr)) return 1;
+    // Interned names and immutable host values can appear in many traced objects.
+    gc->object_cache[bucket] = (uintptr_t)ptr | (uintptr_t)!owned;
+    return owned;
 }
 
 static inline __attribute__((always_inline)) int is_gc_object(gc_heap_t* gc, void* ptr) {
-    if (!gc || !ptr || ((uintptr_t)ptr & (GC_BUMP_GRANULE - 1))) return 0;
+    uintptr_t address = (uintptr_t)ptr;
+    if (!gc || !address || (address & (GC_BUMP_GRANULE - 1))) return 0;
     // Reuse verified ownership across sweeps. Mark and free bits still come
     // from the live slot whenever a reference is traced.
-    size_t bucket = (((uintptr_t)ptr >> 4) ^ ((uintptr_t)ptr >> 12)) & (GC_OBJECT_CACHE_SIZE - 1);
-    return gc->object_cache[bucket] == ptr || gc_lookup_object(gc, ptr, bucket);
+    size_t bucket = gc_object_cache_index(address);
+    uintptr_t cached = gc->object_cache[bucket];
+    if ((cached & ~(uintptr_t)1) == address) return !(cached & 1);
+    return gc_lookup_object(gc, ptr, bucket);
 }
 
 static inline __attribute__((always_inline)) void gc_mark_candidate(gc_heap_t* gc, void* ptr) {
@@ -1763,9 +1773,12 @@ static void gc_trace_data_words(gc_heap_t* gc, void* data_ptr, int64_t byte_size
 static void gc_trace_shape_field(gc_heap_t* gc, const void* shape_entry,
                                  int64_t byte_offset, void* data_ptr,
                                  int64_t byte_size) {
-    if (!shape_entry) return;
     uint8_t kind = 0, nullable = 0, domain = 0;
     lambda_shape_entry_lane(shape_entry, &kind, &nullable, &domain);
+    // The packed-word pass already marks aligned Item words and raw pointers.
+    // TypedItem payloads and unaligned fields still need the shape descriptor.
+    if (kind != LANE_STORAGE_TYPED_ITEM && byte_offset >= 0 &&
+            byte_offset % (int64_t)sizeof(uint64_t) == 0) return;
     if (kind == LANE_STORAGE_ITEM && domain == LMD_TYPE_NULL_ && byte_offset >= 0 &&
             byte_offset + (int64_t)sizeof(uint64_t) <= byte_size) {
         // A `null`-typed lane is an eight-byte slot that the store path
@@ -1826,18 +1839,20 @@ static void gc_trace_shape_fields(gc_heap_t* gc, void* type_ptr, void* data_ptr,
     // descendant's, whose offsets lie outside this map's data.
     uint8_t* last = (uint8_t*)*(void**)((uint8_t*)type_ptr + LAMBDA_GC_OFF_TYPE_MAP_LAST);
     while (shape) {
+        int64_t offset = *(int64_t*)(shape + LAMBDA_GC_OFF_SHAPE_ENTRY_BYTE_OFFSET);
         // A JS accessor is a virtual ShapeEntry field (byte_offset == -1), so
         // trace its exact cell edge even when this Map has no packed data.
-        void* accessor = lambda_shape_entry_accessor(shape);
-        if (accessor) gc_mark_object_ptr(gc, accessor);
-        if (data_ptr) {
-            gc_trace_shape_field(gc, shape,
-                *(int64_t*)(shape + LAMBDA_GC_OFF_SHAPE_ENTRY_BYTE_OFFSET),
-                data_ptr, byte_size);
+        if (offset < 0) {
+            void* accessor = lambda_shape_entry_accessor(shape);
+            if (accessor) gc_mark_object_ptr(gc, accessor);
+        } else if (data_ptr) {
+            gc_trace_shape_field(gc, shape, offset, data_ptr, byte_size);
         }
         if (shape == last) break;
         shape = (uint8_t*)*(void**)(shape + LAMBDA_GC_OFF_SHAPE_ENTRY_NEXT);
     }
+    // Reserved constructor slots beyond the published shape can hold live Items.
+    if (data_ptr) gc_trace_data_words(gc, data_ptr, byte_size);
 }
 
 static int64_t gc_packed_data_allocation_size(void* type_ptr, int data_cap) {
@@ -1910,7 +1925,6 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
                 int64_t byte_size = attr_data ? gc_packed_data_allocation_size(
                     attr_type, *(int*)(p + LAMBDA_GC_OFF_MAP_DATA_CAP)) : 0;
                 gc_trace_shape_fields(gc, attr_type, attr_data, byte_size);
-                if (attr_data) gc_trace_data_words(gc, attr_data, byte_size);
             }
         }
         if (array_flags & 0x02) {  // Container.is_view in array_flags byte
@@ -1971,7 +1985,6 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
                 int64_t byte_size = attr_data ? gc_packed_data_allocation_size(
                     attr_type, *(int*)(p + LAMBDA_GC_OFF_MAP_DATA_CAP)) : 0;
                 gc_trace_shape_fields(gc, attr_type, attr_data, byte_size);
-                if (attr_data) gc_trace_data_words(gc, attr_data, byte_size);
             }
         }
         break;
@@ -2009,7 +2022,6 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
         int64_t byte_size = data_ptr
             ? gc_packed_data_allocation_size(type_ptr, data_cap) : 0;
         gc_trace_shape_fields(gc, type_ptr, data_ptr, byte_size);
-        if (data_ptr) gc_trace_data_words(gc, data_ptr, byte_size);
         break;
     }
 
@@ -2039,7 +2051,6 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
             int64_t byte_size = data_ptr
                 ? gc_packed_data_allocation_size(type_ptr, data_cap) : 0;
             gc_trace_shape_fields(gc, type_ptr, data_ptr, byte_size);
-            if (data_ptr) gc_trace_data_words(gc, data_ptr, byte_size);
         }
         break;
     }
@@ -2110,10 +2121,11 @@ static void gc_record_compaction_owner(gc_heap_t* gc, gc_header_t* header) {
     default:
         return;
     }
-    if (gc->compaction_owner_count == SIZE_MAX ||
+    if (gc->compaction_owner_count == gc->compaction_owner_capacity &&
+            (gc->compaction_owner_count == SIZE_MAX ||
             !mem_grow_array_raw((void**)&gc->compaction_owners, sizeof(gc_header_t*),
                 &gc->compaction_owner_capacity, gc->compaction_owner_count + 1,
-                GC_MARK_STACK_INITIAL, MEM_CAT_CONTAINER)) {
+                GC_MARK_STACK_INITIAL, MEM_CAT_CONTAINER))) {
         // liveness is already established; an optional worklist must not lose
         // owners when its allocation fails (D5.3.1, D6.3.3).
         gc->compaction_owners_valid = false;
@@ -2311,6 +2323,7 @@ static gc_header_t* gc_next_compaction_owner(gc_heap_t* gc,
 
 // compact surviving nursery buffers through their marked owners.
 static void gc_compact_data(gc_heap_t* gc) {
+    if (gc_data_zone_used(gc->data_zone) == 0) return;
     gc_header_t* current = NULL;
     size_t cursor = 0;
 #ifndef NDEBUG
@@ -2764,7 +2777,9 @@ void gc_collect_with_root_region(gc_heap_t* gc, uint64_t* extra_roots,
 
     gc->mark_top = 0;
     gc->compaction_owner_count = 0;
-    gc->compaction_owners_valid = true;
+    // With no source buffers to move, marking needs no compaction worklist.
+    gc->compaction_owners_valid = gc_data_zone_used(gc->data_zone) != 0 ||
+        gc_data_zone_used(gc->tenured_data) >= GC_TENURED_FULL_COMPACT_THRESHOLD;
     gc->mark_failed = 0;
 #ifndef LAMBDA_NO_AMBIENT_PROVIDERS
     uint64_t mark_start_ns = gc_now_nanos();

@@ -56,9 +56,9 @@ pub fn prepare(map_data, game) any^ {
     let walls = [for (wall in map_data.walls, let mover = motion_for_wall(game, wall)
         where ((valid_wall(wall) and not wall.isLiftWall) ^ { false }))
         wall_descriptor(wall, "wall-" ++ string(wall.id), mover, mover.base or 0)]
-    let tracks = [for (door in game.doors, wall in map_data.walls,
-        let faces = [for (face_wall in map_data.walls where face_wall.door_id == door.sectorIndex) face_wall]
-        where wall.isSolid and not wall.isDoor and wall.bottomHeight == door.floorHeight and
+    // Door faces are shared by every candidate track on that door.
+    let tracks = [for (door in game.doors, let faces = [for (face_wall in map_data.walls where face_wall.door_id == door.sectorIndex) face_wall])
+        for (wall in map_data.walls where wall.isSolid and not wall.isDoor and wall.bottomHeight == door.floorHeight and
             wall.topHeight == door.closedHeight and any([for (face in faces) adjacent(wall, face)]) and
             wall.texture != null and wall.texture != "-")
         wall_descriptor({*: wall, bottomHeight: door.closedHeight, topHeight: door.openHeight},

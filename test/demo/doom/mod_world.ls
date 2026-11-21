@@ -12,9 +12,20 @@ fn coordinate(value, origin, size, total) any^ => max(0, min(total - 1, int(floo
 fn bucket_box(grid, column, row) => {min_x: grid.origin.x + column * grid.size,
     min_y: grid.origin.y + row * grid.size, max_x: grid.origin.x + (column + 1) * grid.size,
     max_y: grid.origin.y + (row + 1) * grid.size}
-fn index_items(items, grid) => [for (row in 0 to (grid.rows - 1), column in 0 to (grid.columns - 1),
-    let box = bucket_box(grid, column, row))
-    [for (i in 0 to (len(items) - 1) where ((geo.overlaps(items[i].bounds, box)) ^ { false })) i]]
+fn index_items(items, grid) {
+    // Each box contributes only to nearby cells. Include the previous cell at a
+    // lower grid line because overlap counts contact on the shared boundary.
+    let pairs = [for (i, item in items, let bounds = item.bounds,
+        let x0 = max(0, coordinate(bounds.min_x, grid.origin.x, grid.size, grid.columns) - 1),
+        let x1 = coordinate(bounds.max_x, grid.origin.x, grid.size, grid.columns),
+        let y0 = max(0, coordinate(bounds.min_y, grid.origin.y, grid.size, grid.rows) - 1),
+        let y1 = coordinate(bounds.max_y, grid.origin.y, grid.size, grid.rows))
+        for (row in ((y0 to y1) ^ { [] }), column in ((x0 to x1) ^ { [] })
+            where (geo.overlaps(bounds, bucket_box(grid, column, row)) ^ { false }))
+            {cell: row * grid.columns + column, item: i}]
+    let lists = map([for (p in pairs group by p.cell into members) (string(cell), [for (member in members) member.item])]);
+    [for (cell in 0 to (grid.rows * grid.columns - 1)) lists[string(cell)] or []]
+}
 
 pub fn prepare(level, size = 128) {
     let walls = [for (i in ((0 to (len(level.walls) - 1)) ^ { [] }), let wall = level.walls[i])

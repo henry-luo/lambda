@@ -8867,8 +8867,10 @@ extern "C" void dom_after_set_attribute(void* elem_ptr,
 
 extern "C" bool dom_set_non_style_metadata(void* target, const char* name, const char* value) {
     DomElement* element = (DomElement*)target;
-    if (!element || !element->doc || !name || !value || strchr(name, ':') ||
-        !dom_element_can_write_metadata(element, name)) return false;
+    if (!element || !element->doc || !name || !value || strchr(name, ':')) return false;
+    bool metadata = dom_element_can_write_metadata(element, name);
+    bool scene_paint = !metadata && dom_engine_scene_paint_attribute(element, name);
+    if (!metadata && !scene_paint) return false;
     // namespace/case-sensitive writes keep the general attribute path.
     for (const char* character = name; *character; character++)
         if (*character >= 'A' && *character <= 'Z') return false;
@@ -8879,13 +8881,14 @@ extern "C" bool dom_set_non_style_metadata(void* target, const char* name, const
     bool same_value = old_value && strcmp(old_value, value) == 0;
     if ((uri && *uri) || (!same_value &&
             dom_engine_attribute_has_css_dependency(element->doc, element, name))) return false;
-    if (!dom_element_set_non_style_metadata(element, name, value)) return false;
+    if (!dom_element_write_attribute_without_cascade(element, name, value)) return false;
     dom_after_set_attribute(element, name, value);
     if (dom_edit_transaction_defer_mutation(element->doc, DOM_JS_MUTATION_ATTRIBUTE,
             element, element->parent, name, old_value)) return true;
     // observers/custom elements still see the write, but unrelated geometry
     // reads must not recascade and reflow the document for application metadata.
     element->doc->advance_mutation_epoch();
+    if (scene_paint && !same_value) dom_engine_publish_scene_attribute_change(element);
     dom_mutation_notify_observers(DOM_JS_MUTATION_ATTRIBUTE, element, element->parent, name, old_value);
     dom_engine_publish_metadata_change(element->doc);
     return true;
