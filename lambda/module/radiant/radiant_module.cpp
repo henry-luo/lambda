@@ -5910,7 +5910,7 @@ static const DomHostEngineOps radiant_host_operations = {
     radiant_host_svg_clip_contains,
     radiant_host_web_animation_create,
     dom_range_adopt_subtree,
-    dom_range_refresh_lifecycle_pins,
+    [](DomDocument*) {}, // required host ABI slot; endpoint setters maintain the holds
     dom_selection_collapse,
     dom_text_split_at,
     radiant_host_element_client_frame,

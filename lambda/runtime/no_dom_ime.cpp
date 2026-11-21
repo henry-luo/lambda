@@ -16,9 +16,14 @@ bool dom_is_comment_tag(const char* tag_name) {
         strcmp(tag_name, "#comment") == 0 || str_ieq_cstr(tag_name, "!DOCTYPE"));
 }
 
+void dom_unlink_from_sibling_chain(DomNode*) {}
 bool dom_node_registry_owns(DomDocument*, DomNode*) { return false; }
 bool dom_node_registry_register(DomDocument*, DomNode*, size_t, bool) { return false; }
-void dom_node_registry_refresh_backing(DomDocument*, DomNode*) {}
+void dom_node_refresh_managed_backing(DomDocument*, DomNode*) {}
+void dom_node_borrowed_source_storage(DomDocument*, DomNode*, bool* type, bool* data) {
+    if (type) *type = false;
+    if (data) *data = false;
+}
 bool dom_document_owns_node_storage(DomDocument*, const void*) { return false; }
 uint32_t dom_document_alloc_node_id(DomDocument*) { return 0; }
 DomElement* element_dom_map_lookup(HashMap*, Element*) { return nullptr; }

@@ -210,6 +210,21 @@ TEST_F(DomRangeTest, RangeCreateIsCollapsedAtNullStart) {
     dom_range_release(r);
 }
 
+TEST_F(DomRangeTest, DetachedBoundaryIsHeldUntilLastRangeRelease) {
+    DomRange* range = dom_range_create(state);
+    ASSERT_NE(range, nullptr);
+    const char* exception = nullptr;
+    ASSERT_TRUE(dom_range_set_start(range, world, 0, &exception));
+    ASSERT_EQ(range->end.node, world);
+    EXPECT_EQ(world->external_retain_count, 2u);
+    DomNodeRef ref = dom_node_ref(world);
+    dom_node_schedule_detached(&doc_storage, world);
+    EXPECT_EQ(dom_retire_sweep(&doc_storage), 0u);
+    dom_range_release(range);
+    while (dom_retire_idle(10000)) {}
+    EXPECT_EQ(dom_node_ref_validate(&doc_storage, ref), nullptr);
+}
+
 TEST_F(DomRangeTest, RangeReleaseReusesFreelistSlot) {
     DomRange* first = dom_range_create(state);
     ASSERT_NE(first, nullptr);

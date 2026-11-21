@@ -1211,6 +1211,25 @@ TEST(DomDocumentOwnership, LambdaOnlyEvaluatorClosesDocumentsAtResetAndTeardown)
     DomText* detached = DomText::create_detached_copy(document, "detached", 8);
     ASSERT_NE(detached, nullptr);
     EXPECT_EQ(dom_node_owner_document_bridge(detached), document);
+    {
+        unsigned destination_closed = 0;
+        DomDocument* destination = cssom_create_owned_document(&destination_closed);
+        ASSERT_NE(destination, nullptr);
+        RootFrame roots(1);
+        Rooted<Item> wrapper(roots, vmap_new());
+        virtual_host_set(wrapper.get(), &node_brand, detached);
+        ASSERT_TRUE(dom_cache_node_wrapper(detached, document, wrapper.get()));
+        uint32_t id = dom_document_alloc_node_id(destination);
+        ASSERT_TRUE(dom_node_registry_transfer(document, destination, detached, &id));
+        detached->id = id;
+        EXPECT_EQ(dom_cached_node_wrapper_document(wrapper.get()), destination);
+        dom_node_schedule_detached(destination, detached);
+        EXPECT_EQ(dom_retire_sweep(destination), 0u);
+        EXPECT_TRUE(dom_retire_wrapper_collection_due(destination, sizeof(DomText)));
+        free_document(destination);
+        EXPECT_EQ(destination_closed, 1u);
+        EXPECT_EQ(virtual_host_data(wrapper.get()), nullptr);
+    }
     // weak script carriers cannot collect a document still owned by the evaluator.
     heap_gc_collect();
     EXPECT_EQ(destroyed, 0u);

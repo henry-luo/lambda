@@ -63,24 +63,27 @@ Context* radiant_dom_resource_owner(DomDocument* document) {
         ? (Context*)context : nullptr;
 }
 
-extern "C" void* dom_retain_backing_root(DomDocument* doc, Item* root, void* owner) {
-    gc_heap_t* gc = static_cast<gc_heap_t*>(owner);
-    if (!gc) {
-        Runtime* runtime = dom_document_script_runtime(doc);
-        Heap* heap = runtime ? runtime_heap(runtime) : (::context ? ::context->heap : nullptr);
-        gc = heap ? heap->gc : nullptr;
-    }
-    if (!gc || !root) return nullptr;
+extern "C" void* dom_backing_gc_owner(DomDocument* doc, Item value, void* previous_heap) {
     void* source = nullptr;
-    if (get_type_id(*root) == LMD_TYPE_ELEMENT) source = root->element;
-    else if (get_type_id(*root) == LMD_TYPE_STRING) source = root->get_string();
-    if (!source || !gc_is_managed(gc, source)) return nullptr;
-    // registry slots are stable until retirement or document/runtime teardown.
-    if (!gc_try_register_root(gc, &root->item)) {
+    if (get_type_id(value) == LMD_TYPE_ELEMENT) source = value.element;
+    else if (get_type_id(value) == LMD_TYPE_STRING) source = value.get_string();
+    if (!source) return nullptr;
+    // an adopted occurrence can receive another value from its original evaluator.
+    auto* previous = static_cast<gc_heap_t*>(previous_heap);
+    if (previous && gc_is_managed(previous, source)) return previous;
+    Runtime* runtime = dom_document_script_runtime(doc);
+    Heap* heap = runtime ? runtime_heap(runtime) : nullptr;
+    gc_heap_t* gc = heap ? heap->gc : nullptr;
+    if (gc && gc != previous && gc_is_managed(gc, source)) return gc;
+    auto* active = ::context && ::context->heap ? ::context->heap->gc : nullptr;
+    return active && active != previous && active != gc && gc_is_managed(active, source) ? active : nullptr;
+}
+
+extern "C" void dom_retain_backing_root(void* owner, Item* root) {
+    if (!gc_try_register_root(static_cast<gc_heap_t*>(owner), &root->item)) {
         log_error("DOM_BACKING_ROOT: failed to retain runtime value");
         abort();
     }
-    return gc;
 }
 
 extern "C" void dom_release_backing_root(void* owner, Item* root) {

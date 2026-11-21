@@ -187,6 +187,8 @@ Hashes accelerate lookup; exact semantic equality decides sharing. Explicit `has
 
 ### Part B — DOM recycling and relayout storage
 
+The November 2026 proposal revisits VR7–VR9. It gives each release reference an owner, uses an inline count for durable DOM holds, and reserves lifecycle tracking for development verification and the host's precise GC roots. [Proposed DOM ownership and retirement](Radiant_Design_DOM_Node_Lifecycle.md)
+
 ### VR7 — Complete liveness infrastructure precedes node reuse
 
 The wrapper cache gains true GC weak slots. A document registry tracks current node generations and retainer counts by `(address, node id, reason)`. Ranges, observers, queues, collections, DocState, reconciliation, and Lambda backing participate. A dedicated detached-root candidate queue is independent of the capped mutation-record array.

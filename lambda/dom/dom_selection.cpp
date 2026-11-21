@@ -271,13 +271,7 @@ static DocState* state_for_text_control_selection(DomSelection* s,
 }
 
 // Resolve the DomDocument owning `n` by walking up to the nearest DomElement.
-static DomDocument* node_owning_doc(DomNode* n) {
-    while (n) {
-        if (n->is_element()) return n->as_element()->doc;
-        n = n->parent;
-    }
-    return nullptr;
-}
+
 
 static bool node_is_document_fragment(DomNode* n) {
     if (!n || !n->is_element()) return false;
@@ -306,7 +300,7 @@ static bool node_in_selection_doc(DomNode* n, DomSelection* s) {
     if (s && s->state) {
         // Walk node up to find its doc, then prefer that as the selection's
         // doc when the doc's state matches the selection's state.
-        DomDocument* nd = node_owning_doc(n);
+        DomDocument* nd = dom_node_ancestor_document(n);
         if (nd && nd->state == s->state) sel_doc = nd;
     }
     if (!sel_doc) sel_doc = (DomDocument*)dom_get_document();
@@ -516,8 +510,8 @@ static RangeClientRectCollector js_range_collect_client_rects(
         collector.array_handle = nullptr;
         return collector;
     }
-    DomDocument* doc = node_owning_doc(r->start.node);
-    if (!doc) doc = node_owning_doc(r->end.node);
+    DomDocument* doc = dom_node_ancestor_document(r->start.node);
+    if (!doc) doc = dom_node_ancestor_document(r->end.node);
     bool geometry_ready = !doc || dom_ensure_geometry_snapshot(doc);
     collector.doc = doc;
     collector.plain = plain;
@@ -1329,8 +1323,8 @@ extern "C" void dom_queue_selectionchange(DomSelection* sel) {
     DomBoundary anchor = dom_selection_anchor_boundary(sel);
     DomBoundary focus = dom_selection_focus_boundary(sel);
     DomDocument* doc = nullptr;
-    if (anchor.node) doc = node_owning_doc(anchor.node);
-    if (!doc && focus.node) doc = node_owning_doc(focus.node);
+    if (anchor.node) doc = dom_node_ancestor_document(anchor.node);
+    if (!doc && focus.node) doc = dom_node_ancestor_document(focus.node);
     if (!doc) doc = (DomDocument*)dom_get_document();
     if (!js_doc_runtime_enter_if_needed(doc)) return;
     state->selectionchange_pending = true;

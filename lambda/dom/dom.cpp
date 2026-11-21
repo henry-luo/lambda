@@ -476,34 +476,15 @@ static Url* dom_make_fallback_url(const char* raw_url);
 
 static inline DocState* dom_current_state();
 
-static DomDocument* dom_registry_owner_for_detached_node(DomNode* node);
 
-static DomDocument* dom_node_owner_document(DomNode* node) {
-    if (node) {
-        if (DomAttr* attribute = node->as_attribute()) return attribute->doc;
-        if (node->is_element()) {
-            DomElement* elem = node->as_element();
-            if (elem && elem->doc) return elem->doc;
-        }
-    }
-    for (DomNode* cur = node; cur; cur = cur->parent) {
-        if (cur->is_element()) {
-            DomElement* elem = cur->as_element();
-            if (elem && elem->doc) return elem->doc;
-        }
-    }
-    // CharacterData and DocumentType have no document field. Their registry
-    // keeps ownership after detach, including across foreign-document adoption.
-    return node ? dom_registry_owner_for_detached_node(node) : nullptr;
-}
 
 extern "C" void* dom_node_owner_document_bridge(void* node) {
-    return dom_node_owner_document((DomNode*)node);
+    return dom_node_ancestor_document((DomNode*)node);
 }
 
 static DomDocument* dom_mutation_document(DomNode* target, DomNode* parent) {
-    DomDocument* doc = dom_node_owner_document(target);
-    if (!doc) doc = dom_node_owner_document(parent);
+    DomDocument* doc = dom_node_ancestor_document(target);
+    if (!doc) doc = dom_node_ancestor_document(parent);
     return doc ? doc : _js_current_document;
 }
 
@@ -1212,7 +1193,7 @@ static inline void dom_pre_remove(DomNode* child, bool record_mutation = true,
 static void dom_pre_remove_for_move(DomElement* parent, DomNode* child) {
     if (!parent || !child || !child->parent) return;
     bool same_document = parent->doc &&
-        dom_node_owner_document(child->parent) == parent->doc;
+        dom_node_ancestor_document(child->parent) == parent->doc;
     dom_pre_remove(child, true, !same_document);
 }
 
@@ -1373,7 +1354,7 @@ static Item dom_replace_text_data(DomText* text_node, uint32_t offset,
         (DomNode*)text_node, text_node->parent);
     if (!dom_text_replace_data_contents(state, text_node, offset, count,
                                         repl_chars, repl_len, repl_u16_len,
-                                        dom_node_owner_document(text_node))) {
+                                        dom_node_ancestor_document(text_node))) {
         mem_free(old_text);
         return js_status_ok();
     }
@@ -1538,7 +1519,7 @@ static AttachedExpandoRoot* attached_expando_find(DomNode* node) {
 
 static bool expando_node_is_attached(DomNode* node) {
     if (!node) return false;
-    DomDocument* doc = dom_node_owner_document(node);
+    DomDocument* doc = dom_node_ancestor_document(node);
     if (!doc || !doc->root) return false;
     // A descendant can retain a parent inside a detached subtree; only a
     // complete ancestry chain to the document root makes native ownership a
@@ -1553,7 +1534,7 @@ static void attached_expando_root_add(DomNode* node, Item map,
                                       bool attachment_confirmed = false) {
     if (!node || get_type_id(map) != LMD_TYPE_MAP ||
             (!attachment_confirmed && !expando_node_is_attached(node))) return;
-    DomDocument* doc = dom_node_owner_document(node);
+    DomDocument* doc = dom_node_ancestor_document(node);
     if (!doc) return;
     AttachedExpandoRoot* existing = attached_expando_find(node);
     if (existing) {
@@ -3497,31 +3478,7 @@ JS_FORWARD_STATIC_EXPRESSION(bool, dom_foreign_document_state_ensure, (),
 #define s_pending_image_load_count (dom_foreign_document_rt_state->pending_image_load_count)
 #define s_iframe_load_drain_scheduled (dom_foreign_document_rt_state->iframe_load_drain_scheduled)
 
-static DomDocument* dom_registry_owner_for_detached_node(DomNode* node) {
-    if (!node) return nullptr;
-    if (js_active_runtime_state) {
-        if (dom_node_registry_owns(_js_current_document, node)) return _js_current_document;
-        if (_js_main_document != _js_current_document &&
-            dom_node_registry_owns(_js_main_document, node)) return _js_main_document;
-    }
-    // detached CharacterData keeps its generation record in Lambda-loaded documents too.
-    RuntimeResourceTable* table = runtime_resource_table_context(context);
-    for (int i = 0; i < runtime_resource_table_slot_count(table); i++) {
-        const RuntimeResourceEntry* entry = runtime_resource_table_entry_at(table, i);
-        if (entry && entry->descriptor && entry->descriptor->kind == RUNTIME_RESOURCE_DOM_DOCUMENT) {
-            DomDocument* doc = (DomDocument*)entry->lifecycle_owner;
-            if (dom_node_registry_owns(doc, node)) return doc;
-        }
-    }
-    if (!dom_foreign_document_state_get()) return nullptr;
-    for (ForeignDocCacheEntry* entry = s_foreign_doc_cache; entry; entry = entry->next) {
-        if (dom_node_registry_owns(entry->doc, node)) return entry->doc;
-    }
-    for (int i = 0; i < s_iframe_cache_count; i++) {
-        if (dom_node_registry_owns(s_iframe_cache[i].doc, node)) return s_iframe_cache[i].doc;
-    }
-    return nullptr;
-}
+
 
 extern "C" bool dom_doc_has_browsing_context(void* doc) {
     if (!doc || !dom_foreign_document_state_get()) return false;
@@ -3629,68 +3586,21 @@ static bool dom_transfer_document_storage(DomDocument* source,
     return true;
 }
 
-static bool dom_rebind_subtree_document(DomNode* node,
-                                           DomDocument* source,
-                                           DomDocument* destination) {
-    if (!node || !source || !destination) return false;
-    uint32_t destination_id = destination->next_node_id++;
-    if (!dom_node_registry_transfer(source, destination, node, &destination_id)) {
-        return false;
-    }
-    node->id = destination_id;
-    node->view_state_ref = nullptr;
-    if (DomAttr* attribute = node->as_attribute()) {
-        attribute->doc = lam::up(destination);
-        if (attribute->owner_changed) attribute->owner_changed(attribute);
-        return true;
-    }
-    if (!node->is_element()) return true;
-
-    DomElement* elem = node->as_element();
-    elem->doc = lam::up(destination);
-    for (DomAttr* attribute = elem->rare_ext ? elem->rare_ext->attribute_nodes.get() : nullptr;
-         attribute; attribute = attribute->attribute_next) {
-        if (!dom_rebind_subtree_document(attribute, source, destination)) return false;
-        if (attribute->owner_changed) attribute->owner_changed(attribute);
-    }
-    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
-        if (!dom_rebind_subtree_document(child, source, destination)) return false;
-    }
-    if (elem->shadow_root_element()) {
-        destination->js.has_shadow_roots = true;
-        if (!dom_rebind_subtree_document(
-                (DomNode*)elem->shadow_root_element(), source, destination)) return false;
-    }
-    return true;
-}
-
 static bool dom_prepare_cross_document_insertion(DomNode* node,
                                                     DomElement* parent) {
     if (!node || !parent || !parent->doc) return false;
-    DomDocument* source = dom_node_owner_document(node);
+    DomDocument* source = dom_node_ancestor_document(node);
     DomDocument* destination = parent->doc;
-    if (!source) return true;
-    bool cross_document = source != destination;
-    if (cross_document &&
-        !dom_transfer_document_storage(source, destination)) return false;
-    // Detach only for adoption; same-document backed paths must retain the
-    // source parent so they can remove the corresponding Mark child too.
-    if (cross_document && node->parent && !dom_detach_dom_node(node)) {
-        return false;
-    }
-    if (cross_document && source->state) {
-        DocState* destination_state = destination->state
-            ? destination->state
-            : dom_engine_document_ensure_state(destination, "dom_adopt_range");
+    if (!source || source == destination) return true;
+    DocState* destination_state = destination->state;
+    if (source->state && !destination_state) {
+        destination_state = dom_engine_document_ensure_state(destination, "dom_adopt_range");
         if (!destination_state) return false;
-        dom_engine_range_adopt_subtree(source->state, destination_state, node);
-        dom_engine_range_refresh_lifecycle_pins(source);
     }
-    if (cross_document &&
-        !dom_rebind_subtree_document(node, source, destination)) return false;
-    if (cross_document && source->state) {
-        dom_engine_range_refresh_lifecycle_pins(destination);
-    }
+    if (!dom_transfer_document_storage(source, destination)) return false;
+    if (node->parent && !dom_detach_dom_node(node)) return false;
+    if (!dom_adopt_detached_subtree(source, destination, node)) return false;
+    if (source->state) dom_engine_range_adopt_subtree(source->state, destination_state, node);
     return true;
 }
 
@@ -3740,7 +3650,7 @@ static Item lookup_foreign_doc_wrapper(DomDocument* doc) {
 }
 
 static Item dom_owner_document_from_node(DomNode* node) {
-    DomDocument* owner = dom_node_owner_document(node);
+    DomDocument* owner = dom_node_ancestor_document(node);
     if (owner && owner != _js_current_document) {
         Item wrapper = lookup_foreign_doc_wrapper(owner);
         if (wrapper.item != ITEM_NULL) return wrapper;
@@ -10672,7 +10582,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
 
     if (strcmp(prop, "baseURI") == 0) {
         // detached CharacterData/Attr ownership is retained by the native document registry.
-        return dom_document_base_uri(dom_node_owner_document(node));
+        return dom_document_base_uri(dom_node_ancestor_document(node));
     }
 
     if (DomAttr* attribute = node->as_attribute()) {
@@ -11925,7 +11835,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
             ? "" : dom_to_dom_string_cstr(value);
         DomComment* comment = node->as_comment();
         const char* old = comment->content;
-        if (next && dom_comment_set_content(comment, next, dom_node_owner_document(node))) {
+        if (next && dom_comment_set_content(comment, next, dom_node_ancestor_document(node))) {
             dom_record_mutation_detail(DOM_JS_MUTATION_TEXT, node, node->parent, 0);
             dom_mutation_notify(DOM_JS_MUTATION_TEXT, node, node->parent, nullptr, old);
         }
@@ -13943,7 +13853,7 @@ static bool dom_append_backed_child(DomElement* parent, DomNode* child,
 extern "C" bool dom_parser_move_child(void* parent_ptr, void* child_ptr) {
     DomElement* parent = (DomElement*)parent_ptr;
     DomNode* child = (DomNode*)child_ptr;
-    if (!parent || !child || dom_node_owner_document(child) != parent->doc) {
+    if (!parent || !child || dom_node_ancestor_document(child) != parent->doc) {
         log_error("dom_parser_move: invalid document for parent=%p child=%p", parent, child);
         return false;
     }
@@ -14586,7 +14496,7 @@ static bool dom_selected_content_include_child(DomNode* node) {
 
 extern "C" Item dom_clone_node_bridge(void* elem_ptr, Item deep_arg, bool has_deep) {
     DomNode* node = (DomNode*)elem_ptr;
-    DomNode* clone = node ? dom_clone_node_into_document(node, dom_node_owner_document(node),
+    DomNode* clone = node ? dom_clone_node_into_document(node, dom_node_ancestor_document(node),
         has_deep && js_is_truthy(deep_arg)) : nullptr;
     return clone ? dom_realm_custom_element_upgrade(dom_wrap_element(clone)) : ItemNull;
 }
@@ -14875,7 +14785,7 @@ static Item dom_child_node_insert_relative(DomNode* node, Item* args, int argc,
             }
             continue;
         }
-        DomDocument* source = dom_node_owner_document(insertion);
+        DomDocument* source = dom_node_ancestor_document(insertion);
         if (insertion->is_element() &&
             dom_is_document_fragment_element(insertion->as_element())) {
             if (!dom_insert_fragment_children_before(parent, insertion->as_element(),
@@ -16395,7 +16305,7 @@ Item dom_slot_assign(Item receiver, const Item* args, int count) {
             mem_free(inputs);
             return dom_raise_type_error("assign arguments must be Element or Text nodes");
         }
-        inputs[i] = {dom_node_owner_document(node), node};
+        inputs[i] = {dom_node_ancestor_document(node), node};
     }
     ArrayList* affected = arraylist_new(count + 1);
     bool ok = affected && dom_slot_set_manual_assignment(slot, inputs, count, affected);
