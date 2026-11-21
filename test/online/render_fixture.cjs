@@ -27,4 +27,14 @@ function rgb(image, x, y) {
     return [...image.data.subarray(offset, offset + 3)];
 }
 
-module.exports = {renderFixtures, rgb};
+function layoutCount(log) {
+    return (log.match(/\[LAYOUT_PROFILE\] retained-stage:/g) || []).length;
+}
+
+function loggedResult(log, tag) {
+    const match = new RegExp(tag + ' (\\{[^\\n]+\\})').exec(log);
+    assert.ok(match, log);
+    return JSON.parse(match[1]);
+}
+
+module.exports = {renderFixtures, rgb, layoutCount, loggedResult};

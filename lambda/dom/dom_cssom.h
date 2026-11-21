@@ -165,6 +165,8 @@ Item dom_cssom_get_shadow_stylesheets(Item root);
  * @return Wrapped CSSStyleSheet Item, or ITEM_NULL
  */
 Item dom_cssom_get_element_sheet(Item elem);
+// native lookup retains the associated sheet even after rel changes or removal.
+struct CssStylesheet* dom_cssom_element_sheet(struct DomElement* element);
 // Keep associated-sheet activation in sync with reflected/content attributes.
 void dom_cssom_owner_attribute_changed(void* element, const char* name);
 

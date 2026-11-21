@@ -539,6 +539,7 @@ DOM_OP(CORE, remove_node,         tree, 2, "pn(n: any, index: int) -> null", dom
 DOM_OP(CORE, attach_shadow,       tree, 2, "pn(n: any, init: any) -> any", dom_core_attach_shadow, DOM_F_MUTATES, "", html_element, "", "attachShadow")
 
 DOM_OP(CORE, compare_document_position, node, 2, "fn(a: any, b: any) -> int", dom_core_compare_document_position, 0, "", dom_node, "", "compareDocumentPosition")
+DOM_OP(CORE, lookup_namespace_uri, node, 2, "fn(n: any, prefix: any) -> any", dom_core_lookup_namespace_uri, 0, "", dom_node, "", "lookupNamespaceURI")
 
 // no member: the engine boundary hit-test has no JS spelling on an element
 DOM_OP(CORE, boundary_from_point, geometry, 4, "fn(n: any, x: int, y: int, behavior: any) -> any", dom_core_boundary_from_point, DOM_F_NEUTRAL, "", none, "", "")

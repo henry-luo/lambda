@@ -646,20 +646,14 @@ extern "C" Item js_fetch_with_initiator(Item url_item, Item options_item, const 
     if (!fw->url)
         return dom_realm_promise_reject(dom_realm_new_error(make_string_item("fetch: allocation failed")));
 
-    // Browser fetch resolves a relative request against the active document,
-    // not the process working directory used by file-backed test documents.
+    // use the live HTML base, including base mutations and network bases in file documents.
     DomDocument* document = (DomDocument*)dom_get_document();
-    const char* document_url = document && document->url
-        ? url_get_href(document->url) : nullptr;
-    if (document_url && (strncmp(document_url, "http://", 7) == 0 ||
-                         strncmp(document_url, "https://", 8) == 0)) {
-        char* absolute_url = dom_resolve_network_url(fw->url, document_url);
-        if (!absolute_url)
-            return dom_realm_promise_reject(dom_realm_new_error_named_cstr(
-                "TypeError", "fetch: invalid URL"));
-        mem_free(fw->url);
-        fw->url = absolute_url;
-    }
+    char* absolute_url = dom_resolve_document_request_url(fw->url, nullptr, false);
+    if (!absolute_url)
+        return dom_realm_promise_reject(dom_realm_new_error_named_cstr(
+            "TypeError", "fetch: invalid URL"));
+    mem_free(fw->url);
+    fw->url = absolute_url;
     const char* url = fw->url;
     if (document && !input_resource_policy_admits(document->resource_policy, url)) {
         return dom_realm_promise_reject(dom_realm_new_error_named_cstr(

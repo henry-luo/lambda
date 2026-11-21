@@ -595,6 +595,247 @@ and restore the cookie panel in its frozen source.
 
 ## 13. Web Platform: DOM, CSSOM, Events & Fetch (JS13)
 
+### JS13-L37 — Missing Node.lookupNamespaceURI breaks captured consent-wrapper calls — **FIXED**
+
+**2026-11-21.** Shared DOM publication follows **D8.4.4 / D9.5.4 /
+D9.5.6v2**; prefix conversion retains its receiver and input through precise
+roots under **D6.3.3 / D5.5.1**. Coda's admitted external-cms script throws
+TypeError during DOM mutation. Optimized current-source debugger traces
+separate expected intrinsic probes from the fatal Transcend wrapper call:
+`e=>e?s(Ry,e,null):null`, where Ry captures Node.prototype.lookupNamespaceURI.
+That method is absent, so Function.call receives an undefined callable.
+
+One DOM catalog operation now delegates node-kind dispatch to the shared
+Input namespace lookup. The Node interface declaration and prototype publish
+that operation through the ordinary binding system. Documents use their root,
+attributes their owner, and character data its parent element; fragments do
+not cross to a host. Input LI-093 supplies expanded-name precedence and
+actual namespace declarations, including live shadowing and empty resets.
+No page check, consent bypass, invented API result or source/timer change.
+
+Four focused fixtures fail before the combined repair. All17 focused native
+cases and four matching Chromium fixtures pass, covering captured calls,
+HTML/SVG/XML, live declarations, attributes, fragments, descriptors, receiver
+branding and conversion. The unchanged baseline-js category passes630/630;
+no full baseline repeats. Coda's external-cms/load-listener TypeErrors vanish.
+Its page now displays the real missing-IndexedDB failure rather than blank,
+so JS13-L36 remains a major blocker and Coda remains high. Other namespace
+methods, complete WebIDL edge cases and broader XML conformance are not claimed.
+
+Evidence: `temp/online-visual-round139/`, `coda-errors-function.log`,
+`namespace-before.log`, `namespace-focused-after.log`, `browser-namespace.json`,
+`baseline-js-results.txt` and current live pairs. The algorithm is specified by
+[DOM namespace lookup](https://dom.spec.whatwg.org/#locate-a-namespace).
+
+
+### JS13-L36 — IndexedDB is absent during Coda startup — **OPEN feature gap**
+
+**2026-11-21.** Browser API ownership follows **D8.4.4 / D9.5.6v2**.
+Current source has no indexedDB/IDBFactory publication or transaction/request
+implementation. Coda's live startup logs `Expected value to be defined and
+non-null: idbFactory missing`, an external-cms TypeError and a load-listener
+TypeError. Lambda's1000ms post-load frame is blank while Chromium loads the
+page. The missing API is observed, but its causal relation to the blank frame
+and the earlier TypeErrors is **unconfirmed**. No fake factory or successful
+request is installed. Persistent asynchronous database transactions are a
+substantial missing feature outside this round's native bug repairs.
+
+Round139 isolates and fixes the earlier consent-wrapper TypeErrors as
+JS13-L37. They disappear, and Coda now visibly renders its own error page
+reporting idbFactory missing. The absent IndexedDB API is therefore confirmed
+as the remaining startup blocker after that repair; it is not assigned as
+the cause of the earlier native TypeErrors. No database stub is installed.
+Current evidence: `temp/online-visual-round139/coda-fixed/`.
+
+The independent saved-source font defects are repaired as RI-178/179 and
+LI-092. Coda remains high; those fixes do not establish live startup recovery.
+Evidence: `temp/online-visual-round137/coda-live/`, current paired captures,
+`saas_landing_266-lambda-output.log` and [report125](../../test/online/comparison/repairs.html#round-125).
+
+
+### JS13-L35 — Missing inherited Node constants crash ancestor walks — **FIXED**
+
+**2026-11-21.** Interface publication follows **D8.4.4 / D9.5.6v2**;
+constant-definition temporaries use precise roots under **D6.3.3**. Node
+kind constants existed only on the constructor. Consequently
+`document.DOCUMENT_NODE` was undefined. Ramp's scroll-parent helper walked
+past Document and read `document.style`, throwing after React cleared the
+server-rendered content and leaving an empty page.
+
+The existing interface constant table now publishes both constructor and
+prototype properties, including document-position masks. The shared Node /
+CSSRule installer defines enumerable, non-writable, non-configurable
+properties. No Document style property, exception suppression or page rule
+is introduced. Existing opt-in script-task diagnostics now work in release
+captures and report collected/settled execution state; source admission,
+limits and timing remain unchanged.
+
+Two reduced native tests reproduce the original failure and qualify ancestor
+walking, inherited node kinds, comparison masks, readonly descriptors and
+CSSRule reuse. Both pass and agree with Chromium headless shell. Five
+existing request/base fixtures and the real React fixture's exact golden
+also pass. No broad baseline is repeated for this interface-only repair.
+
+A current, matched 1000ms post-load pair restores Ramp's full interface:
+0.49% coarse mean error and 0.30% changed area. The prior native image was
+blank. The old pair's animation origins were unrecorded, so both references
+are refreshed with the original pair retained in the append-only frame
+audit. Reduced tests independently establish causality; historical score
+movement includes the live reference refresh. Canonical inventory is now
+**113 high / zero critical / 954 low**. Evidence:
+`temp/online-visual-round134/`, frozen pin/source, native/Chromium controls,
+React golden and [report123](../../test/online/comparison/repairs.html#round-123).
+
+### JS13-L34 — Fetch ignores HTML base and XHR retains stale base URLs — **FIXED**
+
+**2026-11-21.** Shared request URL resolution follows **D8.4.4 /
+D9.5.6v2**; Input owns document-base selection under **D9.1.3v2**.
+Fetch resolved against `document->url`, ignoring the active HTML base. In a
+saved Dribbble document with a network base, `/client_app/users` consequently
+became a local-file request. XHR used the base captured at document binding,
+so later base changes and removal continued to target the old directory.
+
+Both APIs now share `dom_resolve_document_request_url`, which reuses the
+existing `dom_document_resolve_url` selection policy at fetch creation or
+XHR open. The first active HTML base wins; inert template bases do not.
+URL bytes are owned before asynchronous transport. Standalone XHR's fallback
+and fetch's local WPT root mapping remain available. No resource permission,
+transport, source limit, timer or host-state layout changes.
+
+Four reduced native cases fail before repair: fetch and XHR in both HTTP
+and file documents. They cover directory/root-relative requests, base href
+mutation, first-base removal and document/absolute fallback. All four pass
+after repair and agree with Chromium headless shell. The existing HTML-base
+dependency fixture also passes; four existing local JS goldens cover XHR URL
+coercion/ordering, local fetch/JSON and header/error conversion. No broad
+baseline or live catalog capture is repeated for this request-only repair.
+
+This fixes a confirmed shared defect exposed by the page investigation; it
+does not establish the cause of Dribbble's live blank state or claim a major
+page clearance. No canonical comparison row or reference is replaced by the
+instrumented saved document. Evidence: `temp/online-visual-round133/`,
+including `fetch-before.log`, `xhr-before.log`, `focused-after.log`,
+`browser-base.json`, `local-js-controls.json` and the frozen source/pin.
+
+### JS13-L33 — Font-loading promises lack native resource completion — **OPEN feature gap**
+
+**2026-11-21.** The browser preamble exposes `FontFace` and
+`document.fonts.load`, but their promises deliberately remain pending: there
+is no native resource-completion bridge. This is separate from
+`document.fonts.ready`, which currently resolves during document setup.
+Shared DOM ownership follows **D8.4.4 / D9.5.6v2**; native resources follow
+**D9.1.1v4**.
+
+Stellar's WebFont 1.6.26 detects `window.FontFace` and calls
+`document.fonts.load`. In the current network-enabled diagnostic, all four
+Inter weights and the root remain `wf-loading` at the selected frame; the
+authored loading selector leaves the page transparent. The library races
+the pending promise against a 3000ms rejection timer, beyond the unchanged
+1000ms post-load capture window (**D10.1.7**). Its unrelated callback error
+was already reproduced in Chromium in round27. No success promise, forced
+visibility, longer settling interval or capture replacement is introduced.
+
+Completion requires an actual FontFaceSet/resource lifecycle, rather than
+an unconditional resolved promise. This feature gap is outside the current
+existing-bug repair. Evidence: `temp/online-visual-round132/webfont.js`,
+`stellar-probe.html`, `stellar-network/result.json` and its `PAGE_PROBE` log.
+The sandboxed `stellar-current` attempt lacks network resources and is not
+qualification evidence. Canonical comparison data remains unchanged.
+
+### JS13-L32 — Null-namespace metadata and reflected inert writes force layout — **FIXED**
+
+**2026-11-21.** Shared DOM mutations follow **D8.4.4 / D9.5.6v2**;
+Input owns attribute storage under **D9.1.3v2**. `setAttributeNS(null, ...)`
+and the `inert` reflected setter bypassed the existing metadata path. Dock's
+actual menu handler repeatedly assigns `inert=true`; each stable assignment
+was eligible to trigger another full layout.
+
+The namespace writer now reuses ordinary metadata handling for null-namespace
+value writes, excluding Attr replacement/prefix changes. Input shares stable
+inert-presence eligibility (LI-087). Existing case/namespace, CSS dependency,
+transaction, after-set, observer and custom-element guards remain in charge.
+Same-valued writes still deliver attribute notifications. First inert enable,
+removal and CSS-sensitive lexical-value changes retain normal invalidation.
+
+Four before controls fail with eleven layouts instead of one. All 38 focused
+metadata/inline-style/SVG controls pass after repair, including namespace Attr
+identity collisions, six custom-element routes, focus and value-selector
+guards. Integer lint passes. This proves the shared mutation repair; Dock's
+whole-document outcome is recorded separately under RI-031. No broader
+baseline is repeated immediately after round125's 17-category milestone.
+Evidence: `temp/online-visual-round126/`.
+
+### JS13-L31 — Unrelated keyframes force attribute cascade and layout — **FIXED**
+
+**2026-11-21.** Shared attribute dependency checks follow **D8.4.4 /
+D9.5.6v2**. The query treated every `@keyframes` rule as an attribute
+reference, including an unused opacity animation. This defeats retained
+metadata and CSSOM property updates across a document. Two focused controls
+fail before repair with eleven layouts instead of one; genuine keyframe
+attribute references already preserve invalidation.
+
+The query now uses the existing CSS tokenizer and function-name decoder to
+recognize actual `attr()` calls in raw keyframe content. Quoted/commented text
+is ignored; escaped names are decoded. Allocation/tokenization failure and
+scope/container dependencies remain conservative. Five transform controls
+pass in the query-only build, including ordinary and escaped attribute calls.
+The combined release passes all 23 focused controls (10 inline-style and
+13 metadata), including direct style assignment and selector/callback guards.
+Integer lint passes. A layout baseline checkpoint and live-page diagnostic are
+recorded separately under `temp/online-visual-round122/`; these focused checks
+alone do not establish page clearance.
+
+### JS13-L30 — CSSOM writes discard authored-attribute notification and property identity — **FIXED**
+
+**2026-11-21.** Shared DOM behavior follows **D8.4.4 / D9.5.6v2**;
+attribute storage remains document-owned under **D9.1.3v2**. The inline
+CSSOM commit knew the changed property but sent only a generic rendering
+mutation. Mutation observers and custom-element callbacks received no style
+attribute record, selectors depending on `[style]` stayed stale, and the
+retained paint path could not identify the changed property.
+
+The commit now passes the property, style attribute name and old value through
+shared native mutation dispatch. Direct `element.style = ...` assignments use
+the same notification helper; their prior selector control also fails before
+repair. Existing CSS dependency checks keep selector-
+dependent writes on the attribute cascade path; other writes retain ordinary
+attribute observations alongside their rendering classification. The existing
+paint admission guards still decide eligibility. All six inline-style controls pass, including observer old values, selector
+dependencies, callback-driven geometry, cssText, and transform containing-block
+establishment. The layout-count control exposed and now covers the separate
+publication defect RI-170: ten established-transform writes retain one layout
+instead of eleven, while geometry and final pixels update. Thirteen metadata
+controls also pass. Live-page evidence is recorded separately under
+`temp/online-visual-round121/`; focused checks do not establish page clearance.
+
+### JS13-L29 — Non-stylesheet link metadata forces full cascade and layout — **FIXED**
+
+**2026-11-21.** Shared DOM/host invalidation follows **D8.4.4 / D9.5.6v2**;
+associated stylesheet ownership follows **D9.1.3v2**. The host classified every
+`link` element as stylesheet-related. Unrelated data/ARIA writes on preload
+and icon links therefore bypassed the metadata path and forced full cascade
+and layout when scripts read geometry. The focused prior-renderer controls
+produce ten layouts for ten writes, versus one in the no-write control.
+
+The predicate now recognizes the existing stylesheet relation token or an
+associated stylesheet. The latter preserves invalidation when a previously
+active link changes relation or is removed. The CSSOM sheet lookup is promoted
+through its module header and reused, not copied. CSS-dependent metadata still
+uses ordinary invalidation; mutation observers retain all ten records and old
+values through both setAttribute and dataset.
+
+**23 focused native controls and 11 stylesheet lifecycle controls pass**, plus
+the existing form-user-validity SVG render control. Two unrelated-link cases
+fail before the fix; their two selector-dependent controls already pass.
+The final controls also cover prior metadata, Error-stack and document-title
+repairs, dynamic linked sheets, media activation, empty/error completion and
+load ordering. Full baselines are not repeated. A live-page diagnostic is
+recorded separately; these layout-count controls alone do not establish a
+page clearance or live performance improvement.
+
+Evidence: `temp/online-visual-round120/` and
+`test/online/render_dataset_metadata.test.cjs`.
+
 ### JS13-L28 — createDocument discards the root namespace — **FIXED FOR ROOT IDENTITY**
 
 **2026-11-20.** Namespace and document ownership use **D9.1.1v4 / D9.1.3v2**.

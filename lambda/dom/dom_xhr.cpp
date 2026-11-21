@@ -499,6 +499,19 @@ extern "C" char* dom_resolve_network_url(const char* url, const char* base_url) 
     return out ? out : mem_strdup(url, MEM_CAT_JS_RUNTIME);
 }
 
+extern "C" char* dom_resolve_document_request_url(const char* url,
+        const char* fallback_base, bool resolve_file_base) {
+    DomDocument* document = (DomDocument*)dom_get_document();
+    if (!document) return dom_resolve_network_url(url, fallback_base);
+    // capture the live base at request creation, rather than retaining document-binding state.
+    Url* base = dom_document_resolve_url(document);
+    bool use_base = base && (base->scheme == URL_SCHEME_HTTP || base->scheme == URL_SCHEME_HTTPS ||
+        (resolve_file_base && base->scheme == URL_SCHEME_FILE));
+    char* result = dom_resolve_network_url(url, use_base ? url_get_href(base) : nullptr);
+    if (base) url_destroy(base);
+    return result;
+}
+
 static const char* status_text_for_code(long code) {
     switch (code) {
         case 200: return "OK";
@@ -837,7 +850,7 @@ extern "C" Item js_xhr_open(Item method_arg, Item url_arg, Item async_arg) {
     xhr->req_header_count = 0;
 
     xhr->method = mem_strdup(method, MEM_CAT_JS_RUNTIME);
-    xhr->url = dom_resolve_network_url(url, _xhr_base_url);
+    xhr->url = dom_resolve_document_request_url(url, _xhr_base_url, true);
     TypeId async_type = get_type_id(async_arg);
     bool async_argument_omitted = async_type == LMD_TYPE_UNDEFINED ||
         async_type == LMD_TYPE_NULL;

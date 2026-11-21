@@ -702,7 +702,9 @@ static char* load_script_content(const char* resolved_path, bool is_http,
             "window.promise_test=window.promise_test||function(){};\n"
             "window.assert_true=window.assert_true||function(){};\n"
             "window.assert_false=window.assert_false||function(){};\n"
-            "window.assert_equals=window.assert_equals||function(){};\n",
+            "window.assert_equals=window.assert_equals||function(){};\n"
+            // inheritance setup uses inequality before restoring its temporary display values.
+            "window.assert_not_equals=window.assert_not_equals||function(actual,unexpected,description){if(Object.is(actual,unexpected))throw new Error(description||'assert_not_equals: values must differ');};\n",
             MEM_CAT_JS_RUNTIME);
     }
     if (!is_http && resolved_path && strcmp(resolved_path, "builtin:wpt-testharnessreport.js") == 0) {
@@ -874,7 +876,6 @@ static char* load_script_content_profiled(const char* resolved_path, bool is_htt
     return content;
 }
 
-#ifndef NDEBUG
 static const char* script_task_kind_name(JsScriptTaskKind kind) {
     switch (kind) {
         case JS_SCRIPT_TASK_CLASSIC: return "classic";
@@ -925,6 +926,7 @@ static bool script_task_diagnostics_enabled() {
     return env && env[0] && strcmp(env, "0") != 0;
 }
 
+#ifndef NDEBUG
 static bool script_task_timing_enabled() {
     const char* env = getenv("RADIANT_JS_TASK_TIMING");
     return env && env[0] && strcmp(env, "0") != 0;
@@ -1374,7 +1376,7 @@ static size_t script_task_collection_source_bytes(JsScriptTaskCollection* collec
 static int loaded_external_scripts = 0;
 static int failed_external_scripts = 0;
 
-static void log_script_task_diagnostics(JsScriptTaskCollection* collection) {
+static void log_script_task_diagnostics(JsScriptTaskCollection* collection, const char* phase) {
     if (!collection) return;
 
     log_debug("script_runner_tasks: scripts=%d inline=%d external=%d loaded=%d failed=%d skipped=%d onload=%d event_attrs=%d async_ready=%d defer=%d load_blocking=%d bytes inline=%zu external=%zu onload=%zu",
@@ -1387,13 +1389,14 @@ static void log_script_task_diagnostics(JsScriptTaskCollection* collection) {
         collection->inline_source_bytes,
         collection->external_source_bytes, collection->onload_source_bytes);
 
-#ifndef NDEBUG
+    // admission diagnostics must remain available in optimized captures, where INFO is stripped.
     if (!script_task_diagnostics_enabled()) return;
 
     for (int i = 0; i < collection->scripts->length; i++) {
         JsScriptTask* task = (JsScriptTask*)arraylist_get(collection->scripts, i);
-        log_info("script_runner_task: #%d kind=%s scheduling=%s compile=%s status=%s external=%d ready=%d load_blocking=%d attrs=[async:%d defer:%d nomodule:%d] src=%s bytes=%zu",
+        log_notice("script_runner_task: #%d phase=%s executed=%d kind=%s scheduling=%s compile=%s status=%s external=%d ready=%d load_blocking=%d attrs=[async:%d defer:%d nomodule:%d] src=%s bytes=%zu",
             task ? task->document_order : -1,
+            phase, task && task->executed ? 1 : 0,
             task ? script_task_kind_name(task->kind) : "null",
             task ? script_task_scheduling_name(task->scheduling) : "null",
             task ? script_compile_policy_name(task->compile_policy) : "null",
@@ -1411,14 +1414,14 @@ static void log_script_task_diagnostics(JsScriptTaskCollection* collection) {
 
     for (int i = 0; i < collection->onload_handlers->length; i++) {
         JsScriptTask* task = (JsScriptTask*)arraylist_get(collection->onload_handlers, i);
-        log_info("script_runner_task: #%d kind=%s compile=%s status=%s external=0 src=<body onload> bytes=%zu",
+        log_notice("script_runner_task: #%d phase=%s executed=%d kind=%s compile=%s status=%s external=0 src=<body onload> bytes=%zu",
             task ? task->document_order : -1,
+            phase, task && task->executed ? 1 : 0,
             task ? script_task_kind_name(task->kind) : "null",
             task ? script_compile_policy_name(task->compile_policy) : "null",
             task ? script_task_status_name(task->status) : "null",
             task ? task->source_len : 0);
     }
-#endif
 }
 
 /**
@@ -2506,7 +2509,7 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     if (resource_base) url_destroy(resource_base);
     prefetch_external_script_sources(&script_tasks, dom_doc->resource_manager, timing);
     load_external_script_sources(&script_tasks, dom_doc->resource_manager, timing);
-    log_script_task_diagnostics(&script_tasks);
+    log_script_task_diagnostics(&script_tasks, "collected");
     if (timing) timing->collect_us += time_now_us() - phase_start_us;
 
     if (!script_task_collection_has_executable_tasks(&script_tasks)) {
@@ -2887,6 +2890,7 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     if (timing) timing->runtime_cleanup_us += time_now_us() - phase_start_us;
 
     phase_start_us = timing ? time_now_us() : 0;
+    log_script_task_diagnostics(&script_tasks, "settled");
     script_task_collection_free(&script_tasks);
     // A recovery jump may have interrupted allocator or JIT ownership.  Keep
     // this sticky until the outer document teardown has declined batch reset.

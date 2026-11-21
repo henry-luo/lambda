@@ -132,6 +132,7 @@ const char radiant_dom_interface_decl[] =
     "    get_root_node: fn(a0: any) any, remove: pn() any,\n"
     "    replace_with: pn(a0: any) any, after: pn(a0: any) any, before: pn(a0: any) any,\n"
     "    has_child_nodes: fn() any, clone_node: pn(a0: any) any,\n"
+    "    lookup_namespace_uri: fn(prefix: any) any,\n"
     "    add_event_listener: pn(a0: any, a1: any, a2: any) any,\n"
     "    remove_event_listener: pn(a0: any, a1: any, a2: any) any,\n"
     "    dispatch_event: pn(a0: any) any\n"

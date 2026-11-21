@@ -14,6 +14,291 @@ are unchanged. Full evidence is under `../../lambda/temp/kianhup-style/`.
 
 ## Fixed issues
 
+<a id="ri-179"></a>
+
+### RI-179 — Font inheritance overwrites local shorthand and re-evaluates ancestor declarations
+
+**Fixed 2026-11-21.** Native computation belongs to Radiant under
+**D9.1.1v4 / D9.1.3v2**. Coda's zero-specificity font shorthand specifies
+700, but actual layout reports and paints weight400. The inheritance guard
+only checks direct longhands, overlooking the local font shorthand. It then
+recascades an ancestor's weight400 with its original specificity. Children
+also search ancestor syntax instead of inheriting the computed parent scalar.
+
+For font components with a local shorthand node, inheritance now uses Input's
+existing property-source winner lookup. Other inherited properties retain
+their cached direct lookup. Missing weight/style/variant components copy the
+parent's computed scalars. Native UA weight/style defaults remain local via
+the shared HTML metadata; explicit all:inherit/unset still inherits.
+No site-specific rule, new font parser or capture policy change.
+
+Two flushed zero-specificity regressions fail before repair. Focused controls
+also cover computed-parent variables, small-caps, native heading/emphasis
+and explicit unset. The first candidate exposed lost UA defaults in the
+text baseline; reduced heading/emphasis controls reproduce the defect and
+the final metadata guard repairs it. All23 focused native cases and15
+matching Chromium controls pass; integer lint passes. Coda's saved-source
+post-layout heading changes from400 to700, matching Chromium. Its remote
+background readiness is separate; no paint defect or live clearance is
+inferred from that diagnostic. Complete font reset/relative-weight
+conformance is not claimed. Evidence: `temp/online-visual-round137/`,
+`font-where-flush-before.log`, `font-ua-before.log`,
+`focused-ua-final.log`, `browser-font.json` and final baseline results.
+Final targeted categories record **1526 passes /84 partials /zero failures**.
+The current matched live Coda pair remains blank after startup exceptions;
+no page clearance is claimed. The missing IndexedDB observation is tracked
+without assigning blank-frame causality in JS13-L36.
+See [report125](../test/online/comparison/repairs.html#round-125).
+
+<a id="ri-178"></a>
+
+### RI-178 — Loader computed-style queries ignore font shorthand components
+
+**Fixed 2026-11-21.** Shared cascade ownership follows
+**D9.1.1v4 / D9.1.3v2**. Before a layout flush, getComputedStyle serialized
+font weight/style/family from the generic declaration fallback, which omitted
+font from its component selection and projection. Valid700/italic/Arial
+shorthands therefore reported defaults while the separate size path correctly
+reported38px. Native formatter tracing confirms the initial font assignment
+itself was correct; RI-179 covers the independent later inheritance defect.
+
+Normal and pseudo fallback reads now select the winning font declaration by
+full cascade priority and use Input's shared projector (LI-092). Variable
+substitution uses the source shorthand grammar before component extraction,
+including virtual longhands that identify the shorthand itself. Existing
+pseudo overflow behavior remains intact. No duplicate font grammar.
+
+Seven of the original eight reduced cases fail before repair; the explicit
+later-component guard already passes. All15 final font cases and eight
+existing font/button controls pass, alongside15 independent Chromium cases.
+Numeric/keyword weights, stronger/important/variable shorthands, descendants,
+pseudo fonts and later explicit components are covered. Broader system-font,
+CSS-wide reset and pseudo variable contexts remain outside qualification.
+Evidence: `temp/online-visual-round137/font-before.log`,
+`font-extra-before.log`, `focused-ua-final.log` and `browser-font.json`.
+
+
+<a id="ri-171"></a>
+
+### RI-171 — Layout harness aborts inheritance setup before display cleanup
+
+**Fixed 2026-11-21.** The failure reported at earlier milestone checkpoints
+was a fixture-execution defect, not incorrect display inheritance. The
+layout-only builtin WPT harness lacked `assert_not_equals`. Upstream
+`inheritance-testcommon.js` temporarily sets the container to `initial` and
+the target to `unset`, then invokes that missing function. The resulting
+ReferenceError aborts before cleanup, leaving both divs inline and zero-width.
+Chromium's full harness completes cleanup and retains their block defaults.
+
+The existing native layout shim now provides a truthful inequality assertion
+using SameValue (`Object.is`), throwing on equal values rather than ignoring
+failed assertions. No layout/cascade code, browser reference, fixture or
+required-pass entry changed. Ownership follows **D9.1.1v4 / D10.1.7**.
+
+The new native regression fails before repair with the missing-function
+ReferenceError. After repair it checks cleanup, equal primitive/NaN rejection
+and signed-zero/distinct-object acceptance. It and both existing HTML script
+tests pass. The unchanged original `wpt-css-display/inheritance` case improves
+from 2/4 to **4/4 matched elements (100%)**. The full
+17-category milestone was last run before this repair (5609/294/1); it was
+not repeated. This is no online-page clearance. Evidence:
+`temp/online-visual-round132/harness-before.log`, `focused-after.log`,
+`display-inheritance/`, `inheritance-after.json` and `inheritance-result.json`.
+
+<a id="ri-177"></a>
+
+### RI-177 — Grid alignment replaces final flex height with an intrinsic estimate
+
+**Status:** FIXED, 2026-11-21. **Lambda blocker:** no. Native formatting and
+size ownership follow **D9.1.1v4 / D9.1.3v2**. Snapshot timing is unchanged
+under **D10.1.7**.
+
+After formatting a nested flex container, grid called a separate intrinsic
+height estimator and stored its result for alignment. It could differ from
+the completed formatter's border box. A script-free Payload reduction has
+547.2px recorded height but 483.2px final in-flow content. Start, center and
+end alignment all reproduce the mismatch; Payload itself moves its main
+heading and actions downward and exposes translated hover content.
+
+The grid content pass now publishes the completed flex formatter height,
+matching its existing nested-grid handoff. The obsolete estimator helper is
+removed; no repeated layout, special row/column inference, tolerance, forced
+height or site condition is added.
+
+All three new regressions fail before repair and pass afterward; Chromium
+confirms all three. Thirty-six focused native grid tests pass, covering the
+new regressions and spanning minima, percentage item sizing, row refinement,
+nested grids and flex/grid constraints. Integer lint passes. The same saved
+Payload document improves from 9.33% mean error / 14.17% changed area to
+3.28% / 6.01% after RI-176/177. Its major vertical shift and leaked hover
+content are restored; native button appearance remains a separate defect.
+No live-page clearance is inferred from a frozen-source repair. Evidence:
+`temp/online-visual-round136/`, original and repaired source captures,
+`grid-flex-before.log`, `grid-height-after.log`, `browser-height.json` and
+`payload-metrics.json`. The 17-category milestone records 5608 passes / 294 partials / two form
+failures / zero skips. Both form failures (`option-text-setter` and
+`input-type-button`) reproduce with the previous qualified round134 renderer;
+no new baseline regression is observed. References and assertions are retained.
+See [report124](../test/online/comparison/repairs.html#round-124).
+
+<a id="ri-176"></a>
+
+### RI-176 — Flexible spanning grid items retain a content-based automatic minimum
+
+**Status:** FIXED, 2026-11-21. **Lambda blocker:** no. Track sizing belongs to
+Radiant under **D9.1.1v4 / D9.1.3v2**.
+
+The automatic minimum contribution was min-content for every non-scroll item,
+including items spanning multiple flexible tracks. A 600px descendant therefore
+expands a two-fr-track item in a 400px grid to 600px. Payload's four-of-sixteen
+column span becomes 291.23px instead of 268px, changing text wrapping and
+centering. [CSS Grid §6.6](https://www.w3.org/TR/css-grid-1/#min-size-auto)
+requires a zero automatic minimum for this flexible spanning case.
+
+Contribution collection now considers the selected axis tracks before sizing.
+Only the automatic minimum is zeroed; explicit item minima and intrinsic track
+minima remain effective. The existing flexible-track predicate has an opt-in
+zero-fr mode for this rule, preserving its distribution callers' behavior.
+No new pixel threshold or track sizing shortcut is introduced.
+
+Three native cases fail before repair and pass afterward: columns, rows and
+zero-fr spans. Three guards retain single-track, explicit item and intrinsic
+track minima. Five Chromium column controls and one row control agree. The
+combined RI-176/177 qualification passes all 36 focused native cases and layout
+integer lint; source/capture clocks and budgets remain unchanged. Evidence:
+`temp/online-visual-round136/grid-before-final.log`, `grid-row-before.log`,
+`grid-height-after.log`, `browser-grid.json` and `browser-height.json`.
+
+<a id="ri-175"></a>
+
+### RI-175 — CSSOM reports internal table rows as block
+
+**Fixed 2026-11-21.** Shared computed display follows **D9.1.3v2 /
+D9.5.6v2**. The display model stores table-row as an internal role with a block
+outer box. CSSOM serialized only the outer enum and returned block, while
+layout output had separate table-role mappings. The existing shared
+css_display_special_name helper now uses is_table_internal_display and the
+registered CSS enum name. CSSOM and layout output reuse that helper, with no
+new tag map or geometry change. The rollback matrix verifies table, table-row
+and table-cell names, and all 78 focused native render controls pass.
+Evidence: Lambda `temp/online-visual-round131/`.
+
+<a id="ri-174"></a>
+
+### RI-174 — Display rollback reapplies the discarded all reset and shows metadata text
+
+**Fixed 2026-11-21.** Radiant's used display and shared CSSOM follow
+**D9.1.3v2 / D9.5.6v2**. Mode uses all:unset with display:revert. The cascade
+correctly removes author declarations for display, including all, and returns
+no surviving author winner. The display resolver then independently reapplied
+the global all reset's initial inline display. Head, style and script text
+became visible instead of receiving their UA defaults.
+
+The resolver now falls through to the existing css_default_display_for_element
+when no cascaded display survives. Actual winning initial/unset declarations
+continue through ordinary value resolution. No unconditional suppression of
+script/style tags or page-specific rule is added. Six before controls fail
+(all initial/unset/inherit crossed with revert/revert-layer); three guards
+already pass (winning initial/unset and explicit visible style). All nine pass
+after the fix and RI-175's shared table-role serialization correction.
+
+All 78 focused native rendering controls and integer lint pass. Mode's current
+capture again shows its landing page, with a large residual difference; the
+intermediate source-text diagnostic is not imported. Dock's whole-page capture
+is qualified separately under RI-031. No source admission, capture deadline,
+clock or vendor change. Evidence: Lambda `temp/online-visual-round131/`.
+
+<a id="ri-173"></a>
+
+### RI-173 — SVG stroke-phase attributes force full HTML layout on every animation frame
+
+**Fixed 2026-11-21.** Shared DOM/host ownership follows **D9.1.3v2 /
+D9.5.6v2**; SVG paint-cache lifetime follows **D5.5.1**. FramerAuth's late
+animation batches mix ordinary HTML transform writes with SVG path
+`stroke-dashoffset` updates. The attribute record discarded property identity,
+so one SVG record rejected the entire retained paint batch. Repeated whole-page
+flow reached the 150-second capture deadline.
+
+The native mutation record now retains the SVG paint-property hint. Its
+attribute kind, observer delivery and ordinary document/style epochs remain
+unchanged. The SVG paint path requires a connected element, rendered SVG
+viewport, no attribute-selector/attr() dependency and no transition or relevant
+animation sampling requirement. It refreshes SVG CSS and repaints without HTML
+flow. SVG batches request full repaint; no local ink-bound assumption is added.
+Existing global SVG cache epochs still invalidate inherited values and shared
+references. The motion guard is shared with HTML admission instead of copied.
+
+Four reduced cases fail before repair with eleven layouts instead of one:
+ordinary attributes, null-namespace writes, inherited group attributes and
+CSSOM property writes. All preserve observer records, geometry and final pixels
+after repair while retaining one layout. Attribute-selector and active
+transition controls keep ordinary cascade/layout; the transition fixture keeps
+its initial zero-time phase. All **30 focused native checks** pass, along with
+seven comparison-tool controls and integer lint. The 17-category layout
+checkpoint reports **5,609 passed, 294 partial and the existing RI-171 failure**.
+No reference or baseline entry is weakened.
+
+The unchanged live FramerAuth request now loads and captures in **70.04s**,
+within the existing 150-second deadline at the same 1000ms post-load frame.
+The main hero remains absent, so its manual high review is retained. Current
+Chromium records Web Animations opacity effects from an authored 0.001 to 1 on
+its heading, copy and actions; automatic native playback remains a documented
+feature gap. No opacity, timing, URL or admission exception is introduced.
+
+Evidence: `temp/online-visual-round124/framerauth-attributes.log`,
+`temp/online-visual-round125/`, and
+`test/online/render_svg_dash_mutation.test.cjs`.
+
+<a id="ri-172"></a>
+
+### RI-172 — Retained transform resets leave fixed descendants in the old containing block
+
+**Fixed 2026-11-21.** Retained geometry ownership follows **D9.1.3v2**;
+effect/geometry admission follows **CI-18**. The paint-only guard rejected the
+literal `none` keyword but admitted CSS-wide resets and pending substitutions.
+These can compute to `none`, removing the transform's containing block. The
+property resolved correctly while fixed descendants retained their old layout.
+
+The guard now requires a non-keyword value with no pending substitution before
+retaining an existing transform's geometry. Other values use ordinary CSS
+resolution and layout. This covers `transform`, `translate`, `rotate` and
+`scale` without changing parsing, inheritance or CSS variable semantics.
+
+All sixteen reduced before cases fail: `var(--clear)` (defined as `none`),
+`initial`, `unset` and `inherit` leave the fixed child at y75 instead of the
+viewport-relative y5. All pass after repair. The full focused selection passes
+**24 checks** (11 inline-style and 13 metadata); concrete transform writes still
+retain one layout while moving geometry/pixels. Integer lint passes. The
+round122 layout checkpoint is not repeated for this guard correction.
+
+Evidence: `temp/online-visual-round124/transform-reset-before-expanded.log`,
+`focused-after.log` and `test/online/render_inline_style_mutation.test.cjs`.
+No live page clearance is established by these controls.
+
+<a id="ri-170"></a>
+
+### RI-170 — Retained paint publication leaves mutation layout dirtiness pending
+
+**Fixed 2026-11-21.** Geometry publication and selected-frame ownership follow
+**D9.1.3v2 / D10.1.7**. The retained paint reconciler resolved an eligible
+property and published its input versions, but mutation recording had dirtied
+the target, descendants and ancestors. The next geometry checkpoint therefore
+performed full flow despite the successful paint commit.
+
+When a proven paint or detached batch publishes against the same viewport,
+font, cascade and layout environment, publication now consumes dirty flags via
+the existing layout visitor. Pending reflow, scheduler work, selector-dependent
+writes, transitions and transform containing-block changes retain their
+existing guards. No paint eligibility is broadened here.
+
+The CSSOM transform control changes geometry and pixels correctly with one
+layout rather than eleven. All six inline-style and thirteen metadata controls
+pass; the integer-cast lint passes. Before this fix the transform count still
+fails after property notification is repaired (JS13-L30). Evidence:
+`temp/online-visual-round121/` and
+`test/online/render_inline_style_mutation.test.cjs`. Live performance and page
+clearance require separate capture evidence.
+
 <a id="ri-138"></a>
 
 ### RI-138 — Trial flow resets the scroll position of an EPUB frame

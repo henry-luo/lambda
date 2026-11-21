@@ -355,9 +355,14 @@ static void _link_iface_proto(Item global, const char* name, const char* base_na
     }
 }
 
-static void _set_ctor_int_constant(Item ctor, const char* name, int64_t value) {
-    js_set_key_default(ctor, js_name_item(name),
-        (Item){.item = i2it(value)});
+static void _define_iface_int_constant(Item target, const char* name, int64_t value) {
+    RootFrame roots(3);
+    Rooted<Item> target_root(roots, target), key_root(roots, js_name_item(name));
+    Rooted<Item> descriptor(roots, js_new_object());
+    dom_realm_set_cstr(descriptor.get(), "value", (Item){.item = i2it(value)});
+    dom_realm_set_cstr(descriptor.get(), "enumerable", (Item){.item = ITEM_TRUE});
+    // WebIDL constants are enumerable, non-writable and non-configurable at both locations.
+    dom_realm_define_property(target_root.get(), key_root.get(), descriptor.get());
 }
 
 // CustomElementRegistry stores definitions in the native Map backing of its
@@ -740,9 +745,14 @@ static void _install_node_iface(Item global) {
         {"COMMENT_NODE", 8}, {"DOCUMENT_NODE", 9},
         {"DOCUMENT_TYPE_NODE", 10}, {"DOCUMENT_FRAGMENT_NODE", 11},
         {"NOTATION_NODE", 12},
+        {"DOCUMENT_POSITION_DISCONNECTED", 1}, {"DOCUMENT_POSITION_PRECEDING", 2},
+        {"DOCUMENT_POSITION_FOLLOWING", 4}, {"DOCUMENT_POSITION_CONTAINS", 8},
+        {"DOCUMENT_POSITION_CONTAINED_BY", 16}, {"DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC", 32},
     };
     for (size_t i = 0; i < sizeof(node_constants) / sizeof(node_constants[0]); i++) {
-        _set_ctor_int_constant(ctor_root.get(), node_constants[i].name,
+        _define_iface_int_constant(ctor_root.get(), node_constants[i].name,
+            node_constants[i].value);
+        _define_iface_int_constant(proto_root.get(), node_constants[i].name,
             node_constants[i].value);
     }
     js_set_key_cstr(global_root.get(), "Node", ctor_root.get());
@@ -1281,7 +1291,7 @@ static void _install_node_interface_members(Item global) {
         "nodeName", "nodeType", "nodeValue", "textContent", "baseURI", "parentNode", "parentElement", "isConnected",
         "ownerDocument", "firstChild", "lastChild", "nextSibling", "previousSibling",
         "childNodes", "contains", "isEqualNode", "isSameNode", "compareDocumentPosition",
-        "getRootNode", "hasChildNodes", "cloneNode", NULL};
+        "getRootNode", "hasChildNodes", "cloneNode", "lookupNamespaceURI", NULL};
     static const char* const node_mutators[] = {
         "appendChild", "removeChild", "insertBefore", "replaceChild", "normalize", NULL};
     static const char* const element_members[] = {
@@ -1551,8 +1561,8 @@ extern "C" void dom_install_collection_globals(void) {
     Rooted<Item> css_rule_proto(css_rule_roots,
         _iface_proto(global, "CSSRule"));
     for (const auto& constant : css_rule_constants) {
-        _set_ctor_int_constant(css_rule_ctor.get(), constant.name, constant.value);
-        _set_ctor_int_constant(css_rule_proto.get(), constant.name, constant.value);
+        _define_iface_int_constant(css_rule_ctor.get(), constant.name, constant.value);
+        _define_iface_int_constant(css_rule_proto.get(), constant.name, constant.value);
     }
     // publish declared CSSOM members before scripts can inspect bare prototypes.
 #define CSS_RULE_INTERFACE(kind, name, base, legacy, host, host_base, shape) \

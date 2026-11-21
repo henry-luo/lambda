@@ -743,7 +743,11 @@ static inline void dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATION_
     radiant_dom_mutation_begin(doc, kind, target, parent, attribute_name, presentation_property);
     // Recheck after invalidating the cascade, before reflow validates focus.
     if (recheck_focus && target) dom_recheck_focus_in(target->as_element());
-    dom_mutation_notify_observers(kind, target, parent, attribute_name, old_value);
+    // CSSOM retains a narrow rendering kind but still mutates the authored attribute.
+    DomJsMutationKind observer_kind = attribute_name &&
+        (kind == DOM_JS_MUTATION_INLINE_STYLE || kind == DOM_JS_MUTATION_STYLE_REPAINT)
+        ? DOM_JS_MUTATION_ATTRIBUTE : kind;
+    dom_mutation_notify_observers(observer_kind, target, parent, attribute_name, old_value);
     if (kind == DOM_JS_MUTATION_ATTRIBUTE) dom_slots_after_attribute_change(doc, target, attribute_name);
     radiant_dom_mutation_finish(doc, kind);
     if (kind == DOM_JS_MUTATION_ATTRIBUTE && attribute_name && str_ieq_cstr(attribute_name, "popover"))
@@ -806,6 +810,15 @@ extern "C" bool dom_css_element_is_indeterminate(void* element_ptr) {
 extern "C" void dom_notify_mutation(DomJsMutationKind kind, void* target, void* parent) {
     // Module-owned DOM setters must still publish mutations through the JS DOM ledger.
     dom_mutation_notify(kind, (DomNode*)target, (DomNode*)parent);
+}
+
+extern "C" void dom_notify_inline_style_mutation(DomElement* element,
+        CssPropertyCode property, const char* old_value) {
+    if (!element || !element->doc) return;
+    // Authored style writes can change selectors on other elements; keep that cascade broad.
+    bool dependency = dom_engine_attribute_has_css_dependency(element->doc, element, "style");
+    dom_mutation_notify(dependency ? DOM_JS_MUTATION_ATTRIBUTE : dom_style_mutation_kind(property),
+        element, element->parent, "style", old_value, dependency ? CSS_PROPERTY_UNKNOWN : property);
 }
 JS_FORWARD_VOID( dom_notify_mutation_detail, (DomJsMutationKind kind, void* target,                                                 void* parent, const char* attribute_name,                                                 const char* old_value), dom_mutation_notify, (kind, (DomNode*)target, (DomNode*)parent, attribute_name, old_value))
 
@@ -8814,7 +8827,7 @@ extern "C" void dom_after_set_attribute(void* elem_ptr,
 extern "C" bool dom_set_non_style_metadata(void* target, const char* name, const char* value) {
     DomElement* element = (DomElement*)target;
     if (!element || !element->doc || !name || !value || strchr(name, ':') ||
-        (strncmp(name, "data-", 5) && strncmp(name, "aria-", 5))) return false;
+        !dom_element_can_write_metadata(element, name)) return false;
     // namespace/case-sensitive writes keep the general attribute path.
     for (const char* character = name; *character; character++)
         if (*character >= 'A' && *character <= 'Z') return false;
@@ -9688,7 +9701,7 @@ static bool dom_form_user_validity_visit(DomElement* element, void* context) {
     if (element->tag_name &&
         (_is_tag(element, "input") || _is_tag(element, "textarea") ||
          _is_tag(element, "select")) &&
-        dom_find_form_owner(element) == scan->form_storage() &&
+        dom_find_form_owner(element) == scan->form &&
         !element->user_validity()) {
         element->set_user_validity(true);
         scan->changed = true;
@@ -10317,6 +10330,31 @@ extern "C" Item dom_core_parent_node(Item n) {
     // The document-element case (its parent is the Document, which owns no
     // DomNode link) lives in the shared helper; do not re-derive it here.
     return node ? dom_parent_node_or_null(node) : ItemNull;
+}
+
+extern "C" Item dom_core_lookup_namespace_uri(Item n, Item prefix) {
+    RootFrame roots(2);
+    Rooted<Item> receiver(roots, n), key(roots, prefix);
+    if (key.get().item != ITEM_NULL && !is_js_undefined(key.get())) {
+        key.set(js_to_string(key.get()));
+        JS_RETURN_IF_ERROR(key.get());
+    }
+    DomNode* node = (DomNode*)dom_unwrap_element(receiver.get());
+    DomElement* element = nullptr;
+    if (DomAttr* attribute = node ? node->as_attribute() : nullptr) {
+        element = attribute->owner_element;
+    } else if (node && node->is_element()) {
+        element = node->as_element();
+        // Document locates through its document element; fragments never cross to their host.
+        if (_is_tag(element, "#document")) element = element->doc ? element->doc->root.get() : nullptr;
+    } else if (node && node->node_type != DOM_NODE_DOCTYPE) {
+        element = node->parent ? node->parent->as_element() : nullptr;
+    }
+    if (!element || (element->tag_name && element->tag_name[0] == '#')) return ItemNull;
+    const char* name = key.get().item == ITEM_NULL || is_js_undefined(key.get())
+        ? nullptr : fn_to_cstr(key.get());
+    const char* uri = dom_element_lookup_namespace_uri(element, name);
+    return uri ? js_name_item(uri) : ItemNull;
 }
 
 static Item dom_optional_dictionary_boolean(Item options, const char* key) {
@@ -11944,9 +11982,12 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
 
     if (prop_id == JS_DOM_PROP_STYLE) {
         const char* style_text = dom_to_attr_cstr(value);
-        elem->set_attribute("style", style_text);
-        elem->set_styles_resolved(false);
-        dom_mutation_notify(DOM_JS_MUTATION_INLINE_STYLE, (DomNode*)elem, elem->parent);
+        const char* old_value = elem->get_attribute("style");
+        if (elem->set_attribute("style", style_text)) {
+            // assigning style forwards the same authored-attribute notifications as CSSOM.
+            elem->set_styles_resolved(false);
+            dom_notify_inline_style_mutation(elem, CSS_PROPERTY_UNKNOWN, old_value);
+        }
         log_debug("dom_set_property: set style='%.50s' on <%s>",
                   style_text, elem->tag_name ? elem->tag_name : "?");
         return value;
@@ -15762,6 +15803,9 @@ static Item dom_set_attribute_ns_value(Item n, Item ns, Item qname, Item value_a
     const char* local_name = colon ? colon + 1 : qualified_name;
     const char* old_value = replaced_value ? replaced_value :
         dom_element_attribute_value_ns(elem, namespace_uri, local_name);
+    // null-namespace writes and reflected properties share ordinary metadata semantics.
+    if (!*namespace_uri && !replace_name && !replaced_value &&
+        dom_set_non_style_metadata(elem, stored_name, value)) return ItemNull;
     if (!dom_element_set_attribute_ns(elem, namespace_uri, stored_name, value, replace_name)) return ItemNull;
     if (!*namespace_uri) dom_attribute_value_did_set(elem, stored_name, value, old_value);
     else dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem,

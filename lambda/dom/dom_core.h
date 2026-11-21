@@ -62,6 +62,7 @@ Item dom_core_scroll_into_view_if_needed_op(Item n, Item center_if_needed);
 Item dom_core_contains_op(Item a, Item b);
 Item dom_core_equal_node(Item a, Item b);
 Item dom_core_same_node_op(Item a, Item b);
+Item dom_core_lookup_namespace_uri(Item n, Item prefix);
 Item dom_core_dispatch(Item n, Item event);
 Item dom_core_dispatch_op(Item n, Item event);
 Item dom_core_pointer_samples(Item event);

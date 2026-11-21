@@ -541,6 +541,20 @@
       "manual_major_remaining": "The primary animated headline remains absent in the matched browser/native frame, despite the restored blue background and logo.",
       "reviewed_at": "2026-11-20T13:31:07.541Z",
       "evidence": "comparison/repairs.html#round-114"
+    },
+    {
+      "label": "saas_landing_310",
+      "url": "https://www.dock.us/",
+      "manual_major_remaining": "The blue hero background, heading and supporting copy are restored. The main product screen and side photographs remain absent, and the header remains unstyled. Retain the major review despite the lower coarse score.",
+      "reviewed_at": "2026-11-20T19:22:44.540Z",
+      "evidence": "comparison/repairs.html#round-119"
+    },
+    {
+      "label": "saas_landing_266",
+      "url": "https://coda.io/",
+      "manual_major_remaining": "The entire Coda interface is replaced by its own error page reporting idbFactory missing. The consent-wrapper TypeErrors are repaired, but IndexedDB remains unavailable. Retain major review despite the lower coarse score.",
+      "reviewed_at": "2026-11-20T23:48:03.060Z",
+      "evidence": "comparison/repairs.html#round-127"
     }
   ]
 }

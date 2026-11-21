@@ -18,9 +18,20 @@
 > where no formal ruling covers a point, the vibe ledger ID is given.
 
 <a id="online-framerauth-layout-timeout"></a>
-## FramerAuth startup reaches the capture deadline after native startup repairs
+## FramerAuth startup and remaining hero omission
 
-**OPEN, 2026-11-20; root cause unconfirmed.** After JS03-L3 and JS13-L27,
+**PARTIAL, 2026-11-21: load timeout resolved by RI-173; hero omission remains.**
+The current native request loads and captures in 70.04s at the unchanged
+150-second deadline and 1000ms post-load frame. Repeated SVG stroke-phase
+attribute mutations were forcing HTML flow for otherwise paint-only animation
+batches. [RI-173](Radiant_Issue_Ledger%20%28fixed%29.md#ri-173) records the shared
+repair and focused qualification. The current matched browser/native pair
+retains the manual high review. Browser instrumentation records opacity
+Web Animations from an authored 0.001 to 1 on the hero heading/copy/actions;
+automatic native Web Animations playback remains a documented feature gap.
+No visibility or clock override is used. Evidence: `temp/online-visual-round125/`.
+
+**Earlier evidence, 2026-11-20; root cause then unconfirmed.** After JS03-L3 and JS13-L27,
 the current FramerAuth (`https://framerauth.com/`) diagnostic no longer logs
 the former Framer fatal TypeError, but repeated layout work reaches the
 unchanged 150-second outer capture deadline. No PNG is produced. The output
@@ -34,6 +45,37 @@ comparison, not the independent title/stack repairs. Do not raise timeouts,
 disable script layout or claim an elapsed-time improvement over a renderer
 that exits the client path early with an error. Evidence:
 `temp/online-visual-round118/saas_landing_207/`.
+
+**2026-11-21 recheck:** JS13-L29 removes irrelevant preload/icon stylesheet
+invalidation in focused controls, but the current FramerAuth diagnostic still
+reaches the unchanged 150-second deadline without a PNG. Cache tracing shows
+later repeated inline-style batches, including animated transforms, carrying
+an unknown presentation-property code. This identifies the next investigation
+path; it does not prove that those writes can bypass layout safely. The prior
+canonical pair remains unchanged. Evidence: `temp/online-visual-round120/`.
+
+**2026-11-21 CSSOM recheck:** JS13-L30 and RI-170 preserve authored
+attribute notifications and property identity, and consume admitted paint
+invalidation. JS13-L31 removes unrelated keyframe dependency fallback. The
+combined release passes 23 focused controls; established-transform controls
+need one layout instead of eleven. FramerAuth now records known transform
+properties, but still reaches 150 seconds without a PNG. No live speed or
+page-clearance claim follows from those controls. Its canonical comparison
+remains high. Evidence: `temp/online-visual-round121/` and
+`temp/online-visual-round122/`.
+
+## Post-merge online renderer build repairs — 2026-11-21
+
+The merged `DomFormUserValidityScan` is a local scan record with a `form`
+pointer. A mechanical accessor rename changed its comparison to the nonexistent
+`scan->form_storage()` method. Restoring the pointer access fixes compilation;
+the existing `ValiditySelectorsUseInitialAndLiveConstraints` render control
+passes against the rebuilt host. Input's missing geometry-structure brace is
+recorded separately as LI-082. Stale generated makefiles also omitted the new
+server backend; regenerating them from the JSON source manifest and applying
+the documented sibling-archive generator restores linking. Ownership/build
+boundaries remain **D9.1.1v4 / D9.1.3v2 / D9.1.5**. No generated build files or
+vendor source were hand-edited. Evidence: `temp/online-visual-round120/`.
 
 <a id="durable-scratch-spool-amplification"></a>
 Scratch spool durability amplification was fixed and moved to the
@@ -270,6 +312,13 @@ required dependencies are 158,957 and 207,242 bytes, exceeding the existing
 reduced own-array-push override passes both AST and MIR execution, excluding that
 suspected dispatch defect. Increasing source budgets has not been qualified as
 a fix; the later runtime requirements and rendering outcome remain unproven.
+
+**2026-11-21 Setpoint recheck:** the current Astro entry remains 239,880
+bytes against the 131,072-byte pre-layout defer limit. The loaded native
+snapshot remains behind its initial gray cover. The same URL/hash and size were
+already present in round18's diagnostic observations; this is not a newly
+isolated semantic failure. The current source and size record are retained in
+`temp/online-visual-round123/setpoint-module-0.{js,json}`. No limit changes.
 
 This explains an admission barrier, not complete browser-framework parity.
 Do not bypass admission or pretend that a longer snapshot window executes
@@ -705,6 +754,21 @@ their load ordering remain open.
 **Task blocker:** no for independent layout repairs. Host/DOM ownership follows
 **D9.1.3v2**, shared tier contracts **D8.4.4**, and capture timing **D10.1.7**.
 No formal ruling or capture budget changes.
+
+**2026-11-21 Kotlin follow-up:** the current 2,032,728-byte parser-inserted
+classic application bundle is admitted and executes; the qualified native
+capture still shows its loading spinner. Bootstrap waits for i18next's
+initialization promise. Its backend requests the en-US translation through
+Webpack's `l.e(61)`, which appends a classic external script and awaits its
+load/registration. The native post-connection callback
+`prepare_connected_inline_script` excludes elements with `src`, so this
+path cannot complete. This is the existing dynamic external preparation
+gap, separate from initial script admission and native layout. Ownership
+remains **D8.4.4 / D9.5.6v2**, with capture policy **D10.1.7**. No synchronous
+append loader, fabricated load event, forced reveal or budget change is
+introduced. Evidence: `temp/online-visual-round135/kotlin.html`,
+`kotlin-app.js`, and `kotlin-current/` (release collected/settled task trace,
+loadOK, 1000ms post-load, 9805.90ms capture). No canonical image is replaced.
 
 **2026-11-20 Aircall follow-up:** its 27,863-byte OneTrust stub executes, receives
 the domain configuration (HTTP 200, 7,140 bytes) and geolocation (HTTP 200,
@@ -3513,6 +3577,14 @@ establishes and verifies RI-063, while Bizzabo's complete saved page plays.
 
 ## Online source growth beyond snapshot admission — 2026-11-13
 
+**2026-11-21 recheck:** About still loads and captures a solid teal frame.
+Its current blocking vendor bundle `vendor-836a3e5ff50c378a30ba.js` contains
+6,044,673 bytes, above the unchanged 5,242,880-byte per-source limit. The
+home-page bundle is 995,726 bytes. This reproduces the previously recorded
+admission barrier; it is not reported as a new layout regression or a fix.
+Source sizes, current document and native capture are retained under
+`temp/online-visual-round123/`. Both existing high-severity rows are preserved.
+
 <a id="online-northstar-source-admission"></a>
 
 **Status:** OPEN profile/capability limit; a new layout regression is excluded
@@ -3725,3 +3797,21 @@ fixes. Evidence: `temp/sync-test-performance-impl/radiant-rerun.log` and the ful
 `radiant-baseline.log`. The remaining 201 document resolver tests and 329 UI
 automation tests pass. This failure is separate from the Input LI-076 constrained
 error contract failure and is not a sync performance acceptance case.
+
+
+## Online form baseline failures reproduced on prior renderer — 2026-11-21
+
+<a id="online-form-baseline-20261121"></a>
+
+**Status:** OPEN investigation; not a blocker for independent native grid
+repairs. Shared DOM/script ownership follows **D8.4.4 / D9.5.6v2**; snapshot
+policy follows **D10.1.7**. The round136 17-category layout milestone records
+two form failures: `option-text-setter` (required pass missing) and
+`input-type-button` (element agreement 100% to 25%). Both reproduce in a
+focused form run with the previous qualified round134 renderer, with the
+same names and scores. That establishes that RI-176/177 did not introduce
+them; the runtime/reference cause remains unisolated. The preceding broad
+milestone131 predates script-harness and Node-interface repairs. No reference,
+assertion, classification, test harness or tolerance is changed to mask the
+failures. Evidence: `temp/online-visual-round136/layout-baseline-results.txt`,
+`form-regressions.log`, `form-prior.log` and `form-prior-results.json`.

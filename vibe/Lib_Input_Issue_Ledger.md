@@ -15,6 +15,70 @@ Resolved records are in the [fixed issue ledger](<Lib_Input_Issue_Ledger (fixed)
 
 ## Open issues
 
+<a id="li-093"></a>
+
+### LI-093 — FIXED
+
+Shared namespace lookup now considers expanded names before declarations,
+while preserving namespace resets and fragment boundaries. See the
+[fixed record](<Lib_Input_Issue_Ledger (fixed).md#li-093>).
+
+
+<a id="li-092"></a>
+
+### LI-092 — FIXED
+
+The generic shorthand projector reuses the existing font component decoder.
+See the [fixed record](<Lib_Input_Issue_Ledger (fixed).md#li-092>).
+
+
+<a id="li-091"></a>
+
+### LI-091 — FIXED
+
+The absent-shorthand marker no longer selects retained property-code-zero
+declarations as candidates for real CSS properties. See the
+[cascade source validation repair](<Lib_Input_Issue_Ledger (fixed).md#li-091>).
+
+<a id="li-090"></a>
+
+### LI-090 — FIXED
+
+Absent properties reuse the existing cached all-only cascade result when no
+own, shorthand, authored-only or borrowed candidate participates. See the
+[rollback read repair](<Lib_Input_Issue_Ledger (fixed).md#li-090>).
+
+<a id="li-089"></a>
+
+### LI-089 — FIXED
+
+Relative Oklab/Oklch colors now reuse shared channel math, source-model
+conversion and native paint consumers. See the
+[perceptual relative-color repair](<Lib_Input_Issue_Ledger (fixed).md#li-089>).
+
+<a id="li-088"></a>
+
+### LI-088 — FIXED
+
+Component cascade reads no longer rescan losing declarations after finding an
+eligible candidate in a sorted source. See the
+[cascade scan repair](<Lib_Input_Issue_Ledger (fixed).md#li-088>).
+
+<a id="li-087"></a>
+
+### LI-087 — FIXED
+
+Repeated writes to an already present inert attribute can preserve native style
+storage when the caller proves CSS independence. See the
+[shared metadata eligibility repair](<Lib_Input_Issue_Ledger (fixed).md#li-087>).
+
+<a id="li-082"></a>
+
+### LI-082 — FIXED
+
+The merged geometry structure lacked its closing brace and blocked consumers.
+See the [header repair](<Lib_Input_Issue_Ledger (fixed).md#li-082>).
+
 <a id="li-080"></a>
 
 ### LI-080 — FIXED
