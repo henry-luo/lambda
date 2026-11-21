@@ -2606,6 +2606,59 @@ protected:
     }
 };
 
+TEST_F(DomRetirementTest, StateStorePreservesOwnerLifetimeStamps) {
+    DomElement* parent = root();
+    DomElement* owner = element("video");
+    DomElement* sibling = element("span");
+    ASSERT_TRUE(attach(parent, owner));
+    ASSERT_TRUE(attach(parent, sibling));
+    struct StateStoreCleanup {
+        DomDocument* document;
+        ~StateStoreCleanup() { state_store_destroy(document); }
+    } cleanup{&doc};
+    ASSERT_NE(state_store_create(&doc), nullptr);
+    DocState* state = doc.state;
+
+    const DomNodeRef original_owner = dom_node_ref(owner);
+    ASSERT_NE(original_owner.lifetime_stamp, 0u);
+    ASSERT_NE(media_view_state_get(state, owner, true), nullptr);
+    ViewStateEntry key = {.view_id = original_owner.expected_id, .kind = VIEW_STATE_MEDIA};
+    auto lookup = [&]() {
+        return static_cast<const ViewStateEntry*>(hashmap_get(state->view_state_map, &key));
+    };
+    const ViewStateEntry* entry = lookup();
+    ASSERT_NE(entry, nullptr);
+    EXPECT_EQ(entry->owner.address, owner);
+    EXPECT_EQ(entry->owner.expected_id, original_owner.expected_id);
+    EXPECT_EQ(entry->owner.lifetime_stamp, original_owner.lifetime_stamp);
+    ViewState* retained_state = entry->state;
+
+    ASSERT_TRUE(parent->remove_child(sibling));
+    ASSERT_EQ(dom_retire_sweep(&doc), 1u);
+    uint32_t current_stamp = dom_node_ref(parent).lifetime_stamp;
+    ASSERT_NE(current_stamp, 0u);
+    ASSERT_NE(current_stamp, original_owner.lifetime_stamp);
+    // unrelated retirement expires the proof while the owner and its state survive.
+    EXPECT_EQ(state_store_prune_after_reflow(state), 0u);
+    entry = lookup();
+    ASSERT_NE(entry, nullptr);
+    EXPECT_EQ(entry->state, retained_state);
+    EXPECT_EQ(entry->owner.lifetime_stamp, current_stamp);
+
+    DomElement* replacement = element("video");
+    ASSERT_TRUE(attach(parent, replacement));
+    view_state_preserve_subtree_identity(state, owner, replacement);
+    EXPECT_EQ(lookup(), nullptr);
+    const DomNodeRef replacement_owner = dom_node_ref(replacement);
+    key.view_id = replacement_owner.expected_id;
+    entry = lookup();
+    ASSERT_NE(entry, nullptr);
+    EXPECT_EQ(entry->state, retained_state);
+    EXPECT_EQ(entry->owner.address, replacement);
+    EXPECT_EQ(entry->owner.expected_id, replacement_owner.expected_id);
+    EXPECT_EQ(entry->owner.lifetime_stamp, replacement_owner.lifetime_stamp);
+}
+
 TEST_F(DomRetirementTest, FocusValidationUsesOwnedRootAfterReflow) {
     DomElement* owned_root = root();
     DomElement* parser_document = element("#document");

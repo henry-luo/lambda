@@ -44,12 +44,25 @@ pub fn metadata(pdf) {
 // Indirect-reference resolution
 // ============================================================
 
-// Find an indirect_object wrapper by its object_num. Returns null when not
-// found. O(n) — callers that need many lookups should cache results.
+pub fn index_render_objects(pdf) any^ {
+    let objects = pdf.objects;
+    if (objects is array) {
+        // The first occurrence wins, matching the unindexed resolver.
+        let index = map([for (obj in reverse(objects)^) (obj.object_num, obj)]);
+        {*:pdf, _render_object_index:index}
+    } else { pdf }
+}
+
+// Find an indirect_object wrapper by its object_num. Single-page callers
+// can resolve a document without building the multipage render index.
 fn find_obj(pdf, num) {
-    let objs = if (pdf and pdf.objects) pdf.objects else [];
-    let hits = [for (o in objs where o.object_num == num) o];
-    if len(hits) > 0 { hits[0] } else { null }
+    let index = pdf._render_object_index;
+    if (index != null) { index[num] }
+    else {
+        let objs = if (pdf and pdf.objects) pdf.objects else [];
+        let hits = [for (o in objs where o.object_num == num) o];
+        if len(hits) > 0 { hits[0] } else { null }
+    }
 }
 
 // Resolve an item that may be an indirect_ref Map. Returns the referenced

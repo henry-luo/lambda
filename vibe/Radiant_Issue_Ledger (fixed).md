@@ -14,6 +14,30 @@ are unchanged. Full evidence is under `../../lambda/temp/kianhup-style/`.
 
 ## Fixed issues
 
+<a id="ri-197"></a>
+
+### RI-197 — Retained view state discards the DOM lifetime stamp
+
+**Fixed 2026-11-22.** After Input replaced the per-node registry with
+structural ownership, StateStore continued storing an address and ID.
+Reconstructing a reference from that pair caused each cold validation to
+walk the document. PDF navigation and scene replays multiplied those walks
+across all retained entries during event validation.
+
+StateStore stores and renews the full weak reference under D5.5.1. Input
+shares one structural ownership snapshot across bulk checks (LI-098).
+State transitions validate the settled interaction graph at the enclosing
+batch boundary and still check the legality of each transition under
+D1.10. This avoids resolving live interaction owners during unload,
+after document weak proofs have been revoked.
+[StateStore](../radiant/radiant/state_store.cpp) ·
+[Transition validation](../radiant/radiant/state_machine.cpp)
+
+The same replay profiles showed local recascades rediscovering selected CSS
+resources for the entire tree. Discovery now follows the recascaded subtree
+under D5.5.3. Full document loading still walks the document.
+[CSS cascade](../radiant/radiant/css_cascade.cpp)
+
 <a id="ri-195"></a>
 
 ### RI-195 — Headless Scene3D fixtures bypass the device mixer
