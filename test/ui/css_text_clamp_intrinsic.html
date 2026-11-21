@@ -3,9 +3,9 @@
 html, body { margin: 0; background: white; font: 16px/20px FixtureMono; }
 .grid { display: grid; grid-template-columns: repeat(3, 120px); gap: 10px; align-content: start; }
 .card { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 6px; }
-.label { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; max-width: 100px; }
+.label { display:flow-root; line-clamp: 2; overflow: hidden; max-width: 100px; }
 .meta { height: 12px; font-size: 10px; line-height: 12px; }
-#short { -webkit-line-clamp: 3; }
+#short { line-clamp: 3; }
 </style>
 <div class="grid">
   <div class="card"><div id="long" class="label">Alpha Bravo Charlie Delta Echo Foxtrot Golf Hotel India Juliet</div><div id="meta" class="meta">34 bytes</div></div>

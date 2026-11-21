@@ -126,7 +126,7 @@ static Item inspector_node_record(MarkBuilder& builder, RadiantDevtools* inspect
     int64_t count = 0;
     if (node->is_element()) {
         DomElement* element = node->as_element();
-        auto snapshot = builder.element(element->tag_name ? element->tag_name : "element");
+        auto snapshot = builder.element(element->tag_name() ? element->tag_name() : "element");
         DomAttributeIterator attributes = dom_element_attribute_iterator(element);
         DomAttributeView attribute;
         while (dom_element_next_attribute(&attributes, &attribute))

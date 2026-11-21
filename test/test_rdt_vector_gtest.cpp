@@ -3998,12 +3998,14 @@ TEST(CssVariableSubstitutionTest, DocumentLimitsBoundBytesTokensAndAuthoredText)
         entry.value_text = lam::up(declaration->value_text);
         entry.value_text_len = declaration->value_text_len;
         // the entry borrows stack storage only for this resolver call (D5.5.1).
-        node->css_variables = lam::own(&entry);
+        DomStyleRareExt* state = node->ensure_ext();
+        ASSERT_NE(state, nullptr);
+        state->css_variables = lam::own(&entry);
         StrView text = {};
         const CssValue* value = css_compute_element_custom_property_text(doc.document_pool,
             node, "--value", 7, &text);
         EXPECT_EQ(value != nullptr, sample.valid) << sample.text;
-        node->css_variables = nullptr;
+        state->css_variables = nullptr;
         if (css_value_contains_var_reference(declaration->value)) {
             const CssValue* substituted = css_resolve_var_value(doc.document_pool,
                 declaration->value, nullptr, nullptr, node);
@@ -4292,11 +4294,12 @@ TEST(SvgCascadeTest, InlineImportanceAndSelectorListSpecificity) {
     CssEngine* engine = css_engine_create(pool);
     SelectorMatcher* matcher = selector_matcher_create(pool);
     DomElement node = {};
-    node.tag_name = lam::up("rect");
+    node.tag_id = MARKUP_NAME_SVG;
     node.id = lam::up("target");
-    const char* classes[] = {"paint"};
-    node.class_names = lam::own_arr(classes);
-    node.class_count = 1;
+    node.classes = lam::own(DomClassList::allocate(pool, 1));
+    ASSERT_TRUE(node.classes);
+    node.classes->class_count = 1;
+    node.classes->class_names[0] = "paint";
     CssStylesheet* sheets[] = {css_parse_stylesheet(engine,
         ".paint { fill:blue !important; } .paint, #target { stroke:red; } .paint { stroke:blue; }"
         ".paint { marker:url(#all); marker-end:url(#end); } #target { marker-start:none !important; }",
@@ -4338,7 +4341,7 @@ TEST(SvgCascadeTest, CustomPropertiesDoNotAliasOrdinaryPropertyQueries) {
     SelectorMatcher* matcher = selector_matcher_create(pool);
     ASSERT_NE(matcher, nullptr);
     DomElement node = {};
-    node.tag_name = lam::up("rect");
+    node.tag_id = MARKUP_NAME_SVG;
     const char* source = "fill:red;--fill:blue!important;--Fill:green";
     size_t count = 0;
     CssDeclaration** declarations = css_parse_declaration_list_text(source, strlen(source), pool, &count);

@@ -55,9 +55,14 @@ def detached_target(repo):
 
 
 def commit_changes(repo, message):
-    git(repo, "add", "-A")
     merge = git(repo, "rev-parse", "--git-path", "MERGE_HEAD")
     merge_path = Path(merge) if os.path.isabs(merge) else repo / merge
+    dirty = git(repo, "status", "--porcelain", "--untracked-files=normal",
+                "--ignore-submodules=none")
+    # Avoid locking an unchanged repository's index; this also preserves empty merge commits.
+    if not dirty and not merge_path.exists():
+        return False
+    git(repo, "add", "-A")
     staged = subprocess.run(["git", "-C", str(repo), "diff", "--cached", "--quiet"]).returncode
     if staged not in (0, 1):
         raise ValueError(f"could not inspect staged changes: {repo}")

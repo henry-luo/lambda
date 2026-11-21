@@ -1257,17 +1257,17 @@ public:
     }
 
     void put_element_class(const char* name, const DomElement* element) {
-        if (!element || element->class_count == 0 || !element->class_names) {
+        if (!element || element->class_count() == 0) {
             put(name, "");
             return;
         }
-        if (element->class_count == 1) {
-            put(name, element->class_names[0]);
+        if (element->class_count() == 1) {
+            put(name, element->class_names()[0]);
             return;
         }
         StrBuf* classes = strbuf_new_cap(64);
-        for (int i = 0; i < element->class_count; i++) {
-            strbuf_append_all(classes, 2, i > 0 ? " " : "", element->class_names[i]);
+        for (int i = 0; i < element->class_count(); i++) {
+            strbuf_append_all(classes, 2, i > 0 ? " " : "", element->class_names()[i]);
         }
         put(name, classes->str);
         strbuf_free(classes);
@@ -1597,8 +1597,8 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
         }
         if (tgt_node && tgt_node->node_type == DOM_NODE_ELEMENT) {
             DomElement* tgt_elem = lam::dom_require_element(tgt_node);
-            if (tgt_elem->tag_name) {
-                mb.put("target_tag", tgt_elem->tag_name);
+            if (tgt_elem->tag_name()) {
+                mb.put("target_tag", tgt_elem->tag_name());
             }
             mb.put_element_class("target_class", tgt_elem);
 
@@ -1885,11 +1885,11 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
             View* dt = st->drag_drop->drop_target;
             if (dt->is_element()) {
                 DomElement* dte = lam::dom_require_element(dt);
-                if (dte->class_count > 0 && dte->class_names) {
-                    mb.put("drop_target_class", dte->class_names[0]);
+                if (dte->class_count() > 0) {
+                    mb.put("drop_target_class", dte->class_names()[0]);
                 }
-                if (dte->tag_name) {
-                    mb.put("drop_target_tag", dte->tag_name);
+                if (dte->tag_name()) {
+                    mb.put("drop_target_tag", dte->tag_name());
                 }
             }
         }
@@ -3363,7 +3363,7 @@ extern "C" bool radiant_dispatch_submit_event_from_script(void* form_node,
     DomNode* node = static_cast<DomNode*>(form_node);
     if (!node || !node->is_element()) return false;
     DomElement* form = node->as_element();
-    if (!form || !form->tag_name || str_icmp_cstr(form->tag_name, "form") != 0) {
+    if (!form || !form->tag_name() || str_icmp_cstr(form->tag_name(), "form") != 0) {
         return false;
     }
     DomDocument* doc = g_emit_handler_ctx ? g_emit_handler_ctx->doc
@@ -6096,9 +6096,9 @@ static bool dom_js_node_is_stylesheet_related(DomNode* node) {
     } else if (node->parent && node->parent->is_element()) {
         elem = lam::dom_require_element(node->parent);
     }
-    if (!elem || !elem->tag_name) return false;
-    if (str_icmp_cstr(elem->tag_name, "style") == 0) return true;
-    if (str_icmp_cstr(elem->tag_name, "link") != 0) return false;
+    if (!elem || !elem->tag_name()) return false;
+    if (str_icmp_cstr(elem->tag_name(), "style") == 0) return true;
+    if (str_icmp_cstr(elem->tag_name(), "link") != 0) return false;
     // preload/icon metadata cannot change a sheet; a formerly associated link still can.
     return radiant_html_has_token(elem->get_attribute("rel"), "stylesheet") ||
         dom_cssom_element_sheet(elem) != nullptr;
@@ -6414,7 +6414,7 @@ static bool dom_js_selector_can_match_mutated_element(CssSelector* selector,
     for (size_t i = 0; i < rightmost->simple_selector_count; i++) {
         CssSimpleSelector* simple = rightmost->simple_selectors[i];
         if (simple && simple->type == CSS_SELECTOR_TYPE_ELEMENT && simple->value &&
-            (!target->tag_name || str_icmp_cstr(simple->value, target->tag_name) != 0)) {
+            (!target->tag_name() || str_icmp_cstr(simple->value, target->tag_name()) != 0)) {
             return false;
         }
     }
@@ -10654,7 +10654,7 @@ static bool run_form_submit_activation(EventContext* evcon, View* target) {
             return false;
         }
         owner = radiant_form_owner(elem);
-    } else if (elem->tag_name && str_icmp_cstr(elem->tag_name, "form") == 0) {
+    } else if (elem->tag_name() && str_icmp_cstr(elem->tag_name(), "form") == 0) {
         owner = elem;
     }
     if (!owner) return false;
@@ -10663,7 +10663,7 @@ static bool run_form_submit_activation(EventContext* evcon, View* target) {
         ViewBlock* block = radiant_mouse_click_block(evcon, target);
         ImageSurface* image = render_media_image_surface(block);
         if (image) {
-            DomElementExt* state = elem->ensure_ext();
+            DomStyleRareExt* state = elem->ensure_ext();
             if (state) {
                 LayoutContentBox content = layout_content_box(block);
                 Rect image_box = render_media_image_rect(block, image,
@@ -12176,7 +12176,7 @@ static bool navigation_commit_iframe_document(UiContext* uicon,
     }
     ViewBlock* block = lam::view_require_block(iframe_view);
     if (!block) return false;
-    if (!block->embed && !block->ensure_embed(owner->view_tree)) return false;
+    if (!block->ensure_embed()) return false;
     LayoutContentBox viewport = layout_content_box(block);
     const char* source = iframe->get_attribute("srcdoc");
     if (!source) source = iframe->get_attribute("src");
@@ -14516,7 +14516,7 @@ static void handle_event_impl(UiContext* uicon, DomDocument* doc, RdtEvent* even
                     // default (no draggable attr) unless draggable="false".
                     if (!is_draggable &&
                         !(draggable && strcmp(draggable, "false") == 0)) {
-                        const char* tag = elem->tag_name;
+                        const char* tag = elem->tag_name();
                         if (tag && (str_icmp_cstr(tag, "img") == 0 ||
                                     (str_icmp_cstr(tag, "a") == 0 &&
                                      elem->get_attribute("href")))) {

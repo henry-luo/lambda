@@ -768,7 +768,7 @@ TEST_F(SourcePosBridgeRoundTrip, FullRoundTripText) {
 
 TEST_F(SourcePosBridgeRoundTrip, GeneratedBeforeContentDoesNotEnterSourceTextPaths) {
     DomElement* before = make_element();
-    before->tag_name = lam::up("::before");
+    before->tag_id = MARKUP_NAME_DOM_BEFORE;
     DomText* glyph = make_text("check", 5);
     ASSERT_TRUE(before->append_child(glyph));
     ASSERT_TRUE(para->insert_before(before, hello));

@@ -1,6 +1,6 @@
 <!doctype html><meta charset="utf-8"><style>
 @font-face{font-family:FixtureMono;src:url(../layout/data/font/LiberationMono-Regular.ttf)}
-html,body{margin:0}button{height:24px}.owner{font:20px/24px FixtureMono}.box{width:62px;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;word-break:break-all;color:blue}
+html,body{margin:0}button{height:24px}.owner{font:20px/24px FixtureMono}.box{width:62px;overflow:hidden;display:flow-root;word-break:break-all;color:blue}
 </style><button id="check">Check</button><button id="change">Change</button><button id="changed">Changed</button><button id="restore">Restore</button><button id="restored">Restored</button><output id="report"></output>
 <script>
 (function(){
@@ -9,10 +9,10 @@ html,body{margin:0}button{height:24px}.owner{font:20px/24px FixtureMono}.box{wid
   var owner=document.createElement('div'),box=document.createElement('div');
   owner.id='owner-'+item.id;owner.className='owner';box.id=item.id;box.className='box';
   owner.style.position='absolute';owner.style.left=String((index%8)*120)+'px';owner.style.top=String(40+Math.floor(index/8)*180)+'px';
-  var text=document.createElement('span');text.style.color='red';text.textContent='ABCDEFGHIJKLMNOPQRSTUVWXYZabcd';box.appendChild(text);box.style.webkitLineClamp='4';box.style.webkitLineClamp=item.value;
-  if(item.inherited){owner.style.webkitLineClamp='calc(40px / 1em)';box.style.fontSize='30px';}
+  var text=document.createElement('span');text.style.color='red';text.textContent='ABCDEFGHIJKLMNOPQRSTUVWXYZabcd';box.appendChild(text);box.style.lineClamp='4';box.style.lineClamp=item.value;
+  if(item.inherited){owner.style.lineClamp='calc(40px / 1em)';box.style.fontSize='30px';}
   if(item.descendant){
-   owner.style.webkitLineClamp='calc(40px / 1em)';owner.style.display='-webkit-box';owner.style.webkitBoxOrient='vertical';owner.style.width='62px';
+   owner.style.lineClamp='calc(40px / 1em)';owner.style.display='flow-root';owner.style.width='62px';
    box.style.display=item.descendant==='flow-root'?'flow-root':'block';box.style.overflow=item.descendant==='hidden'?'hidden':'visible';
   }
   if(item.variable)owner.style.setProperty('--count',item.variable);
@@ -22,8 +22,8 @@ html,body{margin:0}button{height:24px}.owner{font:20px/24px FixtureMono}.box{wid
   var report=document.getElementById('report');
   cases.forEach(function(item){
    var box=document.getElementById(item.id),style=getComputedStyle(box);
-   report.setAttribute('data-'+prefix+item.id+'-specified',box.style.webkitLineClamp);
-   report.setAttribute('data-'+prefix+item.id+'-computed',style.webkitLineClamp);
+   report.setAttribute('data-'+prefix+item.id+'-specified',box.style.lineClamp);
+   report.setAttribute('data-'+prefix+item.id+'-computed',style.lineClamp);
    report.setAttribute('data-'+prefix+item.id+'-height',String(box.getBoundingClientRect().height));
   });
  }
@@ -31,10 +31,10 @@ html,body{margin:0}button{height:24px}.owner{font:20px/24px FixtureMono}.box{wid
   cases.forEach(function(item){
    var owner=document.getElementById('owner-'+item.id),box=document.getElementById(item.id);
    owner.style.fontSize=restore?'20px':'10px';
-   if(item.changed)box.style.webkitLineClamp=restore?item.value:item.changed;
+   if(item.changed)box.style.lineClamp=restore?item.value:item.changed;
    if(item.changedVariable)owner.style.setProperty('--count',restore?item.variable:item.changedVariable);
   });
-  document.getElementById('report').setAttribute('data-'+(restore?'restored-dirty':'dirty')+'-relative',getComputedStyle(document.getElementById('relative')).webkitLineClamp);
+  document.getElementById('report').setAttribute('data-'+(restore?'restored-dirty':'dirty')+'-relative',getComputedStyle(document.getElementById('relative')).lineClamp);
  }
  document.getElementById('check').onclick=function(){record('');};
  document.getElementById('change').onclick=function(){mutate(false);};

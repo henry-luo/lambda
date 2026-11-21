@@ -596,8 +596,8 @@ static const ScrollProp* host_test_scroll_property(const DomElement* element) {
 static const PositionProp* host_test_position_property(const DomElement* element) {
     return element == &host_property_element ? (const PositionProp*)&host_property_values[6] : nullptr;
 }
-static const EmbedProp* host_test_embed_property(const DomElement* element) {
-    return element == &host_property_element ? (const EmbedProp*)&host_property_values[7] : nullptr;
+static const EmbedStyle* host_test_embed_property(const DomElement* element) {
+    return element == &host_property_element ? (const EmbedStyle*)&host_property_values[7] : nullptr;
 }
 
 static bool host_test_property_dispatch(bool present) {
@@ -605,7 +605,7 @@ static bool host_test_property_dispatch(bool present) {
     return dom_engine_boundary_property(&host_property_element) == (const BoundaryProp*)&host_property_values[offset] &&
         dom_engine_scroll_property(&host_property_element) == (const ScrollProp*)&host_property_values[offset + 1] &&
         dom_engine_position_property(&host_property_element) == (const PositionProp*)&host_property_values[offset + 2] &&
-        dom_engine_embed_property(&host_property_element) == (const EmbedProp*)&host_property_values[offset + 3] &&
+        dom_engine_embed_property(&host_property_element) == (const EmbedStyle*)&host_property_values[offset + 3] &&
         !dom_engine_boundary_property(nullptr) && !dom_engine_scroll_property(nullptr) &&
         !dom_engine_position_property(nullptr) && !dom_engine_embed_property(nullptr);
 }
@@ -707,7 +707,7 @@ TEST(DomHostProviderTest, AbsenceValidationDispatchAndConcurrentPublication) {
     host_property_element.bound.p_ = (BoundaryProp*)&host_property_values[0];
     host_property_element.scroller.p_ = (ScrollProp*)&host_property_values[1];
     host_property_element.position.p_ = (PositionProp*)&host_property_values[2];
-    host_property_element.embed.p_ = (EmbedProp*)&host_property_values[3];
+    host_property_element.embed.p_ = (EmbedStyle*)&host_property_values[3];
     ASSERT_EQ(dom_host_engine_ops(), nullptr);
     DomElement empty = {};
     EXPECT_EQ(dom_engine_boundary_property(&empty), nullptr);

@@ -15,6 +15,17 @@ Resolved records are in the [fixed issue ledger](<Lib_Input_Issue_Ledger (fixed)
 
 ## Open issues
 
+<a id="li-094"></a>
+
+### LI-094 — `:modal` still matches after removal of the dialog's `open` attribute
+
+**OPEN**, reproduced on 2026-11-21 with Input `3b18322` and Radiant `4871cce`
+(D9.1.1v4, D9.1.3v2). In `DomIntegrationTest.ModalAndPopoverSelectorsUseElementState`,
+removing `open` leaves `dialog:modal` matching. The Input selector matcher lost
+its `open` check in `fe996232` and now reads the stored modal bit. The native
+test reproduces on the archived pre-rename binary and on the rename build.
+[Selector matcher](../lambda-input/lambda/input/css/selector_matcher.cpp#L1451) · [Integration test](../radiant/test/css/test_css_dom_integration.cpp#L1977)
+
 <a id="li-093"></a>
 
 ### LI-093 — FIXED

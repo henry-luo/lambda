@@ -374,7 +374,7 @@ static Item animation_host_invoke(Item receiver,Item* args,int argc) {
 static int animation_host_operate(Item receiver,Item* args,int argc,Item* out) { *out=animation_host_invoke(receiver,args,argc);return 1; }
 static Item animation_host_construct(Item,Item* args,int argc,Item,uint64_t*) {
     RootFrame roots(2);Rooted<Item> target(roots,argc?args[0]:ItemNull),wrapper(roots,ItemNull);
-    auto* element=(DomElement*)dom_unwrap_element(target.get());if(!element||!element->doc||(element->tag()!=MARKUP_NAME_CANVAS&&strcmp(element->tag_name,"scene3d"))) return dom_realm_throw_type_error("Animation host requires its document canvas or scene element");
+    auto* element=(DomElement*)dom_unwrap_element(target.get());if(!element||!element->doc||(element->tag()!=MARKUP_NAME_CANVAS&&strcmp(element->tag_name(),"scene3d"))) return dom_realm_throw_type_error("Animation host requires its document canvas or scene element");
     Context* owner=radiant_dom_resource_owner(element->doc);
     if(!owner) return dom_realm_throw_type_error("Animation host requires a document evaluator");
     unsigned count=0;for(auto* host=animation_hosts;host;host=host->next) count++;

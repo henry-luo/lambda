@@ -14732,9 +14732,9 @@ TEST_F(RadiantDocumentTest, AlternativeImagePaintUsesSelectedStyleAndImageRole) 
         ASSERT_TRUE(item->set_attribute("alt", recipe.text));
         ASSERT_NE(item->embed, nullptr);
         ImageSurface loaded = {};
-        item->ensure_embed(document->view_tree)->img = lam::up(&loaded);
+        item->ensure_embed()->img = lam::up(&loaded);
         EXPECT_EQ(render_media_image_alternative(lam::view_require_block(item)), nullptr);
-        item->ensure_embed(document->view_tree)->img = nullptr;
+        item->ensure_embed()->img = nullptr;
         ui.document = nullptr;
         free_document(document);
         document = nullptr;
@@ -17496,7 +17496,7 @@ TEST_F(RadiantDocumentTest, RubyDisplayFixupRecursesThroughInlineBoxesAndStopsAt
             DisplayValue display = resolve_display_value(element);
             EXPECT_EQ(display.outer, entry.outer) << entry.id;
             EXPECT_EQ(display.inner, entry.inner) << entry.id;
-            EXPECT_EQ((bool)display.list_item, entry.list_item) << entry.id;
+            EXPECT_EQ(display.inner.list_item(), entry.list_item) << entry.id;
         }
     }
     DomElement* owner = dom_find_element_by_id(document->root->as_element(), "owner");

@@ -1816,7 +1816,7 @@ static bool script_scheduler_enqueue(DomDocument* document, JsScriptTaskCollecti
         bool scheduled = script_task_is_executable(task) || script_task_has_load_failure(task);
         DomElement* element = script_task_element(document, task);
         if (dom_element_is_html_tag(element, MARKUP_NAME_SCRIPT) && (scheduled || element->ext)) {
-            if (DomElementExt* state = element->ensure_ext()) state->script_parser_pending = scheduled;
+            if (DomStyleRareExt* state = element->ensure_ext()) state->script_parser_pending = scheduled;
         }
         if (!scheduled) continue;
 
@@ -1918,7 +1918,7 @@ static void prepare_connected_inline_script(DomElement* script, StrBuf** source_
     DomDocument* document = script->doc;
     if (!document || document->scripting_disabled || !dom_node_is_connected(script) ||
         dom_element_attribute_value_ns(script, "", "src")) return;
-    DomElementExt* state = script->ensure_ext();
+    DomStyleRareExt* state = script->ensure_ext();
     if (!state || state->script_parser_pending || state->script_already_started) return;
     const char* type = dom_element_attribute_value_ns(script, "", "type");
     char legacy_type[64];
@@ -1975,7 +1975,7 @@ static bool execute_script_task_queue(Runtime* runtime, ArrayList* queue,
         JsScriptTask* task = (JsScriptTask*)arraylist_get(queue, i);
         DomElement* script = script_task_element((DomDocument*)runtime->dom_doc, task);
         if (dom_element_is_html_tag(script, MARKUP_NAME_SCRIPT)) {
-            if (DomElementExt* state = script->ensure_ext()) {
+            if (DomStyleRareExt* state = script->ensure_ext()) {
                 state->script_parser_pending = false;
                 state->script_already_started = task->external || task->source_len > 0;
             }
@@ -3026,7 +3026,7 @@ static void collect_handlers_recursive(DomElement* elem,
 
             log_debug("collect_handlers: %s on <%s> → %s()",
                       EVENT_HANDLER_ATTRS[i].attr_name,
-                      elem->tag_name ? elem->tag_name : "?",
+                      elem->tag_name() ? elem->tag_name() : "?",
                       func_name);
         }
     }
@@ -3129,11 +3129,11 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
                 installed++;
                 log_debug("collect_and_compile_event_handlers: installed %s on <%s>",
                           attr_name,
-                          h->element && h->element->tag_name ? h->element->tag_name : "?");
+                          h->element && h->element->tag_name() ? h->element->tag_name() : "?");
             } else {
                 log_error("collect_and_compile_event_handlers: failed to install %s on <%s>",
                           attr_name,
-                          h->element && h->element->tag_name ? h->element->tag_name : "?");
+                          h->element && h->element->tag_name() ? h->element->tag_name() : "?");
             }
             h = h->next;
         }

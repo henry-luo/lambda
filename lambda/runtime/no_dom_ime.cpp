@@ -23,6 +23,7 @@ bool dom_document_owns_node_storage(DomDocument*, const void*) { return false; }
 uint32_t dom_document_alloc_node_id(DomDocument*) { return 0; }
 DomElement* element_dom_map_lookup(HashMap*, Element*) { return nullptr; }
 void element_dom_map_insert(HashMap*, Element*, DomElement*) {}
+const char* DomElement::noncanonical_tag_name() const { return nullptr; }
 
 DomElement* DomElement::create(DomDocument*, const char*, Element*) {
     log_error("macos-ime-dom: unexpected UI element creation");

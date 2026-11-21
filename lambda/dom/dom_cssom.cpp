@@ -2009,7 +2009,7 @@ static void cssom_computed_names(Item receiver, lam::ArrayList<StrView>* names) 
     CssomComputedNames data = {element, scratch, names};
     dom_provider_call(dom_style_engine_ops(), &DomStyleEngineOps::ensure_computed, element, false);
     for (DomElement* ancestor = element; ancestor; ancestor = dom_parent_element(ancestor))
-        for (CssCustomProp* variable = ancestor->css_variables; variable; variable = variable->next)
+        for (CssCustomProp* variable = ancestor->css_variables(); variable; variable = variable->next)
             cssom_computed_custom_name(&data, variable->declaration
                 ? css_declaration_name(variable->declaration) : strview_from_cstr(variable->name));
     css_visit_document_property_registrations(element->doc, cssom_computed_registration, &data);
@@ -2331,8 +2331,8 @@ extern "C" Item dom_cssom_get_element_sheet(Item elem_item) {
     DomElement* elem = (DomElement*)dom_unwrap_element(elem_item);
     if (!elem) return ItemNull;
 
-    bool is_inline_style = elem->tag_name && str_icmp_cstr(elem->tag_name, "style") == 0;
-    bool is_stylesheet_link = elem->tag_name && str_icmp_cstr(elem->tag_name, "link") == 0;
+    bool is_inline_style = elem->tag_name() && str_icmp_cstr(elem->tag_name(), "style") == 0;
+    bool is_stylesheet_link = elem->tag_name() && str_icmp_cstr(elem->tag_name(), "link") == 0;
     if (!is_inline_style && !is_stylesheet_link) {
         return ItemNull;
     }
@@ -2353,11 +2353,11 @@ extern "C" Item dom_cssom_get_element_sheet(Item elem_item) {
 
 extern "C" void dom_cssom_owner_attribute_changed(void* element, const char* name) {
     DomElement* owner = (DomElement*)element;
-    if (!owner || !owner->tag_name || !name) return;
-    bool link = str_icmp_cstr(owner->tag_name, "link") == 0;
+    if (!owner || !owner->tag_name() || !name) return;
+    bool link = str_icmp_cstr(owner->tag_name(), "link") == 0;
     bool media = str_icmp_cstr(name, "media") == 0;
     bool disabled = link && str_icmp_cstr(name, "disabled") == 0;
-    if ((!link && str_icmp_cstr(owner->tag_name, "style") != 0) || (!media && !disabled)) return;
+    if ((!link && str_icmp_cstr(owner->tag_name(), "style") != 0) || (!media && !disabled)) return;
     CssStylesheet* sheet = dom_cssom_element_sheet(owner);
     if (!sheet) return; // pending links retain their state in the reflected attributes.
     if (media) {

@@ -154,7 +154,7 @@ h1 .pixel { display: inline-block; width: .19em; height: .19em; margin-left: .05
 .running .get { animation-name: pulse; animation-duration: 1.6s; animation-iteration-count: infinite; }
 @keyframes pulse { from { opacity: 1; } 50% { opacity: .5; } to { opacity: 1; } }
 /* every blurb fits two lines; the clamp keeps a longer one from growing the card */
-.card-blurb { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+.card-blurb { display: flow-root; line-clamp: 2; overflow: hidden;
               margin: 10px 14px 14px; color: #475569; font-size: 13px; line-height: 1.5; }
 .cmd { display: inline-block; max-width: 100%; margin-top: 3px; padding: 2px 7px; border-radius: 6px;
        background: rgba(59, 130, 246, .1); color: #3b5384; font-family: Menlo, monospace; font-size: 11.5px;

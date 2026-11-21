@@ -206,3 +206,9 @@ On macOS, GUI Chromium may quit during Puppeteer captures. Use Puppeteer’s bun
   `vibe/Lambda_Design_*.md` (core runtime), `vibe/input/` (input),
   `vibe/radiant/` (Radiant), `vibe/jube/` (LambdaJS, Jube).
   `doc/Lambda_Formal_Design.md` Appendix C maps each section to its records
+
+## Communication
+
+Lead with the answer or recommendation in plain English.
+Include numbers, tradeoffs, and
+implementation details when they affect the decision or the user asks for them.

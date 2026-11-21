@@ -352,7 +352,7 @@ static Item dom_form_prepare_submission(Item form_item, DomElement* form,
                                         bool engine_activation) {
     if (!dom_element_is_html_tag(form, MARKUP_NAME_FORM) || !dom_node_is_connected(form))
         return (Item){.item = ITEM_FALSE};
-    DomElementExt* state = form->ensure_ext();
+    DomStyleRareExt* state = form->ensure_ext();
     if (!state) return ItemError;
     if (state->form_constructing_entries || state->form_firing_submission_events)
         return (Item){.item = ITEM_FALSE};
@@ -1024,9 +1024,9 @@ Item dom_add_event_listener(Item elem_item, Item type_item, Item cb_item, Item o
                 is_root_target = true;
             } else {
                 DomElement* el = (DomElement*)dom_unwrap_element(elem_item);
-                if (el && el->tag_name &&
-                    (str_icmp_cstr(el->tag_name, "html") == 0 ||
-                     str_icmp_cstr(el->tag_name, "body") == 0)) {
+                if (el && el->tag_name() &&
+                    (str_icmp_cstr(el->tag_name(), "html") == 0 ||
+                     str_icmp_cstr(el->tag_name(), "body") == 0)) {
                     is_root_target = true;
                 }
             }
@@ -2979,8 +2979,9 @@ static int build_path(Item target, const char* type, bool composed, void** path,
     DomNode* current = node;
     while (current && count < max_path) {
         DomElement* element = current->as_element();
-        DomElement* host = has_shadow && element ? element->shadow_host_element() : nullptr;
-        flags[count] = slot_flag | (host && element->ext->shadow_closed ? DOM_EVENT_PATH_CLOSED_ROOT : 0);
+        const ShadowStyle* state = has_shadow && element ? element->shadow_style() : nullptr;
+        DomElement* host = state ? state->host.get() : nullptr;
+        flags[count] = slot_flag | (host && state->closed ? DOM_EVENT_PATH_CLOSED_ROOT : 0);
         if (has_shadow && dom_shadow_root(current)) flags[count] |= DOM_EVENT_IN_SHADOW_TREE;
         slot_flag = 0;
         path_is_dom[count] = true;
@@ -2998,7 +2999,7 @@ static int build_path(Item target, const char* type, bool composed, void** path,
         }
         if (DomElement* slot = has_shadow ? dom_find_assigned_slot(current) : nullptr) {
             DomElement* root = dom_shadow_root(slot);
-            if (root && root->ext->shadow_closed) slot_flag = DOM_EVENT_PATH_CLOSED_SLOT;
+            if (root && root->is_closed_shadow_root()) slot_flag = DOM_EVENT_PATH_CLOSED_SLOT;
             current = slot;
         } else current = dom_source_parent(current);
     }
