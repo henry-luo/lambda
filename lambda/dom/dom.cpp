@@ -10357,7 +10357,8 @@ extern "C" Item dom_core_lookup_namespace_uri(Item n, Item prefix) {
     } else if (node && node->node_type != DOM_NODE_DOCTYPE) {
         element = node->parent ? node->parent->as_element() : nullptr;
     }
-    if (!element || (element->tag_name && element->tag_name[0] == '#')) return ItemNull;
+    const char* tag_name = element ? element->tag_name() : nullptr;
+    if (!element || (tag_name && tag_name[0] == '#')) return ItemNull;
     const char* name = key.get().item == ITEM_NULL || is_js_undefined(key.get())
         ? nullptr : fn_to_cstr(key.get());
     const char* uri = dom_element_lookup_namespace_uri(element, name);
