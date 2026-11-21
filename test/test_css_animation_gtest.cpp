@@ -4550,8 +4550,8 @@ protected:
             position->inset_present[side] = true;
             position->inset_percents[side] = NAN;
         }
-        boundary->flow_margin = boundary->margin;
-        boundary->has_flow_margin = true;
+        boundary->has_flow_margin = false;
+        capture_flow_margin(boundary);
     }
 };
 

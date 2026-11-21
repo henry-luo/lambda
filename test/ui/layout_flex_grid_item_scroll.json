@@ -1,0 +1,13 @@
+{
+  "name": "a flex-sized grid scroll container keeps its rows in its scroll range",
+  "html": "test/ui/layout_flex_grid_item_scroll.html",
+  "viewport": {"width": 400, "height": 400},
+  "events": [
+    {"type": "script", "js": "document.getElementById('out').textContent = ['grid', 'block'].map(id => document.getElementById(id).clientHeight + '/' + document.getElementById(id).scrollHeight).join(' ')"},
+    {"type": "assert_text", "target": {"selector": "#out"}, "equals": "240/790 240/1600"},
+    {"type": "scroll", "x": 90, "y": 200, "dx": 0, "dy": -5},
+    {"type": "wait", "ms": 50},
+    {"type": "script", "js": "document.getElementById('out').textContent = String(document.getElementById('grid').scrollTop > 0)"},
+    {"type": "assert_text", "target": {"selector": "#out"}, "equals": "true"}
+  ]
+}

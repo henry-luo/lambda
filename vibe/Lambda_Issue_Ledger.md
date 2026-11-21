@@ -133,6 +133,26 @@ See the [fixed record](<Lambda_Issue_Ledger (fixed).md#lr12-68>).
 Parser-head staging publishes child arrivals to mutation observers. See the
 [load-time cascade repair](<Lambda_Issue_Ledger (fixed).md#lr12-69>).
 
+<a id="lr12-67"></a>
+
+## LR12-67 — `dom.set_attribute` stores a numeric list as an empty string
+
+**OPEN**, reproduced on 2026-11-21 in Lambda `view` documents. No `S#`/`D#`
+ruling covers it; the Lambda `import dom` surface is ES36 in the DOM API design.
+`set_attribute` declares `value: string` and converts the value through
+`dom_to_attr_cstr` → `js_to_string`. A Lambda numeric list such as
+`[2.0, 1.0, 5.0]` or `[2, 1, 5]` becomes `""`. A string list gives `"x,y"` and
+a number gives `"2.5"`. WebIDL DOMString conversion would give `"2,1,5"`, or
+the call should be rejected as a type error. The silent empty value loses the
+data. In Homer Studio, a scene3d camera `position` written this way during an
+orbit drag became `""`, scene3d rejected the camera, and the stage stayed blank
+until the next re-render. The studio now passes a string. The array branch of
+`js_to_string` handles `LMD_TYPE_ARRAY_NUM`. The empty result comes from its
+`toString` lookup or element access on a Lambda numeric array; this is
+unconfirmed. Probe:
+`~/Projects/Homer/studio/temp/auto/attr_conv.ls` with `attr_conv.json`.
+[Attribute conversion](../lambda/dom/dom.cpp#L15406) · [Array ToString](../lambda/js/js_runtime_value.cpp#L640)
+
 <a id="lr12-64"></a>
 
 ## LR12-64 — FIXED
