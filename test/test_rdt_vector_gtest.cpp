@@ -1,5 +1,6 @@
 #include "../lambda/module/radiant/radiant_runtime_init.hpp"
 #include "radiant_render_test_utils.hpp"
+#include "radiant_style_test_utils.hpp"
 #include "lambda/io/image_io.h"
 #include <gtest/gtest.h>
 
@@ -519,8 +520,9 @@ TEST(ClipGeometry, PaintContainmentClipsWithoutAllocatingAScrollPane) {
     ViewBlock* block = lam::view_as_block(&element);
     ASSERT_NE(block, nullptr);
     BlockProp properties = BLOCK_PROP_DEFAULT;
+    TestBlockContainment containment(properties);
     BoundaryProp boundary = {}; BorderProp border = {};
-    properties.contain_paint = true;
+    containment.value.contain_paint = true;
     block->blk = lam::view_prop(&properties);
     block->bound = lam::view_prop(&boundary);
     boundary.border = lam::own(&border);
@@ -536,7 +538,7 @@ TEST(ClipGeometry, PaintContainmentClipsWithoutAllocatingAScrollPane) {
     EXPECT_FLOAT_EQ(clip.right, 95); EXPECT_FLOAT_EQ(clip.bottom, 55);
     EXPECT_FLOAT_EQ(radius.top_left, 15); EXPECT_FLOAT_EQ(radius.top_left_y, 10);
     EXPECT_EQ(block->scroller, nullptr);
-    properties.contain_paint = false;
+    containment.value.contain_paint = false;
     EXPECT_FALSE(render_clip_overflow_geometry(block, &clip, &radius));
     boundary.border = nullptr;
     block->blk = nullptr; block->bound = nullptr;
@@ -558,6 +560,7 @@ TEST(TextInkBounds, DirtyAndViewportCullingPreserveOffBoxInkAndRestoreState) {
         owner.parent = lam::up<DomNode>(&parent); owner.x = 20; owner.y = -50;
         owner.width = 280; owner.height = 50;
         BlockProp properties = BLOCK_PROP_DEFAULT;
+        TestBlockContainment containment(properties);
         owner.blk = lam::view_prop(&properties); owner.font = lam::view_prop(&style);
         DomText text = {}; text.node_type = DOM_NODE_TEXT; text.view_type = RDT_VIEW_TEXT;
         text.text = lam::up("ABC"); text.length = 3;
@@ -602,10 +605,10 @@ TEST(TextInkBounds, DirtyAndViewportCullingPreserveOffBoxInkAndRestoreState) {
                 EXPECT_EQ(raster.font.style, saved_font.style);
                 EXPECT_FLOAT_EQ(raster.block.y, saved_block.y);
             }
-            properties.contain_paint = true;
+            containment.value.contain_paint = true;
             EXPECT_TRUE(render_block_viewport_misses(&raster, block));
             EXPECT_TRUE(render_block_dirty_misses(&raster, block));
-            properties.contain_paint = false;
+            containment.value.contain_paint = false;
         }
         style.text_shadow = nullptr; text.font = nullptr; text.rect = nullptr; text.parent = nullptr;
         owner.first_child = nullptr; owner.font = nullptr; owner.blk = nullptr; owner.parent = nullptr;

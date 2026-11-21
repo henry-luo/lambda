@@ -7433,9 +7433,9 @@ static uint64_t retained_subtree_geometry(DomElement* root) {
             float content[] = {element->content_width, element->content_height,
                 element->block()->first_line_baseline, element->block()->last_line_baseline};
             digest->hash = hash_fnv1a_64_extend(digest->hash, content, sizeof(content));
-            if (element->ext) {
-                digest->hash = hash_fnv1a_64_extend(digest->hash, element->ext->frags, sizeof(element->ext->frags));
-                digest->hash = hash_fnv1a_64_extend_u64le(digest->hash, element->ext->fragment_presence_mask);
+            if (const DomFragmentGeometry* geometry = element->fragment_geometry()) {
+                digest->hash = hash_fnv1a_64_extend(digest->hash, geometry->frags, sizeof(geometry->frags));
+                digest->hash = hash_fnv1a_64_extend_u64le(digest->hash, geometry->fragment_presence_mask);
             }
             if (element->embed && element->embedp()->grid && element->embedp()->grid->used_track_text)
                 digest->hash = hash_fnv1a_64_extend_cstr(digest->hash, element->embedp()->grid->used_track_text);
@@ -13152,7 +13152,7 @@ TEST_F(RadiantDocumentTest, FixedColumnHintsRespectCascadeSpansAndFirstRowPriori
             if (strcmp(containment, "size") == 0) {
                 ASSERT_TRUE(hint->blk);
                 // size containment excludes the reusable computed record; hint semantics stay the same.
-                ASSERT_NE(hint->block()->container_axes, 0);
+                ASSERT_NE(hint->block()->containment().container_axes, 0);
             }
             expect_tracks(entry.first);
         }
@@ -17705,11 +17705,14 @@ TEST_F(RadiantDocumentTest, RubyParallelTextFragmentsPreserveSourceAndMatchExpli
         IntrinsicSizes sizes = measure_physical_widths(group);
         EXPECT_FLOAT_EQ(sizes.max_content, 100.0f);
         EXPECT_TRUE(sizes.has_min_content_break);
-        EXPECT_EQ(group->ext->has_ruby_parallel_fragments, true);
-        DomText* kept_base = first_text_leaf(find("nowrap"));
+        ASSERT_NE(group->fragment_geometry(), nullptr);
+        EXPECT_TRUE(group->fragment_geometry()->has_ruby_parallel_fragments);
+        DomElement* nowrap = find("nowrap");
+        ASSERT_NE(nowrap, nullptr);
+        DomText* kept_base = first_text_leaf(nowrap);
         ASSERT_NE(kept_base->rect, nullptr);
         EXPECT_EQ(kept_base->rect->next, nullptr);
-        EXPECT_FALSE(find("nowrap")->ext->has_ruby_parallel_fragments);
+        EXPECT_FALSE(nowrap->fragment_geometry() && nowrap->fragment_geometry()->has_ruby_parallel_fragments);
     };
     for (bool retained : {false, true}) {
         layout_html_doc(&ui, document, retained);
@@ -17822,7 +17825,10 @@ TEST_F(RadiantDocumentTest, RubyTextRunsFollowCommonOwnerWrappingAndRetainSource
             IntrinsicSizes widths = measure_physical_widths(find(entry.ruby));
             EXPECT_FLOAT_EQ(widths.max_content, entry.maximum);
             EXPECT_TRUE(widths.has_min_content_break);
-            EXPECT_TRUE(find(entry.ruby)->ext->has_ruby_parallel_fragments);
+            DomElement* ruby = find(entry.ruby);
+            ASSERT_NE(ruby, nullptr);
+            ASSERT_NE(ruby->fragment_geometry(), nullptr);
+            EXPECT_TRUE(ruby->fragment_geometry()->has_ruby_parallel_fragments);
         }
         ASSERT_NE(radiant_document_ensure_state(document,"ruby-text-runs"),nullptr);
         DomRange* range = dom_range_create(document->state);
@@ -18578,7 +18584,7 @@ TEST_F(RadiantDocumentTest, RubyZeroSizeExplicitBasesRetainTheirBlockAxisEnvelop
             EXPECT_FLOAT_EQ(tail.x, annotation.x + 80.0f);
             if (entry.explicit_base) {
                 EXPECT_FLOAT_EQ(base.height, entry.mutable_font ? font_size : 20.0f);
-                EXPECT_FALSE(ruby->ext->has_empty_ruby_base);
+                EXPECT_FALSE(ruby->fragment_geometry() && ruby->fragment_geometry()->has_empty_ruby_base);
             }
             EXPECT_EQ(first_text_leaf(reading), entry.reading);
             EXPECT_EQ(entry.reading->parent.get(), entry.parent);

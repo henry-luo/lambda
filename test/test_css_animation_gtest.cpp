@@ -25,6 +25,7 @@
 #include "radiant/render_css3d.hpp"
 #include "radiant/resource_loaders.h"
 #include "radiant/network_integration.h"
+#include "radiant_style_test_utils.hpp"
 #include "lambda/input/input.hpp"
 #include "lambda/io/mark_builder.hpp"
 #include "lambda/input/css/css_engine.hpp"
@@ -2214,6 +2215,7 @@ TEST_F(MotionCascadeTest, ContainmentInheritsComputedModesWithoutImplicitContain
     element.parent = lam::up(static_cast<DomNode*>(&parent));
     doc.root = lam::up(&parent);
     BlockProp parent_block = BLOCK_PROP_DEFAULT, child_block = BLOCK_PROP_DEFAULT;
+    TestBlockContainment parent_containment(parent_block);
     parent.blk = lam::view_prop(&parent_block);
     element.blk = lam::view_prop(&child_block);
     LayoutContext context = {};
@@ -2222,23 +2224,23 @@ TEST_F(MotionCascadeTest, ContainmentInheritsComputedModesWithoutImplicitContain
     context.view = lam::up(static_cast<DomNode*>(&element));
     CssDeclaration* inherited = css_parse_declaration_text("contain:inherit", 15, pool);
     ASSERT_NE(inherited, nullptr);
-    parent_block.computed_containment = CSS_CONTAIN_LAYOUT | CSS_CONTAIN_STYLE | CSS_CONTAIN_PAINT;
+    parent_containment.value.computed_containment = CSS_CONTAIN_LAYOUT | CSS_CONTAIN_STYLE | CSS_CONTAIN_PAINT;
     resolve_css_property(CSS_PROPERTY_CONTAIN, inherited, &context);
-    EXPECT_EQ(child_block.computed_containment, parent_block.computed_containment);
-    EXPECT_TRUE(child_block.contain_positioning);
-    EXPECT_TRUE(child_block.contain_paint);
-    EXPECT_FALSE(child_block.contain_size);
+    EXPECT_EQ(child_block.containment().computed_containment, parent_block.containment().computed_containment);
+    EXPECT_TRUE(child_block.containment().contain_positioning);
+    EXPECT_TRUE(child_block.containment().contain_paint);
+    EXPECT_FALSE(child_block.containment().contain_size);
 
     // query-container size containment is a used effect, not the parent's contain value.
-    parent_block.computed_containment = 0;
-    parent_block.container_axes = CSS_CONTAINER_INLINE | CSS_CONTAINER_BLOCK;
-    parent_block.contain_size = parent_block.contain_inline_size = true;
+    parent_containment.value.computed_containment = 0;
+    parent_containment.value.container_axes = CSS_CONTAINER_INLINE | CSS_CONTAINER_BLOCK;
+    parent_containment.value.contain_size = parent_containment.value.contain_inline_size = true;
     resolve_css_property(CSS_PROPERTY_CONTAIN, inherited, &context);
-    EXPECT_EQ(child_block.computed_containment, 0);
-    EXPECT_FALSE(child_block.contain_size);
-    EXPECT_FALSE(child_block.contain_inline_size);
-    EXPECT_FALSE(child_block.contain_positioning);
-    EXPECT_FALSE(child_block.contain_paint);
+    EXPECT_EQ(child_block.containment().computed_containment, 0);
+    EXPECT_FALSE(child_block.containment().contain_size);
+    EXPECT_FALSE(child_block.containment().contain_inline_size);
+    EXPECT_FALSE(child_block.containment().contain_positioning);
+    EXPECT_FALSE(child_block.containment().contain_paint);
 
     const struct {const char* text; uint8_t flags;} modes[] = {
         {"strict", CSS_CONTAIN_SIZE | CSS_CONTAIN_LAYOUT | CSS_CONTAIN_STYLE | CSS_CONTAIN_PAINT},
@@ -2254,15 +2256,15 @@ TEST_F(MotionCascadeTest, ContainmentInheritsComputedModesWithoutImplicitContain
     CssDeclaration* visibility = css_parse_declaration_text("content-visibility:inherit", 26, pool);
     ASSERT_NE(visibility, nullptr);
     // relevance belongs to each element's view; inherit the computed mode, never the parent's skipped bit.
-    parent_block.content_visibility = CSS_VALUE_AUTO;
-    parent_block.content_visibility_skipped = true;
+    parent_containment.value.content_visibility = CSS_VALUE_AUTO;
+    parent_containment.value.content_visibility_skipped = true;
     resolve_css_property(CSS_PROPERTY_CONTENT_VISIBILITY, visibility, &context);
-    EXPECT_EQ(child_block.content_visibility, CSS_VALUE_AUTO);
-    EXPECT_FALSE(child_block.content_visibility_skipped);
-    parent_block.content_visibility = CSS_VALUE_HIDDEN;
+    EXPECT_EQ(child_block.containment().content_visibility, CSS_VALUE_AUTO);
+    EXPECT_FALSE(child_block.containment().content_visibility_skipped);
+    parent_containment.value.content_visibility = CSS_VALUE_HIDDEN;
     resolve_css_property(CSS_PROPERTY_CONTENT_VISIBILITY, visibility, &context);
-    EXPECT_EQ(child_block.content_visibility, CSS_VALUE_HIDDEN);
-    EXPECT_TRUE(child_block.content_visibility_skipped);
+    EXPECT_EQ(child_block.containment().content_visibility, CSS_VALUE_HIDDEN);
+    EXPECT_TRUE(child_block.containment().content_visibility_skipped);
     element.blk = nullptr;
     element.parent = nullptr;
 }
@@ -2306,8 +2308,9 @@ TEST(CssContainment, VisibilityApplicabilityFollowsSizeContainmentBoxes) {
     DomElement parent = {}, child = {};
     parent.node_type = child.node_type = DOM_NODE_ELEMENT;
     BlockProp block = BLOCK_PROP_DEFAULT;
-    block.content_visibility = CSS_VALUE_HIDDEN;
-    block.content_visibility_skipped = true;
+    TestBlockContainment containment(block);
+    containment.value.content_visibility = CSS_VALUE_HIDDEN;
+    containment.value.content_visibility_skipped = true;
     parent.blk = lam::view_prop(&block);
     child.parent = lam::up(static_cast<DomNode*>(&parent));
     for (const auto& test_case : cases) {
@@ -2333,18 +2336,18 @@ TEST_F(MotionCascadeTest, IntrinsicSizeNoneClearsFallbackWithoutDiscardingAutoma
         resolve_css_property(declaration->property_code, declaration, &context);
     };
     resolve("contain-intrinsic-size:auto 20px 30px");
-    EXPECT_FLOAT_EQ(block.contain_intrinsic_width, 20.0f);
-    EXPECT_FLOAT_EQ(block.contain_intrinsic_height, 30.0f);
+    EXPECT_FLOAT_EQ(block.containment().contain_intrinsic_width, 20.0f);
+    EXPECT_FLOAT_EQ(block.containment().contain_intrinsic_height, 30.0f);
     resolve("contain-intrinsic-size:auto none");
-    EXPECT_FLOAT_EQ(block.contain_intrinsic_width, -1.0f);
-    EXPECT_FLOAT_EQ(block.contain_intrinsic_height, -1.0f);
-    EXPECT_TRUE(block.contain_intrinsic_width_auto);
-    EXPECT_TRUE(block.contain_intrinsic_height_auto);
+    EXPECT_FLOAT_EQ(block.containment().contain_intrinsic_width, -1.0f);
+    EXPECT_FLOAT_EQ(block.containment().contain_intrinsic_height, -1.0f);
+    EXPECT_TRUE(block.containment().contain_intrinsic_width_auto);
+    EXPECT_TRUE(block.containment().contain_intrinsic_height_auto);
     resolve("contain-intrinsic-size:none");
-    EXPECT_FALSE(block.contain_intrinsic_width_auto);
-    EXPECT_FALSE(block.contain_intrinsic_height_auto);
+    EXPECT_FALSE(block.containment().contain_intrinsic_width_auto);
+    EXPECT_FALSE(block.containment().contain_intrinsic_height_auto);
     resolve("contain-intrinsic-height:auto none");
-    EXPECT_TRUE(block.contain_intrinsic_height_auto);
+    EXPECT_TRUE(block.containment().contain_intrinsic_height_auto);
     element.blk = nullptr;
 }
 
@@ -2363,17 +2366,17 @@ TEST_F(MotionCascadeTest, IntrinsicSizeMathUsesComputedFontAndClampsNegativeResu
     CssDeclaration* declaration = css_parse_declaration_text(text, strlen(text), pool);
     ASSERT_NE(declaration, nullptr);
     resolve_css_property(declaration->property_code, declaration, &context);
-    EXPECT_FLOAT_EQ(block.contain_intrinsic_width, 12.0f);
-    EXPECT_FLOAT_EQ(block.contain_intrinsic_height, 20.0f);
+    EXPECT_FLOAT_EQ(block.containment().contain_intrinsic_width, 12.0f);
+    EXPECT_FLOAT_EQ(block.containment().contain_intrinsic_height, 20.0f);
     font.font_size = context.font.current_font_size = 20.0f;
     resolve_css_property(declaration->property_code, declaration, &context);
-    EXPECT_FLOAT_EQ(block.contain_intrinsic_width, 22.0f);
-    EXPECT_FLOAT_EQ(block.contain_intrinsic_height, 40.0f);
+    EXPECT_FLOAT_EQ(block.containment().contain_intrinsic_width, 22.0f);
+    EXPECT_FLOAT_EQ(block.containment().contain_intrinsic_height, 40.0f);
     text = "contain-intrinsic-height:calc(1px - 2px)";
     declaration = css_parse_declaration_text(text, strlen(text), pool);
     ASSERT_NE(declaration, nullptr);
     resolve_css_property(declaration->property_code, declaration, &context);
-    EXPECT_FLOAT_EQ(block.contain_intrinsic_height, 0.0f);
+    EXPECT_FLOAT_EQ(block.containment().contain_intrinsic_height, 0.0f);
     element.blk = nullptr;
 }
 
@@ -3235,7 +3238,8 @@ TEST_F(MotionCascadeTest, IntrinsicMeasurementsSharePhysicalLogicalCascadeAndCom
     element.view_type = RDT_VIEW_BLOCK;
     element.display = {CSS_VALUE_BLOCK, CSS_VALUE_FLOW};
     BlockProp block = BLOCK_PROP_DEFAULT;
-    block.contain_size = true;
+    TestBlockContainment containment(block);
+    containment.value.contain_size = true;
     element.blk = lam::view_prop(&block);
     LayoutContext context = {};
     context.pool = lam::up(pool); context.doc = lam::up(&doc);
@@ -3262,8 +3266,9 @@ TEST_F(MotionCascadeTest, IntrinsicMeasurementsSharePhysicalLogicalCascadeAndCom
     DomElement parent = {};
     parent.node_type = DOM_NODE_ELEMENT;
     BlockProp inherited = BLOCK_PROP_DEFAULT;
-    inherited.contain_intrinsic_width = 36.0f;
-    inherited.contain_intrinsic_height = 48.0f;
+    TestBlockContainment inherited_containment(inherited);
+    inherited_containment.value.contain_intrinsic_width = 36.0f;
+    inherited_containment.value.contain_intrinsic_height = 48.0f;
     parent.blk = lam::view_prop(&inherited);
     element.parent = lam::up(static_cast<DomNode*>(&parent));
     declare("contain-intrinsic-size:inherit!important");
@@ -3291,8 +3296,9 @@ TEST_F(MotionCascadeTest, RememberedContainmentSizesBelongToCommittedSelectedVie
     context.run_mode = radiant::RunMode::PerformLayout;
     element.view_type = RDT_VIEW_BLOCK;
     BlockProp properties = BLOCK_PROP_DEFAULT;
-    properties.content_visibility = CSS_VALUE_AUTO;
-    properties.contain_intrinsic_width_auto = properties.contain_intrinsic_height_auto = true;
+    TestBlockContainment containment(properties);
+    containment.value.content_visibility = CSS_VALUE_AUTO;
+    containment.value.contain_intrinsic_width_auto = containment.value.contain_intrinsic_height_auto = true;
     element.blk = lam::view_prop(&properties);
     element.width = 80.0f; element.height = 120.0f;
     ViewBlock* block = lam::view_require_block(&element);
@@ -3310,14 +3316,15 @@ TEST_F(MotionCascadeTest, RememberedContainmentSizesBelongToCommittedSelectedVie
     ASSERT_TRUE(layout_get_last_remembered_size(&context, &element, false, &size));
     EXPECT_FLOAT_EQ(size, 60.0f);
     context.selected_view_tree = lam::up(&first);
-    properties.content_visibility_skipped = true;
+    containment.value.content_visibility_skipped = true;
     layout_store_last_remembered_size(&context, block, true);
     ASSERT_TRUE(layout_get_last_remembered_size(&context, &element, false, &size));
     EXPECT_FLOAT_EQ(size, 120.0f);
-    properties.content_visibility_skipped = false;
+    containment.value.content_visibility_skipped = false;
     DomElement ancestor = {};
     BlockProp ancestor_properties = BLOCK_PROP_DEFAULT;
-    ancestor_properties.content_visibility_skipped = true;
+    TestBlockContainment ancestor_containment(ancestor_properties);
+    ancestor_containment.value.content_visibility_skipped = true;
     ancestor.blk = lam::view_prop(&ancestor_properties);
     ancestor.view_type = RDT_VIEW_BLOCK;
     ancestor.node_type = DOM_NODE_ELEMENT;
@@ -3332,23 +3339,23 @@ TEST_F(MotionCascadeTest, RememberedContainmentSizesBelongToCommittedSelectedVie
     ASSERT_TRUE(layout_get_last_remembered_size(&context, &element, true, &size));
     EXPECT_FLOAT_EQ(size, 80.0f);
     context.css_query_probe = false;
-    properties.content_visibility = CSS_VALUE_VISIBLE;
+    containment.value.content_visibility = CSS_VALUE_VISIBLE;
     layout_store_last_remembered_size(&context, block);
     ASSERT_TRUE(layout_get_last_remembered_size(&context, &element, false, &size));
     EXPECT_FLOAT_EQ(size, 120.0f);
-    properties.contain_size = true;
+    containment.value.contain_size = true;
     layout_store_last_remembered_size(&context, block, true);
     ASSERT_TRUE(layout_get_last_remembered_size(&context, &element, false, &size));
     EXPECT_FLOAT_EQ(size, 120.0f);
-    properties.contain_size = false;
-    properties.contain_intrinsic_height_auto = false;
+    containment.value.contain_size = false;
+    containment.value.contain_intrinsic_height_auto = false;
     layout_store_last_remembered_size(&context, block, true);
     ASSERT_TRUE(layout_get_last_remembered_size(&context, &element, true, &size));
     EXPECT_FLOAT_EQ(size, 140.0f);
     // losing auto clears only that axis, including while the box is skipped.
     EXPECT_FALSE(layout_get_last_remembered_size(&context, &element, false, &size));
-    properties.content_visibility_skipped = true;
-    properties.contain_intrinsic_width_auto = false;
+    containment.value.content_visibility_skipped = true;
+    containment.value.contain_intrinsic_width_auto = false;
     layout_store_last_remembered_size(&context, block, true);
     EXPECT_FALSE(layout_get_last_remembered_size(&context, &element, true, &size));
     element.blk = nullptr;
@@ -3879,6 +3886,7 @@ TEST(CssTransform, GroupingEffectsFlattenUsedTransformStyle) {
     ScrollProp scroll = SCROLL_PROP_DEFAULT;
     InlineProp inline_prop = INLINE_PROP_DEFAULT;
     BlockProp block = BLOCK_PROP_DEFAULT;
+    TestBlockContainment containment(block);
     FilterProp filter = {};
     FilterFunction function = {};
     element.set_synthetic(true);
@@ -3906,9 +3914,9 @@ TEST(CssTransform, GroupingEffectsFlattenUsedTransformStyle) {
     filter.functions = lam::own(&function);
     EXPECT_FALSE(radiant::transform_preserves_3d(&element));
     filter.functions = nullptr;
-    block.contain_paint = true;
+    containment.value.contain_paint = true;
     EXPECT_FALSE(radiant::transform_preserves_3d(&element));
-    block.contain_paint = false;
+    containment.value.contain_paint = false;
     EXPECT_TRUE(radiant::transform_preserves_3d(&element));
     EXPECT_EQ(transform.transform_style, CSS_VALUE_PRESERVE_3D);
 }
@@ -4545,6 +4553,7 @@ TEST_F(AnimationTickTest, QueryMeasurementAndSkippedContentsDeferNewMotion) {
     parent.display.outer = CSS_VALUE_BLOCK;
     parent.display.inner = CSS_VALUE_FLOW;
     BlockProp block = BLOCK_PROP_DEFAULT;
+    TestBlockContainment containment(block);
     parent.blk = lam::view_prop(&block);
     element->parent = lam::up(static_cast<DomNode*>(&parent));
     opacityKeyframes();
@@ -4557,13 +4566,13 @@ TEST_F(AnimationTickTest, QueryMeasurementAndSkippedContentsDeferNewMotion) {
 
     layout.css_query_probe = false;
     for (CssEnum mode : {CSS_VALUE_HIDDEN, CSS_VALUE_AUTO}) {
-        block.content_visibility = mode;
-        block.content_visibility_skipped = true;
+        containment.value.content_visibility = mode;
+        containment.value.content_visibility_skipped = true;
         css_animation_resolve(element, &layout);
         EXPECT_EQ(scheduler->count, 0);
         EXPECT_TRUE(layout_content_visibility_suppresses_transition(&layout, element));
     }
-    block.content_visibility_skipped = false;
+    containment.value.content_visibility_skipped = false;
     css_animation_resolve(element, &layout);
     EXPECT_EQ(scheduler->count, 1);
 }
@@ -4576,6 +4585,7 @@ TEST_F(AnimationTickTest, SkippedEffectsDeferLifecycleAndCatchUpOnActivation) {
     parent.display.outer = CSS_VALUE_BLOCK;
     parent.display.inner = CSS_VALUE_FLOW;
     BlockProp block = BLOCK_PROP_DEFAULT;
+    TestBlockContainment containment(block);
     parent.blk = lam::view_prop(&block);
     element->parent = lam::up(static_cast<DomNode*>(&parent));
     parent.set_styles_resolved(true);
@@ -4586,8 +4596,8 @@ TEST_F(AnimationTickTest, SkippedEffectsDeferLifecycleAndCatchUpOnActivation) {
     ASSERT_NE(instance, nullptr);
     animation_scheduler_tick(scheduler, .25, nullptr);
     EXPECT_FLOAT_EQ(mock.in_line.opacity, .25f);
-    block.content_visibility = CSS_VALUE_HIDDEN;
-    block.content_visibility_skipped = true;
+    containment.value.content_visibility = CSS_VALUE_HIDDEN;
+    containment.value.content_visibility_skipped = true;
     animation_scheduler_tick(scheduler, 2.0, nullptr);
     EXPECT_FLOAT_EQ(mock.in_line.opacity, .25f);
     EXPECT_EQ(instance->play_state, ANIM_PLAY_RUNNING);
@@ -4603,7 +4613,7 @@ TEST_F(AnimationTickTest, SkippedEffectsDeferLifecycleAndCatchUpOnActivation) {
     EXPECT_FLOAT_EQ(mock.in_line.opacity, 1.0f);
     EXPECT_EQ(instance->play_state, ANIM_PLAY_RUNNING);
     EXPECT_FALSE(instance->finish_notified);
-    block.content_visibility_skipped = false;
+    containment.value.content_visibility_skipped = false;
     animation_scheduler_tick(scheduler, 2.0, nullptr);
     EXPECT_EQ(instance->play_state, ANIM_PLAY_FINISHED);
     EXPECT_TRUE(instance->finish_notified);
@@ -6356,6 +6366,7 @@ TEST_F(AnimationTickTest, SkippedComputedReadsRefreshInheritedEndpointsAndPreser
     parent->display = {CSS_VALUE_BLOCK, CSS_VALUE_FLOW};
     child->parent = lam::up(static_cast<DomNode*>(parent));
     BlockProp block = BLOCK_PROP_DEFAULT;
+    TestBlockContainment containment(block);
     parent->blk = lam::view_prop(&block);
     ASSERT_NE(parsedKeyframes("hiddenRead{from{opacity:.2}to{opacity:var(--end)}}", "hiddenRead"), nullptr);
     setAnimationStyle(parent, "--end:.8");
@@ -6367,8 +6378,8 @@ TEST_F(AnimationTickTest, SkippedComputedReadsRefreshInheritedEndpointsAndPreser
     ASSERT_NE(effect, nullptr);
     animation_scheduler_tick(scheduler, .25, nullptr);
     EXPECT_NEAR(child_mock.in_line.opacity, .35f, .00001f);
-    block.content_visibility = CSS_VALUE_HIDDEN;
-    block.content_visibility_skipped = true;
+    containment.value.content_visibility = CSS_VALUE_HIDDEN;
+    containment.value.content_visibility_skipped = true;
     animation_scheduler_tick(scheduler, 2.0, nullptr);
     setAnimationStyle(parent, "--end:.6");
     char computed[64] = {};
@@ -6379,7 +6390,7 @@ TEST_F(AnimationTickTest, SkippedComputedReadsRefreshInheritedEndpointsAndPreser
         EXPECT_FALSE(effect->finish_notified);
         EXPECT_DOUBLE_EQ(effect->start_time, 0.0);
     }
-    block.content_visibility_skipped = false;
+    containment.value.content_visibility_skipped = false;
     animation_scheduler_tick(scheduler, 2.0, nullptr);
     EXPECT_TRUE(effect->finish_notified);
 }

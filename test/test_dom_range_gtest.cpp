@@ -20,6 +20,7 @@ extern "C" {
 #include "lambda/input/css/dom_element.hpp"
 #include "lambda/input/css/dom_lifecycle.hpp"
 #include "radiant/event.hpp"
+#include "radiant_style_test_utils.hpp"
 
 #include <cstring>
 #include <new>
@@ -332,8 +333,9 @@ TEST_F(DomRangeTest, InnerTextTrimsAtomicInlineEdgesAndOmitsSkippedContents) {
     EXPECT_STREQ(rendered, "helloworld");
     mem_free(rendered);
     BlockProp properties = {};
-    properties.content_visibility = CSS_VALUE_AUTO;
-    properties.content_visibility_skipped = true;
+    TestBlockContainment containment(properties);
+    containment.value.content_visibility = CSS_VALUE_AUTO;
+    containment.value.content_visibility_skipped = true;
     span->blk = lam::view_prop(&properties);
     rendered = dom_range_to_string_ex(&range, DOM_STRINGIFY_INNER_TEXT);
     ASSERT_NE(rendered, nullptr);
