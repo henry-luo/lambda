@@ -106,8 +106,8 @@ This fixes the F3 collision class (table-as-flex-item, form-in-flex) and removes
 
 **DV5a — Access style: tagged-union storage, overlay-subclass accessors.** The unions stay *typed and tagged* in `DomElement` (debugger-transparent, grep-able, zero-cost), but the sanctioned access path is accessor methods on the zero-size overlay subclasses, which centralize the tag check: `DomTable::table()` (debug-asserts `role_kind == ROLE_TABLE`, returns `tb`), `ViewTableCell::cell()`, flex/grid item accessors on the container's item view, `form()` on the form-control overlay. This extends the existing pattern (`ViewTable::acts_as_tbody()`, `lam::view_require<RDT_VIEW_TABLE>`). Direct union-member reads outside the accessors are a convention violation; the repeated manual `item_prop_type == X && el->y` guards (~20 sites in event.cpp alone) collapse into the accessors. *(Rejected: `void*` placeholder slot with typed fields only in subclasses — same discipline benefit but the base struct goes debugger-opaque, and overlay subclasses cannot add real storage without breaking the size invariant anyway.)*
 
-### DV6 — Second-level `ext` group for rare state
-The retained design uses `lam::Own<DomStyleRareExt> ext`, allocated on demand in the document pool under D5.5.1. DV6.1 describes its current fields. [View property groups](Radiant_Design_View_Prop_Groups.md#dv61--keep-document-extensions-independently-lazy)
+### DV6 — Second-level extensions for optional state
+The retained design uses `lam::Own<DomStyleExt> ext` for the style directory and `lam::Own<DomStyleRareExt> rare_ext` for rare DOM and view state. The document pool allocates each on demand under D5.5.1. DV6.1 describes their current fields. [View property groups](Radiant_Design_View_Prop_Groups.md#dv61--keep-document-extensions-independently-lazy)
 
 The original proposal grouped these fields behind `ext`:
 - the four fragment-union blocks (F2) — restructure as a small array `FragmentUnion frags[4]` + presence mask;
@@ -115,8 +115,8 @@ The original proposal grouped these fields behind `ext`:
 - `multicol`, `vpath`, `backdrop_filter`, `custom_layout_paint`, `layout_fragments` + count;
 - `shadow_host`, `shadow_root`;
 - pending element scroll (2 floats + presence bits).
-Access pattern: `el->ext->...` guarded by `if (el->ext)` or accessor helpers. Hot groups (`bound`, `blk`, `font`, `in_line`, `scroller`, `position`, `embed`, `transform`, `filter`) stay first-level — one indirection max on hot paths.
-*Impl note:* `ext` contains both Tier-1 (`shadow_*`, pseudo StyleTrees) and Tier-2 fields today; either allocate `ext` from the doc pool (Tier-1, safe superset) with Tier-2 members rebuilt each pass, or split `ext`/`ext_view`. Decide by measurement in P3; default = doc pool.
+
+The proposal used guarded `el->ext` reads or accessors and kept hot groups directly on the node. P3 evaluated allocating the mixed-lifetime extension from the document pool and splitting it by lifetime.
 
 ### DV7 — DomText slimming
 - `color` is **dropped outright** (verified dead 2026-07-18 by field-rename compile sweep): it was a legacy channel for direct PDF→DomText color mapping, but the current PDF pipeline (`lambda/pdf/pdf_to_html`, PDF.js-style) renders visible text as SVG `<text>` (color = SVG fill) with a *transparent* `<span>` selection layer — no writer ever sets the field. Total users: one clone copy (`dom_element.cpp:2298`) and one dead read (`render_text.cpp:180`, guarded by `color.c != 0` which is never true); both delete with the field.

@@ -107,15 +107,26 @@
     {
       "label": "kotlin_docs",
       "url": "https://kotlinlang.org/docs/home.html",
-      "manual_major_remaining": "Documentation and navigation remain absent behind a loading spinner.",
+      "manual_major_remaining": "",
       "rechecks": [
         {
           "rechecked_at": "2026-11-18T04:43:31.020Z",
           "evidence": "comparison/repairs.html#round-83",
           "previous_manual_major_remaining": "The header, navigation and documentation content remain absent; the captured loading spinner prevents the uniform-image heuristic from retaining this major omission.",
           "manual_major_remaining": "Documentation and navigation remain absent behind a loading spinner."
+        },
+        {
+          "rechecked_at": "2026-11-21T07:48:45.170Z",
+          "evidence": "comparison/repairs.html#round-138",
+          "previous_manual_major_remaining": "Documentation and navigation remain absent behind a loading spinner.",
+          "manual_major_remaining": "Sidebar navigation remains absent; the documentation article, cards and current version now render. The browser announcement banner is also absent."
         }
-      ]
+      ],
+      "resolved_previous_manual_major_remaining": "Sidebar navigation remains absent; the documentation article, cards and current version now render. The browser announcement banner is also absent.",
+      "resolved_at": "2026-11-21T08:34:59.338Z",
+      "resolution": "The full sidebar navigation now renders after finite requests were coordinated with virtual frames and undeclared opacity was reset on recascade. Header, article, version and cards remain present. The smaller 44px announcement banner and resulting spacing offset remain; no large omission is visible in the matched viewport. The pair is below the automated major threshold. No visibility override, extra capture time or source-budget change.",
+      "resolution_evidence": "comparison/repairs.html#round-140",
+      "resolved_capture_settle_ms": 1000
     },
     {
       "label": "saas_landing_436",
@@ -555,6 +566,12 @@
       "manual_major_remaining": "The entire Coda interface is replaced by its own error page reporting idbFactory missing. The consent-wrapper TypeErrors are repaired, but IndexedDB remains unavailable. Retain major review despite the lower coarse score.",
       "reviewed_at": "2026-11-20T23:48:03.060Z",
       "evidence": "comparison/repairs.html#round-127"
+    },
+    {
+      "label": "saas_landing_234",
+      "url": "https://www.pelagohealth.com/",
+      "manual_major_remaining": "Hero media, heading and actions are present. The large browser consent dialog remains absent; retain the major review despite the lower coarse score.",
+      "evidence": "comparison/repairs.html#round-136"
     }
   ]
 }

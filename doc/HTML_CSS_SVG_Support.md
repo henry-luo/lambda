@@ -171,7 +171,7 @@ Elements with special behaviour:
 
 | Element or feature | Status | Notes |
 |---|---|---|
-| `<script>` | ◐ | Parser-discovered inline and external (file and HTTP), `defer`, `async` and `type="module"`, with `DOMContentLoaded`, `document.readyState`, `load` and timers. `lambda layout`, `lambda render` and `lambda view` run page scripts. Connected DOM-created inline classics execute synchronously after insertion or a source text change. Fragment markup stays inert, reinsertion and clones of started scripts preserve that state, and nested scripts share the caller's microtask checkpoint. Dynamic `src` and module scheduling remain open ([implementation record](../vibe/Lambda_Issue_Ledger.md#online-dynamic-script-preparation), **D9.1.3v2 / D8.4.4 / D10.1.7**). Web Workers remain unsupported, and `WebSocket` is an inert stub. See [JS_DOM_Support.md](JS_DOM_Support.md). |
+| `<script>` | ◐ | Parser-discovered inline and external (file and HTTP), `defer`, `async` and `type="module"`, with `DOMContentLoaded`, `document.readyState`, `load` and timers. External success dispatches the script element load event after evaluation/microtasks with restored currentScript; fetch failures dispatch error and runtime throws still complete loading (RI-184). Completion preserves pending stylesheet writes. `lambda layout`, `lambda render` and `lambda view` run page scripts. Connected DOM-created inline classics execute synchronously after insertion or a source text change. Fragment markup stays inert, reinsertion and clones of started scripts preserve that state, and nested scripts share the caller's microtask checkpoint. Dynamic `src` and module scheduling remain open ([implementation record](../vibe/Lambda_Issue_Ledger.md#online-dynamic-script-preparation), **D9.1.3v2 / D8.4.4 / D10.1.7**). Web Workers remain unsupported, and `WebSocket` is an inert stub. See [JS_DOM_Support.md](JS_DOM_Support.md). |
 | `<style>`, `<link rel="stylesheet">`, `<base href>` | ✅ | The first applicable HTML base resolves initial CSS, scripts, modules and images without replacing document identity; empty or invalid first bases do not select later bases (RI-109, **D9.1.3v2**). See [§5](#5-cascade-inheritance-and-custom-properties). |
 | `<meta name="viewport">` | ◐ | Width/height and scale hints are parsed. Desktop layout retains the host's CSS viewport. Mobile adaptation and the complete viewport metadata algorithm remain unverified. |
 | `<input>`: `text`, `password`, `email`, `url`, `search`, `tel`, `number` | ✅ | In `lambda view`: caret, selection, undo, IME and password masking, all native. |
@@ -341,7 +341,7 @@ Unsupported functions and units remain a source of differences from a browser. T
 | `attr()` | ◐ | In `content` only; typed `attr()` elsewhere gives 0. |
 | `counter()`, `counters()` | ✅ | With a list-style argument. |
 | `url()` | ◐ | `background-image`, `list-style-image`, `content`, `@font-face`, `@import`, raster `border-image`, and native image `cursor` sources. SVG paint/resource consumers also resolve URLs, including filters and clips (§15). URL masks/filters/clips and vector `border-image` sources remain unsupported. |
-| `image-set()` | ◐ | Density/type selection in a single `background`/`background-image` layer, generated image replacement, URL/gradient list markers and raster border-image sources, including `-webkit-image-set()`, string URLs, default resolution, dpi/dpcm/dppx/x and typed resolution math. Unsupported types are filtered before equal-density source order; raster natural size respects selected density. Live source changes, inherited gradient ownership and PNG/SVG/PDF 1×/2× controls pass, including translated URL markers and border tiles/clips with matching export bounds. Linear/radial/conic markers, repeating and zero-length periods, transparent colors and identity-filter captures have independent PNG/SVG/PDF 1×/2× controls with retained payload ownership. File raster resources decode before recording and embed in relocatable SVG. Outside-marker placement and default gradient-marker size/baseline differ from Chromium; broader gradient grammar/interpolation, border sources, multilayer ordering, generated replacement gradients and independent/paged consumers remain open. |
+| `image-set()` | ◐ | Density/type selection in a single `background`/`background-image` layer, generated image replacement, URL/gradient list markers and raster border-image sources, including `-webkit-image-set()`, string URLs (remote string-source discovery has native/HTTP controls, RI-183), default resolution, dpi/dpcm/dppx/x and typed resolution math. Unsupported types are filtered before equal-density source order; raster natural size respects selected density. Live source changes, inherited gradient ownership and PNG/SVG/PDF 1×/2× controls pass, including translated URL markers and border tiles/clips with matching export bounds. Linear/radial/conic markers, repeating and zero-length periods, transparent colors and identity-filter captures have independent PNG/SVG/PDF 1×/2× controls with retained payload ownership. File raster resources decode before recording and embed in relocatable SVG. Outside-marker placement and default gradient-marker size/baseline differ from Chromium; broader gradient grammar/interpolation, border sources, multilayer ordering, generated replacement gradients and independent/paged consumers remain open. |
 | `cross-fade()`, `element()` | ❌ | |
 
 ### 6.3 Colours
@@ -365,6 +365,12 @@ Unsupported functions and units remain a source of differences from a browser. T
 Colours are sRGB throughout; there is no wide-gamut output.
 
 ### 6.4 Gradients
+
+A sole color with two positions expands into two stops for linear, radial,
+conic and repeating gradients. Twelve shared PNG/Chromium controls cover
+forms with and without geometry preludes (`render_gradient_double_stop.test.cjs`,
+LI-096 / RI-186; **D9.1.1v4 / D9.1.3v2**). A sole color without two positions
+remains unsupported.
 
 | Function | Status | Notes |
 |---|---|---|
@@ -550,7 +556,7 @@ Radiant uses Lambda's own font engine (`lib/font/`) for font loading, glyph metr
 | `text-shadow` | ◐ | Selected-font horizontal grayscale glyphs and decorations preserve authored layer and background/shadow/foreground order. Retained descendants refresh the parent's computed shadows after custom-property/font changes; implicit inheritance and explicit `inherit`/`unset` retain parent-relative offsets, child overrides and initial resets (`test/online/render_text_shadow_inheritance.test.cjs`). Owned list copies follow **D5.5.1**. Sharp/blurred/partial-alpha layers, colored backdrops, translation and smaller source owners have exact PNG/SVG/PDF references at both densities. Each complete silhouette receives layer alpha once; private zero-alpha capture margins are trimmed before publication. Live mutation, font/source retirement and atomic failure have normal/ASan controls. Emphasis, color fonts, fragmented/ancestor geometry, nonuniform/projective transforms and independent/paged contexts remain open. |
 | `text-overflow: ellipsis` | ◐ | Shared horizontal LTR/RTL fitting paints one block-styled marker across inline runs without changing source rectangles. Combining clusters, first-cluster clipping, case expansion, inherited/live font-color changes and disable/restore are covered. Fourteen LTR and fourteen RTL visible-reference cases pass in Chromium and PNG/SVG/PDF at 1×/2×. The RTL fixture passes 114 assertions, including inherited direction/font/color mutation, disabling/restoration and source capitalization boundaries. Native SVG plain text uses selected-font outlines. Horizontal LTR inline-block/image contributions now share paint/hit suppression, with six output references and live width restoration. Mixed bidi, RTL atoms, pure-atom lines without a text host, vertical, scroll and decorated/transformed contexts remain open. |
 | `line-clamp` | ◐ | The shared paint plan fits the final line and suppresses the marker when nothing was discarded. Supports positive integer counts, calculated rounding, owner-font math, computed inheritance, and invalid substitution defaults. Coverage includes horizontal LTR and plain Latin/Hebrew RTL clamp cases. Richer shorthand and longhand syntax, mixed bidi, and broader layout contexts remain open. |
-| `-webkit-box-orient`, `-webkit-line-clamp` | ◐ | Declaration and computed style inspection only. Radiant uses the unprefixed `line-clamp` for layout and rejects `display: -webkit-box` and `display: -webkit-inline-box`. See DV6.5 in the [view property groups design](../vibe/radiant/Radiant_Design_View_Prop_Groups.md#dv65--retire-webkit-box-display-in-radiant). |
+| WebKit box display, `-webkit-box-orient`, `-webkit-line-clamp` | ◐ | Input emits standard `display`, `flex-direction` and `line-clamp` declarations (D10.1.9). A complete vertical clamp block uses a flow box. See the [view property groups design](../vibe/radiant/Radiant_Design_View_Prop_Groups.md#dv65v2--normalize-webkit-box-syntax-at-css-input). |
 | `text-emphasis` | ◐ | Shared selected-font half-size horizontal marks use normalized em metrics and owned hinted resources in native/SVG/PDF. Placement, currentColor, longhand order, transforms, shadows and live edits pass at 1×/2×; shorthand member reads/replacement, priorities, pending/global values and removal have browser controls. One 1× sips open-circle strong-coverage comparison remains failed; SVG and direct Poppler pass its unchanged threshold. Output-density resources do not qualify arbitrary-resolution vector text. Broader shaping/grapheme, fragmented/ancestor/selection, vertical/ruby and computed/API contexts remain open (**FT-15 / FT-16 / FT-17 / CI-18**). |
 | `tab-size` | ✅ | Non-negative numbers, including fractions, and lengths. Lengths inherit as computed pixels; line layout and intrinsic sizing both use the chosen tab period. |
 | Complex scripts | ❌ | Arabic is drawn as isolated letter forms in logical order, and Indic reordering is not done (WPT css-text shaping: 1 of 29 tests match). |
@@ -582,6 +588,14 @@ Status is for the raster painter; SVG and PDF output differ as listed in [§17](
 
 ## 13. Transitions and Animations
 
+Retained recascade restores initial opacity before current declarations and
+effects apply, including completion of no-fill animations without authored
+opacity ([RI-189](<../vibe/Radiant_Issue_Ledger (fixed).md#ri-189>),
+**D9.1.3v2 / D10.1.7**). Explicit Web Animation seeks accept the existing
+background color shorthand track through the same property normalizer as the
+native parser ([JS13-L44](../vibe/jube/JS_Issue_Ledger.md#js13-l44),
+**D8.4.4 / D9.5.6v2**). Automatic Web playback remains unqualified.
+
 Animations run on the frame clock of `lambda view`. Size-affecting samples request reflow before native or headless frames paint (`RenderOutputParity.AnimationFrameTicksReflowAnimatedSizes`, `TransitionRetargetRestartAndCancellationReachPaint`). Static `lambda layout` and `lambda render` sample keyframe animations at time 0, including negative delays, paused effects and fill modes (`RenderOutputParity.AnimationShorthandProjectsCascadeAndVariableValues`, `AnimationNamesRetainCaseAndTimingEndpointsPaint`).
 
 | Feature | Status | Notes |
@@ -596,7 +610,7 @@ Animations run on the frame clock of `lambda view`. Size-affecting samples reque
 | Events | ◐ | `animationstart`, `animationiteration`, `animationend`, `animationcancel`, `transitionend`, `transitioncancel`. CSS/SVG timing delivery is queued outside layout through traced timer arguments under **D6.3.3** and **D5.5.1**. Delayed/negative-delay/zero-duration starts, iteration/end elapsed time, cancellation and a layout-changing start handler pass 17 live assertions in `test/ui/css_animation_events.json`. Complete phase changes, `transitionrun` and `transitionstart` remain open. |
 | SVG SMIL animation | ◐ | Live document-time animation and timeline controls; see [§15](#15-svg) for the supported classes and timing limits. |
 | SVG CSS paint animation and transitions | ◐ | `fill`, `stroke`, `fill-opacity`, `stroke-opacity`, `stroke-width` and `stroke-dashoffset` sample through the shared SVG presentation adapter. Colors, scalars and compatible lengths reach paint, computed reads and hit geometry; live retargeting, priority/inheritance, pause/resume and removal are covered. Paint-server/`none` and dash-list interpolation, geometry animation, additive CSS/SMIL composition and CSS effects inside use-instance trees remain outside this increment. Isolated SVG image documents use their own cascade and image clock for existing CSS effects; focused opacity, variable percentage, midpoint, delay, pause and pixel-transform controls cover raster and selected SVG export. CSS background image clocks start during committed layout before the selected interval advances. This does not qualify arbitrary font-relative effects, all CSS properties, or PDF export. |
-| Animated GIF, Lottie | ◐ | Play in `lambda view`; static output shows the first frame (GIF) or an empty box (Lottie). |
+| Animated GIF, Lottie | ◐ | GIF plays in `lambda view` and explicit timed captures; finite playback holds the final frame. Lottie static output remains an empty box. |
 
 Opacity math accepts numbers or percentages; adding them together is invalid under [CSS Values 4 §5.6](https://www.w3.org/TR/css-values-4/#mixed-percentages). Out-of-range opacity keyframes follow computed-value clamping in [CSS Color 4 §3.3](https://www.w3.org/TR/css-color-4/#transparency); Chromium currently clamps those keyframe samples differently ([CSSWG issue 3340](https://github.com/w3c/csswg-drafts/issues/3340)). Chromium also switches the tested percentage-math keyframes discretely while Radiant interpolates their computed numbers. These differences remain recorded separately from the six passing original scalar/color browser comparisons.
 
@@ -717,18 +731,24 @@ Retained source/sample ownership follows **D5.2.5/D5.5.1**,
 
 ## 16. Image Formats
 
+Late image downloads within the existing snapshot resource window publish
+their native image state, load/error events and decode promises before export.
+The retained document's selected virtual clock stays fixed (**D6.4.1 /
+D10.1.7**; RI-187, `render_late_resources.test.cjs`). Downloads beyond that
+bounded window can still remain absent.
+
 Raster images use the shared image codecs (`lib/image.h`); SVG goes through Radiant's own SVG renderer, and Lottie through ThorVG.
 
 | Format | `<img>`, CSS images | Notes |
 |---|---|---|
 | PNG | ✅ | Including `data:` URIs. |
 | JPEG | ✅ | EXIF orientation is ◐: for orientations 5–8 the box is swapped but the pixels are not rotated, so the image is stretched. |
-| GIF | ✅ | Animated in `lambda view`; exports show the first frame. |
+| GIF | ✅ | Animated in `lambda view`; timed exports sample frame delays and repeat counts, including final-frame retention (**D9.1.3v2 / D10.1.7**, RI-185). |
 | SVG | ✅ | See [§15](#15-svg). |
 | WebP | ✅ | Shared static and animated initial-frame decoder for files and data URIs, including SVG images. The first animated subframe retains canvas offsets and alpha; limits and strict-thumbnail refusal have focused native controls (LI-030, D5.5.1 / D10.1.7). Maple's title now renders. Playback and later-frame selection remain unsupported. |
 | AVIF, BMP, TIFF, ICO | ✅ | Representative files render in `<img>` and CSS backgrounds; `<img>` also supports data URLs. Decoder limits apply, including no 12-bit JPEG-compressed TIFF. |
 | Lottie (`.json`, `.lottie`) | ◐ | Played in `lambda view`; a blank 300 × 300 box in `layout` and `render`. |
-| Remote `http(s)` images | *not verified* | A network path exists (`radiant/surface.cpp`). |
+| Remote `http(s)` images | ◐ | Snapshot discovery uses the bounded asynchronous loader, including a local HTML document's first remote image or video poster (RI-181), and first selected CSS background, variable or pseudo-element URL (RI-182). Cached SVG natural/explicit/max/contain sizing has focused native export controls; remote CSS/base/template discovery has HTTP controls. Markup `fetchpriority` on images, links and scripts adjusts the existing scheduler default (RI-180); passive decoding preserves low hints. Complete loading-policy and IDL reflection coverage is not claimed. |
 
 | Image feature | Status | Notes |
 |---|---|---|

@@ -1,4 +1,5 @@
-const {after} = require('node:test');
+const {before, after} = require('node:test');
+const http = require('node:http');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -37,4 +38,15 @@ function loggedResult(log, tag) {
     return JSON.parse(match[1]);
 }
 
-module.exports = {renderFixtures, rgb, layoutCount, loggedResult};
+function serveFixtureResources(handler) {
+    let server, origin;
+    before(async () => {
+        server = http.createServer(handler);
+        await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+        origin = 'http://127.0.0.1:' + server.address().port;
+    });
+    after(async () => { if (server) await new Promise(resolve => server.close(resolve)); });
+    return () => origin;
+}
+
+module.exports = {renderFixtures, rgb, layoutCount, loggedResult, serveFixtureResources};

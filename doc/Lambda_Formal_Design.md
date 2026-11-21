@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 69.0.1 (2026-11-18)
+**Spec version:** 70.0.0 (2026-11-21)
 
 **Status:** normative. This document is the single source of truth for the
 design decisions that implement
@@ -1681,6 +1681,11 @@ loosely.
   Document access requests content through the input service under the evaluation's authority.
   Deferred reads preserve the observable node and the provider's error contract.
   [S2.4.3v4, S2.4.4v2, D9.1.2v2, D11.1.2; Type_Path §2.2]
+- **D10.1.9 — CSS input normalizes supported WebKit box declarations.** The
+  parser emits standard `display`, `flex-direction` and `line-clamp` declarations. A complete
+  vertical clamp in one declaration block becomes a standard flow box. The
+  output keeps declaration order and importance. Radiant uses the standard
+  declarations for layout. [D9.1.3v2; Radiant_Design_View_Prop_Groups DV6.5v2]
 
 ### D10.2 Document packages
 
@@ -2026,7 +2031,7 @@ in the [implementation history §3](../vibe/impl/Lambda_Impl_Formal_Design_Histo
 | D9.1–D9.2 | SM1–SM17; Radiant_Split §2–§6 | `Lambda_Design_Static_Modules.md`, `Lambda_Design_Script_Cache.md`, `Lambda_Design_Radiant_Split.md` |
 | D9.3 | RG14; DF15; ER-D2; MC1; Demo_Mail ML11 | `Lambda_Design_Runtime_Globals.md`, `Lambda_Design_Exec_Recovery.md`, `Lambda_Demo_Mail.md` |
 | D9.4–D9.5 | JA1–JA16 (D9.4.6: JA5.1); Native_Module §6–§10; Lang_Hosting §5–§13; DOM4 D4j–D4l; Radiant_Split §4 | `Lambda_Design_Jube_Architecture.md`, `Lambda_Design_Native_Module.md`, `Lambda_Design_Jube_Lang_Hosting.md`, `Lambda_Design_Type_Virtual.md`, `Lambda_Jube_DOM4.md`, `Lambda_Design_Radiant_Split.md` |
-| D10.1 | Mark file extensions; XHTML admission; SVG parsing admission and DOM export; lazy file nodes | `Lambda_Type_Path.md`, `input/Input_System.md`, `input/Input_XML.md`, `radiant/Radiant_SVG2.md` |
+| D10.1 | Mark file extensions; XHTML admission; SVG parsing admission and DOM export; lazy file nodes; CSS input normalization | `Lambda_Type_Path.md`, `input/Input_System.md`, `input/Input_XML.md`, `radiant/Radiant_SVG2.md`, `radiant/Radiant_Design_View_Prop_Groups.md` |
 | D10.2 | UA and document editing; TeX engine; Pkg_Math §8, §11 | `radiant/Radiant_Design_Editable.md` §20, `radiant/Radiant_Design_Edit_Mode.md` §2.1, `latex/Lambda_Design_TeX_Engine.md`, `Lambda_Pkg_Math.md` |
 | D11.1 | JA10, JA16 | `Lambda_Design_Jube_Architecture.md` |
 | D11.2 | App_Safety §4.1, §6.4, §7.1, §7.3, §8.3 | `Lambda_Design_App_Safety.md` |

@@ -595,6 +595,251 @@ and restore the cookie panel in its frozen source.
 
 ## 13. Web Platform: DOM, CSSOM, Events & Fetch (JS13)
 
+<a id="js13-l44"></a>
+
+### JS13-L44 — Web keyframe eligibility skips supported background shorthand — **FIXED**
+
+**2026-11-21.** Host bindings follow **D8.4.4 / D9.5.6v2**; native
+animation sampling follows **D9.1.3v2 / D10.1.7**. No ruling changes.
+
+The existing background-shorthand explicit-seek regression paints red rather
+than lime on both the round153 renderer and the first round155 candidate.
+The native parser already normalizes background to its supported color track,
+but the host's property-name filter checks the shorthand's non-animatable
+metadata before invoking that parser. Longhand seeks still pass.
+
+Property eligibility now calls the existing css_animation_property_target
+normalizer before reading metadata. Parsing, keyframe conversion order and
+native sampling remain shared. The shorthand and longhand controls pass in
+the final focused suite; the shorthand also passes against Chromium. This
+does not add automatic Web Animations playback or new shorthand tracks.
+Evidence: `temp/online-visual-round155/shorthand-before.log`,
+`focused-qualified.log`, `test/online/render_capture_settle.test.cjs`.
+
+<a id="js13-l43"></a>
+
+### JS13-L43 — Network-created fades begin at the already selected virtual frame — **FIXED FOR FINITE REQUEST SETTLEMENT**
+
+**2026-11-21.** Native requests belong to **D6.4.4**, owner turns to
+**D6.4.1**, and frozen-frame export to **D10.1.7**. No ruling changes.
+
+**Round155 repair.** The snapshot drain now services context-owned finite
+requests during its existing virtual-frame slices. The shared capped native
+wait gives pending I/O the elapsed slice before selecting a later frame;
+completion callbacks, microtasks and zero-delay continuations commit at that
+frame. Timer-only virtual advances retain their existing behavior. The
+existing five-second drain watchdog bounds settlement and subsequent native
+completion waits together; source admission limits are unchanged.
+
+Requests that finish after the selected interval still settle without moving
+its clock, and an explicit zero window remains frozen. Seven reduced native,
+MIR and Chromium controls cover fetch, XHR, timer-created fetch, chained
+fetch, delayed continuation, after-window delivery and zero-window delivery.
+The final focused suite passes 44 checks, including retained-opacity and
+intrinsic-motion controls. Kotlin's full sidebar is visible in the fresh
+matched pair. Its smaller missing announcement banner remains separate.
+Native image-manager requests retain their separate RI-187 completion path;
+this repair does not qualify arbitrary streaming or wall-clock timelines.
+
+Evidence: `temp/online-visual-round155/focused-qualified.log`,
+`focused-mir.log`, `resource-timing-browser-results.json`,
+`resource-timing-browser-xhr.log`, `live/kotlin_docs/`, and
+`test/online/render_resource_timing.test.cjs`.
+
+**Original round154 diagnosis.**
+
+After the round153 repairs, Kotlin's article and cards render, but the sidebar
+is transparent. A focused native view tree contains the correct sixteen TOC
+roots and link geometry; the containing ul.toc has opacity0. The real stylesheet
+applies a supported300ms fadein animation. HelpTOC.json returnsHTTP200(81232B).
+This is not missing TOC data, missing DOM construction or a geometry failure.
+
+Two small native/Chromium controls distinguish the cause. A timer inserts the
+same fade at virtual100ms; both captures are green after the1000ms window. An
+80ms fetch inserts it at native virtual1016.67ms because the snapshot drain
+advances its virtual window before waiting for finite I/O. The native capture
+correctly retains the new fade's first transparent frame; Chromium's elapsed
+post-load window has already finished that fade. The loader's finite requests
+finish, but their arrival times are not coordinated with virtual progression.
+
+The required integration was to interleave native completion delivery and
+virtual timers before selecting the frame. Advancing the selected frame during
+export, overriding opacity or treating all I/O as instantaneous would hide the
+timing difference. Round154 left that integration open and kept Kotlin high;
+round155 implements the bounded finite-request path described above.
+
+Evidence: `temp/online-visual-round154/kotlin-view.json`, `kotlin-app.css`,
+`fade-controls.test.cjs`, `fade-results.json` and paired browser diagnostics.
+
+<a id="js13-l42"></a>
+
+### JS13-L42 — Virtual immediates invent a delay after completed I/O — **FIXED**
+
+**2026-11-21.** Shared JavaScript execution follows **D8.4.4 / D6.4.1**;
+the selected export frame follows **D10.1.7**. No formal ruling changes.
+
+Kotlin's four JSON requests return HTTP200 after the finite-request drain
+repair, but React's state updates remain queued. Its scheduler selects the
+available setImmediate implementation. `js_setImmediate_impl` supplied a1ms
+timeout to the timer backend, including the virtual clock. A request completed
+at the selected frozen timestamp therefore scheduled rendering beyond that
+frame. Configuration, article and TOC requests succeeded without an app error.
+
+Immediate creation now supplies zero elapsed delay. The existing virtual timer
+ID boundary still moves callbacks to the next host turn; the native libuv
+backend retains its existing zero-delay normalization. This changes neither
+the capture window nor the ordinary timeout/interval policies. No browser API
+is hidden and no page-specific ready/reveal action is added.
+
+A delayed-fetch control schedules its final mutation through setImmediate,
+with MessageChannel as the normal browser fallback. It fails before repair
+and passes afterward in the native host and MIR; Chromium passes the same
+source through the fallback. Kotlin now renders its article, cards and current
+version. Its sidebar navigation remains absent, so it stays high severity.
+
+Evidence: `test/online/dynamic_script_fixtures.cjs` (`late-fetch-immediate`),
+`temp/online-visual-round153/{immediate-before.log,immediate-after.log,late-fetch-final-mir.log,browser-immediate.log}`,
+`kotlin-fetch-completion.log` and `live/kotlin_docs/final/`.
+
+<a id="js13-l41"></a>
+
+### JS13-L41 — Snapshot exits after a checkpoint starts another request — **FIXED**
+
+**2026-11-21.** Finite native work belongs to its resource table under
+**D6.4.4**, runtime turns follow **D6.4.1**, and the selected capture frame
+follows **D10.1.7**. No formal ruling changes.
+
+After the dynamic classic and Location repairs, Kotlin renders its header and
+footer but has no article or navigation. A narrow live trace shows all four
+configuration/content/TOC fetches starting without a rendering exception.
+The snapshot loop obtains libuv's active result, then runs render checkpoints
+and same-time virtual callbacks. A dynamic script evaluated there can start
+another fetch after libuv returned zero. The early exit checked that stale
+result and empty timer/rAF queues, ignoring the new finite native request.
+The next loop-condition request check was therefore never reached.
+
+The early exit now also checks the existing pending-request predicate after
+all checkpoints. The same resource table, drain watchdog and frozen virtual
+time are retained; persistent sockets/timers do not gain a new wait policy.
+There is no added polling loop, deadline increase or page-specific readiness.
+
+Two delayed local controls start fetch from a classic script appended during
+window.load, including a second dependent JSON request. Both fail before the
+fix and pass afterward in the native host, MIR and Chromium. The fixture
+permits its file-to-loopback JSON request through a normal CORS response
+header. Existing script/URL controls are qualified separately.
+
+Evidence: `test/online/dynamic_script_fixtures.cjs` (`late-fetch`,
+`late-fetch-chain`), `temp/online-visual-round153/late-fetch-{before,after,mir}.log`,
+`browser-late-fetch.log` and `kotlin-fetch-trace.log`.
+
+<a id="js13-l40"></a>
+
+### JS13-L40 — Location copies omit the base URL components — **FIXED FOR LIVE ENUMERABLE COMPONENTS**
+
+**2026-11-21.** Shared browser values follow **D8.4.4**, the scripting adapter
+contract **D9.5.6v2**, and precise ownership **D5.5.1 / D6.3.3**. No formal
+ruling changes.
+
+After Kotlin's translation chunk starts its React application, the bundled URL
+parser throws at `w.pathname.charAt(0)`. The unmodified parser works with an
+absolute URL and fails with empty, hash-only and query-only relative inputs.
+Its base is copied with `for…in` from Location. Native Location was an alias
+of Document, whose URL members are non-enumerable; the copy omitted pathname
+and protocol. The empty relative path therefore returned undefined.
+
+The JS adapter now publishes a separate, cached Location with live, enumerable,
+non-configurable own URL accessors. Two private edges retain the owning
+Document and cache the Location without exposing either through own keys.
+Captured accessors validate their receiver. The existing component table,
+declared Document reads, navigation methods and history writes are reused;
+there is no URL-parser patch or page-specific result. Document/window share
+Location identity, and detached parsed documents expose null Location.
+No public runtime-state layout or owner archive dependency changes.
+
+Six new controls fail before repair and pass in the native host, MIR and
+Chromium. They cover copying, own descriptors, identity/stringification,
+illegal construction and receivers, foreign documents, history/hash liveness,
+empty relative paths and collection. The five existing URL controls also pass.
+Kotlin gets past the React error fallback, but its subsequent JSON requests
+still outlive an event-loop checkpoint; no page clearance is claimed here.
+Full Location navigation/component-setter conformance, ancestorOrigins and
+cross-origin exotic behavior remain unqualified.
+
+Evidence: `test/online/url_live_fixtures.cjs`,
+`temp/online-visual-round153/{location-before.log,location-final.log,location-final-mir.log}`,
+`browser-location/results.json`, `url-relative-output.log`, the narrow live
+`kotlin-url-locals.log` trace, and
+[HTML Location](https://html.spec.whatwg.org/multipage/nav-history-apis.html#the-location-interface).
+
+
+<a id="js13-l39"></a>
+
+### JS13-L39 — Node event methods mask JavaScript overrides — **FIXED**
+
+**2026-11-21.** Shared JavaScript behavior follows **D8.4.4** and declared
+host interfaces follow **D9.5.4 / D9.5.6v2**. No formal ruling changes.
+
+An Agiloft listener probe exposed a shared object-model defect: assigning
+document.addEventListener had no effect. Node's constructor and prototype
+did not inherit EventTarget, and the native Node/Document event-method
+records projected methods ahead of JavaScript overrides. Window's standalone
+lazy method slots also masked its inherited surface. Document's descriptor,
+own-key and deletion hooks were stubs, so an override could not be reflected
+or removed correctly even after its lookup was repaired.
+
+Node now inherits the existing EventTarget surface, and the method records
+use prototype dispatch. Window initialization retires only untouched lazy
+markers; later family materialization preserves deleted or authored slots.
+Document reflection and deletion reuse the existing node expando helpers,
+including presence when an own value is undefined. The native event dispatcher
+and Lambda's declared method projection are retained.
+
+All five new shared controls fail before repair and agree with Chromium
+afterward. They cover ten node receivers, Window and standalone EventTarget,
+method identity, instance/prototype wrappers, own descriptors and keys,
+undefined overrides, deletion, inherited readonly writes and native delivery.
+All 31 focused online checks pass; the five new cases also pass separately in
+AST and MIR. No broad baseline or full online sweep is repeated. Agiloft's
+remaining callback exception is still unisolated; no page clearance is claimed.
+
+Evidence: `temp/online-visual-round148/`,
+`test/online/render_event_target_prototype.test.cjs`,
+[DOM Node inheritance](https://dom.spec.whatwg.org/#interface-node) and
+[Web IDL operations](https://webidl.spec.whatwg.org/#es-operations).
+
+<a id="js13-l38"></a>
+
+### JS13-L38 — Programmatic click reenters the same element's activation — **FIXED**
+
+**2026-11-21.** DOM behavior follows **D8.4.4 / D9.5.6v2**; native node
+state and precise wrapper ownership follow **D5.5.1 / D6.3.3**, with the
+input/host boundary under **D9.1.1v4 / D9.1.3v2**. No formal ruling changes.
+
+Teachable's tab click handler calls goToTab(), which calls the same tab's
+click() again. The current native capture reports two maximum-call-stack
+errors. The HTML click algorithm requires a per-element activation guard;
+the native bridge dispatched a new event on every call without that guard.
+
+A native rare-state bit now covers event construction, dispatch and default
+activation. The rooted original element retains the guard across removal and
+forced layout. It clears after ordinary completion and handler errors; other
+elements, clones, later microtasks and direct dispatchEvent calls retain their
+own behavior. The bit fits the existing packed state; no runtime root-layout
+or native module ABI change is introduced.
+
+Seven focused controls agree with Chromium. Six fail before repair, while
+the later-microtask control already passes. All seven pass afterward, as do
+six existing form/label activation tests. The current Teachable capture loads
+without either recursion error. Its separate initial hidden state remains,
+so no whole-page clearance is claimed. No baseline sweep, page override,
+admission limit or capture-clock change. All1067 comparison rows remain
+unchanged at111 high, zero critical,956 low.
+
+Evidence: `temp/online-visual-round147/`,
+`test/online/render_click_reentrancy.test.cjs`,
+[HTML activation behavior](https://html.spec.whatwg.org/multipage/interaction.html#dom-click).
+
 ### JS13-L37 — Missing Node.lookupNamespaceURI breaks captured consent-wrapper calls — **FIXED**
 
 **2026-11-21.** Shared DOM publication follows **D8.4.4 / D9.5.4 /
@@ -1613,6 +1858,40 @@ the normal resource cache. This does not establish Shadow DOM as the cause of
 every remaining blank page or of that site's remaining theme mismatch.
 
 ### JS13-L1 — snapshot script admission can leave the whole document hidden — **OPEN**
+
+Round146 (2026-11-21), using the qualified RI-184 renderer and the unchanged
+1000ms post-load frame, adds three focused observations. Figma pricing skips
+eight async chunks, including the1,094,814-byte `6986-096f061ed4aeb73f.js`.
+Its current initial HTML includes the pricing content and a fixed, full-screen
+`#exp-overlay` with an opaque white fallback controlled by the Statsig client.
+The native frame remains white. WeTransfer skips its133,035-byte
+`428m3c1fnans3.js` and132,636-byte `1kd31x42pyvte.js`; its initial main contains
+an empty opacity-zero container, with the hero content in JSON until client
+rendering. Handhold skips six startup chunks, including354,055-byte and
+161,282-byte sources; its
+server-rendered headline appears but the complete interface remains absent.
+No task exception is reported in these focused attempts. These are confirmed
+admission barriers, not proof that admitting every chunk would qualify the
+rest of the runtime or resolve every visual difference. No limit, visibility
+override or canonical capture is changed (**D8.4.4 / D10.1.7**).
+Evidence: `temp/online-visual-round146/figma-pricing.html`,
+`handhold.html`, `saas_landing_582/`, `saas_landing_571/` and
+`handhold-current/`. The WeTransfer initial-shell source is retained in
+`temp/online-visual-round2/documents/saas_landing_571.html` and its listed
+chunk URLs agree with the current task trace.
+
+Round142 (2026-11-21) confirms the same admission limit on Dayos. Its current
+`/_nuxt/DkFIkpF9.js` is2,383,199 bytes. Opt-in task diagnostics show the module
+ready but executed0 with status `skipped-large-defer`; inline configuration
+scripts execute. The qualified1000ms post-load native frame retains the yellow
+startup overlay, while Chromium shows the main interface. This establishes
+that the main startup module never runs; further runtime compatibility after
+admission remains unqualified. No source limit is raised and no overlay is
+removed. The existing static-paint repair RI-112 remains valid. Evidence:
+`temp/online-visual-round142/dayos-entry.mjs`, `dayos-diagnostic.log` and
+`dayos-engine.log`; the current pair is in report128. Boundaries remain
+**D8.4 / D10.1.7 / D9.1.1v4 / D9.1.3v2**.
+
 
 Found 2026-11-12. Browser execution belongs to **D8.4**; finite snapshot time
 belongs to **D10.1.7**. This limits full application-page fidelity, but does not

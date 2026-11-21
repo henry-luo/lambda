@@ -1634,13 +1634,11 @@ static int radiant_dom_reflected_string_set(Item receiver, Item value, Item* out
                                             const char* attribute) {
     DomElement* elem = radiant_dom_member_elem(receiver);
     if (!elem || !out) return 0;
-    const char* text = dom_to_attribute_cstr(value);
-    elem->set_attribute(attribute, text ? text : "");
-    if (str_icmp_cstr(attribute, "src") == 0 && radiant_dom_is_tag(elem, "img")) {
-        dom_after_set_attribute((void*)elem, attribute, text ? text : "");
-    }
-    dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-    *out = value;
+    RootFrame roots(3);
+    Rooted<Item> target(roots, receiver), input(roots, value), name(roots, js_name_item(attribute));
+    // IDL writes need the same null-namespace mutation and resource hooks as DOM setters.
+    Item result = dom_core_set_attribute_ns(target.get(), ItemNull, name.get(), input.get());
+    *out = item_is_error(result) ? result : input.get();
     return 1;
 }
 
@@ -2794,6 +2792,10 @@ RADIANT_C_API int radiant_dom_document_host_set_property(Item object,
 
 RADIANT_C_API int radiant_dom_document_host_has_property(Item object, Item key, Item* out) {
     if (!out) return 0;
+    if (radiant_dom_has_expando(object, key)) {
+        *out = (Item){.item = b2it(true)};
+        return 1;
+    }
     Item value = ItemNull;
     if (!radiant_dom_document_host_get_property(object, key, &value)) return 0;
     *out = (Item){.item = b2it(value.item != ItemNull.item && value.item != ITEM_JS_UNDEFINED)};
@@ -2801,23 +2803,21 @@ RADIANT_C_API int radiant_dom_document_host_has_property(Item object, Item key, 
 }
 
 RADIANT_C_API int radiant_dom_document_host_delete_property(Item object, Item key, Item* out) {
-    (void)object; (void)key;
     if (!out) return 0;
-    *out = (Item){.item = b2it(true)};
+    // Document wrappers share the node expando store, including method overrides.
+    *out = radiant_dom_delete_expando(object, key);
     return 1;
 }
 
 RADIANT_C_API int radiant_dom_document_host_own_property_descriptor(Item object, Item key, Item* out) {
-    (void)object; (void)key;
     if (!out) return 0;
-    *out = radiant_dom_undefined_item();
+    *out = radiant_dom_expando_descriptor(object, key);
     return 1;
 }
 
 RADIANT_C_API int radiant_dom_document_host_own_property_names(Item object, Item* out) {
-    (void)object;
     if (!out) return 0;
-    *out = radiant_host_api->value->array_new(0);
+    *out = radiant_dom_expando_names(object);
     return 1;
 }
 

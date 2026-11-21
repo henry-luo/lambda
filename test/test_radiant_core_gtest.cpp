@@ -138,7 +138,7 @@ TEST_F(RadiantCoreTest, TeardownReleasesFormPayloadBelowNonRenderingParents) {
         parent->display.inner = RDT_DISPLAY_REPLACED;
         forms[i].custom_validity_msg = mem_strdup("fallback control", MEM_CAT_LAYOUT);
         ASSERT_NE(forms[i].custom_validity_msg, nullptr);
-        child->style_ext = lam::own(&slots[i]);
+        child->ext = lam::own(&slots[i]);
         ASSERT_TRUE(child->set_form_storage(&forms[i]));
         ASSERT_TRUE(parent->DomNode::append_child(child));
         ASSERT_TRUE(owner->DomNode::append_child(parent));
@@ -158,7 +158,7 @@ TEST_F(RadiantCoreTest, RetainedResetPreservesScriptCreatedFormProperties) {
     form.custom_validity_msg = mem_strdup("invalid value", MEM_CAT_LAYOUT);
     ASSERT_NE(form.custom_validity_msg, nullptr);
     DomStyleExt slots = {};
-    control->style_ext = lam::own(&slots);
+    control->ext = lam::own(&slots);
     ASSERT_TRUE(control->set_form_storage(&form));
     control->set_role_kind(DomElement::ROLE_FORM);
     tree.root = lam::up(control);
@@ -587,7 +587,7 @@ TEST(LineClampGrammar, RejectsNonIntegerTokensAndRetainsCalculatedCounts) {
     pool_destroy(pool);
 }
 
-TEST(LegacyBoxGrammar, RejectsLegacyDisplayAndValidatesPrefixedOrientation) {
+TEST(LegacyBoxGrammar, NormalizesLegacyDisplayAndValidatesPrefixedOrientation) {
     Pool* pool = pool_create(); ASSERT_NE(pool, nullptr);
     const char* valid[] = {"horizontal", "vertical", "inline-axis", "block-axis",
         "inherit", "initial", "unset", "revert-layer", "var(--axis)"};
@@ -601,10 +601,14 @@ TEST(LegacyBoxGrammar, RejectsLegacyDisplayAndValidatesPrefixedOrientation) {
         SCOPED_TRACE(value);
         EXPECT_EQ(css_parse_property_declaration("-webkit-box-orient",18,value,strlen(value),pool),nullptr);
     }
-    const char* displays[] = {"-webkit-box", "-webkit-inline-box"};
-    for (const char* value : displays) {
-        SCOPED_TRACE(value);
-        EXPECT_EQ(css_parse_property_declaration("display",7,value,strlen(value),pool),nullptr);
+    const struct { const char* source; CssEnum expected; } displays[] = {
+        {"-webkit-box", CSS_VALUE_FLEX}, {"-webkit-inline-box", CSS_VALUE_INLINE_FLEX}
+    };
+    for (const auto& display : displays) {
+        CssDeclaration* declaration = css_parse_property_declaration("display", 7,
+            display.source, strlen(display.source), pool);
+        ASSERT_NE(declaration, nullptr);
+        EXPECT_TRUE(css_value_keyword_equals(declaration->value, display.expected));
     }
     pool_destroy(pool);
 }
@@ -1678,7 +1682,7 @@ TEST_F(IncrementalCssTest, HeightQueriesInvalidateEnvironmentAndGenerationButNor
     }
     tree.measurement_cache_generation++;
     expect_height_refresh(100.0f, 30.0f);
-    document.mutation_epoch++;
+    document.advance_mutation_epoch();
     expect_height_refresh(100.0f, 30.0f);
     context.ui_context = nullptr;
 }
@@ -1789,8 +1793,8 @@ TEST_F(IncrementalCssTest, RebindsOnlyChangedGeometryAndRestoresAuthoredValues) 
     int64_t evaluated = g_style_geometry_evaluations;
 
     // flow consumes margins and sizing; neither mutation changes computed CSS.
-    target->boundary_mut()->flow_margin = target->boundary()->margin;
-    target->boundary_mut()->has_flow_margin = true;
+    target->boundary_mut()->has_flow_margin = false;
+    capture_flow_margin(target->boundary_mut());
     target->boundary_mut()->margin.top = 0.0f;
     target->blk->given_width = 777.0f;
     resolve();
@@ -2876,7 +2880,7 @@ TEST(DomRetirementOwnerArenaTest, AdoptedMetadataRetiresFromItsPhysicalPool) {
     const char* tag = child->tag_name();
     const char* cached_id = child->id;
     const char* cached_class = child->class_names()[0];
-    DomStyleRareExt* extension = child->ext;
+    DomStyleRareExt* extension = child->rare_ext;
     EXPECT_TRUE(pool_owns(doc.document_pool, cached_id));
     EXPECT_TRUE(pool_owns(doc.document_pool, cached_class));
     dom_node_schedule_detached(&target_doc, child);
@@ -3976,7 +3980,7 @@ protected:
 
     bool cascade_mutation(DomJsMutationKind kind, DomNode* target, DomNode* parent) {
         // raw DOM edits need the same cache invalidation as the JS notifier.
-        doc.mutation_epoch++;
+        doc.advance_mutation_epoch();
         doc.style_content_epoch++;
         doc.js.mutation_records[0] = {1, kind, target, parent, 0, 0,
             DOM_JS_MUTATION_ATTRIBUTE_UNKNOWN, CSS_PROPERTY_UNKNOWN, true};
@@ -4425,7 +4429,7 @@ TEST_F(StyleEpochTest, DocumentElementMutationRetainsRootBelowDocumentProxy) {
     ASSERT_TRUE(document_proxy->append_child(document_root));
     doc.js.doc_node = document_proxy;
     ASSERT_TRUE(document_root->set_attribute("data-theme", "light"));
-    doc.mutation_epoch++;
+    doc.advance_mutation_epoch();
     doc.style_content_epoch++;
     doc.js.mutation_records[0] = {1, DOM_JS_MUTATION_ATTRIBUTE,
         document_root, document_proxy, 0, 0, DOM_JS_MUTATION_ATTRIBUTE_LOCAL,
@@ -4831,7 +4835,7 @@ TEST_F(StyleEpochTest, LineClampComputedCountsUseDeclarationOwnersWithoutRetaine
     }
 }
 
-TEST_F(StyleEpochTest, LegacyDisplayFallsBackAndPrefixedOrientationRemainsInspectable) {
+TEST_F(StyleEpochTest, LegacyDisplayUsesStandardLayoutAndPrefixedOrientationRemainsInspectable) {
     ASSERT_TRUE(css_property_system_init(doc.document_pool));
     const CssProperty* orientation = css_property_get_by_name("-webkit-box-orient");
     ASSERT_NE(orientation, nullptr);
@@ -4840,14 +4844,15 @@ TEST_F(StyleEpochTest, LegacyDisplayFallsBackAndPrefixedOrientationRemainsInspec
     ASSERT_NE(child, nullptr); ASSERT_TRUE(parent->append_child(child));
     ASSERT_TRUE(parent->set_attribute("style", "-webkit-box-orient:vertical"));
     const struct Case { const char* style; const char* axis; const char* display; } cases[] = {
-        {"display:block;display:-webkit-box", "horizontal", "block"},
-        {"display:flex;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2", "vertical", "flex"},
+        {"display:block;display:-webkit-box", "horizontal", "flex"},
+        {"display:flex;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2", "vertical", "flow-root"},
         {"display:inline-flex;display:-webkit-inline-box;-webkit-box-orient:vertical", "vertical", "inline-flex"},
-        {"display:grid;display:-webkit-box;-webkit-box-orient:inline-axis", "horizontal", "grid"},
+        {"display:grid;display:-webkit-box;-webkit-box-orient:inline-axis", "horizontal", "flex"},
+        {"display:-webkit-box;display:grid", "horizontal", "grid"},
         {"display:block;-webkit-box-orient:block-axis", "vertical", "block"},
         {"display:block;-webkit-box-orient:inherit", "vertical", "block"},
         {"display:block;-webkit-box-orient:unset", "horizontal", "block"},
-        {"display:flex;--axis:block-axis;-webkit-box-orient:var(--axis)", "vertical", "flex"},
+        {"display:flex;--axis:column;-webkit-box-orient:var(--axis)", "vertical", "flex"},
         {"display:flex;--axis:invalid;-webkit-box-orient:var(--axis)", "horizontal", "flex"},
         {"display:flow-root;-webkit-box-orient:vertical;-webkit-line-clamp:2", "vertical", "flow-root"}
     };

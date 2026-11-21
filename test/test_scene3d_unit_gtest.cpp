@@ -2098,9 +2098,9 @@ protected:
     }
     DomElement *billboard_scaled_camera() {
         attr(camera, "type", "orthographic"); attr(camera, "view_height", "4");
-        EXPECT_TRUE(camera->remove_attribute("target")); doc.mutation_epoch++;
+        EXPECT_TRUE(camera->remove_attribute("target")); doc.advance_mutation_epoch();
         auto *parent = element("group", root); attr(parent, "scale", "2 1 1");
-        EXPECT_TRUE(root->remove_child(camera)); EXPECT_TRUE(parent->append_child(camera)); doc.mutation_epoch++;
+        EXPECT_TRUE(root->remove_child(camera)); EXPECT_TRUE(parent->append_child(camera)); doc.advance_mutation_epoch();
         return parent;
     }
     void check_particle_billboard_affine_camera(bool gpu) {
@@ -2235,7 +2235,7 @@ protected:
         ASSERT_TRUE(scene3d_runtime_step(runtime, 1));
         ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
         EXPECT_NEAR(sample.position.x, 1.65, 3e-6); EXPECT_NEAR(sample.velocity.x, 4, 3e-6);
-        ASSERT_TRUE(emitter->remove_child(curve)); doc.mutation_epoch++;
+        ASSERT_TRUE(emitter->remove_child(curve)); doc.advance_mutation_epoch();
         ASSERT_NE(scene3d_prepare_animations(root), nullptr);
         ASSERT_TRUE(scene3d_runtime_step(runtime, 1));
         scene3d_context_lost(root);
@@ -2721,7 +2721,7 @@ protected:
         ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
         EXPECT_NEAR(sample.position.x, .30358442187309265, 2e-6);
         EXPECT_NEAR(sample.velocity.x, 1.071688437461853, 2e-6);
-        ASSERT_TRUE(emitter->remove_child(noise)); doc.mutation_epoch++;
+        ASSERT_TRUE(emitter->remove_child(noise)); doc.advance_mutation_epoch();
         ASSERT_NE(scene3d_prepare_animations(root), nullptr);
         ASSERT_TRUE(scene3d_runtime_step(runtime, 1));
         scene3d_context_lost(root);
@@ -4498,7 +4498,7 @@ TEST_F(Scene3dTest, ParticlesGpuTrailAttachesAndRemovesFromLiveMotionWithoutRese
     EXPECT_NEAR(points[0].position.x, .7, 2e-6); EXPECT_NEAR(points[3].position.x, .4, 2e-6);
     scene3d_context_lost(root);
     ASSERT_TRUE(scene3d_particles_trail_samples(owner, emitter, 0, points, &count)); EXPECT_EQ(count, 4u);
-    ASSERT_TRUE(emitter->remove_child(trail)); doc.mutation_epoch++;
+    ASSERT_TRUE(emitter->remove_child(trail)); doc.advance_mutation_epoch();
     ASSERT_NE(scene3d_prepare_animations(root), nullptr); scene3d_context_lost(root);
     Scene3dParticleSample sample; ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
     EXPECT_NEAR(sample.position.x, .7, 2e-6); EXPECT_EQ(sample.sequence, 0u);
@@ -4612,14 +4612,14 @@ TEST_F(Scene3dTest, ParticlesSheetAdmissionRejectsRangesModesAndRetainedLifetime
         EXPECT_EQ(after.gpu_readbacks, 0u); attr(sheet, keys[i], valid[i]);
     }
     attr(sheet, "cycles", "1"); EXPECT_EQ(scene3d_prepare_animations(root), nullptr);
-    ASSERT_TRUE(sheet->remove_attribute("cycles")); doc.mutation_epoch++;
+    ASSERT_TRUE(sheet->remove_attribute("cycles")); doc.advance_mutation_epoch();
     auto *duplicate = particle_sheet(emitter); EXPECT_EQ(scene3d_prepare_animations(root), nullptr);
-    ASSERT_TRUE(emitter->remove_child(duplicate)); doc.mutation_epoch++;
+    ASSERT_TRUE(emitter->remove_child(duplicate)); doc.advance_mutation_epoch();
     attr(emitter, "lifetime", "1"); attr(sheet, "fps", "1024");
     EXPECT_EQ(scene3d_prepare_animations(root), nullptr); // old births still own the long lifetime
     attr(sheet, "fps", "10"); ASSERT_NE(scene3d_prepare_animations(root), nullptr);
     ASSERT_TRUE(scene3d_particles_view(owner, emitter, &after)); EXPECT_EQ(after.gpu_readbacks, 0u);
-    ASSERT_TRUE(emitter->remove_child(sheet)); doc.mutation_epoch++;
+    ASSERT_TRUE(emitter->remove_child(sheet)); doc.advance_mutation_epoch();
     ASSERT_NE(scene3d_prepare_animations(root), nullptr);
     ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
     ASSERT_TRUE(scene3d_particles_view(owner, emitter, &after)); EXPECT_EQ(after.sheet_columns, 1u);
@@ -4677,7 +4677,7 @@ TEST_F(Scene3dTest, ParticlesColorAdmissionKeepsLiveStateOnMalformedDuplicateOrO
     attr(opacity, "values", "1 0");
     auto *duplicate = particle_curve(emitter, "particle-opacity-curve", "0 1", "1 1");
     EXPECT_EQ(scene3d_prepare_animations(root), nullptr);
-    ASSERT_TRUE(emitter->remove_child(duplicate)); doc.mutation_epoch++;
+    ASSERT_TRUE(emitter->remove_child(duplicate)); doc.advance_mutation_epoch();
     ASSERT_NE(scene3d_prepare_animations(root), nullptr);
     ASSERT_TRUE(scene3d_particles_view(owner, emitter, &after));
     EXPECT_EQ(after.gpu_readbacks, 0u); EXPECT_EQ(after.time, before.time);
@@ -4757,13 +4757,13 @@ TEST_F(Scene3dTest, ParticlesNoiseAdmissionRejectsMalformedAndRetainedLifetimeDo
     auto *duplicate = particle_noise(emitter);
     EXPECT_EQ(scene3d_prepare_animations(root), nullptr);
     ASSERT_TRUE(emitter->remove_child(duplicate));
-    doc.mutation_epoch++;
+    doc.advance_mutation_epoch();
     attr(emitter, "lifetime", "1"); attr(noise, "frequency", "1024");
     EXPECT_EQ(scene3d_prepare_animations(root), nullptr); // old lifetime still exceeds the lattice domain
     attr(noise, "frequency", "2");
     ASSERT_NE(scene3d_prepare_animations(root), nullptr);
     ASSERT_TRUE(emitter->remove_child(noise));
-    doc.mutation_epoch++;
+    doc.advance_mutation_epoch();
     ASSERT_NE(scene3d_prepare_animations(root), nullptr);
     ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
     ASSERT_TRUE(scene3d_particles_view(owner, emitter, &after));
@@ -11069,7 +11069,7 @@ TEST_F(Scene3dCaptureTest, RetainedCaptureRoutesFenceBusRemovalAndStopReleasesTh
     EXPECT_TRUE(item_is_error(provider_route("capture", token, "mic", route + 1, route)));
     auto session = ItemReader(item_attr(packet.get(), "session").to_const()).asUInt64();
     EXPECT_TRUE(item_is_error(provider_route("capture", token, nullptr, 0, route, session + 1)));
-    ASSERT_TRUE(root->remove_child(bus)); doc.mutation_epoch++; EXPECT_TRUE(item_is_error(read_audio()));
+    ASSERT_TRUE(root->remove_child(bus)); doc.advance_mutation_epoch(); EXPECT_TRUE(item_is_error(read_audio()));
     ASSERT_TRUE(radiant_capture_stop(&doc, token)); EXPECT_FALSE(item_is_error(read_audio()));
     EXPECT_TRUE(item_is_error(provider_route("capture", token, "master", bus_identity(packet.get(), "master"))));
     EXPECT_EQ(host.closes, 1u);
@@ -11080,7 +11080,7 @@ TEST_F(Scene3dCaptureTest, PendingDenialAndRevocationReleaseNamedReferencesWitho
     acquire(true); ASSERT_FALSE(item_is_error(provider_route("capture", token, "mic", route))); EXPECT_EQ(host.opens, 0u);
     host.permission = AUDIO_CAPTURE_DENIED; AudioProviderInfo info;
     ASSERT_TRUE(radiant_capture_routing(&doc, token, &info)); EXPECT_STREQ(info.state, "denied"); EXPECT_EQ(info.route, 0u);
-    ASSERT_TRUE(root->remove_child(bus)); doc.mutation_epoch++; EXPECT_FALSE(item_is_error(read_audio()));
+    ASSERT_TRUE(root->remove_child(bus)); doc.advance_mutation_epoch(); EXPECT_FALSE(item_is_error(read_audio()));
     EXPECT_EQ(host.opens, 0u); host.permission = AUDIO_CAPTURE_ALLOWED; token = radiant_capture_open(&doc); ASSERT_NE(token, 0u);
     packet.set(read_audio()); route = bus_identity(packet.get(), "master"); ASSERT_FALSE(item_is_error(provider_route("capture", token, "master", route)));
     ASSERT_TRUE(radiant_capture_monitor(&doc, token, 1)); input(0); ASSERT_TRUE(radiant_capture_grant(&doc, false));
@@ -11091,11 +11091,11 @@ TEST_F(Scene3dCaptureTest, PendingDenialAndRevocationReleaseNamedReferencesWitho
     ASSERT_TRUE(radiant_capture_routing(&doc, token, &info)); EXPECT_STREQ(info.state, "lost"); EXPECT_EQ(info.route, 0u); EXPECT_EQ(host.closes, 2u);
 }
 TEST_F(Scene3dCaptureTest, GraphLossStopsMonitoringWhileRecordingContinuesAndExplicitDetachmentRecovers) {
-    auto* shell = element("div"); ASSERT_TRUE(shell->append_child(root)); doc.root = lam::up(shell); doc.mutation_epoch++;
+    auto* shell = element("div"); ASSERT_TRUE(shell->append_child(root)); doc.root = lam::up(shell); doc.advance_mutation_epoch();
     auto* bus = element("audio-bus", root); attr(bus, "id", "mic");
     RootFrame roots(1); Rooted<Item> packet(roots, read_audio()); auto route = bus_identity(packet.get(), "mic");
     acquire(); ASSERT_FALSE(item_is_error(provider_route("capture", token, "mic", route))); ASSERT_TRUE(radiant_capture_monitor(&doc, token, 1)); input(0);
-    ASSERT_TRUE(shell->remove_child(root)); doc.mutation_epoch++; radiant_audio_tick(&doc, 0);
+    ASSERT_TRUE(shell->remove_child(root)); doc.advance_mutation_epoch(); radiant_audio_tick(&doc, 0);
     AudioProviderInfo info; ASSERT_TRUE(radiant_capture_routing(&doc, token, &info));
     EXPECT_STREQ(info.state, "capturing"); EXPECT_EQ(info.loss, AUDIO_VOICE_ROUTE_LOST); EXPECT_FALSE(info.route_valid); EXPECT_EQ(info.gain, 0);
     EXPECT_FALSE(radiant_capture_monitor(&doc, token, 1)); EXPECT_EQ(host.closes, 0u); input(4);
@@ -11224,7 +11224,7 @@ TEST_F(Scene3dAudioTest, PausedProviderReferencesRejectBusRemovalBeforeLiveSourc
     auto* source = speaker(); auto* bus = element("audio-bus", root); attr(bus, "id", "music"); attr(bus, "smoothing", "0");
     ASSERT_FALSE(item_is_error(upload())); ASSERT_FALSE(item_is_error(transport("play"))); RootFrame roots(2);
     Rooted<Item> packet(roots, read_audio()), result(roots, ItemNull); uint64_t route = bus_identity(packet.get(), "music"), token = audio_fixture_midi(root, .2); ASSERT_NE(token, 0u);
-    ASSERT_FALSE(item_is_error(provider_route("midi", token, "music", route))); attr(source, "gain", ".25"); ASSERT_TRUE(root->remove_child(bus)); doc.mutation_epoch++;
+    ASSERT_FALSE(item_is_error(provider_route("midi", token, "music", route))); attr(source, "gain", ".25"); ASSERT_TRUE(root->remove_child(bus)); doc.advance_mutation_epoch();
     EXPECT_TRUE(item_is_error(read_audio())); pcm(0, .5f); ASSERT_FALSE(item_is_error(provider_route("midi", token, nullptr, 0, route)));
     result.set(read_audio()); ASSERT_FALSE(item_is_error(result.get())); pcm(0, .125f); EXPECT_EQ(bus_identity(result.get(), "music"), 0u);
     EXPECT_TRUE(item_is_error(provider_route("midi", token, "master", route)));
@@ -11267,14 +11267,14 @@ TEST_F(Scene3dAudioTest, SpeechQueueKeepsSeparateNamedRoutesWhenTheSharedVoiceAd
     ASSERT_FALSE(item_is_error(result.get())); EXPECT_EQ(ItemReader(item_attr(result.get(), "route").to_const()).asUInt64(), 0u);
 }
 TEST_F(Scene3dAudioTest, GraphOwnerRemovalFailsActiveSpeechAndUnvoicedMidiWithoutReplayingEither) {
-    fake_speech(); auto* shell = element("div"); auto* owner = element("span", shell); ASSERT_TRUE(shell->append_child(root)); doc.root = lam::up(shell); doc.mutation_epoch++;
+    fake_speech(); auto* shell = element("div"); auto* owner = element("span", shell); ASSERT_TRUE(shell->append_child(root)); doc.root = lam::up(shell); doc.advance_mutation_epoch();
     auto* bus = element("audio-bus", root); attr(bus, "id", "providers"); RootFrame roots(1); Rooted<Item> packet(roots, read_audio());
     auto route = bus_identity(packet.get(), "providers"), midi = audio_fixture_midi(owner, .2), speech = audio_fixture_speech(owner), queued = audio_fixture_speech(owner);
     ASSERT_NE(midi, 0u); ASSERT_NE(speech, 0u); ASSERT_NE(queued, 0u); ASSERT_TRUE(radiant_speech_command(&doc, queued, "pause"));
     ASSERT_FALSE(item_is_error(provider_route("midi", midi, "providers", route))); ASSERT_FALSE(item_is_error(provider_route("speech", speech, "providers", route)));
     ASSERT_FALSE(item_is_error(provider_route("speech", queued, "providers", route)));
     ASSERT_TRUE(radiant_speech_tick(&doc)); float output[64 * 2]; auto mix = radiant_document_submix(&doc); ASSERT_TRUE(audio_submix_render(mix, output, 64));
-    ASSERT_TRUE(shell->remove_child(root)); doc.mutation_epoch++; radiant_audio_tick(&doc, 0); EXPECT_FALSE(radiant_speech_tick(&doc));
+    ASSERT_TRUE(shell->remove_child(root)); doc.advance_mutation_epoch(); radiant_audio_tick(&doc, 0); EXPECT_FALSE(radiant_speech_tick(&doc));
     AudioProviderInfo midi_info, speech_info; ASSERT_TRUE(radiant_midi_routing(&doc, midi, &midi_info)); ASSERT_TRUE(radiant_speech_routing(&doc, speech, &speech_info));
     EXPECT_STREQ(midi_info.state, "error"); EXPECT_STREQ(speech_info.state, "error"); EXPECT_EQ(midi_info.loss, AUDIO_VOICE_ROUTE_LOST); EXPECT_EQ(speech_info.loss, AUDIO_VOICE_ROUTE_LOST);
     EXPECT_FALSE(midi_info.route_valid); EXPECT_FALSE(speech_info.route_valid); ASSERT_TRUE(audio_submix_render(mix, output, 64)); for (float v : output) EXPECT_FLOAT_EQ(v, 0);
@@ -11417,7 +11417,7 @@ TEST_F(Scene3dAudioTest, ProviderJobsRetireWithTheirSceneWhileCopiedReadResultsS
     auto id = render_id(job.get()), session = ItemReader(item_attr(packet.get(), "session").to_const()).asUInt64();
     ASSERT_FALSE(item_is_error(render_command("audio_render_step", id, 64))); output.set(render_command("audio_render_read", id, 64)); ASSERT_FALSE(item_is_error(output.get()));
     float first = render_sample(output.get(), 17);
-    doc.root = nullptr; doc.mutation_epoch++; radiant_audio_tick(&doc, 0);
+    doc.root = nullptr; doc.advance_mutation_epoch(); radiant_audio_tick(&doc, 0);
     AudioRenderSnapshot snapshot; EXPECT_FALSE(audio_render_snapshot(&doc, session, id, &snapshot));
     EXPECT_FLOAT_EQ(render_sample(output.get(), 17), first);
 }
@@ -11682,7 +11682,7 @@ TEST_F(Scene3dAudioTest, DeviceLossAndRemovedSourcesCancelFutureCuesAndDoNotRepl
     ASSERT_FALSE(item_is_error(queue(packet.get(), "play", 100))); audio_bus_retire_output(); result.set(read_audio()); ASSERT_FALSE(item_is_error(result.get()));
     EXPECT_EQ(cue_count(result.get(), "cue_pending"), 0u); EXPECT_STREQ(cue_row(result.get(), "cue_history").get("status").asString()->chars, "device_lost");
     EXPECT_EQ(ItemReader(item_attr(result.get(), "document_players").to_const()).asUInt64(), 2u); EXPECT_FALSE(radiant_audio_frames_pending(&doc));
-    ASSERT_FALSE(item_is_error(queue(packet.get(), "play", 100, 2))); ASSERT_TRUE(root->remove_child(source)); doc.mutation_epoch++;
+    ASSERT_FALSE(item_is_error(queue(packet.get(), "play", 100, 2))); ASSERT_TRUE(root->remove_child(source)); doc.advance_mutation_epoch();
     result.set(read_audio()); ASSERT_FALSE(item_is_error(result.get())); EXPECT_EQ(cue_count(result.get(), "cue_pending"), 0u);
     EXPECT_EQ(ItemReader(item_attr(result.get(), "document_players").to_const()).asUInt64(), 1u); pcm(0, 0);
     doc.root = nullptr; radiant_audio_tick(&doc, 0); size_t players, bytes; ASSERT_TRUE(radiant_audio_usage(&doc, &players, &bytes)); EXPECT_EQ(players, 0u);
@@ -11691,7 +11691,7 @@ TEST_F(Scene3dAudioTest, PendingCuesKeepIdentityAcrossTemplateReplacementAndGrap
     speaker(); ASSERT_FALSE(item_is_error(upload())); RootFrame roots(2); Rooted<Item> packet(roots, read_audio()), result(roots, ItemNull);
     ASSERT_FALSE(item_is_error(queue(packet.get(), "play", 17))); auto* previous = root; create_scene_root();
     attr(camera, "position", "0 0 0"); attr(camera, "target", "0 0 -1"); speaker();
-    scene3d_follow_rebuild(&doc, previous, root); doc.root = lam::up(root); doc.mutation_epoch++; result.set(read_audio());
+    scene3d_follow_rebuild(&doc, previous, root); doc.root = lam::up(root); doc.advance_mutation_epoch(); result.set(read_audio());
     ASSERT_FALSE(item_is_error(result.get())); ASSERT_EQ(cue_count(result.get(), "cue_pending"), 1u);
     ASSERT_NE(snapshot(), nullptr); scene3d_context_lost(root); ASSERT_NE(snapshot(), nullptr);
     float output[32 * 2]; ASSERT_TRUE(audio_submix_render(radiant_document_submix(&doc), output, 32));
@@ -11725,7 +11725,7 @@ TEST_F(Scene3dAudioTest, InvalidBusPeersRejectSourceParametersAndRoutesBeforePub
     attr(source, "gain", ".25"); attr(effects, "gain", ".25");
     auto* cycle = element("audio-send", master); attr(cycle, "bus", "effects");
     EXPECT_TRUE(item_is_error(read_audio())); pcm(0, .5f);
-    ASSERT_TRUE(master->remove_child(cycle)); doc.mutation_epoch++; attr(source, "bus", "missing");
+    ASSERT_TRUE(master->remove_child(cycle)); doc.advance_mutation_epoch(); attr(source, "bus", "missing");
     EXPECT_TRUE(item_is_error(read_audio())); pcm(0, .5f);
     attr(source, "bus", "effects"); ASSERT_FALSE(item_is_error(read_audio())); pcm(0, .03125f);
 }
@@ -11762,7 +11762,7 @@ TEST_F(Scene3dAudioTest, NamedRoutingPreservesIdentityAndGainAcrossTemplateAndCo
     configure(); ASSERT_FALSE(item_is_error(upload())); RootFrame roots(2); Rooted<Item> before(roots, transport("play")), after(roots, ItemNull);
     ASSERT_FALSE(item_is_error(before.get())); pcm(0, .125f);
     auto* previous = root; create_scene_root(); attr(camera, "position", "0 0 0"); attr(camera, "target", "0 0 -1"); configure();
-    scene3d_follow_rebuild(&doc, previous, root); doc.root = lam::up(root); doc.mutation_epoch++; after.set(read_audio()); ASSERT_FALSE(item_is_error(after.get()));
+    scene3d_follow_rebuild(&doc, previous, root); doc.root = lam::up(root); doc.advance_mutation_epoch(); after.set(read_audio()); ASSERT_FALSE(item_is_error(after.get()));
     auto before_bus = ItemReader(item_attr(before.get(), "buses").to_const()).asArray().get(1).item();
     auto after_bus = ItemReader(item_attr(after.get(), "buses").to_const()).asArray().get(1).item();
     EXPECT_EQ(item_attr(before_bus, "identity").get_uint64(), item_attr(after_bus, "identity").get_uint64());
@@ -11852,7 +11852,7 @@ TEST_F(Scene3dAudioTest, DeviceRetirementAndDetachedSourcesReleaseNativeReaders)
     audio_bus_retire_output(); RootFrame roots(1); Rooted<Item> packet(roots, read_audio());
     EXPECT_STREQ(source_row(packet.get()).get("state").asString()->chars, "error");
     ASSERT_FALSE(item_is_error(transport("play"))); pcm(0, .5f);
-    ASSERT_TRUE(root->remove_child(source)); doc.mutation_epoch++; radiant_audio_tick(&doc, 0);
+    ASSERT_TRUE(root->remove_child(source)); doc.advance_mutation_epoch(); radiant_audio_tick(&doc, 0);
     size_t players, bytes; ASSERT_TRUE(radiant_audio_usage(&doc, &players, &bytes)); EXPECT_EQ(players, 1u); pcm(0, 0);
     doc.root = nullptr; radiant_audio_tick(&doc, 0); ASSERT_TRUE(radiant_audio_usage(&doc, &players, &bytes)); EXPECT_EQ(players, 0u);
 }
@@ -11878,7 +11878,7 @@ TEST_F(Scene3dAudioTest, TemplateAndGraphicsRecoveryPreserveCursorsAndNativeIden
     speaker(); ASSERT_FALSE(item_is_error(upload())); RootFrame roots(2); Rooted<Item> before(roots, transport("play")), after(roots, ItemNull);
     ASSERT_FALSE(item_is_error(before.get())); pcm(0, .5f, 16); before.set(read_audio());
     auto* previous = root; create_scene_root(); attr(camera, "position", "0 0 0"); attr(camera, "target", "0 0 -1"); speaker();
-    scene3d_follow_rebuild(&doc, previous, root); doc.root = lam::up(root); doc.mutation_epoch++; after.set(read_audio());
+    scene3d_follow_rebuild(&doc, previous, root); doc.root = lam::up(root); doc.advance_mutation_epoch(); after.set(read_audio());
     ASSERT_FALSE(item_is_error(after.get()));
     EXPECT_EQ(item_attr(before.get(), "session").get_uint64(), item_attr(after.get(), "session").get_uint64());
     EXPECT_EQ(source_row(before.get()).get("identity").asUInt64(), source_row(after.get()).get("identity").asUInt64());
@@ -11892,7 +11892,7 @@ TEST_F(Scene3dAudioTest, NativeClipAndSourceCapsRejectOverflowWithoutDiscardingO
     EXPECT_TRUE(item_is_error(upload(0, 0, "overflow"))); pcm(0, .5f);
     for (unsigned i = 1; i < 32; i++) { char id[32]; snprintf(id, sizeof(id), "source%u", i); speaker(id); }
     ASSERT_FALSE(item_is_error(read_audio())); auto* overflow = speaker("overflow"); EXPECT_TRUE(item_is_error(read_audio())); pcm(0, .5f);
-    ASSERT_TRUE(root->remove_child(overflow)); doc.mutation_epoch++; ASSERT_FALSE(item_is_error(read_audio()));
+    ASSERT_TRUE(root->remove_child(overflow)); doc.advance_mutation_epoch(); ASSERT_FALSE(item_is_error(read_audio()));
     attr(source, "id", "renamed"); RootFrame roots(1); Rooted<Item> packet(roots, read_audio()); ASSERT_FALSE(item_is_error(packet.get()));
     EXPECT_STREQ(source_row(packet.get()).get("state").asString()->chars, "ready"); pcm(0, 0);
 }
@@ -12060,7 +12060,7 @@ TEST_F(Scene3dAgentTest, ParticlesSpawnCommandsPreserveQueuedIdentityAcrossEquiv
     ASSERT_FALSE(item_is_error(particle_spawn_batch(&request,1,0,2))); auto *owner=scene3d_particles(root);
     Scene3dEmitterView before,after; ASSERT_TRUE(scene3d_particles_view(owner,emitter,&before));
     auto *previous=root; create_scene_root(); particle_clock(); emitter=particle_emitter(); attr(emitter,"emitting","false"); attr(emitter,"backend","gpu");
-    scene3d_follow_rebuild(&doc,previous,root); doc.root=lam::up(root); doc.mutation_epoch++;
+    scene3d_follow_rebuild(&doc,previous,root); doc.root=lam::up(root); doc.advance_mutation_epoch();
     ASSERT_NE(scene3d_prepare_animations(root),nullptr); ASSERT_EQ(scene3d_particles(root),owner);
     ASSERT_TRUE(scene3d_particles_view(owner,emitter,&after)); EXPECT_EQ(before.identity,after.identity);
     scene3d_context_lost(root); ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root),2));

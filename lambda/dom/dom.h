@@ -426,6 +426,9 @@ Item dom_dataset_set_property(Item elem, Item prop_name, Item value);
  * @return String value
  */
 Item dom_location_get_property(Item prop_name);
+size_t dom_location_component_count(void);
+const char* dom_location_component_name(size_t index);
+Item dom_location_set_component(Item document, size_t index, Item value);
 
 // =============================================================================
 // Node.contains() (v12)
@@ -586,7 +589,7 @@ struct JsRuntimeState;
 bool dom_exec_insert_html(DomDocument* doc, const char* html);
 
 /** Mutation-sequence reads for incremental reconciliation. */
-uint64_t dom_mutation_epoch(DomDocument* doc);
+uint32_t dom_mutation_epoch(DomDocument* doc);
 #endif
 
 void dom_schedule_animation_frame(Item callback);

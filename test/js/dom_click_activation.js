@@ -27,8 +27,9 @@ control.addEventListener('change', function() { events.push('change:' + control.
 var canceled = !control.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true}));
 check('checkbox canceled preactivation', canceled && !control.checked && control.indeterminate && events.join(',') === 'click:true:false');
 events.length = 0;
-control.click();
-check('dynamic checkbox commit', control.checked && !control.indeterminate && events.join(',') === 'input:true,change:true');
+var clickResult = control.click();
+check('dynamic checkbox commit', clickResult === undefined && control.checked && !control.indeterminate &&
+  events.join(',') === 'input:true,change:true');
 
 var first = input('radio', 'activation');
 var second = input('radio', 'activation');
@@ -39,8 +40,8 @@ second.addEventListener('click', function(event) {
   if (typeof gc === 'function') gc();
   event.preventDefault();
 }, {once: true});
-second.click();
-check('radio canceled preactivation', sawRadio && first.checked && !second.checked);
+var canceledClickResult = second.click();
+check('radio canceled preactivation', canceledClickResult === undefined && sawRadio && first.checked && !second.checked);
 second.click();
 check('dynamic radio commit', !first.checked && second.checked);
 first.addEventListener('click', function(event) {

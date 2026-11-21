@@ -19,8 +19,8 @@ The largest savings come from the payload allocated for common elements. Moving 
 | `ScrollProp` | 216 B | 80 B |
 | `TransformProp` | 408 B | 56 B |
 | `FormControlProp` | 256 B | 208 B |
-| `BoundaryProp` | 224 B | 224 B |
-| `LayoutCache` | 1,240 B | 1,240 B |
+| `BoundaryProp` | 224 B | 192 B |
+| `LayoutCache` | 1,240 B | 864 B |
 
 These are direct compiler record sizes. Earlier captures use the name `DomElementExt` for `DomStyleRareExt`. Optional allocations and shared storage contribute to the measured totals in Appendix A. [Element records](../../lambda-input/lambda/input/css/dom_element.hpp) · [View payloads](../../radiant/radiant/view.hpp) · [Layout cache](../../radiant/radiant/layout.hpp)
 
@@ -57,7 +57,7 @@ The view pool owns the optional payloads. Retained style resolution releases sta
 
 ### DV6.1 — Keep document extensions independently lazy
 
-`DomElement::ext` lazily owns a `DomStyleRareExt` in the document pool. The extension tracks the physical storage owner for adoption (D5.5.1). It holds uncommon DOM state, typed slots for uncommon view features, and pointers to the separately allocated attribute and fragment groups. The document pool owns `DomAttributeCache` (48 B) and `DomFragmentGeometry` (164 B). Layout resets the geometry group as needed. The attributes group holds expanded-name, synthetic attribute, and name-cache state. The extension packs its 12 Boolean flags into the gap before its pointer fields. It stores form-image offsets as fractional CSS pixels and rounds them when FormData or dialog submission serializes them (D9.5.6v2).
+`DomElement::rare_ext` lazily owns a `DomStyleRareExt` in the document pool. The extension tracks the physical storage owner for adoption (D5.5.1). It holds uncommon DOM state, typed slots for uncommon view features, and pointers to the separately allocated attribute and fragment groups. The document pool owns `DomAttributeCache` (48 B) and `DomFragmentGeometry` (164 B). Layout resets the geometry group as needed. The attributes group holds expanded-name, synthetic attribute, and name-cache state. The extension packs its 12 Boolean flags into the gap before its pointer fields. It stores form-image offsets as fractional CSS pixels and rounds them when FormData or dialog submission serializes them (D9.5.6v2).
 
 The custom-property list and its lookup index live in `DomStyleRareExt`. The first write that needs custom-property storage allocates the extension. Mutation invalidates the index, and the list and index follow the physical storage owner through adoption (D5.5.1). [Custom-property storage](../../lambda-input/lambda/input/css/dom_element.cpp)
 
@@ -65,7 +65,7 @@ The custom-property list and its lookup index live in `DomStyleRareExt`. The fir
 
 `PopoverStyle` holds the popover modes, visibility, toggle task, and opening order. It also holds the top-layer membership and implicit anchor shared with modal dialogs. The physical document pool allocates this `ViewProp` on demand. Relayout preserves it, and node retirement releases it (D5.5.1). The opening order is an unsigned 64-bit sequence and reserves zero for entries outside the popover stacks. On arm64, the group is a 40-byte record. The original split reduced `DomStyleRareExt` from 304 to 280 bytes and its minimum pool block by 16 bytes under the allocator then in use (D5.1.4, D5.2.4).
 
-`DomStyleExt` holds a second lazy directory in the node's physical document pool. It owns private pseudo specified styles through the 80-byte `PseudoStyle` group and borrows namespace URI bytes. A directory stays live while any of its bindings are present. Node retirement clears document-owned state and borrows under D5.5.1 and D5.5.2. [Element extensions](../../lambda-input/lambda/input/css/dom_element.hpp) · [Release paths](../../lambda-input/lambda/input/css/dom_element.cpp)
+`DomElement::ext` lazily owns a `DomStyleExt` directory in the node's physical document pool. It owns private pseudo specified styles through the 80-byte `PseudoStyle` group and borrows namespace URI bytes. A directory stays live while any of its bindings are present. Node retirement clears document-owned state and borrows under D5.5.1 and D5.5.2. [Element extensions](../../lambda-input/lambda/input/css/dom_element.hpp) · [Release paths](../../lambda-input/lambda/input/css/dom_element.cpp)
 
 The document pool uses 8-byte alignment. On arm64 its block header takes 24 bytes, with 32-bit spans and an extent-size cap (D5.1.4, D5.5.1). `ShadowStyle` and `PopoverStyle` each need a minimum 64-byte pool block, down from 80 bytes. `DomStyleExt` needs 72 bytes, down from 80. The default pool alignment is 16 bytes. [Document pool creation](../../lambda-input/lambda/input/css/dom_element.cpp) · [Pool sizing](../../lambda-input/lib/mempool.c)
 
@@ -99,9 +99,12 @@ The normal selector matcher and active stylesheet checks determine eligibility f
 
 An element reads its private pseudo tree when present and otherwise reads the selected shared tree. Adding a conflicting declaration or requesting a writable slot materializes the shared tree in the node's pool before applying the override. Layout and pseudo CSSOM use this same lookup, including when a pseudo generates no box. The physical source document keeps a shared snapshot available after adoption. Recascade clears the node's shared indexes, and retained generated boxes follow the existing borrow-retirement path when a private tree is replaced (D5.5.1, D5.5.3, DV9c). [Matching path](../../radiant/radiant/css_cascade.cpp) · [Storage and promotion](../../lambda-input/lambda/input/css/dom_element.cpp) · [Pseudo CSSOM](../../radiant/radiant/css_prop_table.cpp)
 
-### DV6.5 — Retire WebKit box display in Radiant
+<a id="dv65--retire-webkit-box-display-in-radiant"></a>
+### DV6.5v2 — Normalize WebKit box syntax at CSS input
 
-Radiant rejects `display: -webkit-box` and `display: -webkit-inline-box` before cascade, so a valid fallback declaration can win. Use `flex` or `inline-flex` with `flex-direction` for flex layout, and the unprefixed `line-clamp` for clamped text. The shared CSS property metadata still accepts `-webkit-box-orient` and `-webkit-line-clamp` for declaration and computed style inspection. Neither prefixed property affects Radiant layout (D9.1.1v4, D9.1.3v2).
+Under D10.1.9 and D9.1.3v2, Input accepts `display: -webkit-box` and `display: -webkit-inline-box` as `flex` and `inline-flex`. The parser maps `-webkit-box-orient` to `flex-direction` and `-webkit-line-clamp` to `line-clamp`. Use `row` for `horizontal` or `inline-axis` and `column` for `vertical` or `block-axis`.
+
+When one declaration block supplies a vertical legacy orientation and a valid count that does not depend on substitution, Input emits `flow-root` or `inline-block` for the legacy display. The parser uses declaration order and `!important` to select the local clamp and orientation. Declarations split across blocks follow the cascade of their standard equivalents. Custom properties used for a normalized direction supply a standard `flex-direction` value. Prefixed CSSOM property names access the canonical declarations.
 
 The four-byte `DisplayValue` holds the outer role and the inner mode. `DisplayInner` packs the standard `list-item` modifier into its high bit. The same representation works for published and animated display. The CSS-wide values `initial` and `unset` resolve to inline flow. [Display storage](../../lambda-input/lambda/input/css/dom_element.hpp) · [Display resolution](../../radiant/radiant/css_display.cpp)
 
@@ -120,7 +123,14 @@ The fallback table costs one pointer per document and allocates entries only whe
 1. Expose a read accessor, a presence test where needed, and one mutable ensure path. Group reads are allocation-free and use typed defaults or null. Reuse the typed ensure helpers to select the correct pool. Keep anonymous scratch items in pass storage. Secondary resolution uses its selected view's storage.
 2. Use one registration source per view slot. Keep the typed access, ownership, default/reset behavior, teardown, and clear behavior in agreement. Child groups follow their root's existing teardown entry. The catalog marks `shadow` and `popover` as document-owned slots. DOM retirement releases them (D5.5.1). Keep compile-time coverage and debug post-clear checks. The Input headers expose the shared element definition, and Radiant defines the concrete view payloads and tears them down (D9.1.1v4, D9.1.3v2). [Slot ownership dispatch](../../radiant/radiant/view_pool.cpp) · [Node retirement](../../lambda-input/lambda/input/css/dom_element.cpp)
 3. Separate immutable resolved style from used geometry where sharing pays for itself. Keep canonical `InlineProp` bindings behind the existing write gate (DV9c). Treat interned inherited text deltas as a separate experiment. Preserve style identities, inherited revisions, layout invalidation, and the lifetime of retained animation or view state.
-4. Keep the nine general measurement entries and four intrinsic-width entries inline in `LayoutCache`. The cache trials moved those arrays and increased CPU time on large pages. Cache storage, `BoundaryProp::flow_margin`, and pass-lived flex/grid measurement state remain separate investigations (D5.1.4, DV10). [Cache trial results](../impl/Radiant_Impl_View_Prop_Groups.md#deferred-layout-cache-storage)
+4. Keep four general measurement entries and four intrinsic-width entries inline in `LayoutCache`. General measurements match the known dimensions and available space. A new key replaces the oldest insertion, and a write to a matching key refreshes it in place. `KnownDimensions` uses NaN for an unknown axis and preserves zero as a definite size. A reserved available-width tag marks an empty key. Only the general measurement entries hold a result-size pair. The intrinsic-width entry holds its result in `IntrinsicSizes` and uses a 24-byte constraint key. Committed layout publishes geometry through the retained layout paths under D5.5.3 and DV10. The intrinsic-width history and retained flex-flow caches each have their own nine-entry limit. [Layout cache](../../radiant/radiant/layout.hpp) · [Earlier storage trials](../impl/Radiant_Impl_View_Prop_Groups.md#deferred-layout-cache-storage)
+5. Capture the four resolved margin values and CSS types in a compact `FlowMargin` before flow or fragmentation consumes them. The live `Margin` holds the cascade specificity. When deferred percentage resolution accepts a declaration, it updates both the live side and the captured side if present. CSSOM, inheritance, animation, and retained layout replay read the captured values where they need the pre-collapse margin (D5.5.3, DV9b, DV10). [Boundary record](../../radiant/radiant/view.hpp) · [Deferred percentages](../../radiant/radiant/layout_percentages.cpp)
+
+### Document epoch width
+
+The document mutation, style-query, and style-content epochs and their Radiant snapshots use `uint32_t` equality stamps (D5.5.3). Style-query epochs cover style and presentation changes that affect queries. Style-content epochs cover inherited styles and content dependencies beyond the changed subtree. Mutation epochs track document mutations. Reserve `UINT32_MAX` for an unstamped mutation snapshot and wrap the document mutation counter to zero at that value. The accepted wrap interval is approximately 50 days at 1,000 increments per second. A snapshot can alias a new one after a full counter cycle. [Document counters](../../lambda-input/lambda/input/css/dom_element.hpp) · [Layout cache](../../radiant/radiant/layout.hpp)
+
+On arm64, narrower document counters reduce `DomDocument` from 3,984 to 3,968 bytes. Packing the 32-bit style epoch beside the intrinsic revision fields reduces `IntrinsicWidthCacheEntry` from 184 to 176 bytes. The four inline entries and two narrower inherited-cache stamps reduce `LayoutCache` from 968 to 928 bytes.
 
 ## 5. Measurement and acceptance
 
@@ -134,6 +144,14 @@ The fallback table costs one pointer per document and allocates entries only whe
 ## Appendix A. End-to-end release measurements
 
 The comparisons use native Clang arm64 release builds at `-O3` with full LTO. The original baseline includes the pre-existing `DomElement` field reorder. Each page uses local resources, a 1200 × 800 viewport, and disabled scripting. Samples come from `post_layout_pre_output` after first layout. Totals sum independent page processes. Tracked process memory includes the Input arena that can own parser-backed elements. The profiler accounts for logical storage and allocator-tracked memory in their respective scopes (D5.2.1–D5.2.4).
+
+In profile output, `slots.ext` counts `rare_ext` allocations and `ext_size` gives their record size. `prop_extensions` and `prop_ext_size` describe the `ext` directory.
+
+### Compact cache keys and flow margins
+
+A paired native release replay across the 224 pages reduced active view-property storage from 175,396,951 to 169,762,735 bytes. The saving is 5.37 MiB, or 3.21% of active view-property storage and 2.15% of the combined active DOM and view total. All normalized layout trees matched, and the profiler reported zero attribution errors (D5.2.4). Results are in `temp/view-memory-two-cuts/comparison.json`.
+
+Across five paired release workloads, median first-layout CPU changed by −0.55% to +1.08%. Bootstrap Kitchen Sink, the upper endpoint, measured +0.59% on repeat. The native suites passed 140 dynamic tests, 126 paged tests, and 3,857 static smoke fixtures.
 
 ### Current checkout and archived refactor endpoint
 

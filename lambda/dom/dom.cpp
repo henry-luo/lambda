@@ -255,7 +255,7 @@ static bool dom_expando_flag_is(DomElement* elem, const char* name);
 static void dom_expando_flag_set(DomElement* elem, const char* name, Item value);
 
 static Item dom_dialog_store_return_value(DomElement* element, Item text_value) {
-    DomStyleRareExt* storage = element->ensure_ext();
+    DomStyleRareExt* storage = element->ensure_rare_ext();
     const char* text = fn_to_cstr(text_value);
     const char* copy = storage && element->doc
         ? pool_strdup(element->doc->document_pool, text ? text : "") : nullptr;
@@ -340,9 +340,10 @@ static void dom_set_fragment_script_state(DomElement* root, DomFragmentScriptMod
     for (DomNode* node = root; node;) {
         DomElement* element = node->as_element();
         if (dom_element_is_html_tag(element, MARKUP_NAME_SCRIPT)) {
-            if (DomStyleRareExt* state = element->ensure_ext()) {
+            if (DomStyleRareExt* state = element->ensure_rare_ext()) {
                 state->script_already_started = mode == DomFragmentScriptMode::inert;
                 state->script_parser_pending = mode == DomFragmentScriptMode::parser_inserted;
+                state->script_parser_inserted = mode == DomFragmentScriptMode::parser_inserted;
             }
         }
         // A parser-inserted template holds a separate, unscheduled source tree.
@@ -567,7 +568,7 @@ static void dom_enqueue_script_reaction(DomDocument* document, DomNode* node) {
     DomElement* script = node ? node->as_element() : nullptr;
     if (!document->js.prepare_inline_script || document->scripting_disabled ||
         !dom_element_is_html_tag(script, MARKUP_NAME_SCRIPT) || !dom_node_is_connected(node) ||
-        (script->ext && (script->ext->script_already_started || script->ext->script_parser_pending))) return;
+        (script->rare_ext && (script->rare_ext->script_already_started || script->rare_ext->script_parser_pending))) return;
     auto* reaction = (DomScriptReaction*)mem_alloc(sizeof(DomScriptReaction), MEM_CAT_DOM);
     if (!reaction) return;
     reaction->script = dom_node_ref(script);
@@ -632,7 +633,7 @@ extern "C" void dom_clear_script_reactions(DomDocument* document) {
 
 static bool dom_update_slot_assignment(DomElement* slot, bool fallback_changed) {
     DomSlotAssignment assignment = dom_slot_assignment(slot);
-    DomStyleRareExt* state = slot->ext;
+    DomStyleRareExt* state = slot->rare_ext;
     size_t previous = state ? state->signaled_slot_assignment_count : 0;
     size_t count = 0;
     bool changed = false;
@@ -648,7 +649,7 @@ static bool dom_update_slot_assignment(DomElement* slot, bool fallback_changed) 
         return false;
     }
 
-    state = slot->ensure_ext();
+    state = slot->ensure_rare_ext();
     if (!state) return false;
     Pool* pool = slot->storage_pool();
     DomNodeRef* assigned = count ? (DomNodeRef*)pool_calloc(pool, count * sizeof(DomNodeRef)) : nullptr;
@@ -728,9 +729,9 @@ static inline void dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATION_
         DomElement* element = target ? target->as_element() : nullptr;
         if (dom_element_is_html_tag(element, MARKUP_NAME_DIALOG) && !element->has_attribute("open")) {
             // Removing open ends the active close request, even when the handler reopens the dialog.
-            if (element->ext) {
-                element->ext->dialog_cancel_dispatching = false;
-                element->ext->dialog_previous_focus = {};
+            if (element->rare_ext) {
+                element->rare_ext->dialog_cancel_dispatching = false;
+                element->rare_ext->dialog_previous_focus = {};
             }
             recheck_focus = true;
         }
@@ -753,9 +754,10 @@ static inline void dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATION_
     if (kind == DOM_JS_MUTATION_ATTRIBUTE && attribute_name && str_ieq_cstr(attribute_name, "popover"))
         dom_popover_attribute_changed(target ? target->as_element() : nullptr);
     if (doc->js.prepare_inline_script) {
-        if (kind == DOM_JS_MUTATION_TEXT) {
+        if (kind == DOM_JS_MUTATION_TEXT || (kind == DOM_JS_MUTATION_ATTRIBUTE &&
+                attribute_name && str_ieq_cstr(attribute_name, "src"))) {
             dom_enqueue_script_reaction(doc, target);
-            if (parent != target) dom_enqueue_script_reaction(doc, parent);
+            if (kind == DOM_JS_MUTATION_TEXT && parent != target) dom_enqueue_script_reaction(doc, parent);
         } else if (kind == DOM_JS_MUTATION_CHILD_REMOVE) {
             dom_enqueue_script_reaction(doc, parent);
         }
@@ -1171,14 +1173,14 @@ enum DomPopoverCloseFlags : unsigned {
 static Item dom_hide_popover(DomElement* element, DomElement* source, unsigned flags);
 
 static void dom_remove_popup_visibility(DomElement* element, void*) {
-    if (!element->ext) return;
+    if (!element->rare_ext) return;
     bool was_modal = element->is_dialog_modal();
     // Removing a popup silently clears live visibility before adoption or reinsertion.
     if (element->is_popover_open())
         dom_hide_popover(element, nullptr, DOM_POPOVER_CLOSE_REMOVED_ATTRIBUTE);
     dom_top_layer_remove(element);
-    element->ext->dialog_modal = false;
-    element->ext->dialog_previous_focus = {};
+    element->rare_ext->dialog_modal = false;
+    element->rare_ext->dialog_previous_focus = {};
     if (was_modal && element->doc) dom_recheck_focus_in(element->doc->root);
 }
 
@@ -2360,7 +2362,7 @@ extern "C" bool dom_element_is_svg(void* element) {
 static void dom_document_configuration_changed(DomDocument* doc) {
     // document configuration changes selector matches without changing an observable DOM attribute.
     if (doc->root) dom_mutation_notify(DOM_JS_MUTATION_UNKNOWN, doc->root);
-    else { doc->mutation_epoch++; doc->style_content_epoch++; }
+    else { doc->advance_mutation_epoch(); doc->style_content_epoch++; }
     if (doc->state) dom_engine_document_request_repaint(doc);
 }
 
@@ -3646,7 +3648,7 @@ static bool dom_rebind_subtree_document(DomNode* node,
 
     DomElement* elem = node->as_element();
     elem->doc = lam::up(destination);
-    for (DomAttr* attribute = elem->ext ? elem->ext->attribute_nodes.get() : nullptr;
+    for (DomAttr* attribute = elem->rare_ext ? elem->rare_ext->attribute_nodes.get() : nullptr;
          attribute; attribute = attribute->attribute_next) {
         if (!dom_rebind_subtree_document(attribute, source, destination)) return false;
         if (attribute->owner_changed) attribute->owner_changed(attribute);
@@ -4965,7 +4967,7 @@ enum DomToggleTaskKind { DOM_DIALOG_TOGGLE, DOM_POPOVER_TOGGLE };
 static DomToggleTaskTracker* dom_toggle_tracker(DomElement* element, DomToggleTaskKind kind,
                                                bool ensure) {
     if (kind == DOM_DIALOG_TOGGLE) {
-        DomStyleRareExt* state = ensure ? element->ensure_ext() : element->ext.get();
+        DomStyleRareExt* state = ensure ? element->ensure_rare_ext() : element->rare_ext.get();
         return state ? &state->dialog_toggle : nullptr;
     }
     PopoverStyle* state = ensure ? element->ensure_popover_style() : element->popover_style();
@@ -6409,10 +6411,12 @@ static bool dom_replace_text_content(DomElement* elem, const char* text) {
     if (!elem || !text) return false;
     // replace-all owns a single childList record, including both removed and added nodes.
     RootFrame roots(2);
-    Rooted<Item> parent(roots, dom_wrap_element(elem));
+    // copy borrowed text before wrapping the parent can collect its source.
+    bool has_text = *text != '\0';
     Rooted<Item> replacement(roots, js_name_item(text));
+    Rooted<Item> parent(roots, dom_wrap_element(elem));
     Item argument = replacement.get();
-    if (item_is_error(dom_replace_children(parent.get(), &argument, *text ? 1 : 0))) return false;
+    if (item_is_error(dom_replace_children(parent.get(), &argument, has_text ? 1 : 0))) return false;
     // Stylesheet text changes CSS globally; ordinary text is subtree-local.
     DomJsMutationKind kind = elem->tag_name() && str_icmp_cstr(elem->tag_name(), "style") == 0
         ? DOM_JS_MUTATION_STYLE : DOM_JS_MUTATION_TEXT;
@@ -7177,6 +7181,24 @@ static const JsUrlComponent k_url_components[] = {
     { "origin",   url_get_origin },
 };
 
+size_t dom_location_component_count(void) {
+    return sizeof(k_url_components) / sizeof(k_url_components[0]);
+}
+
+const char* dom_location_component_name(size_t index) {
+    return index < dom_location_component_count() ? k_url_components[index].name : nullptr;
+}
+
+Item dom_location_set_component(Item document, size_t index, Item value) {
+    DomDocument* doc = js_document_proxy_doc_from_item(document);
+    if (!doc || index >= dom_location_component_count()) return ItemError;
+    // keep existing navigation semantics while binding captured setters to their owning document.
+    void* previous = dom_swap_active_document(doc);
+    Item result = dom_document_proxy_set_property(js_name_item(k_url_components[index].name), value);
+    dom_restore_active_document(previous);
+    return result;
+}
+
 // The component's value as a JS string, or false when `prop` is not one of
 // them. A missing URL or component reads as "", as it does in a browser for a
 // document that has not been navigated.
@@ -7502,9 +7524,11 @@ static Item dom_document_get_property_for(DomDocument* doc_arg, Item prop_name) 
         return js_name_item("");
     }
 
-    // location-style URL access. We model document.location and bare
-    // location as aliases of the document/window proxy itself.
-    if (prop_id == JS_DOM_PROP_LOCATION || prop_id == JS_DOM_PROP_DOCUMENT) {
+    if (prop_id == JS_DOM_PROP_LOCATION) {
+        return dom_doc_has_browsing_context(doc)
+            ? dom_location_for_document(doc_to_proxy_item(doc)) : ItemNull;
+    }
+    if (prop_id == JS_DOM_PROP_DOCUMENT) {
         return doc_to_proxy_item(doc);
     }
     {
@@ -8051,8 +8075,18 @@ extern "C" Item dom_click_method_bridge(Item elem_item) {
     // D6.3.3: MouseEvent construction and dispatch can collect both JS carriers.
     RootFrame roots(2);
     Rooted<Item> element_root(roots, elem_item);
-    Rooted<Item> event_root(roots, js_create_click_mouse_event());
-    return dom_dispatch_event(element_root.get(), event_root.get());
+    Rooted<Item> event_root(roots, ItemNull);
+    DomStyleRareExt* state = elem->ensure_rare_ext();
+    if (!state) return ItemError;
+    // HTML click() suppresses re-entry on this element through dispatch and activation.
+    if (state->click_in_progress) return make_js_undefined();
+    state->click_in_progress = true;
+    event_root.set(js_create_click_mouse_event());
+    // click() has a void return even when dispatch reports a canceled event.
+    Item result = item_is_error(event_root.get()) ? event_root.get()
+        : dom_dispatch_event(element_root.get(), event_root.get());
+    state->click_in_progress = false;
+    return item_is_error(result) ? result : make_js_undefined();
 }
 
 #define JS_DOM_EVENT_LISTENER_BRIDGE(name, operation) \
@@ -8851,7 +8885,7 @@ extern "C" bool dom_set_non_style_metadata(void* target, const char* name, const
             element, element->parent, name, old_value)) return true;
     // observers/custom elements still see the write, but unrelated geometry
     // reads must not recascade and reflow the document for application metadata.
-    element->doc->mutation_epoch++;
+    element->doc->advance_mutation_epoch();
     dom_mutation_notify_observers(DOM_JS_MUTATION_ATTRIBUTE, element, element->parent, name, old_value);
     dom_engine_publish_metadata_change(element->doc);
     return true;
@@ -9102,27 +9136,8 @@ extern "C" void dom_set_option_selected_dirty(void* dom_elem, bool selected) {
 }
 
 extern "C" void dom_set_option_text_bridge(void* dom_elem, const char* value) {
-    DomElement* elem = (DomElement*)dom_elem;
-    if (!elem) return;
-    const char* sv = value ? value : "";
-    DomNode* child = elem->first_child;
-    while (child) {
-        DomNode* next = child->next_sibling;
-        child->parent = nullptr;
-        child->next_sibling = nullptr;
-        child->prev_sibling = nullptr;
-        child = next;
-    }
-    elem->first_child = nullptr;
-    elem->last_child = nullptr;
-    DomText* tn = DomText::create_copy(sv, strlen(sv), elem);
-    if (tn) {
-        tn->parent = lam::up(elem);
-        elem->first_child = lam::own(tn);
-        elem->last_child = lam::up(tn);
-    }
-    // option.text replaces children, so publish a structural mutation instead of an attribute record.
-    dom_mutation_notify();
+    // the shared replacement also updates the backing tree and leaves no child for empty text.
+    dom_replace_text_content(static_cast<DomElement*>(dom_elem), value ? value : "");
 }
 
 // For a <select required> element, returns true iff no <option> is
@@ -9914,6 +9929,7 @@ typedef enum JsDomReflectKind {
     X("formNoValidate", "formnovalidate", BOOL, 0, DOM_TAG_INPUT | DOM_TAG_BUTTON) \
     X("noModule", "nomodule", BOOL, 0, DOM_TAG_SCRIPT) \
     X("defer", "defer", BOOL, 0, DOM_TAG_SCRIPT) \
+    X("async", "async", BOOL, 0, DOM_TAG_SCRIPT) \
     X("autofocus", "autofocus", BOOL, 0, DOM_TAG_ANY) \
     X("open", "open", BOOL, 0, DOM_TAG_DETAILS) \
     X("defaultChecked", "checked", BOOL, 0, DOM_TAG_INPUT) \
@@ -10756,8 +10772,8 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         }
     }
     if (elem->tag_id == MARKUP_NAME_DIALOG && strcmp(prop, "returnValue") == 0) {
-        return js_name_item(elem->ext && elem->ext->dialog_return_value
-            ? elem->ext->dialog_return_value.get() : "");
+        return js_name_item(elem->rare_ext && elem->rare_ext->dialog_return_value
+            ? elem->rare_ext->dialog_return_value.get() : "");
     }
 
     // The document node carries the Document's own properties as well as the
@@ -10780,6 +10796,12 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
 
     if (const DomElementRef* aria_ref = dom_aria_ref_for_property(prop)) {
         return dom_aria_element_ref_get(elem, aria_ref);
+    }
+
+    if (dom_element_is_html_tag(elem, MARKUP_NAME_SCRIPT) && !strcmp(prop, "async")) {
+        bool force_async = !elem->rare_ext || (!elem->rare_ext->script_parser_inserted &&
+            !elem->rare_ext->script_force_async_cleared);
+        return {.item = (force_async || elem->has_attribute("async")) ? ITEM_TRUE : ITEM_FALSE};
     }
 
     if (_is_tag(elem, "a") || _is_tag(elem, "area")) {
@@ -12557,6 +12579,10 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
         // assignment of a non-bool truthy value writes empty string, not the
         // raw value.
         if (_is_bool_reflected(elem, prop)) {
+            if (!strcmp(prop, "async") && dom_element_is_html_tag(elem, MARKUP_NAME_SCRIPT)) {
+                // the IDL setter clears force-async even when no attribute needs removing.
+                if (DomStyleRareExt* state = elem->ensure_rare_ext()) state->script_force_async_cleared = true;
+            }
             const char* attr = _idl_to_attr_name(prop);
             if (!attr) attr = prop;
             // lowercase the attr name in case caller passed the camelCase form
@@ -12578,7 +12604,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
             // IDL writes are attribute writes too: refresh the engine's constraint mirrors
             dom_reinit_behavior_if_constraint_attr(elem, attr);
             dom_cssom_owner_attribute_changed(elem, attr);
-            dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+            dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent, attr);
             return value;
         }
 
@@ -12616,7 +12642,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
             snprintf(buf, sizeof(buf), "%ld", n);
             elem->set_attribute(int_attr, buf);
             if (canvas_dimension) dom_canvas_reset_context(elem_item);
-            dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+            dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent, int_attr);
             return value;
         }
 
@@ -12629,7 +12655,8 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
             _is_write_reflected(elem, prop, &string_attr)) {
             dom_element_set_attribute_ns(elem, "", string_attr, dom_to_attr_cstr(value));
             dom_cssom_owner_attribute_changed(elem, string_attr);
-            dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+            // reflected writes must identify the attribute for observers and src preparation.
+            dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent, string_attr);
             return value;
         }
 
@@ -14505,8 +14532,8 @@ static DomNode* dom_clone_node_into_document(DomNode* node,
     if (!clone) return nullptr;
     dom_clone_content_attributes(elem, clone);
     // Script clones keep the preparation result and have no parser owner.
-    if (elem->ext && elem->ext->script_already_started) {
-        if (DomStyleRareExt* state = clone->ensure_ext()) state->script_already_started = true;
+    if (elem->rare_ext && elem->rare_ext->script_already_started) {
+        if (DomStyleRareExt* state = clone->ensure_rare_ext()) state->script_already_started = true;
     }
     // CSSOM cloning preserves the declaration block, including names changed by serialization.
     if (CssRule* authored = dom_element_inline_declaration_block(elem))
@@ -15151,9 +15178,9 @@ static DomElement* dom_next_selected_content(DomElement* select, DomElement* pre
 
 static void dom_update_selected_content(DomElement* select, bool initialize) {
     if (!dom_realm_active() || !select || !select->doc) return;
-    if (select->ext) {
-        select->ext->selected_content_pending = false;
-        select->ext->selected_content_reset_pending = false;
+    if (select->rare_ext) {
+        select->rare_ext->selected_content_pending = false;
+        select->rare_ext->selected_content_reset_pending = false;
     }
     if (select->has_attribute("multiple")) return;
     for (DomNode* ancestor = select->parent; ancestor; ancestor = ancestor->parent) {
@@ -15173,10 +15200,10 @@ static void dom_update_selected_content(DomElement* select, bool initialize) {
 static Item dom_deliver_selected_content(Item env_item) {
     JS_ENV_UNPACK(env, env_item);
     DomElement* select = (DomElement*)dom_unwrap_element(env[0]);
-    if (!select || !select->ext || !select->ext->selected_content_pending) return ItemNull;
-    bool reset = select->ext->selected_content_reset_pending;
-    select->ext->selected_content_pending = false;
-    select->ext->selected_content_reset_pending = false;
+    if (!select || !select->rare_ext || !select->rare_ext->selected_content_pending) return ItemNull;
+    bool reset = select->rare_ext->selected_content_reset_pending;
+    select->rare_ext->selected_content_pending = false;
+    select->rare_ext->selected_content_reset_pending = false;
     if (dom_node_is_connected(select)) {
         if (reset) _select_ask_for_reset(select);
         else dom_update_selected_content(select, true);
@@ -15186,7 +15213,7 @@ static Item dom_deliver_selected_content(Item env_item) {
 
 static void dom_queue_selected_content(DomElement* select, bool reset) {
     if (!select || select->has_attribute("multiple") || !dom_next_selected_content(select, nullptr)) return;
-    DomStyleRareExt* state = select->ensure_ext();
+    DomStyleRareExt* state = select->ensure_rare_ext();
     if (!state) return;
     state->selected_content_reset_pending |= reset;
     if (state->selected_content_pending) return;
@@ -16457,7 +16484,7 @@ static Item dom_open_dialog(Item n, bool modal, Item invoker = ItemNull) {
         return ItemError;
     }
     elem->set_dialog_modal(modal);
-    if (elem->ext) elem->ext->dialog_previous_focus = dom_node_ref(dom_document_focused_target(elem->doc));
+    if (elem->rare_ext) elem->rare_ext->dialog_previous_focus = dom_node_ref(dom_document_focused_target(elem->doc));
     // drop a newly inert focus before recording reflow or dispatching popup events.
     if (modal && elem->doc) dom_recheck_focus_in(elem->doc->root);
     dom_queue_toggle_task(elem, target.get(), source.get(), DOM_DIALOG_TOGGLE, true);
@@ -16491,9 +16518,9 @@ static Item dom_dialog_close_open(DomElement* elem, Item target, Item returned, 
     // close changes modal state synchronously; its notification is a later task.
     DomDocument* document = elem->doc;
     DomNodeRef previous_focus{};
-    if (elem->ext && (elem->is_dialog_modal() ||
+    if (elem->rare_ext && (elem->is_dialog_modal() ||
         dom_shadow_including_contains(elem, dom_document_focused_target(document))))
-        previous_focus = elem->ext->dialog_previous_focus;
+        previous_focus = elem->rare_ext->dialog_previous_focus;
     const char* open_value = elem->get_attribute("open");
     elem->set_dialog_modal(false);
     dom_top_layer_remove(elem);
@@ -16522,7 +16549,7 @@ Item dom_form_close_dialog(DomElement* form, DomElement* submitter) {
     Rooted<Item> result(roots, make_js_undefined());
     if (dom_element_is_html_tag(submitter, MARKUP_NAME_INPUT) &&
         form_input_kind_is(submitter->get_attribute("type"), FORM_INPUT_KIND_IMAGE)) {
-        const DomStyleRareExt* coordinates = submitter->ext;
+        const DomStyleRareExt* coordinates = submitter->rare_ext;
         char text[64];
         snprintf(text, sizeof(text), "%d,%d",
             math_round_to_int_sat(coordinates ? coordinates->form_image_selected_x : 0.0f),
@@ -16570,7 +16597,7 @@ static Item dom_request_close_dialog(Item receiver, Item value, Item invoker) {
     DomDocument* doc = elem->doc;
     if (!elem->has_attribute("open") || !dom_node_is_connected(elem) ||
         !dom_doc_has_browsing_context(doc)) return make_js_undefined();
-    DomStyleRareExt* state = elem->ensure_ext();
+    DomStyleRareExt* state = elem->ensure_rare_ext();
     if (!state) return ItemError;
     if (state->dialog_cancel_dispatching) return make_js_undefined();
 
@@ -18114,9 +18141,9 @@ static Item js_web_keyframe_property_names(Item frame, Pool* pool,
                 !strcmp(name, "composite")) continue;
         char css_name[128];
         dom_style_camel_to_css_prop(name, css_name, sizeof(css_name));
-        // Resolve aliases the same way as when parsing the keyframe value.
+        // property eligibility uses the parser's normalized animation track.
         const CssPropertyRuntimeMetadata* metadata = css_property_runtime_metadata(
-            css_property_code_from_name(css_name));
+            css_animation_property_target(css_property_code_from_name(css_name)));
         if (!metadata || metadata->animation_type == ANIM_VAL_NONE) continue;
         if (!lam::pool_grow_array(pool, &names, &capacity, *out_count + 1, 8))
             return ItemError;

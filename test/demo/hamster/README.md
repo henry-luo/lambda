@@ -195,6 +195,12 @@ assertions across 87 events; its narrow companion checks a 390px layout and
 physical module placement. Focused regressions first reproduced incorrect ramp
 height and bend waypoints, then passed after geometry-aware traversal was added.
 
+The floor plan compares authored cell values under S5.4.3 and retains DOM nodes
+under D5.5.1. Previously each command rebuilt the contents of all 25 cells.
+The desktop replay reached its 120-second deadline in the optimized host.
+With cell-level updates, all 41 assertions across 87 events pass in about 31
+seconds on the same optimized host.
+
 The exclusion regression samples converging and opposing traffic, a six-resident
 neighborhood, separate floors, and a ramp passing beneath an occupied upper
 room. It checks continued movement and feeding as well as clearance, including

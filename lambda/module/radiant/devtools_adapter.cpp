@@ -18,8 +18,8 @@ struct RadiantDevtools {
     DomDocument* document;
     DevtoolsDocument* lease;
     ArrayList* handles;
-    uint64_t mutation_epoch;
-    uint64_t style_epoch;
+    uint32_t mutation_epoch;
+    uint32_t style_epoch;
     uint32_t layout_generation;
     int64_t revision;
     char* source_path;
@@ -57,8 +57,8 @@ static void inspector_sync(RadiantDevtools* inspector) {
             } else if (lease) mem_free(lease);
         }
     }
-    uint64_t mutation = doc ? doc->mutation_epoch : 0;
-    uint64_t style = doc ? doc->style_query_epoch : 0;
+    uint32_t mutation = doc ? doc->mutation_epoch : 0;
+    uint32_t style = doc ? doc->style_query_epoch : 0;
     uint32_t layout = doc && doc->view_tree ? doc->view_tree->layout_generation : 0;
     changed = changed || mutation != inspector->mutation_epoch ||
         style != inspector->style_epoch || layout != inspector->layout_generation;

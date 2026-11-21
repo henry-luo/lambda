@@ -123,7 +123,8 @@ NameRef mvp_lmd_internal_name(MvpLmdInternalName name) {
         "RegExp iterator matcher", "RegExp iterator string", "RegExp iterator global",
         "RegExp iterator unicode", "RegExp iterator done", "MVP [[IteratorNext]]",
         "MVP [[CustomElementName]]", "URL record", "PerformanceObserver record",
-        "PerformanceObserverEntryList record", "ReadableStream read lifecycle"};
+        "PerformanceObserverEntryList record", "ReadableStream read lifecycle",
+        "Document location", "Location document"};
     static_assert(sizeof(names) / sizeof(names[0]) == LMD_INTERNAL_NAME_COUNT);
     static const ContextCapsuleOps ops = {"js-mvp-internal-names", CONTEXT_CAPSULE_LIFETIME_CONTEXT,
         sizeof(NameRef) * LMD_INTERNAL_NAME_COUNT, NULL, NULL, NULL};

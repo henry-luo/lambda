@@ -1423,7 +1423,9 @@ TEST_F(RadiantDocumentTest, InteractionColorsRepaintLeafAncestorsAndInheritedCur
 TEST_F(RadiantDocumentTest, UnstyledMetadataPreservesGeometryAndCssDependenciesReflow) {
     DomElement* result = load_script_source(
         "<!doctype html><style id=theme>#result{width:40px;height:20px}"
-        "[data-sized] #result{width:80px}</style><link id=sheet><div id=outer><div id=result></div></div>");
+        "[data-sized] #result{width:80px}</style>"
+        "<link id=sheet rel=stylesheet href=xhtml_names.css>"
+        "<link id=hint rel=preload as=style><div id=outer><div id=result></div></div>");
     ASSERT_NE(result, nullptr);
     ASSERT_NE(radiant_document_ensure_state(document, "metadata-layout-test"), nullptr);
     ASSERT_TRUE(layout_update_document(&ui, document));
@@ -1449,8 +1451,13 @@ TEST_F(RadiantDocumentTest, UnstyledMetadataPreservesGeometryAndCssDependenciesR
     for (const char* id : {"theme", "sheet"}) {
         DomElement* owner = dom_find_element_by_id(document->root->as_element(), id);
         ASSERT_NE(owner, nullptr);
+        ASSERT_NE(dom_cssom_element_sheet(owner), nullptr);
         EXPECT_FALSE(dom_set_non_style_metadata(owner, "data-revision", "true"));
     }
+    // preload links have no stylesheet lifecycle to invalidate on metadata writes.
+    DomElement* hint = dom_find_element_by_id(document->root->as_element(), "hint");
+    ASSERT_NE(hint, nullptr);
+    EXPECT_TRUE(dom_set_non_style_metadata(hint, "data-revision", "true"));
 }
 
 TEST_F(RadiantDocumentTest, AttrValuesKeepMetadataStyleInvalidation) {
@@ -5925,12 +5932,12 @@ TEST_F(RadiantDocumentTest, HtmlUaSpacingFollowsComputedFlowFontAndAuthorOverrid
             ASSERT_NE(element, nullptr) << id;
             ASSERT_NE(element->boundary(), nullptr) << id;
             // inspect resolved margins before normal-flow collapse consumes them.
-            const Spacing* value = padding ? &element->boundary()->padding :
-                view_boundary_flow_margin(element->boundary());
-            EXPECT_FLOAT_EQ(value->top, top) << id;
-            EXPECT_FLOAT_EQ(value->right, right) << id;
-            EXPECT_FLOAT_EQ(value->bottom, bottom) << id;
-            EXPECT_FLOAT_EQ(value->left, left) << id;
+            const BoundaryProp* boundary = element->boundary();
+            const float expected[] = {top, right, bottom, left};
+            for (CssBoxSide side : {CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_RIGHT, CSS_BOX_SIDE_BOTTOM, CSS_BOX_SIDE_LEFT}) {
+                float value = padding ? boundary->padding.values[side] : view_boundary_flow_margin(boundary, side).value;
+                EXPECT_FLOAT_EQ(value, expected[side]) << id << " side " << side;
+            }
         };
         auto block_margins = [&](const char* id, float value) {
             spacing(id, false, flow.vertical ? 0.0f : value, flow.vertical ? value : 0.0f,
@@ -15502,11 +15509,9 @@ TEST_F(RadiantDocumentTest, TableRowsConsumeCollapsedBlockMarginsOnce) {
             }
             DomElement* tail = dom_find_element_by_id(document->root->as_element(), "ordinary-tail");
             ASSERT_NE(tail, nullptr); ASSERT_NE(tail->bound, nullptr);
-            const Margin* resolved = view_boundary_flow_margin(tail->boundary());
-            ASSERT_NE(resolved, nullptr);
             // the zero authored margin stays zero even when flow promotes the preceding chain.
-            EXPECT_FLOAT_EQ(resolved->top, 0.0f);
-            EXPECT_FLOAT_EQ(resolved->bottom, 0.0f);
+            EXPECT_FLOAT_EQ(view_boundary_flow_margin(tail->boundary(), CSS_BOX_SIDE_TOP).value, 0.0f);
+            EXPECT_FLOAT_EQ(view_boundary_flow_margin(tail->boundary(), CSS_BOX_SIDE_BOTTOM).value, 0.0f);
             ASSERT_TRUE(tail->set_attribute("style", "margin-bottom:24px"));
             layout_html_doc(&ui, document, true);
             expect_height("ordinary", 90);
@@ -22255,6 +22260,21 @@ TEST_F(RadiantDecodedAudio, FirstOfflineFrameIncludesElapsedTimeSinceVoiceAdmiss
     EXPECT_DOUBLE_EQ(radiant_audio_clock(document), 0.02); EXPECT_FALSE(radiant_audio_frames_pending(document));
 }
 
+TEST_F(RadiantDecodedAudio, HeadlessAudioStaysOffDeviceAndAdvancesOnDocumentClock) {
+    audio_bus_set_offline(false);
+    ASSERT_NE(load("test/ui/audio_shared_bus.html", true), nullptr);
+    double start = 0; ASSERT_TRUE(radiant_document_clock(document, &start));
+    uint64_t token = open_clip(960); ASSERT_NE(token, 0u);
+    ASSERT_TRUE(radiant_audio_play(document, token, 1));
+    float output[16] = {}; audio_bus_mix(output, 8);
+    for (float sample : output) EXPECT_FLOAT_EQ(sample, 0);
+    EXPECT_DOUBLE_EQ(radiant_audio_clock(document), 0);
+    EXPECT_TRUE(radiant_audio_tick(document, start + 10));
+    EXPECT_DOUBLE_EQ(radiant_audio_clock(document), 0.01);
+    radiant_audio_tick(document, start + 20);
+    EXPECT_STREQ(radiant_audio_state(document, token), "ended");
+}
+
 
 TEST_F(RadiantDecodedAudio, AudioClockReaderUsesItsOwnerWhenAnotherRealmIsVirtual) {
     ASSERT_NE(load("test/lambda/ui/_window_fullscreen.ls"), nullptr);
@@ -22541,7 +22561,8 @@ TEST_F(RadiantDecodedAudio, TakingOverAnOwnedCueReaderRetiresItsPrivateVoiceAndS
     ASSERT_EQ(audio_cues_commit_locked(queue, 1, 1, &event, &bank, 1, 0), nullptr); audio_submix_unlock(mix);
     ASSERT_TRUE(radiant_audio_play(document, player, 1)); EXPECT_FALSE(audio_submix_has_voices(mix));
     audio_cue_owner_destroy(owner); audio_submix_destroy(mix);
-    float output[16]; audio_bus_mix(output, 8); EXPECT_FLOAT_EQ(output[0], .5f); EXPECT_FLOAT_EQ(output[1], -.25f);
+    float output[16]; ASSERT_TRUE(audio_submix_render(radiant_document_submix(document), output, 8));
+    EXPECT_FLOAT_EQ(output[0], .5f); EXPECT_FLOAT_EQ(output[1], -.25f);
     EXPECT_STREQ(radiant_audio_state(document, player), "playing"); EXPECT_EQ(radiant_audio_frame(document), 8u);
 }
 

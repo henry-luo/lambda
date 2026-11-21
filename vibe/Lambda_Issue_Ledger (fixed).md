@@ -16,6 +16,89 @@
 > Semantic and design rulings remain cited by S# / D#; where no formal ruling
 > covers a point, the original vibe ledger ID is retained.
 
+<a id="lr12-69"></a>
+## LR12-69 — Parser-head arrivals trigger an extra load-time cascade
+
+**Fixed 2026-11-21.** Script-to-layout notification follows D9.5.6v2.
+`SkipsGlobalCascadeForLoadTimeInlineStyleWrites` reported an incremental cascade
+for two inline writes. Resuming the staged parser head added a layout mutation
+for nodes the initial cascade had already seen. The host now publishes those
+arrivals through the existing mutation-observer hook. Author mutations still
+enter the cascade ledger.
+
+The inline-write, class-subtree and no-op class load tests pass. Thirteen
+parser preparation replays also pass, including staged observer delivery.
+Evidence is in `temp/radiant-test-fixes/inline-style-before.log`,
+`inline-style-after.log` and `script-preparation.log`.
+
+<a id="lr12-68"></a>
+## LR12-68 — Radiant integration fixtures relied on retired behavior
+
+**Fixed 2026-11-21.** Host integration follows **D9.1.3v2 / D9.5.6v2**.
+The document metadata fixture used a bare link to exercise stylesheet
+invalidation. After `5c326894b` narrowed this check to stylesheet owners, the
+fixture now loads a local stylesheet and checks the preload metadata path as
+well. All 201 document tests pass.
+
+The project render fixture `line_clamp_01` now uses `line-clamp` and
+`display: flow-root` under **DV6.5**. It passes against the existing image at
+1.36% different pixels. The six WPT `baseline-source` cases and
+`text-wrap-balance-line-clamp-001` still exercised the retired WebKit CSS and
+retained their failing verdicts in this run. D10.1.9 later normalized the syntax
+and cleared those failures under [LI-097](<Lib_Input_Issue_Ledger (fixed).md#li-097>).
+Evidence is in
+`temp/radiant-baseline-build-fix/verified-baseline.log` and `verified-results/`.
+
+<a id="lr12-67"></a>
+## LR12-67 — Animation fixture held dead mock elements during teardown
+
+**Fixed 2026-11-21.** Target storage follows **D5.5.1** and the host
+test uses the Radiant scheduler through **D9.1.3v2**. On Lambda `0078dd571`,
+`AnimationTickTest.CssRestylePreservesImplicitOpacityEndpoint` crashed in
+`css_animation_restore_underlying_transform` from the scheduler's fixture
+teardown. Its target and style slots belonged to a test-body local that had
+already expired. The mock now uses a typed element and retires its effects
+while the target and borrowed properties are live. All 187 CSS animation
+tests pass. See `temp/radiant-baseline-build-fix/animation-crash.ips` and
+`runtime-focused.log`.
+
+<a id="online-form-baseline-20261121"></a>
+## Online form layout captures and DOM fixture behavior
+
+**Fixed 2026-11-21.** Declared scripting interfaces follow **D9.5.4 /
+D9.5.6v2**, replacement roots follow **D6.3.3**, and capture follows **D10.1.7**.
+Round136 and the prior renderer both disagreed with the saved
+`option-text-setter` and `input-type-button` frames. Fresh Chromium captures
+of the same WPT files through the ordinary extractor give a 22px select in
+place of the saved 42px and a hidden button container in place of the saved
+63px box. The native layout matches both fresh captures at full agreement.
+The form baseline now has 368 passes, 10 accepted partials and zero failures.
+
+Running the original WPT assertions independently also exposed two DOM
+errors. `HTMLElement.click()` returned the dispatch boolean, and setting
+`option.text` to the empty string left an empty Text child. Click now returns
+undefined after dispatch, and the option setter uses the shared text
+replacement path for backing storage and child-list changes. The original
+fixtures pass all six assertions. The click activation and text-content
+goldens pass on AST and MIR. See `forms-browser.log`,
+`forms-fresh-comparison.log`, `forms-assertions-verified.log` and
+`dom-js-{ast,mir}.log` under `temp/radiant-baseline-build-fix/`.
+
+<a id="lr12-66"></a>
+## LR12-66 — Host tests used retired containment and geometry fields
+
+**Status:** FIXED, 2026-11-21. Provider ownership follows **D9.1.3v2** and
+fixture storage follows **D5.5.1**. The animation, vector, document and DOM
+range tests still used fields moved into `BlockContainmentProp` and optional
+`DomFragmentGeometry`. They now attach fixture-owned containment where writes
+are needed and use the current read accessors, preserving the assertions.
+
+`make test-radiant-baseline` built all selected executables and entered the
+test phase; 19 focused cases passed, including the separately built DOM-range
+case. The full run did not pass: LI-095 and LR12-67 caused independent
+teardown crashes, layout reported failures, and GUI cases timed out in the
+current window-service environment. Evidence: `temp/radiant-baseline-fix.log`.
+
 <a id="lr12-64"></a>
 ## LR12-64 — Captured Node content accessors and detached CharacterData writes
 

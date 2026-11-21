@@ -6,6 +6,61 @@ remain in the [active issue ledger](Lib_Input_Issue_Ledger.md).
 
 ## Fixed issues
 
+<a id="li-097"></a>
+
+### LI-097 — Legacy WebKit box declarations need standard equivalents
+
+**Fixed 2026-11-21.** D10.1.9 assigns normalization to CSS input under
+D9.1.3v2. The retired display values and clamp declarations caused seven
+baseline regressions in `wpt-css-inline` and `wpt-css-text`. The parser now
+emits standard flex and clamp declarations. It converts a complete vertical
+clamp block to standard flow layout and keeps declaration order and importance.
+
+The original layout fixtures record 169 full matches for `wpt-css-inline` and
+896 full matches plus 84 recorded partials for `wpt-css-text`. Both have zero
+baseline regressions. Evidence is in `temp/radiant-test-fixes/layout-before.log`
+and `layout-normalization-probe.log`.
+
+<a id="li-096"></a>
+
+### LI-096 — A sole double-position color is rejected as one gradient stop
+
+**Fixed 2026-11-21.** Input owns CSS value validation under **D9.1.1v4 /
+D9.1.3v2**. `css_gradient_stop_list_valid` counted comma-separated color
+groups, rejecting `linear-gradient(#010a14 0% 100%)` even though its color
+expands into two stops. Radial component validation also required two color
+groups after a geometry prelude. The shared validator now counts expanded
+positions and radial geometry accepts one group. Linear/conic leading hints
+remain invalid; radial length preludes retain their separate geometry rules.
+No color parser or alternate gradient implementation is introduced.
+
+The native parser suite passes all124 tests, including13 valid declarations
+and six malformed controls in the new regression. Twelve shared PNG cases
+fail before the combined LI-096/RI-186 repair; all12 pass afterward and in
+Chromium, with25 existing color controls also passing. The cases cover all
+three gradient types, repeats, and forms with/without geometry preludes.
+The [CSS Images color-stop rule](https://www.w3.org/TR/css-images-4/#color-stop-syntax)
+defines a two-position color as two stops of the same color. A sole color
+without two positions remains unsupported. Evidence:
+`temp/online-visual-round150/`, `parser-before.log`, `parser-final.log`,
+`gradient-before.log`, `gradient-after.log`, `browser-gradient-results.json`.
+No remaining blocker for the repaired form; no broad baseline is repeated.
+
+<a id="li-095"></a>
+
+### LI-095 — Default document construction left the tag-name map uninitialized
+
+**Fixed 2026-11-21.** The document owns its lazy tag-name map under **D5.5.1 /
+D9.1.3v2**. With Input `5af070c`, a placement-construction probe over nonzero
+storage left the `tag_name_overrides` pointer bytes untouched. Document teardown
+passed that indeterminate pointer to `hashmap_free`, crashing
+`SvgFilterTest.ComponentTransferUsesStraightChannelsAndRemappedAlpha` and
+`SecondaryViewTest.PictureSelectionPrecedesFallbackAndPreservesDataUrlCommas`.
+The member now starts null on ordinary C++ construction, as it already does on
+the factory's zeroed storage. The probe passes with the initializer. All 250
+vector and 180 selected paged-media tests pass. Evidence is in Lambda's
+`temp/radiant-baseline-build-fix/`, including the probe and crash reports.
+
 <a id="li-093"></a>
 
 ### LI-093 — Namespace lookup ignores an element's expanded name

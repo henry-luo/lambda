@@ -20,26 +20,26 @@ observations still require re-verification. Add new Radiant issues here.
 
 ## Open issues
 
-<a id="ri-183"></a>
+<a id="ri-194"></a>
 
-### RI-183 — FIXED
+### RI-194 — FIXED
 
 A flex item that is a grid (or any container whose `content_height` stops at its
 own flow cursor) keeps its descendants in its scroll range, so the wheel scrolls
-it. See the [flex scroll-range repair](<Radiant_Issue_Ledger (fixed).md#ri-183>).
+it. See the [flex scroll-range repair](<Radiant_Issue_Ledger (fixed).md#ri-194>).
 
-<a id="ri-182"></a>
+<a id="ri-193"></a>
 
-### RI-182 — FIXED
+### RI-193 — FIXED
 
 In a definite grid container, an auto row no longer grows to a scroll
 container item's content height, so `overflow: auto` grid items scroll as in
 Chromium. See the
-[minimum-contribution repair](<Radiant_Issue_Ledger (fixed).md#ri-182>).
+[minimum-contribution repair](<Radiant_Issue_Ledger (fixed).md#ri-193>).
 
-<a id="ri-181"></a>
+<a id="ri-192"></a>
 
-### RI-181 — Two Scene3dTest units in one process crash the scene3d unit binary
+### RI-192 — Two Scene3dTest units in one process crash the scene3d unit binary
 
 **Open, 2026-11-21.** `test/test_scene3d_unit_gtest.exe` exits with SIGSEGV
 (139) when any two `Scene3dTest` cases run in one process. Examples are
@@ -49,17 +49,112 @@ Chromium. See the
 without the RI-180 repair, so it predates it. The cause is unconfirmed:
 suspected fixture teardown or shared native state between cases. It does not
 block Lambda work. Workaround: run each case in its own process with
-`--gtest_filter`. RI-180 was verified that way (87 animation, motion and clip
+`--gtest_filter`. RI-191 was verified that way (87 animation, motion and clip
 cases).
+
+<a id="ri-191"></a>
+
+### RI-191 — FIXED
+
+Autoplay clips and motion controllers that an edit adds to a scene first
+rendered without clips now claim the host clock. A seek or an explicit host
+command still keeps manual control. See the
+[clock-claim repair](<Radiant_Issue_Ledger (fixed).md#ri-191>).
+
+<a id="ri-190"></a>
+
+### RI-190 — FIXED
+
+CSS resource discovery resolves a document base only when it encounters a
+resource URL and reuses that lookup for the discovery pass. See the
+[CSS discovery performance repair](<Radiant_Issue_Ledger (fixed).md#ri-190>).
+
+<a id="ri-189"></a>
+
+### RI-189 — FIXED
+
+Retained recascade now resets non-inherited opacity before applying current
+declarations and effects. An expired no-fill animation can no longer leave
+its final active sample when opacity is undeclared. See the
+[opacity restoration repair](<Radiant_Issue_Ledger (fixed).md#ri-189>).
+
+<a id="ri-188"></a>
+
+### RI-188 — FIXED
+
+A document with no native resource manager can acquire its first remote
+stylesheet after script execution. Discovery now visits links before the
+manager guard, reusing the existing manager-initializing queue helper. See the
+[first stylesheet repair](<Radiant_Issue_Ledger (fixed).md#ri-188>).
+
+
+<a id="ri-187"></a>
+
+### RI-187 — FIXED
+
+Snapshot preparation settles late native image state and resource callbacks
+in the retained document realm without advancing its selected clock. See the
+[late resource completion repair](<Radiant_Issue_Ledger (fixed).md#ri-187>).
+
+<a id="ri-186"></a>
+
+### RI-186 — FIXED
+
+Linear-gradient resolution allocates stop storage for a sole double-position
+color group, consistently with Input's LI-096 validation repair. See the
+[gradient allocation repair](<Radiant_Issue_Ledger (fixed).md#ri-186>).
+
+<a id="ri-185"></a>
+
+### RI-185 — FIXED
+
+GIF playback samples elapsed frame deadlines across missed ticks, normalizes
+encoded repeat counts, and retains the final frame until cancellation. See
+the [GIF playback repair](<Radiant_Issue_Ledger (fixed).md#ri-185>).
+
+<a id="ri-184"></a>
+
+### RI-184 — FIXED
+
+Parser-discovered external scripts dispatch completion after evaluation and
+microtasks, with restored currentScript and the original rooted event target.
+Completion preserves bootstrap's pending stylesheet writes. See the
+[script completion repair](<Radiant_Issue_Ledger (fixed).md#ri-184>).
+
+<a id="ri-183"></a>
+
+### RI-183 — FIXED
+
+CSS resource discovery now queues image-set string sources through the existing
+URL visitor while keeping type() strings as metadata. See the
+[image-set discovery repair](<Radiant_Issue_Ledger (fixed).md#ri-183>).
+
+
+<a id="ri-182"></a>
+
+### RI-182 — FIXED
+
+A local document's selected CSS resources can now initialize the network
+manager before its first background image is consumed. See the
+[CSS resource initialization repair](<Radiant_Issue_Ledger (fixed).md#ri-182>).
+
+
+<a id="ri-181"></a>
+
+### RI-181 — FIXED
+
+Snapshot preparation now lazily creates the network manager for a local
+HTML document's first admitted remote image or poster. See the
+[resource initialization repair](<Radiant_Issue_Ledger (fixed).md#ri-181>).
 
 <a id="ri-180"></a>
 
 ### RI-180 — FIXED
 
-Autoplay clips and motion controllers that an edit adds to a scene first
-rendered without clips now claim the host clock. A seek or an explicit host
-command still keeps manual control. See the
-[clock-claim repair](<Radiant_Issue_Ledger (fixed).md#ri-180>).
+HTML resource discovery and early script/stylesheet prefetch honor authored
+fetchpriority hints. Passive image decoding preserves the owner's priority.
+See the [priority repair](<Radiant_Issue_Ledger (fixed).md#ri-180>).
+
 
 <a id="ri-179"></a>
 
@@ -2391,6 +2486,13 @@ is established; no substitution, larger wait or admission change is shipped.
 The first scratch browser pair was invalid because disabling scripting activated
 a noscript redirect; the corrected helper asserts its saved file URL.
 Evidence: `temp/online-visual-round138/`. Canonical Slack remains unchanged.
+
+2026-11-21 Going follow-up: the selected H.265 MP4 returns HTTP200 with
+Content-Length7,036,404, exceeding the unchanged per-resource source limit.
+The missing hero video is therefore still within this recorded complete-file
+loading gap. Response metadata is retained in
+`temp/online-visual-round143/going-video-headers.txt`; no limit or source
+substitution is changed (**D10.1.7 / D9.1.1v4 / D9.1.3v2**).
 
 <a id="rad22-4"></a>
 

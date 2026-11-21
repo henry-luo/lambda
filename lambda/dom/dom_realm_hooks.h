@@ -92,6 +92,7 @@ extern "C" void dom_install_window_font_global(void);
 extern "C" void dom_install_window_scroll_globals(void);
 extern "C" void dom_install_custom_elements_global(void);
 extern "C" void dom_install_history_interface(Item global, Item history);
+Item dom_location_for_document(Item document);
 extern "C" void dom_tree_walker_install_interface(Item prototype);
 extern "C" void dom_node_iterator_install_interface(Item prototype);
 extern "C" void dom_document_install_traversal_interface(Item prototype);
