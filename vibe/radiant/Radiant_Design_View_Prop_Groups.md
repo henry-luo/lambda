@@ -20,7 +20,7 @@ The largest savings come from the payload allocated for common elements. Moving 
 | `TransformProp` | 408 B | 56 B |
 | `FormControlProp` | 256 B | 208 B |
 | `BoundaryProp` | 224 B | 224 B |
-| `LayoutCache` | 1,240 B | 1,240 B |
+| `LayoutCache` | 1,240 B | 928 B |
 
 These are direct compiler record sizes. Earlier captures use the name `DomElementExt` for `DomStyleRareExt`. Optional allocations and shared storage contribute to the measured totals in Appendix A. [Element records](../../lambda-input/lambda/input/css/dom_element.hpp) · [View payloads](../../radiant/radiant/view.hpp) · [Layout cache](../../radiant/radiant/layout.hpp)
 
@@ -120,7 +120,13 @@ The fallback table costs one pointer per document and allocates entries only whe
 1. Expose a read accessor, a presence test where needed, and one mutable ensure path. Group reads are allocation-free and use typed defaults or null. Reuse the typed ensure helpers to select the correct pool. Keep anonymous scratch items in pass storage. Secondary resolution uses its selected view's storage.
 2. Use one registration source per view slot. Keep the typed access, ownership, default/reset behavior, teardown, and clear behavior in agreement. Child groups follow their root's existing teardown entry. The catalog marks `shadow` and `popover` as document-owned slots. DOM retirement releases them (D5.5.1). Keep compile-time coverage and debug post-clear checks. The Input headers expose the shared element definition, and Radiant defines the concrete view payloads and tears them down (D9.1.1v4, D9.1.3v2). [Slot ownership dispatch](../../radiant/radiant/view_pool.cpp) · [Node retirement](../../lambda-input/lambda/input/css/dom_element.cpp)
 3. Separate immutable resolved style from used geometry where sharing pays for itself. Keep canonical `InlineProp` bindings behind the existing write gate (DV9c). Treat interned inherited text deltas as a separate experiment. Preserve style identities, inherited revisions, layout invalidation, and the lifetime of retained animation or view state.
-4. Keep the nine general measurement entries and four intrinsic-width entries inline in `LayoutCache`. The cache trials moved those arrays and increased CPU time on large pages. Cache storage, `BoundaryProp::flow_margin`, and pass-lived flex/grid measurement state remain separate investigations (D5.1.4, DV10). [Cache trial results](../impl/Radiant_Impl_View_Prop_Groups.md#deferred-layout-cache-storage)
+4. Keep four general measurement entries and four intrinsic-width entries inline in `LayoutCache`. General measurements match the known dimensions and available space. A new key replaces the oldest insertion, and a write to a matching key refreshes it in place. `KnownDimensions` uses NaN for an unknown axis and preserves zero as a definite size. A reserved available-width tag marks an empty `CacheEntry`. The intrinsic-width history and retained flex-flow caches each have their own nine-entry limit. The pass-local entries and separately keyed retained state follow D5.5.3 and DV10. [Layout cache](../../radiant/radiant/layout.hpp) · [Earlier storage trials](../impl/Radiant_Impl_View_Prop_Groups.md#deferred-layout-cache-storage)
+
+### Document epoch width
+
+The document mutation, style-query, and style-content epochs and their Radiant snapshots use `uint32_t` equality stamps (D5.5.3). Style-query epochs cover style and presentation changes that affect queries. Style-content epochs cover inherited styles and content dependencies beyond the changed subtree. Mutation epochs track document mutations. Reserve `UINT32_MAX` for an unstamped mutation snapshot and wrap the document mutation counter to zero at that value. The accepted wrap interval is approximately 50 days at 1,000 increments per second. A snapshot can alias a new one after a full counter cycle. [Document counters](../../lambda-input/lambda/input/css/dom_element.hpp) · [Layout cache](../../radiant/radiant/layout.hpp)
+
+On arm64, narrower document counters reduce `DomDocument` from 3,984 to 3,968 bytes. Packing the 32-bit style epoch beside the intrinsic revision fields reduces `IntrinsicWidthCacheEntry` from 184 to 176 bytes. The four inline entries and two narrower inherited-cache stamps reduce `LayoutCache` from 968 to 928 bytes.
 
 ## 5. Measurement and acceptance
 

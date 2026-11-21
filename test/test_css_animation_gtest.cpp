@@ -1731,7 +1731,7 @@ TEST(CssPropTable, UnlaidOutChildKeepsCommittedAncestorCascadeAndObservesMutatio
         ASSERT_TRUE(css_prop_serialize_computed(child, CSS_PROPERTY_COLOR, 0, value, sizeof(value)));
         EXPECT_EQ(parent->style_version, refreshed_version);
         ASSERT_TRUE(parent->set_attribute("style", "color:green"));
-        doc->mutation_epoch++;
+        doc->advance_mutation_epoch();
         ASSERT_TRUE(css_prop_serialize_computed(child, CSS_PROPERTY_COLOR, 0, value, sizeof(value)));
         EXPECT_STREQ(value, "rgb(0, 128, 0)");
     }

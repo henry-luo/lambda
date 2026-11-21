@@ -1678,7 +1678,7 @@ TEST_F(IncrementalCssTest, HeightQueriesInvalidateEnvironmentAndGenerationButNor
     }
     tree.measurement_cache_generation++;
     expect_height_refresh(100.0f, 30.0f);
-    document.mutation_epoch++;
+    document.advance_mutation_epoch();
     expect_height_refresh(100.0f, 30.0f);
     context.ui_context = nullptr;
 }
@@ -3976,7 +3976,7 @@ protected:
 
     bool cascade_mutation(DomJsMutationKind kind, DomNode* target, DomNode* parent) {
         // raw DOM edits need the same cache invalidation as the JS notifier.
-        doc.mutation_epoch++;
+        doc.advance_mutation_epoch();
         doc.style_content_epoch++;
         doc.js.mutation_records[0] = {1, kind, target, parent, 0, 0,
             DOM_JS_MUTATION_ATTRIBUTE_UNKNOWN, CSS_PROPERTY_UNKNOWN, true};
@@ -4425,7 +4425,7 @@ TEST_F(StyleEpochTest, DocumentElementMutationRetainsRootBelowDocumentProxy) {
     ASSERT_TRUE(document_proxy->append_child(document_root));
     doc.js.doc_node = document_proxy;
     ASSERT_TRUE(document_root->set_attribute("data-theme", "light"));
-    doc.mutation_epoch++;
+    doc.advance_mutation_epoch();
     doc.style_content_epoch++;
     doc.js.mutation_records[0] = {1, DOM_JS_MUTATION_ATTRIBUTE,
         document_root, document_proxy, 0, 0, DOM_JS_MUTATION_ATTRIBUTE_LOCAL,

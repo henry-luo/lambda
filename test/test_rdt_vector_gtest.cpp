@@ -2969,7 +2969,7 @@ TEST(SvgFilterTest, CoordinatorPreservesPinnedProgramsAndMutationRetiresOldFacts
     EXPECT_EQ(render_svg_filter_program_acquire(&document, &element), original);
     render_svg_filter_program_release(original);
     EXPECT_EQ(mem_context_request_reclaim(memory, MEM_PRESSURE_CRITICAL, SIZE_MAX), 0u);
-    document.mutation_epoch++;
+    document.advance_mutation_epoch();
     RdtSvgFilterProgram* changed = render_svg_filter_program_acquire(&document, &element);
     ASSERT_NE(changed, nullptr); EXPECT_NE(changed, original);
     EXPECT_FALSE(changed->compiled); EXPECT_TRUE(original->compiled);

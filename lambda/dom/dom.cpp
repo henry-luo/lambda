@@ -2362,7 +2362,7 @@ extern "C" bool dom_element_is_svg(void* element) {
 static void dom_document_configuration_changed(DomDocument* doc) {
     // document configuration changes selector matches without changing an observable DOM attribute.
     if (doc->root) dom_mutation_notify(DOM_JS_MUTATION_UNKNOWN, doc->root);
-    else { doc->mutation_epoch++; doc->style_content_epoch++; }
+    else { doc->advance_mutation_epoch(); doc->style_content_epoch++; }
     if (doc->state) dom_engine_document_request_repaint(doc);
 }
 
@@ -8885,7 +8885,7 @@ extern "C" bool dom_set_non_style_metadata(void* target, const char* name, const
             element, element->parent, name, old_value)) return true;
     // observers/custom elements still see the write, but unrelated geometry
     // reads must not recascade and reflow the document for application metadata.
-    element->doc->mutation_epoch++;
+    element->doc->advance_mutation_epoch();
     dom_mutation_notify_observers(DOM_JS_MUTATION_ATTRIBUTE, element, element->parent, name, old_value);
     dom_engine_publish_metadata_change(element->doc);
     return true;

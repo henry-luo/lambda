@@ -7959,7 +7959,7 @@ static bool dispatch_contenteditable_plain_event(EventContext* evcon,
     }
     EditingTargetRangesScope target_range_scope(
         evcon, target_ranges, target_range_count);
-    uint64_t snapshot_epoch = dom_mutation_epoch(document);
+    uint32_t snapshot_epoch = dom_mutation_epoch(document);
 
     DomSelection* selection = state->dom_selection;
     DomBoundary start = {};
