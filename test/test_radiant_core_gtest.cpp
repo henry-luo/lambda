@@ -138,7 +138,7 @@ TEST_F(RadiantCoreTest, TeardownReleasesFormPayloadBelowNonRenderingParents) {
         parent->display.inner = RDT_DISPLAY_REPLACED;
         forms[i].custom_validity_msg = mem_strdup("fallback control", MEM_CAT_LAYOUT);
         ASSERT_NE(forms[i].custom_validity_msg, nullptr);
-        child->style_ext = lam::own(&slots[i]);
+        child->ext = lam::own(&slots[i]);
         ASSERT_TRUE(child->set_form_storage(&forms[i]));
         ASSERT_TRUE(parent->DomNode::append_child(child));
         ASSERT_TRUE(owner->DomNode::append_child(parent));
@@ -158,7 +158,7 @@ TEST_F(RadiantCoreTest, RetainedResetPreservesScriptCreatedFormProperties) {
     form.custom_validity_msg = mem_strdup("invalid value", MEM_CAT_LAYOUT);
     ASSERT_NE(form.custom_validity_msg, nullptr);
     DomStyleExt slots = {};
-    control->style_ext = lam::own(&slots);
+    control->ext = lam::own(&slots);
     ASSERT_TRUE(control->set_form_storage(&form));
     control->set_role_kind(DomElement::ROLE_FORM);
     tree.root = lam::up(control);
@@ -1682,7 +1682,7 @@ TEST_F(IncrementalCssTest, HeightQueriesInvalidateEnvironmentAndGenerationButNor
     }
     tree.measurement_cache_generation++;
     expect_height_refresh(100.0f, 30.0f);
-    document.mutation_epoch++;
+    document.advance_mutation_epoch();
     expect_height_refresh(100.0f, 30.0f);
     context.ui_context = nullptr;
 }
@@ -2880,7 +2880,7 @@ TEST(DomRetirementOwnerArenaTest, AdoptedMetadataRetiresFromItsPhysicalPool) {
     const char* tag = child->tag_name();
     const char* cached_id = child->id;
     const char* cached_class = child->class_names()[0];
-    DomStyleRareExt* extension = child->ext;
+    DomStyleRareExt* extension = child->rare_ext;
     EXPECT_TRUE(pool_owns(doc.document_pool, cached_id));
     EXPECT_TRUE(pool_owns(doc.document_pool, cached_class));
     dom_node_schedule_detached(&target_doc, child);
@@ -3980,7 +3980,7 @@ protected:
 
     bool cascade_mutation(DomJsMutationKind kind, DomNode* target, DomNode* parent) {
         // raw DOM edits need the same cache invalidation as the JS notifier.
-        doc.mutation_epoch++;
+        doc.advance_mutation_epoch();
         doc.style_content_epoch++;
         doc.js.mutation_records[0] = {1, kind, target, parent, 0, 0,
             DOM_JS_MUTATION_ATTRIBUTE_UNKNOWN, CSS_PROPERTY_UNKNOWN, true};
@@ -4429,7 +4429,7 @@ TEST_F(StyleEpochTest, DocumentElementMutationRetainsRootBelowDocumentProxy) {
     ASSERT_TRUE(document_proxy->append_child(document_root));
     doc.js.doc_node = document_proxy;
     ASSERT_TRUE(document_root->set_attribute("data-theme", "light"));
-    doc.mutation_epoch++;
+    doc.advance_mutation_epoch();
     doc.style_content_epoch++;
     doc.js.mutation_records[0] = {1, DOM_JS_MUTATION_ATTRIBUTE,
         document_root, document_proxy, 0, 0, DOM_JS_MUTATION_ATTRIBUTE_LOCAL,

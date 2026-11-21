@@ -14455,7 +14455,7 @@ TEST_F(SecondaryViewTest, SourceEpochInvalidatesRetainedViews) {
     ViewTree* b = secondary();
     pages(a, 2);
     pages(b, 2);
-    doc.mutation_epoch++;
+    doc.advance_mutation_epoch();
     ViewPreviewOptions options = view_preview_options_default();
     EXPECT_EQ(view_tree_preview_arrange(a, nullptr, &options), VIEW_MODEL_STALE_SOURCE);
     EXPECT_EQ(view_tree_preview_arrange(b, nullptr, &options), VIEW_MODEL_STALE_SOURCE);
@@ -14532,7 +14532,7 @@ TEST_F(SecondaryViewTest, WindowPreviewRecomposesInSharedWorkspaceWithoutGrowing
     DomElement* first = (DomElement*)source->first_child.get();
     EXPECT_TRUE(first->set_attribute("style", "background: #ffffff"));
     // this low-level fixture has no DOM host to advance the mutation epoch after the write.
-    doc.mutation_epoch++;
+    doc.advance_mutation_epoch();
     EXPECT_FALSE(view_tree_model_source_valid(ui.paged_view));
     render_paged_window_scroll(&ui, 0.0f, 0.0f);
     render_html_doc(&ui, browsing, nullptr);
@@ -14688,7 +14688,7 @@ TEST_F(SecondaryViewTest, PageInstancesRejectInvalidAndStaleInputsWithoutChangin
     EXPECT_TRUE(original->model->committed); EXPECT_EQ(original->model->pages.get()[0], material);
     EXPECT_EQ(view_tree_page_content_owner(instance), original);
     EXPECT_EQ(mem_context_live_count((MemContext*)doc.services.mem_ctx), baseline);
-    doc.mutation_epoch++;
+    doc.advance_mutation_epoch();
     EXPECT_EQ(view_tree_page_content_owner(instance), nullptr);
     EXPECT_EQ(view_tree_page_material(instance, instance->model->pages.get()[0]), nullptr);
     EXPECT_EQ(view_tree_page_instances_create(instance, nullptr, &options, &status), nullptr);
@@ -14770,7 +14770,7 @@ TEST_F(SecondaryViewTest, PhysicalPageSnapshotsIgnoreThePreviewFilterAndPreserve
     EXPECT_EQ(render_secondary_page_snapshot(tree, 6), nullptr);
     EXPECT_EQ(render_secondary_page_snapshot(tree, 1, NAN), nullptr);
     EXPECT_EQ(render_secondary_page_snapshot(tree, 1, -1.0f), nullptr);
-    doc.mutation_epoch++;
+    doc.advance_mutation_epoch();
     EXPECT_EQ(render_secondary_page_snapshot(tree, 1), nullptr);
 }
 
@@ -14855,7 +14855,7 @@ TEST_F(SecondaryViewTest, ThumbnailCachesRejectStaleLayoutsAndRebindAfterRecompo
     ASSERT_EQ(layout_secondary_view(tree, &layout, nullptr), TYPESET_OK);
     ASSERT_NE(render_page_snapshot_cache_get(cache.cache, tree, 1, 0.5f), nullptr);
     EXPECT_EQ(render_page_snapshot_cache_stats(cache.cache).renders, 3u);
-    doc.mutation_epoch++;
+    doc.advance_mutation_epoch();
     EXPECT_EQ(render_page_snapshot_cache_get(cache.cache, tree, 1, 0.5f), nullptr);
     EXPECT_EQ(render_page_snapshot_cache_stats(cache.cache).entries, 0u);
     render_page_snapshot_cache_clear(cache.cache);
@@ -15002,7 +15002,7 @@ TEST_F(SecondaryViewTest, SnapshotsRejectInvalidDensityAndStaleOrUncommittedView
     ViewPageSelection empty = {false, nullptr, 0}; options.padding = 0.0f;
     ASSERT_EQ(view_tree_preview_arrange(tree, &empty, &options), VIEW_MODEL_OK);
     EXPECT_EQ(render_secondary_view_snapshot(tree), nullptr);
-    doc.mutation_epoch++;
+    doc.advance_mutation_epoch();
     EXPECT_EQ(render_secondary_view_snapshot(tree), nullptr);
     EXPECT_FALSE(render_secondary_view_to_png(tree, "temp/paged-media-impl/stale-preview.png"));
     EXPECT_FALSE(render_secondary_view_to_svg(tree, "temp/paged-media-impl/stale-preview.svg"));

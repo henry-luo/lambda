@@ -1870,7 +1870,7 @@ static bool script_scheduler_enqueue(DomDocument* document, JsScriptTaskCollecti
         DomElement* element = script_task_element(document, task);
         if (!script_task_bind_element(document, task, element)) return false;
         if (dom_element_is_html_tag(element, MARKUP_NAME_SCRIPT)) {
-            if (DomStyleRareExt* state = element->ensure_ext()) {
+            if (DomStyleRareExt* state = element->ensure_rare_ext()) {
                 state->script_parser_pending = true;
                 state->script_parser_inserted = true;
             }
@@ -1888,7 +1888,7 @@ static bool script_task_prepare(DomDocument* document, JsScriptTask* task) {
     task->prepared = true;
     DomElement* script = script_task_element(document, task);
     DomStyleRareExt* state = dom_element_is_html_tag(script, MARKUP_NAME_SCRIPT)
-        ? script->ensure_ext() : nullptr;
+        ? script->ensure_rare_ext() : nullptr;
     if (state) state->script_parser_pending = false;
     if (!script || script->doc.get() != document || !dom_element_is_connected(script) ||
             (state && state->script_already_started)) {
@@ -2050,7 +2050,7 @@ static void prepare_connected_external_script(DomElement* script);
 static void prepare_connected_inline_script(DomElement* script, StrBuf** source_owner) {
     DomDocument* document = script->doc;
     if (!document || document->scripting_disabled || !dom_node_is_connected(script)) return;
-    DomStyleRareExt* state = script->ensure_ext();
+    DomStyleRareExt* state = script->ensure_rare_ext();
     if (!state || state->script_parser_pending || state->script_already_started) return;
     const char* type = dom_element_attribute_value_ns(script, "", "type");
     char legacy_type[64];
@@ -2423,7 +2423,7 @@ static void prepare_connected_external_script(DomElement* script) {
     task->parser_inserted = false;
     task->prepared = true;
     // dynamic defer attributes do not order execution; only the async IDL setter clears force-async.
-    task->scheduling = task->async_attr || !script->ext->script_force_async_cleared
+    task->scheduling = task->async_attr || !script->rare_ext->script_force_async_cleared
         ? JS_SCRIPT_SCHED_ASYNC : JS_SCRIPT_SCHED_DEFER;
     task->document_order = state->tasks->length;
     if (!script_task_list_append(state->tasks, task)) return;

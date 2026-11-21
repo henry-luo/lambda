@@ -340,9 +340,9 @@ static bool dom_should_validate_submit(DomElement* form, DomElement* submitter) 
 class FormSubmissionEvents {
 public:
     explicit FormSubmissionEvents(DomElement* form) : form_(form) {
-        form_->ext->form_firing_submission_events = true;
+        form_->rare_ext->form_firing_submission_events = true;
     }
-    ~FormSubmissionEvents() { form_->ext->form_firing_submission_events = false; }
+    ~FormSubmissionEvents() { form_->rare_ext->form_firing_submission_events = false; }
 private:
     DomElement* form_;
 };
@@ -352,7 +352,7 @@ static Item dom_form_prepare_submission(Item form_item, DomElement* form,
                                         bool engine_activation) {
     if (!dom_element_is_html_tag(form, MARKUP_NAME_FORM) || !dom_node_is_connected(form))
         return (Item){.item = ITEM_FALSE};
-    DomStyleRareExt* state = form->ensure_ext();
+    DomStyleRareExt* state = form->ensure_rare_ext();
     if (!state) return ItemError;
     if (state->form_constructing_entries || state->form_firing_submission_events)
         return (Item){.item = ITEM_FALSE};

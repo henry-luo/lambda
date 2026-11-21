@@ -589,7 +589,7 @@ struct JsRuntimeState;
 bool dom_exec_insert_html(DomDocument* doc, const char* html);
 
 /** Mutation-sequence reads for incremental reconciliation. */
-uint64_t dom_mutation_epoch(DomDocument* doc);
+uint32_t dom_mutation_epoch(DomDocument* doc);
 #endif
 
 void dom_schedule_animation_frame(Item callback);

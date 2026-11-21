@@ -1731,7 +1731,7 @@ TEST(CssPropTable, UnlaidOutChildKeepsCommittedAncestorCascadeAndObservesMutatio
         ASSERT_TRUE(css_prop_serialize_computed(child, CSS_PROPERTY_COLOR, 0, value, sizeof(value)));
         EXPECT_EQ(parent->style_version, refreshed_version);
         ASSERT_TRUE(parent->set_attribute("style", "color:green"));
-        doc->mutation_epoch++;
+        doc->advance_mutation_epoch();
         ASSERT_TRUE(css_prop_serialize_computed(child, CSS_PROPERTY_COLOR, 0, value, sizeof(value)));
         EXPECT_STREQ(value, "rgb(0, 128, 0)");
     }
@@ -3890,9 +3890,9 @@ TEST(CssTransform, GroupingEffectsFlattenUsedTransformStyle) {
     FilterProp filter = {};
     FilterFunction function = {};
     element.set_synthetic(true);
-    element.ext = lam::own(&extension);
+    element.rare_ext = lam::own(&extension);
     DomStyleExt slots = {};
-    element.style_ext = lam::own(&slots);
+    element.ext = lam::own(&slots);
     slots.transform = lam::view_prop(&transform);
     element.scroller = lam::view_prop(&scroll);
     element.in_line = lam::view_ref(&inline_prop);
@@ -3954,9 +3954,9 @@ TEST(CssTransform, PaintProjectsNestedDepthOnceAndHonorsFlattening) {
         scene_prop.functions = lam::shared(&translation);
         plane_prop.functions = lam::shared(&translation);
         DomStyleExt slots[3] = {};
-        camera.style_ext = lam::own(&slots[0]);
-        scene.style_ext = lam::own(&slots[1]);
-        plane.style_ext = lam::own(&slots[2]);
+        camera.ext = lam::own(&slots[0]);
+        scene.ext = lam::own(&slots[1]);
+        plane.ext = lam::own(&slots[2]);
         slots[0].transform = lam::view_prop(&camera_prop);
         slots[1].transform = lam::view_prop(&scene_prop);
         slots[2].transform = lam::view_prop(&plane_prop);
@@ -4456,7 +4456,7 @@ protected:
         element->node_type = DOM_NODE_ELEMENT;
         element->doc = lam::up(&doc);
         element->in_line = lam::view_ref(&mock->in_line);
-        element->style_ext = lam::own(&mock->props);
+        element->ext = lam::own(&mock->props);
         return element;
     }
 
@@ -4464,7 +4464,7 @@ protected:
         // transform bounds consume a laid-out block view, as the render fixtures do.
         element->view_type = RDT_VIEW_BLOCK;
         element->font = lam::view_prop(font);
-        element->style_ext->transform = lam::view_prop(transform);
+        element->ext->transform = lam::view_prop(transform);
         element->width = 40.0f;
         element->height = 10.0f;
         layout.view = lam::up(static_cast<View*>(element));
@@ -5848,7 +5848,7 @@ TEST_F(AnimationTickTest, NeutralTransformsCopyUnderlyingListsAndPadWithIdentity
         source.params.translate.x = 10.0f;
         source.translate_x_percent = source.translate_y_percent = NAN;
         if (sample.has_base) transform.functions = lam::shared(&source);
-        element->style_ext->transform = lam::view_prop(&transform);
+        element->ext->transform = lam::view_prop(&transform);
         CssAnimProp config = defaultAnimProp("neutralTransform", 1.0f);
         AnimationInstance* instance = css_animation_create(scheduler, element, &config,
             parsedKeyframes(sample.ends_none
@@ -6118,7 +6118,7 @@ TEST_F(AnimationTickTest, TransformValueCachesRefreshPerElementAndOwnInheritedLi
     for (int index = 0; index < 2; index++) {
         elements[index] = createMockElement(mocks[index]);
         elements[index]->font = lam::view_prop(&fonts[index]);
-        elements[index]->style_ext->transform = lam::view_prop(&transforms[index]);
+        elements[index]->ext->transform = lam::view_prop(&transforms[index]);
         fonts[index].font_size = index == 0 ? 10.0f : 20.0f;
         layout.view = lam::up(static_cast<View*>(elements[index]));
         layout.elmt = lam::up(elements[index]);
@@ -6539,7 +6539,7 @@ TEST_F(AnimationTickTest, TransformAnimationMarksDocumentOwnedList) {
     TransformProp transform = {};
     MockElement mock;
     DomElement* element = createMockElement(&mock);
-    element->style_ext->transform = lam::view_prop(&transform);
+    element->ext->transform = lam::view_prop(&transform);
 
     TransformFunction keyframe_function = {};
     keyframe_function.type = TRANSFORM_TRANSLATEX;

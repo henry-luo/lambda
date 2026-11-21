@@ -7959,7 +7959,7 @@ static bool dispatch_contenteditable_plain_event(EventContext* evcon,
     }
     EditingTargetRangesScope target_range_scope(
         evcon, target_ranges, target_range_count);
-    uint64_t snapshot_epoch = dom_mutation_epoch(document);
+    uint32_t snapshot_epoch = dom_mutation_epoch(document);
 
     DomSelection* selection = state->dom_selection;
     DomBoundary start = {};
@@ -10663,7 +10663,7 @@ static bool run_form_submit_activation(EventContext* evcon, View* target) {
         ViewBlock* block = radiant_mouse_click_block(evcon, target);
         ImageSurface* image = render_media_image_surface(block);
         if (image) {
-            DomStyleRareExt* state = elem->ensure_ext();
+            DomStyleRareExt* state = elem->ensure_rare_ext();
             if (state) {
                 LayoutContentBox content = layout_content_box(block);
                 Rect image_box = render_media_image_rect(block, image,

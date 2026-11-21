@@ -20,7 +20,7 @@ The largest savings come from the payload allocated for common elements. Moving 
 | `TransformProp` | 408 B | 56 B |
 | `FormControlProp` | 256 B | 208 B |
 | `BoundaryProp` | 224 B | 224 B |
-| `LayoutCache` | 1,240 B | 1,240 B |
+| `LayoutCache` | 1,240 B | 928 B |
 
 These are direct compiler record sizes. Earlier captures use the name `DomElementExt` for `DomStyleRareExt`. Optional allocations and shared storage contribute to the measured totals in Appendix A. [Element records](../../lambda-input/lambda/input/css/dom_element.hpp) · [View payloads](../../radiant/radiant/view.hpp) · [Layout cache](../../radiant/radiant/layout.hpp)
 
@@ -57,7 +57,7 @@ The view pool owns the optional payloads. Retained style resolution releases sta
 
 ### DV6.1 — Keep document extensions independently lazy
 
-`DomElement::ext` lazily owns a `DomStyleRareExt` in the document pool. The extension tracks the physical storage owner for adoption (D5.5.1). It holds uncommon DOM state, typed slots for uncommon view features, and pointers to the separately allocated attribute and fragment groups. The document pool owns `DomAttributeCache` (48 B) and `DomFragmentGeometry` (164 B). Layout resets the geometry group as needed. The attributes group holds expanded-name, synthetic attribute, and name-cache state. The extension packs its 12 Boolean flags into the gap before its pointer fields. It stores form-image offsets as fractional CSS pixels and rounds them when FormData or dialog submission serializes them (D9.5.6v2).
+`DomElement::rare_ext` lazily owns a `DomStyleRareExt` in the document pool. The extension tracks the physical storage owner for adoption (D5.5.1). It holds uncommon DOM state, typed slots for uncommon view features, and pointers to the separately allocated attribute and fragment groups. The document pool owns `DomAttributeCache` (48 B) and `DomFragmentGeometry` (164 B). Layout resets the geometry group as needed. The attributes group holds expanded-name, synthetic attribute, and name-cache state. The extension packs its 12 Boolean flags into the gap before its pointer fields. It stores form-image offsets as fractional CSS pixels and rounds them when FormData or dialog submission serializes them (D9.5.6v2).
 
 The custom-property list and its lookup index live in `DomStyleRareExt`. The first write that needs custom-property storage allocates the extension. Mutation invalidates the index, and the list and index follow the physical storage owner through adoption (D5.5.1). [Custom-property storage](../../lambda-input/lambda/input/css/dom_element.cpp)
 
@@ -65,7 +65,7 @@ The custom-property list and its lookup index live in `DomStyleRareExt`. The fir
 
 `PopoverStyle` holds the popover modes, visibility, toggle task, and opening order. It also holds the top-layer membership and implicit anchor shared with modal dialogs. The physical document pool allocates this `ViewProp` on demand. Relayout preserves it, and node retirement releases it (D5.5.1). The opening order is an unsigned 64-bit sequence and reserves zero for entries outside the popover stacks. On arm64, the group is a 40-byte record. The original split reduced `DomStyleRareExt` from 304 to 280 bytes and its minimum pool block by 16 bytes under the allocator then in use (D5.1.4, D5.2.4).
 
-`DomStyleExt` holds a second lazy directory in the node's physical document pool. It owns private pseudo specified styles through the 80-byte `PseudoStyle` group and borrows namespace URI bytes. A directory stays live while any of its bindings are present. Node retirement clears document-owned state and borrows under D5.5.1 and D5.5.2. [Element extensions](../../lambda-input/lambda/input/css/dom_element.hpp) · [Release paths](../../lambda-input/lambda/input/css/dom_element.cpp)
+`DomElement::ext` lazily owns a `DomStyleExt` directory in the node's physical document pool. It owns private pseudo specified styles through the 80-byte `PseudoStyle` group and borrows namespace URI bytes. A directory stays live while any of its bindings are present. Node retirement clears document-owned state and borrows under D5.5.1 and D5.5.2. [Element extensions](../../lambda-input/lambda/input/css/dom_element.hpp) · [Release paths](../../lambda-input/lambda/input/css/dom_element.cpp)
 
 The document pool uses 8-byte alignment. On arm64 its block header takes 24 bytes, with 32-bit spans and an extent-size cap (D5.1.4, D5.5.1). `ShadowStyle` and `PopoverStyle` each need a minimum 64-byte pool block, down from 80 bytes. `DomStyleExt` needs 72 bytes, down from 80. The default pool alignment is 16 bytes. [Document pool creation](../../lambda-input/lambda/input/css/dom_element.cpp) · [Pool sizing](../../lambda-input/lib/mempool.c)
 
@@ -123,7 +123,13 @@ The fallback table costs one pointer per document and allocates entries only whe
 1. Expose a read accessor, a presence test where needed, and one mutable ensure path. Group reads are allocation-free and use typed defaults or null. Reuse the typed ensure helpers to select the correct pool. Keep anonymous scratch items in pass storage. Secondary resolution uses its selected view's storage.
 2. Use one registration source per view slot. Keep the typed access, ownership, default/reset behavior, teardown, and clear behavior in agreement. Child groups follow their root's existing teardown entry. The catalog marks `shadow` and `popover` as document-owned slots. DOM retirement releases them (D5.5.1). Keep compile-time coverage and debug post-clear checks. The Input headers expose the shared element definition, and Radiant defines the concrete view payloads and tears them down (D9.1.1v4, D9.1.3v2). [Slot ownership dispatch](../../radiant/radiant/view_pool.cpp) · [Node retirement](../../lambda-input/lambda/input/css/dom_element.cpp)
 3. Separate immutable resolved style from used geometry where sharing pays for itself. Keep canonical `InlineProp` bindings behind the existing write gate (DV9c). Treat interned inherited text deltas as a separate experiment. Preserve style identities, inherited revisions, layout invalidation, and the lifetime of retained animation or view state.
-4. Keep the nine general measurement entries and four intrinsic-width entries inline in `LayoutCache`. The cache trials moved those arrays and increased CPU time on large pages. Cache storage, `BoundaryProp::flow_margin`, and pass-lived flex/grid measurement state remain separate investigations (D5.1.4, DV10). [Cache trial results](../impl/Radiant_Impl_View_Prop_Groups.md#deferred-layout-cache-storage)
+4. Keep four general measurement entries and four intrinsic-width entries inline in `LayoutCache`. General measurements match the known dimensions and available space. A new key replaces the oldest insertion, and a write to a matching key refreshes it in place. `KnownDimensions` uses NaN for an unknown axis and preserves zero as a definite size. A reserved available-width tag marks an empty `CacheEntry`. The intrinsic-width history and retained flex-flow caches each have their own nine-entry limit. The pass-local entries and separately keyed retained state follow D5.5.3 and DV10. [Layout cache](../../radiant/radiant/layout.hpp) · [Earlier storage trials](../impl/Radiant_Impl_View_Prop_Groups.md#deferred-layout-cache-storage)
+
+### Document epoch width
+
+The document mutation, style-query, and style-content epochs and their Radiant snapshots use `uint32_t` equality stamps (D5.5.3). Style-query epochs cover style and presentation changes that affect queries. Style-content epochs cover inherited styles and content dependencies beyond the changed subtree. Mutation epochs track document mutations. Reserve `UINT32_MAX` for an unstamped mutation snapshot and wrap the document mutation counter to zero at that value. The accepted wrap interval is approximately 50 days at 1,000 increments per second. A snapshot can alias a new one after a full counter cycle. [Document counters](../../lambda-input/lambda/input/css/dom_element.hpp) · [Layout cache](../../radiant/radiant/layout.hpp)
+
+On arm64, narrower document counters reduce `DomDocument` from 3,984 to 3,968 bytes. Packing the 32-bit style epoch beside the intrinsic revision fields reduces `IntrinsicWidthCacheEntry` from 184 to 176 bytes. The four inline entries and two narrower inherited-cache stamps reduce `LayoutCache` from 968 to 928 bytes.
 
 ## 5. Measurement and acceptance
 
@@ -137,6 +143,8 @@ The fallback table costs one pointer per document and allocates entries only whe
 ## Appendix A. End-to-end release measurements
 
 The comparisons use native Clang arm64 release builds at `-O3` with full LTO. The original baseline includes the pre-existing `DomElement` field reorder. Each page uses local resources, a 1200 × 800 viewport, and disabled scripting. Samples come from `post_layout_pre_output` after first layout. Totals sum independent page processes. Tracked process memory includes the Input arena that can own parser-backed elements. The profiler accounts for logical storage and allocator-tracked memory in their respective scopes (D5.2.1–D5.2.4).
+
+In profile output, `slots.ext` counts `rare_ext` allocations and `ext_size` gives their record size. `prop_extensions` and `prop_ext_size` describe the `ext` directory.
 
 ### Current checkout and archived refactor endpoint
 
