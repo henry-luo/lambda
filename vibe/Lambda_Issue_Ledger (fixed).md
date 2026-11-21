@@ -16,6 +16,21 @@
 > Semantic and design rulings remain cited by S# / D#; where no formal ruling
 > covers a point, the original vibe ledger ID is retained.
 
+<a id="lr12-69"></a>
+## LR12-69 — Parser-head arrivals trigger an extra load-time cascade
+
+**Fixed 2026-11-21.** Script-to-layout notification follows D9.5.6v2.
+`SkipsGlobalCascadeForLoadTimeInlineStyleWrites` reported an incremental cascade
+for two inline writes. Resuming the staged parser head added a layout mutation
+for nodes the initial cascade had already seen. The host now publishes those
+arrivals through the existing mutation-observer hook. Author mutations still
+enter the cascade ledger.
+
+The inline-write, class-subtree and no-op class load tests pass. Thirteen
+parser preparation replays also pass, including staged observer delivery.
+Evidence is in `temp/radiant-test-fixes/inline-style-before.log`,
+`inline-style-after.log` and `script-preparation.log`.
+
 <a id="lr12-68"></a>
 ## LR12-68 — Radiant integration fixtures relied on retired behavior
 
@@ -28,8 +43,10 @@ well. All 201 document tests pass.
 The project render fixture `line_clamp_01` now uses `line-clamp` and
 `display: flow-root` under **DV6.5**. It passes against the existing image at
 1.36% different pixels. The six WPT `baseline-source` cases and
-`text-wrap-balance-line-clamp-001` still exercise the retired WebKit CSS and
-retain their failing verdicts by user decision. Evidence is in
+`text-wrap-balance-line-clamp-001` still exercised the retired WebKit CSS and
+retained their failing verdicts in this run. D10.1.9 later normalized the syntax
+and cleared those failures under [LI-097](<Lib_Input_Issue_Ledger (fixed).md#li-097>).
+Evidence is in
 `temp/radiant-baseline-build-fix/verified-baseline.log` and `verified-results/`.
 
 <a id="lr12-67"></a>

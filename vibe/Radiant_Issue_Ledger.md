@@ -20,6 +20,14 @@ observations still require re-verification. Add new Radiant issues here.
 
 ## Open issues
 
+<a id="ri-190"></a>
+
+### RI-190 — FIXED
+
+CSS resource discovery resolves a document base only when it encounters a
+resource URL and reuses that lookup for the discovery pass. See the
+[CSS discovery performance repair](<Radiant_Issue_Ledger (fixed).md#ri-190>).
+
 <a id="ri-189"></a>
 
 ### RI-189 — FIXED

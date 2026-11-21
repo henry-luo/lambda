@@ -126,9 +126,12 @@ See the [fixed record](<Lambda_Issue_Ledger (fixed).md#lr12-67>).
 The host baseline exercises real stylesheet owners and standard line clamping.
 See the [fixed record](<Lambda_Issue_Ledger (fixed).md#lr12-68>).
 
-On Lambda `44b6c6a23d` and Radiant `362a90b`, `test_radiant_document_gtest`
-also fails to compile because it reads `container_axes` directly from `BlockProp`.
-[Document test](../test/test_radiant_document_gtest.cpp#L13155)
+<a id="lr12-69"></a>
+
+## LR12-69 — FIXED
+
+Parser-head staging publishes child arrivals to mutation observers. See the
+[load-time cascade repair](<Lambda_Issue_Ledger (fixed).md#lr12-69>).
 
 <a id="lr12-64"></a>
 

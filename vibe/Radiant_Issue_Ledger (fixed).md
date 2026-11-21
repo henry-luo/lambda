@@ -14,6 +14,35 @@ are unchanged. Full evidence is under `../../lambda/temp/kianhup-style/`.
 
 ## Fixed issues
 
+<a id="ri-190"></a>
+
+### RI-190 — CSS resource discovery repeatedly scans the DOM for a base URL
+
+**Fixed 2026-11-21.** Resource acquisition follows **D9.1.2v2** and uses the
+existing admission policy under **D11.1.2**.
+
+The first-resource discovery change in Radiant `952b770` enabled selected CSS
+prefetch on local documents before a resource manager exists. Prefetch looked
+up the document base for every selected declaration without a stylesheet
+base. On documents without an active `<base>`, each lookup scanned the entire
+DOM. That quadratic cost appeared in the PDF load and in recascades during
+the document editor, spreadsheet and Hamster replays. A release stack sample
+of the document-editor replay showed the DOM base lookup beneath the cascade
+resource walk.
+
+The URL visitor now resolves bases on demand and shares the document fallback
+within each discovery pass. Each URL-bearing declaration resolves its own
+stylesheet base. Requests that already have an absolute URL skip the
+document-base lookup before they enter the resource queue.
+
+The ten reported replays pass on the macOS ARM64 release build in
+0.95–2.77 seconds each in serial and 2.02–5.99 seconds in the parallel Radiant
+baseline. The baseline records 8,172 passes, 298 partial results, 20 skips and
+zero failures. All 70 loopback resource checks pass, as does the local-file
+control with a CSS image as its first remote dependency and a relative inline
+image under an active `<base>`. Timing reports and the stack sample are under
+`temp/radiant-perf-regression/`.
+
 <a id="ri-189"></a>
 
 ### RI-189 — Expired no-fill effects retain undeclared opacity
@@ -167,6 +196,9 @@ repeat/completion tests fail before repair. Three of seven shared PNG controls
 fail with the previous qualified renderer; all seven pass after repair and
 agree with Chromium. Ten existing SVG image-motion controls and the layout
 integer-cast lint pass. No broad baseline or online sweep is repeated.
+
+The mixed GIF and Lottie replay now checks the second GIF frame at both 150ms
+and 1050ms, then the first at 1250ms under D10.1.7. All six pixel assertions pass.
 
 This was found while reviewing Maple's apparent headline-font difference.
 The fresh asset is actually animated WebP, whose later-frame playback remains

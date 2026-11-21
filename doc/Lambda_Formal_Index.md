@@ -502,7 +502,7 @@ in full — including lines too long for a viewer — run
 | SO46 | 3520 | How an element pattern spells *content must be empty* |
 | SO48 | 3521 | PDF file content: remaining object kinds, decimal encoding, virtual source containers, direct array/scalar … |
 
-## Design — [`Lambda_Formal_Design.md`](Lambda_Formal_Design.md) v69.0.1 (2026-11-18)
+## Design — [`Lambda_Formal_Design.md`](Lambda_Formal_Design.md) v70.0.0 (2026-11-21)
 
 | ID | Line | Title |
 |---|---|---|
@@ -771,52 +771,53 @@ in full — including lines too long for a viewer — run
 | D10.1.6 | 1666 | SVG export serializes the current DOM |
 | D10.1.7* | 1671 | An animation snapshot uses the virtual-timer frame |
 | D10.1.8* | 1678 | A file node loads on demand |
-| **§D10.2** | 1685 | *Document packages* |
-| D10.2.1* | 1687 | The DOM behavior package owns the editing policy |
-| D10.2.2* | 1697 | LaTeX is read by TeX expansion, never by TeX typesetting |
-| D10.2.3* | 1711 | Document math keeps the layout policy of its notation |
-| D10.2.4 | 1718 | Bundled fonts are shared resources |
-| D10.2.5* | 1722 | Graphical document editing keeps isolated errors read-only |
-| **§D11** | 1731 | *Security and Capabilities* |
-| **§D11.1** | 1736 | *Trust and IO* |
-| D11.1.1* | 1738 | There are three trust tiers |
-| D11.1.2* | 1746 | One central IO API is the only IO door |
-| **§D11.2** | 1752 | *Apps and scripts* |
-| D11.2.1* | 1754 | Apps and scripts run inside an admitted root |
-| D11.2.2* | 1763 | Create freely; overwrite only with approval |
-| D11.2.3* | 1771 | The trusted host owns the grant settings |
-| D11.2.4* | 1779 | Network access is denied by default; updates are a host service |
-| D11.2.5* | 1788 | Uninstall keeps private app data |
-| **§D11.3** | 1794 | *Media capabilities* |
-| D11.3.1* | 1796 | Audible output depends on the document origin |
-| D11.3.2* | 1808 | The microphone needs explicit acquisition and separate grants |
-| DO1 | 1899 | Nullable-lane residue: boxed fallback for `any`, `number` and unions; |
-| DO2 | 1903 | Scalar-home audits: result-bearing dispatch helpers, resume-slot reads, exception-peek rematerialization, the … |
-| DO3 | 1906 | Boxing: do union parameters stay boxed? Does the return type take part in unboxed-call selection? What is the … |
-| DO4 | 1908 | `MirValue`: its size (measure first), and whether the planned occurrence source replaces the actual-rep … |
-| DO25 | 1911 | Node identity (D3.1.3, S5.1.4v2): where the identity lives, the universal ID form, which operations copy it, … |
-| DO27 | 1914 | Instance type alteration (S2.1.5): can reconstruction reuse the old buffer, and how are extra fields carried? … |
-| DO28 | 1916 | Tier carrier divergence for annotated module bindings: one carrier for each declared contract at the shared … |
-| DO31 | 1919 | Can an object declaration also name an element tag, and how do the tags of a hierarchy relate? [D3.1.1] |
-| DO32 | 1921 | Virtual PDF output: wider pure-producer demand, retained-child representation (SO48), remaining object … |
-| DO5 | 1926 | Numeric GC fallback: bring the per-boundary inventory to zero, then delete the scalar heap |
-| DO6 | 1929 | Side-root slot metadata (boxed Item versus raw pointer), needed only for a moving collector; |
-| DO7 | 1932 | Stack maps (kept in view): the only route to zero rooting cost in the mutator; |
-| DO8 | 1935 | COW counts: a saturating count waits for live-corpus counters |
-| DO9 | 1937 | Memory Context stage 2, including MIR code-page bytes; |
-| DO10 | 1939 | Stack-frame checks: concat without tail-payload rebase; |
-| DO24 | 1942 | Can a compiler-generated wide temporary be live across a loop back edge under the D6.2.3 reclaim? The emitter … |
-| DO11 | 1947 | Dual functions: promotion-aware numeric inference, guard-failure counters, lazy generation of cold boxed … |
-| DO12 | 1950 | MIR cache: GC-root registry reset under L1, thunk identity under lazy generation, a growth bound for the name … |
-| DO13 | 1952 | Emission testing: guest-transpiler scope, the MT6 coupling spike, a clean zero-root-elision fixture, and the … |
-| DO14 | 1955 | Unified AST: the "views" variance tier (adopt only when a shared pass needs it) |
-| DO29 | 1957 | Typed `var` rebinding: arbitrary places, async rebinding, and a scalar-lane binding passed to an untyped … |
-| DO33 | 1959 | Interpreter tier breadth (D8.3.2): satellite budgets under MT7, cross-context promotion cells, loops outside … |
-| DO16 | 1965 | Name identity: the dynamic-intern growth bound, the pooled-flag audit, GOT rebuild on L1 hits, mapped-backing … |
-| DO17 | 1968 | Const pool: decimal sharing, datetime packing, cross-module literal dedup, mapped-leaf page retention, the … |
-| DO18 | 1971 | Sys-func registry: the public mutation convention, the public result of `splice`, and the confirmed ArrayNum … |
-| DO19 | 1973 | Jube: the globals allowlist audit, the WPT harness, the data-pack design, `dynamic_lookup` retirement, the … |
-| DO20 | 1977 | Cross-isolate lifetime for shared graph Items (promote-on-share is recommended) |
-| DO21 | 1979 | Static modules: Class F scheduling, the profile-B headless audit, the runtime-native IO inventory and Windows … |
-| DO22 | 1983 | First-class `Type*` representation needs its own design record: the kind-discriminated layout, the canonical … |
-| DO23 | 1986 | Shapes: cross-`Input` type sharing and shape serialization |
+| D10.1.9 | 1684 | CSS input normalizes supported WebKit box declarations |
+| **§D10.2** | 1690 | *Document packages* |
+| D10.2.1* | 1692 | The DOM behavior package owns the editing policy |
+| D10.2.2* | 1702 | LaTeX is read by TeX expansion, never by TeX typesetting |
+| D10.2.3* | 1716 | Document math keeps the layout policy of its notation |
+| D10.2.4 | 1723 | Bundled fonts are shared resources |
+| D10.2.5* | 1727 | Graphical document editing keeps isolated errors read-only |
+| **§D11** | 1736 | *Security and Capabilities* |
+| **§D11.1** | 1741 | *Trust and IO* |
+| D11.1.1* | 1743 | There are three trust tiers |
+| D11.1.2* | 1751 | One central IO API is the only IO door |
+| **§D11.2** | 1757 | *Apps and scripts* |
+| D11.2.1* | 1759 | Apps and scripts run inside an admitted root |
+| D11.2.2* | 1768 | Create freely; overwrite only with approval |
+| D11.2.3* | 1776 | The trusted host owns the grant settings |
+| D11.2.4* | 1784 | Network access is denied by default; updates are a host service |
+| D11.2.5* | 1793 | Uninstall keeps private app data |
+| **§D11.3** | 1799 | *Media capabilities* |
+| D11.3.1* | 1801 | Audible output depends on the document origin |
+| D11.3.2* | 1813 | The microphone needs explicit acquisition and separate grants |
+| DO1 | 1904 | Nullable-lane residue: boxed fallback for `any`, `number` and unions; |
+| DO2 | 1908 | Scalar-home audits: result-bearing dispatch helpers, resume-slot reads, exception-peek rematerialization, the … |
+| DO3 | 1911 | Boxing: do union parameters stay boxed? Does the return type take part in unboxed-call selection? What is the … |
+| DO4 | 1913 | `MirValue`: its size (measure first), and whether the planned occurrence source replaces the actual-rep … |
+| DO25 | 1916 | Node identity (D3.1.3, S5.1.4v2): where the identity lives, the universal ID form, which operations copy it, … |
+| DO27 | 1919 | Instance type alteration (S2.1.5): can reconstruction reuse the old buffer, and how are extra fields carried? … |
+| DO28 | 1921 | Tier carrier divergence for annotated module bindings: one carrier for each declared contract at the shared … |
+| DO31 | 1924 | Can an object declaration also name an element tag, and how do the tags of a hierarchy relate? [D3.1.1] |
+| DO32 | 1926 | Virtual PDF output: wider pure-producer demand, retained-child representation (SO48), remaining object … |
+| DO5 | 1931 | Numeric GC fallback: bring the per-boundary inventory to zero, then delete the scalar heap |
+| DO6 | 1934 | Side-root slot metadata (boxed Item versus raw pointer), needed only for a moving collector; |
+| DO7 | 1937 | Stack maps (kept in view): the only route to zero rooting cost in the mutator; |
+| DO8 | 1940 | COW counts: a saturating count waits for live-corpus counters |
+| DO9 | 1942 | Memory Context stage 2, including MIR code-page bytes; |
+| DO10 | 1944 | Stack-frame checks: concat without tail-payload rebase; |
+| DO24 | 1947 | Can a compiler-generated wide temporary be live across a loop back edge under the D6.2.3 reclaim? The emitter … |
+| DO11 | 1952 | Dual functions: promotion-aware numeric inference, guard-failure counters, lazy generation of cold boxed … |
+| DO12 | 1955 | MIR cache: GC-root registry reset under L1, thunk identity under lazy generation, a growth bound for the name … |
+| DO13 | 1957 | Emission testing: guest-transpiler scope, the MT6 coupling spike, a clean zero-root-elision fixture, and the … |
+| DO14 | 1960 | Unified AST: the "views" variance tier (adopt only when a shared pass needs it) |
+| DO29 | 1962 | Typed `var` rebinding: arbitrary places, async rebinding, and a scalar-lane binding passed to an untyped … |
+| DO33 | 1964 | Interpreter tier breadth (D8.3.2): satellite budgets under MT7, cross-context promotion cells, loops outside … |
+| DO16 | 1970 | Name identity: the dynamic-intern growth bound, the pooled-flag audit, GOT rebuild on L1 hits, mapped-backing … |
+| DO17 | 1973 | Const pool: decimal sharing, datetime packing, cross-module literal dedup, mapped-leaf page retention, the … |
+| DO18 | 1976 | Sys-func registry: the public mutation convention, the public result of `splice`, and the confirmed ArrayNum … |
+| DO19 | 1978 | Jube: the globals allowlist audit, the WPT harness, the data-pack design, `dynamic_lookup` retirement, the … |
+| DO20 | 1982 | Cross-isolate lifetime for shared graph Items (promote-on-share is recommended) |
+| DO21 | 1984 | Static modules: Class F scheduling, the profile-B headless audit, the runtime-native IO inventory and Windows … |
+| DO22 | 1988 | First-class `Type*` representation needs its own design record: the kind-discriminated layout, the canonical … |
+| DO23 | 1991 | Shapes: cross-`Input` type sharing and shape serialization |

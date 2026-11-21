@@ -1984,8 +1984,9 @@ public:
                     break;
                 }
                 if (publish) {
-                    // staging moves stay silent; parser resume exposes only the next segment.
-                    dom_notify_mutation(DOM_JS_MUTATION_CHILD_INSERT, next, head);
+                    // the initial cascade already saw these nodes. Only observers see their parser arrival.
+                    dom_observers_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT,
+                        next, head, nullptr, nullptr);
                     if (next->is_element() &&
                             dom_element_is_html_tag(next->as_element(), MARKUP_NAME_SCRIPT)) publish = false;
                 }

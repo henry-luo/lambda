@@ -6,6 +6,21 @@ remain in the [active issue ledger](Lib_Input_Issue_Ledger.md).
 
 ## Fixed issues
 
+<a id="li-097"></a>
+
+### LI-097 — Legacy WebKit box declarations need standard equivalents
+
+**Fixed 2026-11-21.** D10.1.9 assigns normalization to CSS input under
+D9.1.3v2. The retired display values and clamp declarations caused seven
+baseline regressions in `wpt-css-inline` and `wpt-css-text`. The parser now
+emits standard flex and clamp declarations. It converts a complete vertical
+clamp block to standard flow layout and keeps declaration order and importance.
+
+The original layout fixtures record 169 full matches for `wpt-css-inline` and
+896 full matches plus 84 recorded partials for `wpt-css-text`. Both have zero
+baseline regressions. Evidence is in `temp/radiant-test-fixes/layout-before.log`
+and `layout-normalization-probe.log`.
+
 <a id="li-096"></a>
 
 ### LI-096 — A sole double-position color is rejected as one gradient stop

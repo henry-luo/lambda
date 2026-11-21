@@ -1566,11 +1566,15 @@ extern "C" Item dom_cssom_rule_set_selector_text(Item rule_item, Item value) {
 
 // CSSOM exposes one effective declaration per property; source duplicates remain
 // intact until mutation so layout keeps the authored logical-property order.
+static CssPropertyCode cssom_decl_code(StrView name) {
+    return css_property_canonical_code(css_property_code_from_name(name.str));
+}
+
 static bool cssom_decl_matches(const CssDeclaration* declaration, StrView name) {
     if (!declaration || !name.str) return false;
     // native custom IDs still require full name identity; their C-string prefix can coincide.
     bool custom = name.length > 2 && name.str[0] == '-' && name.str[1] == '-';
-    CssPropertyCode code = custom ? CSS_PROPERTY_UNKNOWN : css_property_code_from_name(name.str);
+    CssPropertyCode code = custom ? CSS_PROPERTY_UNKNOWN : cssom_decl_code(name);
     StrView stored = css_declaration_name(declaration);
     return code > 0 ? declaration->property_code == code : strview_eq(&stored, &name);
 }
@@ -1594,7 +1598,7 @@ static const CssValue* cssom_decl_project_value(Pool* pool, const CssDeclaration
 static CssDeclaration* cssom_decl_find(CssRule* rule, StrView name) {
     if (!rule || !name.str) return nullptr;
     CssDeclaration* selected = nullptr;
-    CssPropertyCode requested = css_property_code_from_name(name.str);
+    CssPropertyCode requested = cssom_decl_code(name);
     const CssProperty* group = css_property_get_by_code(css_property_cascade_shorthand(requested));
     bool grouped = group && cssom_decl_has_projection(group->code);
     for (size_t i = 0; i < rule->data.style_rule.declaration_count; i++) {
@@ -1611,7 +1615,8 @@ static CssDeclaration* cssom_decl_find(CssRule* rule, StrView name) {
 
 static const char* cssom_decl_value(CssRule* rule, StrView name, Pool* output, bool priority = false) {
     if (!output) return "";
-    CssPropertyCode requested = name.str ? css_property_code_from_name(name.str) : CSS_PROPERTY_UNKNOWN;
+    CssPropertyCode source_property = css_property_code_from_name(name.str);
+    CssPropertyCode requested = css_property_canonical_code(source_property);
     const CssProperty* property = css_property_get_by_code(requested);
     auto serialize = [output](CssDeclaration* declaration, bool allow_pending) -> const char* {
         if (!declaration) return "";
@@ -1737,7 +1742,8 @@ static const char* cssom_decl_value(CssRule* rule, StrView name, Pool* output, b
         projected.value_text = nullptr; projected.value_text_len = 0;
         return serialize(&projected, false);
     }
-    return serialize(declaration, false);
+    const char* text = serialize(declaration, false);
+    return source_property == CSS_PROPERTY_WEBKIT_BOX_ORIENT ? css_webkit_box_orientation_name(text) : text;
 }
 
 static bool cssom_decl_expand_members(CssRule* rule, CssPropertyCode member) {
@@ -1868,7 +1874,7 @@ static bool cssom_decl_store(CssRule* rule, StrView name, CssDeclaration* replac
     // CSSOM property setters notify only when the declaration serialization
     // changes; repeated writes otherwise keep observers and layout running.
     String* before = cssom_decl_text(rule, comparison_pool);
-    CssPropertyCode requested = css_property_code_from_name(name.str);
+    CssPropertyCode requested = cssom_decl_code(name);
     const CssProperty* definition = css_property_get_by_code(requested);
     bool reset_members = definition && definition->shorthand;
     // replacing one member preserves its siblings and replaces their inherited priority independently.
@@ -2114,7 +2120,7 @@ static void cssom_decl_commit(CssomDeclarationView* view, StrView name) {
     }
     String* text = cssom_decl_text(view->rule, view->serialization_pool());
     if (!text) return;
-    CssPropertyCode property = name.str ? css_property_code_from_name(name.str) : CSS_PROPERTY_UNKNOWN;
+    CssPropertyCode property = name.str ? cssom_decl_code(name) : CSS_PROPERTY_UNKNOWN;
     dom_provider_call(dom_style_engine_ops(), &DomStyleEngineOps::capture_transition, view->element, property);
     const char* old_value = view->element->get_attribute("style");
     if (dom_element_commit_inline_declarations(view->element, view->rule, text->chars))
