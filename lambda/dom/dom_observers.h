@@ -42,6 +42,8 @@ void dom_observers_reset(void);
 // ============================================================================
 
 void dom_notify_mutation(DomJsMutationKind kind, void* target, void* parent);
+void dom_notify_inline_style_mutation(DomElement* element,
+                                     CssPropertyCode property, const char* old_value);
 void dom_notify_mutation_detail(DomJsMutationKind kind,
                                    void* target, void* parent,
                                    const char* attribute_name,

@@ -8,6 +8,7 @@
 #include "dom_cssom.h"
 #include "radiant/stylesheet_sync.hpp"
 #include "dom_style.h"
+#include "dom_observers.h"
 #include "dom_collection_types.h"
 #include "dom_core.h"
 #include "realm/dom_realm.h"
@@ -67,7 +68,6 @@ static Pool* get_document_pool();
 // document (realm state, absent for a Lambda-only script) is the last resort
 // rather than the first (ESO114).
 static Pool* sheet_pool(CssStylesheet* sheet);
-extern "C" void dom_notify_mutation(DomJsMutationKind kind, void* target, void* parent);
 static void cssom_collection_detach(Item wrapper);
 
 enum CssomCacheKind { CSSOM_CACHE_SHEET, CSSOM_CACHE_RULE,
@@ -2116,8 +2116,9 @@ static void cssom_decl_commit(CssomDeclarationView* view, StrView name) {
     if (!text) return;
     CssPropertyCode property = name.str ? css_property_code_from_name(name.str) : CSS_PROPERTY_UNKNOWN;
     dom_provider_call(dom_style_engine_ops(), &DomStyleEngineOps::capture_transition, view->element, property);
+    const char* old_value = view->element->get_attribute("style");
     if (dom_element_commit_inline_declarations(view->element, view->rule, text->chars))
-        dom_notify_mutation(dom_style_mutation_kind(property), view->element, view->element->parent);
+        dom_notify_inline_style_mutation(view->element, property, old_value);
 }
 
 extern "C" const char* dom_cssom_inline_property(void* element, const char* property,
@@ -2315,7 +2316,7 @@ extern "C" Item dom_cssom_stylesheet_rule_at(Item sheet_item, Item index_item) {
 // HTMLStyleElement .sheet
 // =============================================================================
 
-static CssStylesheet* cssom_element_sheet(DomElement* elem) {
+extern "C" CssStylesheet* dom_cssom_element_sheet(DomElement* elem) {
     DomDocument* doc = elem ? elem->doc : nullptr;
     if (!doc) return nullptr;
     if (doc->js.has_shadow_roots && dom_shadow_root(elem)) return radiant_shadow_inline_stylesheet(elem);
@@ -2341,13 +2342,13 @@ extern "C" Item dom_cssom_get_element_sheet(Item elem_item) {
 
     // consume pending text edits before exposing the sheet that CSSOM will mutate.
     if (is_inline_style) radiant_sync_mutated_inline_stylesheets(doc);
-    CssStylesheet* sheet = cssom_element_sheet(elem);
+    CssStylesheet* sheet = dom_cssom_element_sheet(elem);
     if (sheet) return dom_cssom_wrap_stylesheet(sheet);
 
     // Linked sheets are parsed before script execution; only a <style> can
     // need a lazy synchronization after its text-tree mutation.
     if (!is_inline_style || !radiant_sync_inline_stylesheet(elem)) return ItemNull;
-    return dom_cssom_wrap_stylesheet(cssom_element_sheet(elem));
+    return dom_cssom_wrap_stylesheet(dom_cssom_element_sheet(elem));
 }
 
 extern "C" void dom_cssom_owner_attribute_changed(void* element, const char* name) {
@@ -2357,7 +2358,7 @@ extern "C" void dom_cssom_owner_attribute_changed(void* element, const char* nam
     bool media = str_icmp_cstr(name, "media") == 0;
     bool disabled = link && str_icmp_cstr(name, "disabled") == 0;
     if ((!link && str_icmp_cstr(owner->tag_name(), "style") != 0) || (!media && !disabled)) return;
-    CssStylesheet* sheet = cssom_element_sheet(owner);
+    CssStylesheet* sheet = dom_cssom_element_sheet(owner);
     if (!sheet) return; // pending links retain their state in the reflected attributes.
     if (media) {
         const char* query = owner->get_attribute("media");

@@ -1926,7 +1926,6 @@ node-official-report:
 # Keep raw `baseline` out of Lambda's inventory; `baseline-js` holds its dynamic cases.
 # build configuration owns the default inventory; keep command-line overrides available.
 LAYOUT_BASELINE_SUITES ?= $(shell node -p "require('./$(DEFAULT_CONFIG)').test.layout_baseline_suites.join(' ')")
-override LAYOUT_BASELINE_SUITES := $(filter-out baseline,$(LAYOUT_BASELINE_SUITES))
 # The baseline target must select recorded entries before reporting aggregate
 # failures; otherwise untracked work-in-progress fixtures are misreported as
 # baseline regressions.
@@ -1999,7 +1998,7 @@ endef
 # Run the shared layout baseline inventory without building. Suites with a
 # recorded baseline run only those entries; suites without one run in full.
 run-layout-baseline-suites:
-	@$(LAYOUT_TEST_ENV) node test/run_layout_baseline.js --suites "$(LAYOUT_BASELINE_SUITES)" \
+	@$(LAYOUT_TEST_ENV) node test/run_layout_baseline.js --suites "$(filter-out baseline,$(LAYOUT_BASELINE_SUITES))" \
 		--jobs $(LAYOUT_BASELINE_CONCURRENCY) --results "$(LAYOUT_BASELINE_RESULTS)"
 
 test-radiant-baseline: export LAMBDA_AUDIO_OUTPUT := offline

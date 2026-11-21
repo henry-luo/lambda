@@ -343,6 +343,7 @@ static void dom_set_fragment_script_state(DomElement* root, DomFragmentScriptMod
             if (DomStyleRareExt* state = element->ensure_rare_ext()) {
                 state->script_already_started = mode == DomFragmentScriptMode::inert;
                 state->script_parser_pending = mode == DomFragmentScriptMode::parser_inserted;
+                state->script_parser_inserted = mode == DomFragmentScriptMode::parser_inserted;
             }
         }
         // A parser-inserted template holds a separate, unscheduled source tree.
@@ -743,15 +744,20 @@ static inline void dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATION_
     radiant_dom_mutation_begin(doc, kind, target, parent, attribute_name, presentation_property);
     // Recheck after invalidating the cascade, before reflow validates focus.
     if (recheck_focus && target) dom_recheck_focus_in(target->as_element());
-    dom_mutation_notify_observers(kind, target, parent, attribute_name, old_value);
+    // CSSOM retains a narrow rendering kind but still mutates the authored attribute.
+    DomJsMutationKind observer_kind = attribute_name &&
+        (kind == DOM_JS_MUTATION_INLINE_STYLE || kind == DOM_JS_MUTATION_STYLE_REPAINT)
+        ? DOM_JS_MUTATION_ATTRIBUTE : kind;
+    dom_mutation_notify_observers(observer_kind, target, parent, attribute_name, old_value);
     if (kind == DOM_JS_MUTATION_ATTRIBUTE) dom_slots_after_attribute_change(doc, target, attribute_name);
     radiant_dom_mutation_finish(doc, kind);
     if (kind == DOM_JS_MUTATION_ATTRIBUTE && attribute_name && str_ieq_cstr(attribute_name, "popover"))
         dom_popover_attribute_changed(target ? target->as_element() : nullptr);
     if (doc->js.prepare_inline_script) {
-        if (kind == DOM_JS_MUTATION_TEXT) {
+        if (kind == DOM_JS_MUTATION_TEXT || (kind == DOM_JS_MUTATION_ATTRIBUTE &&
+                attribute_name && str_ieq_cstr(attribute_name, "src"))) {
             dom_enqueue_script_reaction(doc, target);
-            if (parent != target) dom_enqueue_script_reaction(doc, parent);
+            if (kind == DOM_JS_MUTATION_TEXT && parent != target) dom_enqueue_script_reaction(doc, parent);
         } else if (kind == DOM_JS_MUTATION_CHILD_REMOVE) {
             dom_enqueue_script_reaction(doc, parent);
         }
@@ -806,6 +812,15 @@ extern "C" bool dom_css_element_is_indeterminate(void* element_ptr) {
 extern "C" void dom_notify_mutation(DomJsMutationKind kind, void* target, void* parent) {
     // Module-owned DOM setters must still publish mutations through the JS DOM ledger.
     dom_mutation_notify(kind, (DomNode*)target, (DomNode*)parent);
+}
+
+extern "C" void dom_notify_inline_style_mutation(DomElement* element,
+        CssPropertyCode property, const char* old_value) {
+    if (!element || !element->doc) return;
+    // Authored style writes can change selectors on other elements; keep that cascade broad.
+    bool dependency = dom_engine_attribute_has_css_dependency(element->doc, element, "style");
+    dom_mutation_notify(dependency ? DOM_JS_MUTATION_ATTRIBUTE : dom_style_mutation_kind(property),
+        element, element->parent, "style", old_value, dependency ? CSS_PROPERTY_UNKNOWN : property);
 }
 JS_FORWARD_VOID( dom_notify_mutation_detail, (DomJsMutationKind kind, void* target,                                                 void* parent, const char* attribute_name,                                                 const char* old_value), dom_mutation_notify, (kind, (DomNode*)target, (DomNode*)parent, attribute_name, old_value))
 
@@ -6396,10 +6411,12 @@ static bool dom_replace_text_content(DomElement* elem, const char* text) {
     if (!elem || !text) return false;
     // replace-all owns a single childList record, including both removed and added nodes.
     RootFrame roots(2);
-    Rooted<Item> parent(roots, dom_wrap_element(elem));
+    // copy borrowed text before wrapping the parent can collect its source.
+    bool has_text = *text != '\0';
     Rooted<Item> replacement(roots, js_name_item(text));
+    Rooted<Item> parent(roots, dom_wrap_element(elem));
     Item argument = replacement.get();
-    if (item_is_error(dom_replace_children(parent.get(), &argument, *text ? 1 : 0))) return false;
+    if (item_is_error(dom_replace_children(parent.get(), &argument, has_text ? 1 : 0))) return false;
     // Stylesheet text changes CSS globally; ordinary text is subtree-local.
     DomJsMutationKind kind = elem->tag_name() && str_icmp_cstr(elem->tag_name(), "style") == 0
         ? DOM_JS_MUTATION_STYLE : DOM_JS_MUTATION_TEXT;
@@ -7164,6 +7181,24 @@ static const JsUrlComponent k_url_components[] = {
     { "origin",   url_get_origin },
 };
 
+size_t dom_location_component_count(void) {
+    return sizeof(k_url_components) / sizeof(k_url_components[0]);
+}
+
+const char* dom_location_component_name(size_t index) {
+    return index < dom_location_component_count() ? k_url_components[index].name : nullptr;
+}
+
+Item dom_location_set_component(Item document, size_t index, Item value) {
+    DomDocument* doc = js_document_proxy_doc_from_item(document);
+    if (!doc || index >= dom_location_component_count()) return ItemError;
+    // keep existing navigation semantics while binding captured setters to their owning document.
+    void* previous = dom_swap_active_document(doc);
+    Item result = dom_document_proxy_set_property(js_name_item(k_url_components[index].name), value);
+    dom_restore_active_document(previous);
+    return result;
+}
+
 // The component's value as a JS string, or false when `prop` is not one of
 // them. A missing URL or component reads as "", as it does in a browser for a
 // document that has not been navigated.
@@ -7489,9 +7524,11 @@ static Item dom_document_get_property_for(DomDocument* doc_arg, Item prop_name) 
         return js_name_item("");
     }
 
-    // location-style URL access. We model document.location and bare
-    // location as aliases of the document/window proxy itself.
-    if (prop_id == JS_DOM_PROP_LOCATION || prop_id == JS_DOM_PROP_DOCUMENT) {
+    if (prop_id == JS_DOM_PROP_LOCATION) {
+        return dom_doc_has_browsing_context(doc)
+            ? dom_location_for_document(doc_to_proxy_item(doc)) : ItemNull;
+    }
+    if (prop_id == JS_DOM_PROP_DOCUMENT) {
         return doc_to_proxy_item(doc);
     }
     {
@@ -8038,8 +8075,18 @@ extern "C" Item dom_click_method_bridge(Item elem_item) {
     // D6.3.3: MouseEvent construction and dispatch can collect both JS carriers.
     RootFrame roots(2);
     Rooted<Item> element_root(roots, elem_item);
-    Rooted<Item> event_root(roots, js_create_click_mouse_event());
-    return dom_dispatch_event(element_root.get(), event_root.get());
+    Rooted<Item> event_root(roots, ItemNull);
+    DomStyleRareExt* state = elem->ensure_rare_ext();
+    if (!state) return ItemError;
+    // HTML click() suppresses re-entry on this element through dispatch and activation.
+    if (state->click_in_progress) return make_js_undefined();
+    state->click_in_progress = true;
+    event_root.set(js_create_click_mouse_event());
+    // click() has a void return even when dispatch reports a canceled event.
+    Item result = item_is_error(event_root.get()) ? event_root.get()
+        : dom_dispatch_event(element_root.get(), event_root.get());
+    state->click_in_progress = false;
+    return item_is_error(result) ? result : make_js_undefined();
 }
 
 #define JS_DOM_EVENT_LISTENER_BRIDGE(name, operation) \
@@ -8821,7 +8868,7 @@ extern "C" void dom_after_set_attribute(void* elem_ptr,
 extern "C" bool dom_set_non_style_metadata(void* target, const char* name, const char* value) {
     DomElement* element = (DomElement*)target;
     if (!element || !element->doc || !name || !value || strchr(name, ':') ||
-        (strncmp(name, "data-", 5) && strncmp(name, "aria-", 5))) return false;
+        !dom_element_can_write_metadata(element, name)) return false;
     // namespace/case-sensitive writes keep the general attribute path.
     for (const char* character = name; *character; character++)
         if (*character >= 'A' && *character <= 'Z') return false;
@@ -9089,27 +9136,8 @@ extern "C" void dom_set_option_selected_dirty(void* dom_elem, bool selected) {
 }
 
 extern "C" void dom_set_option_text_bridge(void* dom_elem, const char* value) {
-    DomElement* elem = (DomElement*)dom_elem;
-    if (!elem) return;
-    const char* sv = value ? value : "";
-    DomNode* child = elem->first_child;
-    while (child) {
-        DomNode* next = child->next_sibling;
-        child->parent = nullptr;
-        child->next_sibling = nullptr;
-        child->prev_sibling = nullptr;
-        child = next;
-    }
-    elem->first_child = nullptr;
-    elem->last_child = nullptr;
-    DomText* tn = DomText::create_copy(sv, strlen(sv), elem);
-    if (tn) {
-        tn->parent = lam::up(elem);
-        elem->first_child = lam::own(tn);
-        elem->last_child = lam::up(tn);
-    }
-    // option.text replaces children, so publish a structural mutation instead of an attribute record.
-    dom_mutation_notify();
+    // the shared replacement also updates the backing tree and leaves no child for empty text.
+    dom_replace_text_content(static_cast<DomElement*>(dom_elem), value ? value : "");
 }
 
 // For a <select required> element, returns true iff no <option> is
@@ -9695,7 +9723,7 @@ static bool dom_form_user_validity_visit(DomElement* element, void* context) {
     if (element->tag_name() &&
         (_is_tag(element, "input") || _is_tag(element, "textarea") ||
          _is_tag(element, "select")) &&
-        dom_find_form_owner(element) == scan->form_storage() &&
+        dom_find_form_owner(element) == scan->form &&
         !element->user_validity()) {
         element->set_user_validity(true);
         scan->changed = true;
@@ -9901,6 +9929,7 @@ typedef enum JsDomReflectKind {
     X("formNoValidate", "formnovalidate", BOOL, 0, DOM_TAG_INPUT | DOM_TAG_BUTTON) \
     X("noModule", "nomodule", BOOL, 0, DOM_TAG_SCRIPT) \
     X("defer", "defer", BOOL, 0, DOM_TAG_SCRIPT) \
+    X("async", "async", BOOL, 0, DOM_TAG_SCRIPT) \
     X("autofocus", "autofocus", BOOL, 0, DOM_TAG_ANY) \
     X("open", "open", BOOL, 0, DOM_TAG_DETAILS) \
     X("defaultChecked", "checked", BOOL, 0, DOM_TAG_INPUT) \
@@ -10326,6 +10355,32 @@ extern "C" Item dom_core_parent_node(Item n) {
     return node ? dom_parent_node_or_null(node) : ItemNull;
 }
 
+extern "C" Item dom_core_lookup_namespace_uri(Item n, Item prefix) {
+    RootFrame roots(2);
+    Rooted<Item> receiver(roots, n), key(roots, prefix);
+    if (key.get().item != ITEM_NULL && !is_js_undefined(key.get())) {
+        key.set(js_to_string(key.get()));
+        JS_RETURN_IF_ERROR(key.get());
+    }
+    DomNode* node = (DomNode*)dom_unwrap_element(receiver.get());
+    DomElement* element = nullptr;
+    if (DomAttr* attribute = node ? node->as_attribute() : nullptr) {
+        element = attribute->owner_element;
+    } else if (node && node->is_element()) {
+        element = node->as_element();
+        // Document locates through its document element; fragments never cross to their host.
+        if (_is_tag(element, "#document")) element = element->doc ? element->doc->root.get() : nullptr;
+    } else if (node && node->node_type != DOM_NODE_DOCTYPE) {
+        element = node->parent ? node->parent->as_element() : nullptr;
+    }
+    const char* tag_name = element ? element->tag_name() : nullptr;
+    if (!element || (tag_name && tag_name[0] == '#')) return ItemNull;
+    const char* name = key.get().item == ITEM_NULL || is_js_undefined(key.get())
+        ? nullptr : fn_to_cstr(key.get());
+    const char* uri = dom_element_lookup_namespace_uri(element, name);
+    return uri ? js_name_item(uri) : ItemNull;
+}
+
 static Item dom_optional_dictionary_boolean(Item options, const char* key) {
     if (options.item == ITEM_NULL || is_js_undefined(options)) return (Item){.item = ITEM_FALSE};
     if (!js_is_object_value(options)) return dom_raise_type_error("DOM options must be an object");
@@ -10741,6 +10796,12 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
 
     if (const DomElementRef* aria_ref = dom_aria_ref_for_property(prop)) {
         return dom_aria_element_ref_get(elem, aria_ref);
+    }
+
+    if (dom_element_is_html_tag(elem, MARKUP_NAME_SCRIPT) && !strcmp(prop, "async")) {
+        bool force_async = !elem->rare_ext || (!elem->rare_ext->script_parser_inserted &&
+            !elem->rare_ext->script_force_async_cleared);
+        return {.item = (force_async || elem->has_attribute("async")) ? ITEM_TRUE : ITEM_FALSE};
     }
 
     if (_is_tag(elem, "a") || _is_tag(elem, "area")) {
@@ -11951,9 +12012,12 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
 
     if (prop_id == JS_DOM_PROP_STYLE) {
         const char* style_text = dom_to_attr_cstr(value);
-        elem->set_attribute("style", style_text);
-        elem->set_styles_resolved(false);
-        dom_mutation_notify(DOM_JS_MUTATION_INLINE_STYLE, (DomNode*)elem, elem->parent);
+        const char* old_value = elem->get_attribute("style");
+        if (elem->set_attribute("style", style_text)) {
+            // assigning style forwards the same authored-attribute notifications as CSSOM.
+            elem->set_styles_resolved(false);
+            dom_notify_inline_style_mutation(elem, CSS_PROPERTY_UNKNOWN, old_value);
+        }
         log_debug("dom_set_property: set style='%.50s' on <%s>",
                   style_text, elem->tag_name() ? elem->tag_name() : "?");
         return value;
@@ -12515,6 +12579,10 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
         // assignment of a non-bool truthy value writes empty string, not the
         // raw value.
         if (_is_bool_reflected(elem, prop)) {
+            if (!strcmp(prop, "async") && dom_element_is_html_tag(elem, MARKUP_NAME_SCRIPT)) {
+                // the IDL setter clears force-async even when no attribute needs removing.
+                if (DomStyleRareExt* state = elem->ensure_rare_ext()) state->script_force_async_cleared = true;
+            }
             const char* attr = _idl_to_attr_name(prop);
             if (!attr) attr = prop;
             // lowercase the attr name in case caller passed the camelCase form
@@ -12536,7 +12604,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
             // IDL writes are attribute writes too: refresh the engine's constraint mirrors
             dom_reinit_behavior_if_constraint_attr(elem, attr);
             dom_cssom_owner_attribute_changed(elem, attr);
-            dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+            dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent, attr);
             return value;
         }
 
@@ -12574,7 +12642,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
             snprintf(buf, sizeof(buf), "%ld", n);
             elem->set_attribute(int_attr, buf);
             if (canvas_dimension) dom_canvas_reset_context(elem_item);
-            dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+            dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent, int_attr);
             return value;
         }
 
@@ -12587,7 +12655,8 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
             _is_write_reflected(elem, prop, &string_attr)) {
             dom_element_set_attribute_ns(elem, "", string_attr, dom_to_attr_cstr(value));
             dom_cssom_owner_attribute_changed(elem, string_attr);
-            dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+            // reflected writes must identify the attribute for observers and src preparation.
+            dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent, string_attr);
             return value;
         }
 
@@ -15769,6 +15838,9 @@ static Item dom_set_attribute_ns_value(Item n, Item ns, Item qname, Item value_a
     const char* local_name = colon ? colon + 1 : qualified_name;
     const char* old_value = replaced_value ? replaced_value :
         dom_element_attribute_value_ns(elem, namespace_uri, local_name);
+    // null-namespace writes and reflected properties share ordinary metadata semantics.
+    if (!*namespace_uri && !replace_name && !replaced_value &&
+        dom_set_non_style_metadata(elem, stored_name, value)) return ItemNull;
     if (!dom_element_set_attribute_ns(elem, namespace_uri, stored_name, value, replace_name)) return ItemNull;
     if (!*namespace_uri) dom_attribute_value_did_set(elem, stored_name, value, old_value);
     else dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem,
@@ -18069,9 +18141,9 @@ static Item js_web_keyframe_property_names(Item frame, Pool* pool,
                 !strcmp(name, "composite")) continue;
         char css_name[128];
         dom_style_camel_to_css_prop(name, css_name, sizeof(css_name));
-        // Resolve aliases the same way as when parsing the keyframe value.
+        // property eligibility uses the parser's normalized animation track.
         const CssPropertyRuntimeMetadata* metadata = css_property_runtime_metadata(
-            css_property_code_from_name(css_name));
+            css_animation_property_target(css_property_code_from_name(css_name)));
         if (!metadata || metadata->animation_type == ANIM_VAL_NONE) continue;
         if (!lam::pool_grow_array(pool, &names, &capacity, *out_count + 1, 8))
             return ItemError;

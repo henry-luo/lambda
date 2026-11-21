@@ -18,9 +18,20 @@
 > where no formal ruling covers a point, the vibe ledger ID is given.
 
 <a id="online-framerauth-layout-timeout"></a>
-## FramerAuth startup reaches the capture deadline after native startup repairs
+## FramerAuth startup and remaining hero omission
 
-**OPEN, 2026-11-20; root cause unconfirmed.** After JS03-L3 and JS13-L27,
+**PARTIAL, 2026-11-21: load timeout resolved by RI-173; hero omission remains.**
+The current native request loads and captures in 70.04s at the unchanged
+150-second deadline and 1000ms post-load frame. Repeated SVG stroke-phase
+attribute mutations were forcing HTML flow for otherwise paint-only animation
+batches. [RI-173](Radiant_Issue_Ledger%20%28fixed%29.md#ri-173) records the shared
+repair and focused qualification. The current matched browser/native pair
+retains the manual high review. Browser instrumentation records opacity
+Web Animations from an authored 0.001 to 1 on the hero heading/copy/actions;
+automatic native Web Animations playback remains a documented feature gap.
+No visibility or clock override is used. Evidence: `temp/online-visual-round125/`.
+
+**Earlier evidence, 2026-11-20; root cause then unconfirmed.** After JS03-L3 and JS13-L27,
 the current FramerAuth (`https://framerauth.com/`) diagnostic no longer logs
 the former Framer fatal TypeError, but repeated layout work reaches the
 unchanged 150-second outer capture deadline. No PNG is produced. The output
@@ -34,6 +45,37 @@ comparison, not the independent title/stack repairs. Do not raise timeouts,
 disable script layout or claim an elapsed-time improvement over a renderer
 that exits the client path early with an error. Evidence:
 `temp/online-visual-round118/saas_landing_207/`.
+
+**2026-11-21 recheck:** JS13-L29 removes irrelevant preload/icon stylesheet
+invalidation in focused controls, but the current FramerAuth diagnostic still
+reaches the unchanged 150-second deadline without a PNG. Cache tracing shows
+later repeated inline-style batches, including animated transforms, carrying
+an unknown presentation-property code. This identifies the next investigation
+path; it does not prove that those writes can bypass layout safely. The prior
+canonical pair remains unchanged. Evidence: `temp/online-visual-round120/`.
+
+**2026-11-21 CSSOM recheck:** JS13-L30 and RI-170 preserve authored
+attribute notifications and property identity, and consume admitted paint
+invalidation. JS13-L31 removes unrelated keyframe dependency fallback. The
+combined release passes 23 focused controls; established-transform controls
+need one layout instead of eleven. FramerAuth now records known transform
+properties, but still reaches 150 seconds without a PNG. No live speed or
+page-clearance claim follows from those controls. Its canonical comparison
+remains high. Evidence: `temp/online-visual-round121/` and
+`temp/online-visual-round122/`.
+
+## Post-merge online renderer build repairs — 2026-11-21
+
+The merged `DomFormUserValidityScan` is a local scan record with a `form`
+pointer. A mechanical accessor rename changed its comparison to the nonexistent
+`scan->form_storage()` method. Restoring the pointer access fixes compilation;
+the existing `ValiditySelectorsUseInitialAndLiveConstraints` render control
+passes against the rebuilt host. Input's missing geometry-structure brace is
+recorded separately as LI-082. Stale generated makefiles also omitted the new
+server backend; regenerating them from the JSON source manifest and applying
+the documented sibling-archive generator restores linking. Ownership/build
+boundaries remain **D9.1.1v4 / D9.1.3v2 / D9.1.5**. No generated build files or
+vendor source were hand-edited. Evidence: `temp/online-visual-round120/`.
 
 <a id="durable-scratch-spool-amplification"></a>
 Scratch spool durability amplification was fixed and moved to the
@@ -65,14 +107,24 @@ both fail at the same line. This blocks linking the host for verification.
 
 <a id="lr12-66"></a>
 
-## LR12-66 — Host tests still access containment fields on `BlockProp`
+## LR12-66 — FIXED
 
-**OPEN**, reproduced on 2026-11-21 at Lambda `017c686351` and Radiant `4871cce`
-(D9.1.3v2, DV4.2). The `debug_native` targets for `test_css_animation_gtest`
-and `test_rdt_vector_gtest` still access `computed_containment` and `contain_paint`
-directly on `BlockProp`. Radiant now stores these fields in `BlockContainmentProp`.
-The original sources and the extension rename both fail to compile these tests.
-[Animation test](../test/test_css_animation_gtest.cpp#L2225) · [Vector test](../test/test_rdt_vector_gtest.cpp#L523)
+The host tests now use the optional containment and fragment-geometry groups.
+See the [fixed record](<Lambda_Issue_Ledger (fixed).md#lr12-66>).
+
+<a id="lr12-67"></a>
+
+## LR12-67 — FIXED
+
+The animation fixture retires effects before destroying their mock targets.
+See the [fixed record](<Lambda_Issue_Ledger (fixed).md#lr12-67>).
+
+<a id="lr12-68"></a>
+
+## LR12-68 — FIXED
+
+The host baseline exercises real stylesheet owners and standard line clamping.
+See the [fixed record](<Lambda_Issue_Ledger (fixed).md#lr12-68>).
 
 On Lambda `44b6c6a23d` and Radiant `362a90b`, `test_radiant_document_gtest`
 also fails to compile because it reads `container_axes` directly from `BlockProp`.
@@ -297,6 +349,13 @@ required dependencies are 158,957 and 207,242 bytes, exceeding the existing
 reduced own-array-push override passes both AST and MIR execution, excluding that
 suspected dispatch defect. Increasing source budgets has not been qualified as
 a fix; the later runtime requirements and rendering outcome remain unproven.
+
+**2026-11-21 Setpoint recheck:** the current Astro entry remains 239,880
+bytes against the 131,072-byte pre-layout defer limit. The loaded native
+snapshot remains behind its initial gray cover. The same URL/hash and size were
+already present in round18's diagnostic observations; this is not a newly
+isolated semantic failure. The current source and size record are retained in
+`temp/online-visual-round123/setpoint-module-0.{js,json}`. No limit changes.
 
 This explains an admission barrier, not complete browser-framework parity.
 Do not bypass admission or pretend that a longer snapshot window executes
@@ -727,11 +786,153 @@ and checks that each is still in the preparation document when its turn comes.
 Fragment markup stays inert, started script clones retain the started bit,
 and nested classics defer their jobs until the enclosing script checkpoint.
 The standalone probe and same-origin XHR reduction now turn green. Tests cover
-AST and MIR execution. Dynamically scheduled external scripts, modules and
-their load ordering remain open.
+AST and MIR execution. Dynamic classic external scripts and their async/ordered
+scheduling are now implemented; dynamic modules and body parser-arrival replay
+remain open. See the round153 qualification below.
 **Task blocker:** no for independent layout repairs. Host/DOM ownership follows
 **D9.1.3v2**, shared tier contracts **D8.4.4**, and capture timing **D10.1.7**.
 No formal ruling or capture budget changes.
+
+**2026-11-21 Attentive follow-up:** a valid initial Vimeo iframe and the
+unmodified current player SDK pass the same constructor control in Lambda
+and Chromium. On the retained full page, consent code removes iframe URLs
+into `fs-consent-src` and disables the three SDK scripts. Chromium at the
+1000ms frame has those scripts at type `fs-consent`, no `src`, and no Vimeo
+global. Native executes the earlier collected SDK sources and then reports
+three invalid-embed exceptions against the now-empty iframe URLs. This
+persists after the independently qualified EventTarget repair JS13-L39.
+The remaining defect is preparation against stale parser-task metadata,
+not the Vimeo URL predicate or attribute reader. Correct scheduling must
+distinguish changes before preparation from changes to an already-prepared
+deferred script; blindly rechecking attributes at execution would be wrong.
+No consent bypass, forced URL restoration or late execution filter is added.
+Evidence: `temp/online-visual-round148/attentive-diagnostic.log`,
+`attentive-probe-lambda-output.log`, `browser-attentive.json`, and
+`attentive-after/` (**D8.4.4 / D9.5.6v2 / D10.1.7**).
+
+**2026-11-21 parser preparation repair:** FIXED for live task snapshots and
+head parser arrivals. The source scan now acts as a preload scan; each parser
+candidate snapshots its current attributes, text and document base at its
+preparation turn. Existing fetches are reused when the URL is unchanged.
+Preparation precedes assignment to the existing defer/async queues, so later
+attribute changes do not alter a prepared script. Native queue pins preserve
+removed script identities, and adoption into another document cancels execution
+against the original preparation document. Head staging remains silent; resume
+publishes each new segment through the next script once, before its observer
+checkpoint. The existing collector, resource policy, evaluator and source caps
+are reused (**D8.4.4 / D9.5.6v2 / D6.3.3 / D5.5.1**). The HTML preparation
+contract is [script preparation](https://html.spec.whatwg.org/multipage/scripting.html#prepare-the-script-element).
+
+Thirteen shared controls cover disabled/redirected scripts, inline text,
+activation, scheduling, prepared source retention, removal, adoption and head
+segment visibility. All pass in the default host and MIR and in Chromium.
+The final focused batch passes **64/64**, with **13/13** additional MIR cases
+and **630/630** JavaScript layout baseline cases. The independent adoption
+teardown repair is recorded below. Evidence: `temp/online-visual-round152/`
+(`qualified-focused.log`, `qualified-mir.log`, browser preparation results,
+and `baseline-js-results.txt`). No clock, source budget or public state layout
+changes; no full multi-category baseline or catalog capture sweep.
+
+**Remaining body-arrival gap:** current Attentive still executes its three
+body SDK tasks and reports the same invalid-embed errors. Its old/new native
+pixels are identical; the refreshed browser pair remains **67.46% mean error /
+91.47% changed area**, with a blank native frame. A minimal equivalent observer
+disables the head script after repair, but misses the body script; Chromium
+disables both. The post-DOM host does not replay body parsing/insertion arrivals.
+The head repair does not complete incremental document parsing, and no body
+notification shortcut or consent bypass is added. Evidence:
+`body-arrival-probe.log`, `body-arrival-results.json` and
+`live/saas_landing_123/` under round152. Attentive remains high severity;
+dynamic modules and broader parser progression remain open
+(**D9.5.6v2 / D10.1.7**).
+
+**2026-11-21 Kotlin follow-up:** the current 2,032,728-byte parser-inserted
+classic application bundle is admitted and executes; the qualified native
+capture still shows its loading spinner. Bootstrap waits for i18next's
+initialization promise. Its backend requests the en-US translation through
+Webpack's `l.e(61)`, which appends a classic external script and awaits its
+load/registration. The native post-connection callback
+`prepare_connected_inline_script` excludes elements with `src`, so this
+path cannot complete. This is the existing dynamic external preparation
+gap, separate from initial script admission and native layout. Ownership
+remains **D8.4.4 / D9.5.6v2**, with capture policy **D10.1.7**. No synchronous
+append loader, fabricated load event, forced reveal or budget change is
+introduced. Evidence: `temp/online-visual-round135/kotlin.html`,
+`kotlin-app.js`, and `kotlin-current/` (release collected/settled task trace,
+loadOK, 1000ms post-load, 9805.90ms capture). No canonical image is replaced.
+
+**2026-11-21 dynamic classic external repair:** connected external classics now
+prepare once from live DOM metadata and use the existing asynchronous fetch,
+classic evaluator and host task queue. Default-async sources run by completion
+order; setting `async=false` before preparation preserves insertion order.
+Each source has its own task and microtask checkpoint. Prepared URLs survive
+attribute changes and removal, and adoption checks the preparation document.
+`currentScript`, load/error delivery, empty-URL handling and load blocking share
+the existing scheduler. Reflected `src` writes now pass through the common
+attribute setter, including observer attribute names and old values. Native
+resource discovery yields script acquisition to the installed script host,
+avoiding duplicate requests. No synchronous append loader or fabricated event
+is introduced (**D8.4.4 / D9.5.6v2 / D6.3.3 / D9.1.3v2**).
+
+The existing 5MiB per-source, 20MiB queue and 128KiB async/defer execution
+limits remain unchanged. The existing 250ms load boundary pumps pending fetches
+without advancing the selected virtual clock. Twenty Chromium controls cover
+ordering, chains, removal, clones, connected IDL/setAttribute changes, errors,
+empty responses, adoption, inert/unsupported scripts, observer metadata and a
+script-created first remote stylesheet. Two extra controls retain the large
+async/ordered source caps. The pre-Location candidate passes 95 focused host
+checks and eight additional MIR cases. Evidence: `temp/online-visual-round153/`
+(`focused-candidate.log`, `focused-mir.log`, `browser-dynamic*results.json`).
+The stylesheet initialization defect is [RI-188](Radiant_Issue_Ledger.md#ri-188).
+
+Kotlin's 10,929-byte translation chunk now executes. Its third-candidate frame
+advances from a spinner to the header and language tabs, then a React error
+fallback. The next reduced cause is missing enumerable Location components;
+that repair and final page qualification are recorded in
+[JS13-L40](jube/JS_Issue_Ledger.md#js13-l40). Dynamic modules, body parser-arrival
+replay and broader incremental parsing remain open. This repair alone does not
+clear the whole page or change capture policy (**D10.1.7**).
+
+**Round153 final qualification:** the separate live Location repair
+[JS13-L40](jube/JS_Issue_Ledger.md#js13-l40), finite-request checkpoint repair
+[JS13-L41](jube/JS_Issue_Ledger.md#js13-l41), and virtual immediate repair
+[JS13-L42](jube/JS_Issue_Ledger.md#js13-l42) complete the next bootstrap steps.
+Kotlin now renders the documentation article, cards and current version;
+its sidebar navigation remains absent. The matched1000ms pair is still high
+at10.62% mean error /22.60% changed area. No whole-page clearance is claimed.
+The prior renderer showed a spinner; image score alone does not represent
+that content recovery. The final shared batch passes60 focused controls;
+the JavaScript layout baseline passes630/630 once at this milestone.
+The source caps, capture window and watchdog remain unchanged. No full
+multi-category baseline or catalog sweep is repeated. Current evidence is
+`temp/online-visual-round153/qualified-focused.log`, `baseline-js-results.txt`
+and `live/kotlin_docs/final/`.
+
+**2026-11-21 AWS follow-up:** the public documentation entry
+`/assets/r/awsdocs-main-landing-page.2.0.0.js` is only6,743 bytes, but its
+bootstrap awaits30 Webpack chunk promises before calling the page renderer.
+Its loader creates external script elements and waits for their registration.
+The retained initial HTML contains the page data in a hidden encoded-XML input,
+rather than rendered main content. This is another concrete dependency on the
+same dynamic external preparation gap; the small entry size does not establish
+that the application has executed. Subsequent chunk admission/runtime support
+is unqualified, and no new live capture or clearance is claimed. Evidence:
+`temp/online-visual-round146/aws-landing.js` and
+`temp/online-visual-round2/documents/aws_docs.html`. No synchronous append
+loader, fabricated completion, source-limit or clock change is introduced
+(**D8.4.4 / D9.5.6v2 / D10.1.7**).
+
+**Round154 AWS qualification:** the completed dynamic classic path executes
+26 current chunks. Four mandatory application chunks remain above the
+unchanged128KiB async/defer cap:136065,440498,810439 and176737 bytes; a separate
+329470-byte telemetry script is also skipped. The native before/after images
+are identical and blank. The fresh browser pair remains high at12.86% mean
+error. This advances acquisition/execution support without completing AWS
+startup; no limit is raised or whole-page clearance claimed. Evidence:
+`temp/online-visual-round154/live/aws_docs/`, with opt-in task diagnostics.
+Kotlin's remaining transparent sidebar is separately reduced to the
+[network/virtual-clock timing gap](jube/JS_Issue_Ledger.md#js13-l43), rather than
+missing TOC data or geometry (**D8.4.4 / D6.4.4 / D10.1.7**).
 
 **2026-11-20 Aircall follow-up:** its 27,863-byte OneTrust stub executes, receives
 the domain configuration (HTTP 200, 7,140 bytes) and geolocation (HTTP 200,
@@ -770,6 +971,25 @@ still need requalification with their remote settings and authored timers.
 Evidence: temp/online-visual-round51/{inline-script.html,inline-script.log,
 inline-browser.log,dynamic-settings.cjs,dynamic-settings-result.json}; pin
 c4820dc947adc9c460968a46f86aad343a1428682900eb50d91f038b7f496b50.
+
+## Online foreign-document adoption retirement — 2026-11-21
+
+<a id="online-foreign-document-retirement"></a>
+
+**Foreign-document adoption teardown — FIXED, 2026-11-21.** A document created
+by `createHTMLDocument()` can own an adopted node whose rare extension is
+allocated from the main document's pool. Window retirement destroyed that pool
+before deferred runtime cleanup released the foreign-document cache;
+`dom_retire_begin_destroy()` then read freed node storage while unlinking slots.
+The main document's bound host now releases that cache before native pool
+destruction, using the existing foreign-document cleanup path. Deferred runtime
+retirement and precise ownership stay intact (**D5.5.1 / D6.3.3 / D6.4.1**).
+Both an adopted prepared script and a non-executable data script crashed before
+repair and now terminate normally; Chromium controls pass. The standalone data
+adoption reduction also reproduced `LOAD_OK` followed by SIGSEGV on round151.
+Evidence: round152 `adoption-storage-before/after` logs and JSON,
+`tests-retirement.log`, archived crash reports and the focused qualification
+above. No vendor changes or native-stack GC scanning.
 
 ## Online observer zero-area intersections — 2026-11-17
 
@@ -3540,6 +3760,14 @@ establishes and verifies RI-063, while Bizzabo's complete saved page plays.
 
 ## Online source growth beyond snapshot admission — 2026-11-13
 
+**2026-11-21 recheck:** About still loads and captures a solid teal frame.
+Its current blocking vendor bundle `vendor-836a3e5ff50c378a30ba.js` contains
+6,044,673 bytes, above the unchanged 5,242,880-byte per-source limit. The
+home-page bundle is 995,726 bytes. This reproduces the previously recorded
+admission barrier; it is not reported as a new layout regression or a fix.
+Source sizes, current document and native capture are retained under
+`temp/online-visual-round123/`. Both existing high-severity rows are preserved.
+
 <a id="online-northstar-source-admission"></a>
 
 **Status:** OPEN profile/capability limit; a new layout regression is excluded
@@ -3752,3 +3980,11 @@ fixes. Evidence: `temp/sync-test-performance-impl/radiant-rerun.log` and the ful
 `radiant-baseline.log`. The remaining 201 document resolver tests and 329 UI
 automation tests pass. This failure is separate from the Input LI-076 constrained
 error contract failure and is not a sync performance acceptance case.
+
+
+## Online form baseline failures — FIXED
+
+<a id="online-form-baseline-20261121"></a>
+
+Fresh Chromium captures and the repaired DOM methods qualify both fixtures.
+See the [fixed record](<Lambda_Issue_Ledger (fixed).md#online-form-baseline-20261121>).

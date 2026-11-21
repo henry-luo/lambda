@@ -27,6 +27,11 @@ void js_xhr_set_base_url(const char* base_url);
 // the returned MEM_CAT_JS_RUNTIME string.
 char* dom_resolve_network_url(const char* url, const char* base_url);
 
+// resolve against the current document's live base; standalone realms use fallback_base.
+// fetch keeps its local WPT root mapping, while XHR open resolves file bases too.
+char* dom_resolve_document_request_url(const char* url, const char* fallback_base,
+    bool resolve_file_base);
+
 // XHR methods (called via js_new_function on XHR objects)
 Item js_xhr_open(Item method_arg, Item url_arg, Item async_arg);
 Item js_xhr_set_request_header(Item name_arg, Item value_arg);

@@ -920,7 +920,10 @@ static int virtual_clock_advance_slice(double target_ms, bool animation_frame) {
     return progress;
 }
 
-extern "C" int js_event_loop_advance_virtual_time(double delta_ms, int frame_steps) {
+static int virtual_clock_wait_native_until(uint64_t deadline_ns);
+
+static int virtual_clock_advance(double delta_ms, int frame_steps,
+                                 uint64_t native_deadline_ns) {
     if (!js_active_runtime_state) return 0;
     if (!virtual_clock_enabled) return 0;
     if (delta_ms < 0.0) delta_ms = 0.0;
@@ -942,7 +945,16 @@ extern "C" int js_event_loop_advance_virtual_time(double delta_ms, int frame_ste
     int progress = 0;
     for (int frame = 1; frame <= frames; frame++) {
         double slice_ms = start_ms + delta_ms * ((double)frame / (double)frames);
+        double slice_duration_ms = slice_ms - virtual_clock_ms;
+        uint64_t slice_start_ns = native_deadline_ns ? uv_hrtime() : 0;
         progress += virtual_clock_advance_slice(slice_ms, true);
+        if (native_deadline_ns && slice_duration_ms > 0.0) {
+            // finite I/O gets its elapsed frame before the clock selects a later
+            // frame; otherwise completion-created animations are born at export.
+            uint64_t slice_deadline_ns = slice_start_ns + (uint64_t)(slice_duration_ms * 1000000.0);
+            if (slice_deadline_ns > native_deadline_ns) slice_deadline_ns = native_deadline_ns;
+            progress += virtual_clock_wait_native_until(slice_deadline_ns);
+        }
     }
     if (frames == 0) {
         progress += virtual_clock_advance_slice(target_ms, false);
@@ -950,6 +962,10 @@ extern "C" int js_event_loop_advance_virtual_time(double delta_ms, int frame_ste
         progress += virtual_clock_advance_slice(target_ms, false);
     }
     return progress;
+}
+
+extern "C" int js_event_loop_advance_virtual_time(double delta_ms, int frame_steps) {
+    return virtual_clock_advance(delta_ms, frame_steps, 0);
 }
 
 static uv_loop_t* js_timer_get_loop(const char* name) {
@@ -1103,8 +1119,8 @@ static Item js_setImmediate_impl(Item callback, Item args_array, bool has_args) 
     th->is_interval = false;
     th->timer.data = th;
     js_timer_capture_argument_pack(th, args_array, has_args);
-    // immediates queued while draining the current check phase belong to the next turn.
-    return js_timer_finish_create(loop, th, JS_CLASS_IMMEDIATE, 1, 0,
+    // the virtual timer ID boundary supplies the next turn without inventing a millisecond delay.
+    return js_timer_finish_create(loop, th, JS_CLASS_IMMEDIATE, 0, 0,
         "Immediate", 9);
 }
 JS_FORWARD_ITEM(js_setImmediate_timer, (Item callback), js_setImmediate_impl, (callback, ItemNull, false))
@@ -1812,6 +1828,21 @@ static bool event_loop_has_pending_requests(void) {
     return false;
 }
 
+static int virtual_clock_wait_native_until(uint64_t deadline_ns) {
+    int progress = 0;
+    while (event_loop_has_pending_requests()) {
+        uint64_t now_ns = uv_hrtime();
+        if (now_ns >= deadline_ns) break;
+        int remaining_ms = (int)((deadline_ns - now_ns + 999999ULL) / 1000000ULL);
+        if (event_loop_pump_native_wait(remaining_ms)) progress++;
+        js_event_loop_render_checkpoint();
+        // completion microtasks and zero-delay work share this frame, including
+        // requests chained from a callback. No post-selection time movement.
+        progress += js_event_loop_advance_virtual_time(0.0, 0);
+    }
+    return progress;
+}
+
 extern "C" int js_event_loop_wait_until(int (*predicate)(void*), void* user, int watchdog_ms) {
     if (!js_active_runtime_state || !predicate || watchdog_ms <= 0) return -1;
     uint64_t start_ns = uv_hrtime();
@@ -1877,18 +1908,20 @@ static int js_event_loop_drain_impl(bool keep_intervals) {
     }
 
     if (auto_close_mode) {
+        uint64_t drain_start_ns = uv_hrtime();
         if (virtual_clock_enabled) {
             // Resource-completion tasks run at the load boundary. Settle their
             // zero-delay work even when the requested window is zero.
             js_event_loop_advance_virtual_time(0.0, 0);
             if (auto_close_settle_ms > 0.0) {
-                js_event_loop_advance_virtual_time(auto_close_settle_ms, 0);
+                uint64_t native_deadline_ns = drain_start_ns +
+                    (uint64_t)EVENT_LOOP_DRAIN_TIMEOUT_MS * 1000000ULL;
+                virtual_clock_advance(auto_close_settle_ms, 0, native_deadline_ns);
                 // Browser snapshots observe the next rendering opportunity after
                 // their wait completes, including timer callbacks due this frame.
-                js_event_loop_advance_virtual_time(1000.0 / 60.0, 1);
+                virtual_clock_advance(1000.0 / 60.0, 1, native_deadline_ns);
             }
         }
-        uint64_t drain_start_ns = uv_hrtime();
         stop_all_interval_timers();
         for (int turn = 0; turn < 4 || event_loop_has_pending_requests(); turn++) {
             // NOWAIT polling can retire the realm before an admitted fetch/XHR
@@ -1914,8 +1947,9 @@ static int js_event_loop_drain_impl(bool keep_intervals) {
             // rAF and IO delivery may queue more work at this same capture time.
             if (virtual_clock_enabled) js_event_loop_advance_virtual_time(0.0, 0);
             else js_microtask_flush();
+            // checkpoints can start requests after libuv computed its liveness result.
             if (!active && timer_handle_count == 0 && frame_callbacks == 0 &&
-                !js_animation_frame_has_pending()) break;
+                !js_animation_frame_has_pending() && !event_loop_has_pending_requests()) break;
         }
         close_all_timer_handles();
         lambda_uv_run_loop(loop, UV_RUN_NOWAIT);

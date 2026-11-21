@@ -20,6 +20,171 @@ observations still require re-verification. Add new Radiant issues here.
 
 ## Open issues
 
+<a id="ri-189"></a>
+
+### RI-189 — FIXED
+
+Retained recascade now resets non-inherited opacity before applying current
+declarations and effects. An expired no-fill animation can no longer leave
+its final active sample when opacity is undeclared. See the
+[opacity restoration repair](<Radiant_Issue_Ledger (fixed).md#ri-189>).
+
+<a id="ri-188"></a>
+
+### RI-188 — FIXED
+
+A document with no native resource manager can acquire its first remote
+stylesheet after script execution. Discovery now visits links before the
+manager guard, reusing the existing manager-initializing queue helper. See the
+[first stylesheet repair](<Radiant_Issue_Ledger (fixed).md#ri-188>).
+
+
+<a id="ri-187"></a>
+
+### RI-187 — FIXED
+
+Snapshot preparation settles late native image state and resource callbacks
+in the retained document realm without advancing its selected clock. See the
+[late resource completion repair](<Radiant_Issue_Ledger (fixed).md#ri-187>).
+
+<a id="ri-186"></a>
+
+### RI-186 — FIXED
+
+Linear-gradient resolution allocates stop storage for a sole double-position
+color group, consistently with Input's LI-096 validation repair. See the
+[gradient allocation repair](<Radiant_Issue_Ledger (fixed).md#ri-186>).
+
+<a id="ri-185"></a>
+
+### RI-185 — FIXED
+
+GIF playback samples elapsed frame deadlines across missed ticks, normalizes
+encoded repeat counts, and retains the final frame until cancellation. See
+the [GIF playback repair](<Radiant_Issue_Ledger (fixed).md#ri-185>).
+
+<a id="ri-184"></a>
+
+### RI-184 — FIXED
+
+Parser-discovered external scripts dispatch completion after evaluation and
+microtasks, with restored currentScript and the original rooted event target.
+Completion preserves bootstrap's pending stylesheet writes. See the
+[script completion repair](<Radiant_Issue_Ledger (fixed).md#ri-184>).
+
+<a id="ri-183"></a>
+
+### RI-183 — FIXED
+
+CSS resource discovery now queues image-set string sources through the existing
+URL visitor while keeping type() strings as metadata. See the
+[image-set discovery repair](<Radiant_Issue_Ledger (fixed).md#ri-183>).
+
+
+<a id="ri-182"></a>
+
+### RI-182 — FIXED
+
+A local document's selected CSS resources can now initialize the network
+manager before its first background image is consumed. See the
+[CSS resource initialization repair](<Radiant_Issue_Ledger (fixed).md#ri-182>).
+
+
+<a id="ri-181"></a>
+
+### RI-181 — FIXED
+
+Snapshot preparation now lazily creates the network manager for a local
+HTML document's first admitted remote image or poster. See the
+[resource initialization repair](<Radiant_Issue_Ledger (fixed).md#ri-181>).
+
+<a id="ri-180"></a>
+
+### RI-180 — FIXED
+
+HTML resource discovery and early script/stylesheet prefetch honor authored
+fetchpriority hints. Passive image decoding preserves the owner's priority.
+See the [priority repair](<Radiant_Issue_Ledger (fixed).md#ri-180>).
+
+
+<a id="ri-179"></a>
+
+### RI-179 — FIXED
+
+Local font shorthands stop implicit inheritance; missing scalar components
+inherit computed parent values while native UA defaults remain local. See the
+[font inheritance repair](<Radiant_Issue_Ledger (fixed).md#ri-179>).
+
+<a id="ri-178"></a>
+
+### RI-178 — FIXED
+
+Loader-time normal/pseudo computed reads now select and project font shorthand
+components. See the
+[font CSSOM repair](<Radiant_Issue_Ledger (fixed).md#ri-178>).
+
+
+<a id="ri-177"></a>
+
+### RI-177 — FIXED
+
+Grid alignment now consumes a nested flex formatter's completed height instead
+of replacing it with an intrinsic estimate. See the
+[final-height repair](<Radiant_Issue_Ledger (fixed).md#ri-177>).
+
+<a id="ri-176"></a>
+
+### RI-176 — FIXED
+
+A multi-track span crossing flexible tracks has a zero automatic minimum;
+explicit item and intrinsic track minima remain effective. See the
+[spanning-minimum repair](<Radiant_Issue_Ledger (fixed).md#ri-176>).
+
+
+<a id="ri-175"></a>
+
+### RI-175 — FIXED
+
+Internal table display roles now use the shared display-name serializer in
+CSSOM and layout output. See the
+[table-role reflection repair](<Radiant_Issue_Ledger (fixed).md#ri-175>).
+
+<a id="ri-174"></a>
+
+### RI-174 — FIXED
+
+Display rollback no longer reapplies an author all reset after the cascade
+has removed it. See the
+[UA fallback repair](<Radiant_Issue_Ledger (fixed).md#ri-174>).
+
+### RI-173 — FIXED
+
+SVG stroke-phase updates no longer force HTML flow when selector and motion
+checks permit paint-only reconciliation (**D9.1.3v2 / D9.5.6v2 / D5.5.1**).
+See the [fixed record](Radiant_Issue_Ledger%20%28fixed%29.md#ri-173).
+
+### RI-172 — FIXED
+
+Transform substitutions and CSS-wide resets retain layout when they may remove
+an existing containing block (**D9.1.3v2 / CI-18**). See the
+[fixed record](Radiant_Issue_Ledger%20%28fixed%29.md#ri-172).
+
+### RI-171 — FIXED
+
+The layout-only WPT harness omitted an inequality assertion, aborting fixture
+setup before temporary display styles were cleared. A truthful SameValue
+assertion restores cleanup; the original case now matches all four elements.
+No layout implementation, reference or required-pass entry changed.
+Ownership follows **D9.1.1v4 / D10.1.7**. See the
+[fixed record](Radiant_Issue_Ledger%20%28fixed%29.md#ri-171).
+
+
+### RI-170 — FIXED
+
+Retained paint publication now consumes its own layout-dirty flags against an
+unchanged layout environment (**D9.1.3v2 / D10.1.7**). See the
+[fixed record](Radiant_Issue_Ledger%20%28fixed%29.md#ri-170).
+
 ### RI-141 — Native export image fixture misses its preloaded cache entry
 
 Open, 2026-11-20. In the standalone native release suite,
@@ -982,6 +1147,21 @@ temp/online-visual-round6/craft-live.png, and the unchanged browser reference
 test/online/snapshots/saas_landing_436-browser.png. This observation does not
 assign other pages' blank content to masking without their own evidence.
 
+**Additional evidence, 2026-11-21:** Dock's `.hero-scene-foreground` repeats
+the full workspace photograph above its product panel (`z-index:1` on the
+parent layer). An authored URL WebP mask cuts out the center in Chromium.
+The missing image-mask consumer instead paints the photograph across the
+product panel. After LI-091 repairs the panel dimensions, hiding only this
+foreground in a diagnostic copy reveals the real Acme AE Onboarding panel;
+no panel markup or dimensions are replaced. This intervention is evidence,
+not a product fix or canonical capture. Saved DOM, original CSS, the qualified
+renderer image and the diagnostic image are under
+`temp/online-visual-round128/dock-static.html`,
+`temp/online-visual-round127/hero.css`,
+`temp/online-visual-round131/dock-static-fixed/` and
+`temp/online-visual-round132/dock-without-foreground/`. URL image masking
+remains outside this existing-bug milestone (D9.1.1v4 / D5.5.1).
+
 **Additional evidence, 2026-11-16:** Draftbit's border overlay uses two linear
 mask layers, `content-box` and `mask-composite:exclude` (prefixed `xor`). The
 radial-only consumer leaves its full gradient rectangle painted over the hero.
@@ -1021,7 +1201,41 @@ state remain unisolated; no assertion or skip was added. Evidence: Lambda
 
 <a id="ri-031"></a>
 
-### RI-031 — Current Dock document exceeds the online layout deadline
+### RI-031 — Dock captures after redundant work is removed; layout cost remains
+
+**Latest qualification129 — PARTIAL:** LI-089 evaluates the authored relative
+Oklch background; LI-090 reuses the existing all-only cascade cache for absent
+properties. Dock saves a PNG in140.11s at the unchanged150s/1000ms policy.
+Its blue hero, main heading and copy are restored. Against the preserved
+reference, mean error improves44.87%→12.12%, changed area70.07%→26.53%.
+Product screen/side photographs and header differences retain a manual high
+review. All66 native rendering and47 style-node controls pass; the milestone
+remains5609 passed,294 partial,one existing RI-171 failure. An intervening
+color-only timeout is excluded. No budget change. Report119 and Lambda
+`temp/online-visual-round129/` preserve the qualified pair and source pin.
+
+
+**Latest qualification 2026-11-21 — PARTIAL:** LI-087 / JS13-L32 remove
+repeated stable-inert menu layouts; LI-088 stops cascade sources after the
+highest eligible candidate. The combined release now saves Dock's PNG in
+144.78s within the unchanged150-second/1000ms policy. All46 style-node and38
+native rendering checks pass; the17-category milestone remains5609 passed,
+294 partial,one existing RI-171 failure. The current matched browser/native
+comparison remains high at44.87% mean error /70.07% changed area. Large nested
+grid/flex measurement cost remains; no general performance-completeness claim.
+Background/text/media/header differences need separate diagnosis. Evidence:
+Lambda `temp/online-visual-round127/`, report118.
+
+**2026-11-21 update:** LI-087 / JS13-L32 remove repeated stable-inert menu
+layouts. All38 focused controls and integer lint pass. The release now reaches
+the completed-load marker at about145 seconds, but the unchanged150-second
+capture deadline still kills it before a PNG. A cache-enabled trace confirms
+the remaining layouts come from distinct stylesheet/content/geometry writes.
+A two-second CPU sample identifies nested grid/flex intrinsic measurement and
+CSS cascade candidate selection as significant costs; these samples alone do
+not establish a safe cache extension. No canonical pair is replaced. Evidence:
+Lambda `temp/online-visual-round126/`. RI-031 remains OPEN.
+
 
 Latest release qualification (2026-11-14): a saved script-free control completes
 in 11.58s wall / 9.83s CPU. The scripted page instead reaches 150.04s with 149.13s
@@ -2214,6 +2428,22 @@ does not block independent HTML work.
 #### RAD22-3
 
 **Remote media requires a complete downloaded file; progressive/range playback is unavailable.** Reverified 2026-11-17: `radiant_media_prepare` requests HTTP media through the input-owned resource manager, then copies ready cached bytes to an immutable local decoder file. Fast local-server MP4 controls load successfully, so HTTP media is no longer categorically unsupported. `rdt_video_open_file` still receives a complete local file; it does not consume a partially available HTTP stream. RI-121 fixes source-request ordering before the unchanged snapshot wait, while larger transfers may remain unavailable at capture. Going's 7 MB source decodes locally but its normal snapshot still lacks the video. Progressive/range playback requires a larger input/media integration and is not implemented here (**D9.1.2v2 / D10.1.7**).
+
+2026-11-21 Slack follow-up: its hero MP4 is40,038,408bytes (HTTP200). The
+saved-source native frame has no video metadata and uses300×150. A diagnostic
+substitution of the existing local16:9 control restores500.16×281.34 and
+brings the heading fromy64 toy113.17 (Chromium116.16). No separate grid defect
+is established; no substitution, larger wait or admission change is shipped.
+The first scratch browser pair was invalid because disabling scripting activated
+a noscript redirect; the corrected helper asserts its saved file URL.
+Evidence: `temp/online-visual-round138/`. Canonical Slack remains unchanged.
+
+2026-11-21 Going follow-up: the selected H.265 MP4 returns HTTP200 with
+Content-Length7,036,404, exceeding the unchanged per-resource source limit.
+The missing hero video is therefore still within this recorded complete-file
+loading gap. Response metadata is retained in
+`temp/online-visual-round143/going-video-headers.txt`; no limit or source
+substitution is changed (**D10.1.7 / D9.1.1v4 / D9.1.3v2**).
 
 <a id="rad22-4"></a>
 

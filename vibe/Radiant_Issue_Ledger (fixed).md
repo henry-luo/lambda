@@ -14,6 +14,616 @@ are unchanged. Full evidence is under `../../lambda/temp/kianhup-style/`.
 
 ## Fixed issues
 
+<a id="ri-189"></a>
+
+### RI-189 — Expired no-fill effects retain undeclared opacity
+
+**Fixed 2026-11-21.** Native style ownership follows **D9.1.1v4 /
+D9.1.3v2**; the selected snapshot follows **D10.1.7**. No ruling changes.
+
+The new network/fade controls exposed a second, independent defect. An
+80ms linear fade-out with no fill and no authored opacity leaves the red
+probe almost white at 250ms, instead of restoring its initial opacity 1.
+A declared-opacity control restores correctly. The finish callback already
+requests recascade, but reset_non_inherited_style_cache omits opacity, so
+the retained InlineProp keeps the last active sample. Color restoration
+already works and is not the root cause.
+
+The existing reset now restores initial opacity through ensure_inline before
+current declarations and animation samples apply. This also gives removed
+opacity declarations a clean base without changing inheritance or forcing
+visibility. Default and declared no-fill controls pass in native and Chromium;
+all 15 block/flex/grid intrinsic-motion controls retain their implicit,
+explicit, authored, variable and inherited endpoints. The network-created
+fades now finish fully opaque as well. Layout integer-cast lint passes.
+
+Evidence: `temp/online-visual-round155/opacity-before.log`,
+`focused-qualified.log`, `lint.log`, and
+`test/online/render_capture_settle.test.cjs`. Complete motion conformance and
+automatic Web Animations playback remain outside this repair.
+
+<a id="ri-188"></a>
+
+### RI-188 — First script-created remote stylesheet is never requested
+
+**Fixed 2026-11-21.** Native resource ownership follows **D9.1.1v4 /
+D9.1.3v2**, with the retained export frame under **D10.1.7**.
+
+A local document with only inline CSS has no native resource manager. After a
+dynamic classic script creates a remote stylesheet link,
+`radiant_discover_document_resources` returned at its no-manager guard before
+visiting links. The link callback already called the shared
+`queue_resolved_http_resource`, which can initialize that manager, but was
+unreachable. The script and load event ran; the stylesheet was never requested.
+
+Discovery now visits links before checking the manager for later resource
+phases. It uses the existing queue, policy and transfer implementation; no
+runtime dependency is added to Radiant. The focused stylesheet control fails
+before repair and passes afterward, requests the CSS once and paints its blue
+probe. The shared control also passes in Chromium and MIR. The enclosing
+pre-Location batch passes 95 focused host checks. No source limit, deadline,
+clock or reference tolerance changes. This is independent of a page's remaining
+script/bootstrap failures.
+
+Evidence: `test/online/{dynamic_script_fixtures.cjs,render_dynamic_scripts.test.cjs}`
+(`stylesheet`), `temp/online-visual-round153/probe-stylesheet*`,
+`focused-candidate.log`, `focused-mir.log` and browser stylesheet results.
+
+
+<a id="ri-187"></a>
+
+### RI-187 — Snapshot downloads finish without publishing image state or callbacks
+
+**Fixed 2026-11-21.** Native resource ownership follows **D9.1.3v2 /
+D5.5.1**, retained realm binding **D6.4.1**, and fixed-frame export
+**D10.1.7**. No formal ruling changes.
+
+A650ms HTTP image finishes after the loader's250ms completion phase but
+within snapshot preparation's existing1000ms resource window. Preparation
+flushed the downloaded bytes without polling the document's native pending
+work. `DomImageSource` therefore retained an empty authoritative surface,
+which overrode the decoded embed image. Its load event and decode promise
+also remained queued after the initial JavaScript drain. The PNG was blank.
+An80ms control painted correctly and ran both callbacks; tracing the failing
+650ms case showed one completed resource and zero failures.
+
+Snapshot preparation now binds the retained document through the existing
+script-loop host, flushes resource processing, polls native pending work and
+pumps current tasks without advancing virtual time. It repeats within the
+same resource deadline and performs the final completion handoff under the
+same binding. No runtime dependency is added to Radiant, and no timeout,
+source limit, clock offset or forced visibility changes.
+
+All56 focused image/resource tests pass, including nine new controls for
+parsed, constructed, detached and picture images; failure and decode rejection;
+chained sources; an unrelated slow sibling; a script-free control; and a
+zero-time capture. Five initial cases fail before repair. All nine controls
+agree with Chromium on their completion pixels. The clock invariant compares
+completion against the last ordinary timer/rendering frame; both bootstrap
+and post-load completions are covered without requiring a later frame.
+Integer-cast lint and all three repository diff checks pass. No broad baseline
+is repeated. Evidence: `temp/online-visual-round151/`, `late-before.log`,
+`focused-final.log`, `browser-late-results.json`, and `late-clock-probe.log`.
+
+Current Jetty/Pelago pairs are inspected, but native pixels are identical with
+the prior renderer on those current pages. No live improvement or page
+clearance is attributed to this repair. Jetty's media/navigation and Pelago's
+consent state remain major differences. The repaired late-completion path has
+no remaining blocker; the full high-severity goal remains open.
+
+<a id="ri-186"></a>
+
+### RI-186 — Linear-gradient resolution discards a sole double-position color
+
+**Fixed 2026-11-21.** Native selected-style consumption belongs to
+**D9.1.3v2**, shared CSS providers to **D9.1.1v4**, and retained stop storage
+to **D5.5.1**. The linear-gradient resolver allocated stops only for two
+comma-separated color groups, despite its existing stop builder expanding a
+double-position color into two stops. It now permits one group and reuses
+that builder and its ownership path. Input's corresponding admission defect
+is repaired as LI-096. No formal ruling changes.
+
+Hera's saved DOM contains a dark `linear-gradient(#010a14 0% 100%)` underlay.
+Dropping it exposes white beneath a partially transparent radial layer. The
+same-source1200×800 comparison improves from13.6926% mean error /30.8646%
+changed area to2.0472% /2.4167%. The large light band disappears. This is
+diagnostic saved-source evidence: Hera's independent live text-reveal gap
+remains and no canonical row or major flag is cleared.
+
+All12 new shared PNG cases fail before repair; all12 pass afterward and
+agree with Chromium. The124 native CSS parser tests and25 existing PNG/color
+controls pass. Captures, admission limits and clocks are unchanged. No vendor
+edit or broad baseline run. Evidence: `temp/online-visual-round150/`,
+`saas_landing_463-{lambda,browser}.png`, `hera-after.{png,json}`,
+`gradient-{before,after}.log`, and `browser-gradient-results.json`.
+The repaired stop form has no remaining blocker; full-page clearance is open.
+
+<a id="ri-185"></a>
+
+### RI-185 — Sparse GIF ticks and completion select the wrong frame
+
+**Fixed 2026-11-21.** Native playback belongs to **D9.1.3v2**, finite
+capture selection to **D10.1.7**, and decoded-buffer ownership to **D5.5.1**.
+No formal ruling changes.
+
+The player advanced only one frame per scheduler tick. A two-frame GIF with
+100ms/200ms delays still displayed its second frame after a single 650ms tick,
+although the selected time is in the first frame of its third loop. Pauses,
+sparse UI ticks and timed exports could therefore display the wrong image.
+The renderer also treated the encoded repeat count as total plays, ignored
+the absence of a loop extension, and freed frame pixels on natural completion,
+restoring the initial still instead of holding the final frame.
+
+The player now samples the active loop and its frame deadlines directly in
+O(frame count), without replaying elapsed loops. Its diagnostic loop counter
+saturates before integer conversion. Encoded positive counts add the initial
+play, zero with an extension remains infinite, and no extension means one
+play. Forward fill retains decoded final pixels until the existing cancellation
+path releases the player and restores the cache-owned still. Completion frees
+the other frame buffers.
+
+All 26 native GIF tests pass. Five sparse-tick variants and two new
+repeat/completion tests fail before repair. Three of seven shared PNG controls
+fail with the previous qualified renderer; all seven pass after repair and
+agree with Chromium. Ten existing SVG image-motion controls and the layout
+integer-cast lint pass. No broad baseline or online sweep is repeated.
+
+This was found while reviewing Maple's apparent headline-font difference.
+The fresh asset is actually animated WebP, whose later-frame playback remains
+unsupported under LI-030. The GIF repair does not clear Maple or another
+high-severity page. Capture clocks, admission limits and comparison rows are
+unchanged. Evidence: `temp/online-visual-round149/`,
+`radiant/test/test_gif_player_gtest.cpp`, and
+`test/online/render_gif_playback.test.cjs`.
+
+<a id="ri-184"></a>
+
+### RI-184 — External script success never dispatches the element load event
+
+**Fixed 2026-11-21.** Host ownership follows **D9.1.1v4 / D9.1.3v2**;
+native event entry and precise roots follow **D6.4.1 / D6.3.3**. Youtrust's
+46,464-byte deferred consent SDK executes within the existing admission limit,
+but its script's onload callback never runs. The scheduler reported fetch
+errors without reporting successful external completion, leaving both the
+home and pricing pages without their large consent dialog.
+
+The scheduler now dispatches load after evaluation and its microtask checkpoint,
+including empty sources and runtime throws. Failed graph fetches retain error;
+inline classics/modules do not receive resource load events. currentScript is
+restored before the handler, while the parser's suspended head tail and write
+cursor remain suspended. A rooted original script target survives removal and
+forced layout. Shared completion dispatch enters the document's execution
+scope so native handler entry preserves bootstrap's pending mutations and
+stylesheet owners. A minimal external-script fixture otherwise loses its
+injected stylesheet unless an earlier CSSOM read publishes it.
+
+Ten focused HTTP cases pass for blocking, defer, async, module, runtime throw,
+empty source, self-removal, fetch failure and both inline kinds. They check
+event count/shape, execution and callback microtasks, currentScript, parser
+visibility, and pixels from evaluation and earlier bootstrap stylesheet writes.
+Seven lifecycle cases fail against the preceding release; five stylesheet
+checks fail against the initial unscoped completion implementation. Chromium
+controls confirm the lifecycle distinctions. Six existing inline-script and
+stylesheet tests pass, and the milestone baseline-js gate passes **630/630**.
+
+With the existing 1000ms settling interval and current matched browser references,
+home mean error falls **30.49% → 1.02%** and pricing **31.18% → 2.74%**.
+Both pages also clear against the older references. Their old animation origins
+were unrecorded, so the current matched pairs are published and the older pairs
+archived. Minor typography, focus and background layout differences remain.
+All other1065 comparison rows are preserved;
+inventory becomes **111 high, zero critical,956 low**. No source/transfer
+budget, capture clock or page condition changed (**D10.1.7**).
+Evidence: `temp/online-visual-round145/`,
+[report131](../test/online/comparison/repairs.html#round-131),
+[HTML script execution](https://html.spec.whatwg.org/multipage/scripting.html#execute-the-script-element).
+
+<a id="ri-183"></a>
+
+### RI-183 — image-set string sources never enter the resource queue
+
+**Fixed 2026-11-21.** Ownership follows **D9.1.1v4 / D9.1.3v2**.
+The existing image consumer accepts string sources in image-set, but resource
+discovery only visited URL-tagged values. Generic recursion reached the source
+string and ignored it, leaving a network-managed background permanently without
+bytes. The native HTTP image-set-string regression paints white before repair;
+an ordinary quoted url() control passes. This is an existing discovery defect,
+not a missing decoder or image-set selector.
+
+The shared visitor now uses the existing parsed image-set option helper, visits
+only each option's image and normalizes its string source to a borrowed URL
+value for the callback. type() strings remain metadata; declaration-relative
+spelling and the existing density/type selection are unchanged. Other URL,
+function, list and custom fallback traversal remains in place.
+
+After repair, three native GTests pass, including the new cached image-set
+export in the10-case image export matrix, the18-case priority matrix and the
+stylesheet-token guard. Six HTTP controls pass for image-set strings, ordinary
+quoted URLs, punctuation/encoded inline URLs, variables and inert templates.
+The image-set test checks green pixels and the stylesheet-relative request,
+and rejects a request for the MIME string. Integer lint passes. No full
+baseline, capture clock, source/transfer budget or page condition changed.
+The syntax follows [CSS Images4 §2.4](https://drafts.csswg.org/css-images-4/#image-set-notation).
+Evidence: `temp/online-visual-round144/resource-spelling-before.log`,
+`focused-native.log` and `focused-http.log`.
+
+A saved-style scan finds one high-page exposure in Conductor's webinar poster
+rule, not proof that this below-fold image causes its major difference.
+Overpass's portrait is an independent readiness observation: a read-only
+saved-source capture with the existing1000ms settling interval has the same
+pixels as the self-assignment diagnostic (0.78098% mean error). Its downloaded
+PNG paints correctly locally; no CSS publication or decoder patch is justified.
+No page clearance is claimed. All1067 comparison rows and browser references
+are preserved in [report130](../test/online/comparison/repairs.html#round-130).
+
+<a id="ri-182"></a>
+
+### RI-182 — CSS-only local documents cannot start their first network resource
+
+**Fixed 2026-11-21.** Native/input ownership follows **D9.1.1v4 /
+D9.1.3v2**. The selected-style traversal and URL callback required an existing
+resource manager. RI-181 let img/poster discovery create it, but a document
+whose first dependency was a CSS background still could not queue that
+resource. Its synchronous fallback did not consume the shared durable cache.
+
+The URL callback now uses the existing lazy queue helper with the absolute URL
+resolved against the declaration's stylesheet base. Selected-style traversal
+no longer requires a manager. Admission, active/inert selection, variable
+resolution and existing priority/transfer/wait budgets are preserved. The
+queue helper reports success only for a created or reused resource.
+
+Four new export cases fail before repair and pass afterward: inline background,
+stylesheet background, custom-property URL and pseudo-element background.
+The unchanged five img/poster cases, the resource-priority matrix and the
+stylesheet-token guard still pass (three GTests total). Evidence:
+`temp/online-visual-round143/background-before.log` and `focused-after.log`.
+Three focused HTTP base/template/variable-resource controls and integer lint
+also pass. The release paint control changes from0 to2993 red pixels for the
+same cached73×41 CSS image. Current matched1000ms Overpass still lacks its
+live hero (24.49% mean error); its saved-source portrait is independently
+unresolved (2.51% diagnostic error). No whole-page clearance or attribution
+of its live startup difference is claimed. No broad baseline was repeated.
+See [report129](../test/online/comparison/repairs.html#round-129).
+
+<a id="ri-181"></a>
+
+### RI-181 — Local HTML image/poster exports never initialize network discovery
+
+**Fixed 2026-11-21.** Under **D9.1.1v4 / D9.1.3v2**, native snapshot
+preparation returned when a local document had no resource manager. Only
+playable media could initialize one, leaving ordinary remote images and
+posters on a synchronous path that did not consume the shared durable cache.
+The unchanged ExportQueuesOrdinaryNetworkImagesBeforeInitialLayout test
+fails independently before repair; the starting host also fails the seeded
+SVG control. Resource queuing now initializes a manager lazily for an
+admitted HTTP dependency, and initial snapshot discovery includes images and
+posters. The existing wait limit and resource policy are unchanged.
+
+The unchanged five-case export regression now passes: natural SVG dimensions,
+explicit video dimensions, poster-only sizing, max-height and size containment.
+The priority-discovery matrix and stylesheet-token guard also pass. Integer
+lint passes. No full baseline was repeated. Evidence:
+`temp/online-visual-round141/export-isolated.log`, `export-cache-before.log`
+and `focused-final.log`. This local export repair alone clears no online page.
+
+<a id="ri-180"></a>
+
+### RI-180 — Authored fetchpriority never reaches resource scheduling
+
+**Fixed 2026-11-21.** Ownership follows **D9.1.1v4 / D9.1.3v2**.
+Discovery assigned fixed priorities to images, preload links, stylesheets and
+scripts; the early source prefetch path also ignored fetchpriority. A saved
+DOM scan finds hints on61 remaining high pages; this is exposure, not evidence
+that scheduling caused their full-page differences. Module scripts also
+lost their lower default when rediscovered through the DOM.
+
+One native helper parses high/low as ASCII case-insensitive enumerated
+keywords, shifting the existing destination default by one bounded scheduler
+rank. Missing, auto and invalid values retain the default. Both discovery
+and early prefetch use it. Dynamic image source requests pass their owner;
+passive decoding borrows an existing request without promoting a low hint
+back to normal. Shared URL identities retain the existing promotion logic.
+Input supplies the borrowed manager lookup and an atomics-free priority
+header; no runtime dependency or scheduler values change.
+
+The cache-backed native integration checks18 discovery cases plus missing
+lookup, passive reads, dynamic hints, shared identity and promotion. It and
+two existing loading controls pass (three GTests total); integer lint passes.
+No source/transfer budget, capture clock, site condition or vendor code changed.
+IDL fetchPriority reflection and complete fetch API priority support are not
+claimed. The keyword semantics follow the
+[HTML fetch priority definition](https://html.spec.whatwg.org/multipage/urls-and-fetching.html#fetch-priority-attributes).
+Evidence: `temp/online-visual-round140/priority-hints.json` and
+`temp/online-visual-round141/focused-final.log`. Three focused HTTP controls also
+pass. Current matched1000ms Aircall and Dayos pairs both load, with unchanged
+major differences (37.89% and62.33% mean error). No online clearance is claimed;
+see [report128](../test/online/comparison/repairs.html#round-128).
+
+<a id="ri-179"></a>
+
+### RI-179 — Font inheritance overwrites local shorthand and re-evaluates ancestor declarations
+
+**Fixed 2026-11-21.** Native computation belongs to Radiant under
+**D9.1.1v4 / D9.1.3v2**. Coda's zero-specificity font shorthand specifies
+700, but actual layout reports and paints weight400. The inheritance guard
+only checks direct longhands, overlooking the local font shorthand. It then
+recascades an ancestor's weight400 with its original specificity. Children
+also search ancestor syntax instead of inheriting the computed parent scalar.
+
+For font components with a local shorthand node, inheritance now uses Input's
+existing property-source winner lookup. Other inherited properties retain
+their cached direct lookup. Missing weight/style/variant components copy the
+parent's computed scalars. Native UA weight/style defaults remain local via
+the shared HTML metadata; explicit all:inherit/unset still inherits.
+No site-specific rule, new font parser or capture policy change.
+
+Two flushed zero-specificity regressions fail before repair. Focused controls
+also cover computed-parent variables, small-caps, native heading/emphasis
+and explicit unset. The first candidate exposed lost UA defaults in the
+text baseline; reduced heading/emphasis controls reproduce the defect and
+the final metadata guard repairs it. All23 focused native cases and15
+matching Chromium controls pass; integer lint passes. Coda's saved-source
+post-layout heading changes from400 to700, matching Chromium. Its remote
+background readiness is separate; no paint defect or live clearance is
+inferred from that diagnostic. Complete font reset/relative-weight
+conformance is not claimed. Evidence: `temp/online-visual-round137/`,
+`font-where-flush-before.log`, `font-ua-before.log`,
+`focused-ua-final.log`, `browser-font.json` and final baseline results.
+Final targeted categories record **1526 passes /84 partials /zero failures**.
+The current matched live Coda pair remains blank after startup exceptions;
+no page clearance is claimed. The missing IndexedDB observation is tracked
+without assigning blank-frame causality in JS13-L36.
+See [report125](../test/online/comparison/repairs.html#round-125).
+
+<a id="ri-178"></a>
+
+### RI-178 — Loader computed-style queries ignore font shorthand components
+
+**Fixed 2026-11-21.** Shared cascade ownership follows
+**D9.1.1v4 / D9.1.3v2**. Before a layout flush, getComputedStyle serialized
+font weight/style/family from the generic declaration fallback, which omitted
+font from its component selection and projection. Valid700/italic/Arial
+shorthands therefore reported defaults while the separate size path correctly
+reported38px. Native formatter tracing confirms the initial font assignment
+itself was correct; RI-179 covers the independent later inheritance defect.
+
+Normal and pseudo fallback reads now select the winning font declaration by
+full cascade priority and use Input's shared projector (LI-092). Variable
+substitution uses the source shorthand grammar before component extraction,
+including virtual longhands that identify the shorthand itself. Existing
+pseudo overflow behavior remains intact. No duplicate font grammar.
+
+Seven of the original eight reduced cases fail before repair; the explicit
+later-component guard already passes. All15 final font cases and eight
+existing font/button controls pass, alongside15 independent Chromium cases.
+Numeric/keyword weights, stronger/important/variable shorthands, descendants,
+pseudo fonts and later explicit components are covered. Broader system-font,
+CSS-wide reset and pseudo variable contexts remain outside qualification.
+Evidence: `temp/online-visual-round137/font-before.log`,
+`font-extra-before.log`, `focused-ua-final.log` and `browser-font.json`.
+
+
+<a id="ri-171"></a>
+
+### RI-171 — Layout harness aborts inheritance setup before display cleanup
+
+**Fixed 2026-11-21.** The failure reported at earlier milestone checkpoints
+was a fixture-execution defect, not incorrect display inheritance. The
+layout-only builtin WPT harness lacked `assert_not_equals`. Upstream
+`inheritance-testcommon.js` temporarily sets the container to `initial` and
+the target to `unset`, then invokes that missing function. The resulting
+ReferenceError aborts before cleanup, leaving both divs inline and zero-width.
+Chromium's full harness completes cleanup and retains their block defaults.
+
+The existing native layout shim now provides a truthful inequality assertion
+using SameValue (`Object.is`), throwing on equal values rather than ignoring
+failed assertions. No layout/cascade code, browser reference, fixture or
+required-pass entry changed. Ownership follows **D9.1.1v4 / D10.1.7**.
+
+The new native regression fails before repair with the missing-function
+ReferenceError. After repair it checks cleanup, equal primitive/NaN rejection
+and signed-zero/distinct-object acceptance. It and both existing HTML script
+tests pass. The unchanged original `wpt-css-display/inheritance` case improves
+from 2/4 to **4/4 matched elements (100%)**. The full
+17-category milestone was last run before this repair (5609/294/1); it was
+not repeated. This is no online-page clearance. Evidence:
+`temp/online-visual-round132/harness-before.log`, `focused-after.log`,
+`display-inheritance/`, `inheritance-after.json` and `inheritance-result.json`.
+
+<a id="ri-177"></a>
+
+### RI-177 — Grid alignment replaces final flex height with an intrinsic estimate
+
+**Status:** FIXED, 2026-11-21. **Lambda blocker:** no. Native formatting and
+size ownership follow **D9.1.1v4 / D9.1.3v2**. Snapshot timing is unchanged
+under **D10.1.7**.
+
+After formatting a nested flex container, grid called a separate intrinsic
+height estimator and stored its result for alignment. It could differ from
+the completed formatter's border box. A script-free Payload reduction has
+547.2px recorded height but 483.2px final in-flow content. Start, center and
+end alignment all reproduce the mismatch; Payload itself moves its main
+heading and actions downward and exposes translated hover content.
+
+The grid content pass now publishes the completed flex formatter height,
+matching its existing nested-grid handoff. The obsolete estimator helper is
+removed; no repeated layout, special row/column inference, tolerance, forced
+height or site condition is added.
+
+All three new regressions fail before repair and pass afterward; Chromium
+confirms all three. Thirty-six focused native grid tests pass, covering the
+new regressions and spanning minima, percentage item sizing, row refinement,
+nested grids and flex/grid constraints. Integer lint passes. The same saved
+Payload document improves from 9.33% mean error / 14.17% changed area to
+3.28% / 6.01% after RI-176/177. Its major vertical shift and leaked hover
+content are restored; native button appearance remains a separate defect.
+No live-page clearance is inferred from a frozen-source repair. Evidence:
+`temp/online-visual-round136/`, original and repaired source captures,
+`grid-flex-before.log`, `grid-height-after.log`, `browser-height.json` and
+`payload-metrics.json`. The 17-category milestone records 5608 passes / 294 partials / two form
+failures / zero skips. Both form failures (`option-text-setter` and
+`input-type-button`) reproduce with the previous qualified round134 renderer;
+no new baseline regression is observed. References and assertions are retained.
+See [report124](../test/online/comparison/repairs.html#round-124).
+
+<a id="ri-176"></a>
+
+### RI-176 — Flexible spanning grid items retain a content-based automatic minimum
+
+**Status:** FIXED, 2026-11-21. **Lambda blocker:** no. Track sizing belongs to
+Radiant under **D9.1.1v4 / D9.1.3v2**.
+
+The automatic minimum contribution was min-content for every non-scroll item,
+including items spanning multiple flexible tracks. A 600px descendant therefore
+expands a two-fr-track item in a 400px grid to 600px. Payload's four-of-sixteen
+column span becomes 291.23px instead of 268px, changing text wrapping and
+centering. [CSS Grid §6.6](https://www.w3.org/TR/css-grid-1/#min-size-auto)
+requires a zero automatic minimum for this flexible spanning case.
+
+Contribution collection now considers the selected axis tracks before sizing.
+Only the automatic minimum is zeroed; explicit item minima and intrinsic track
+minima remain effective. The existing flexible-track predicate has an opt-in
+zero-fr mode for this rule, preserving its distribution callers' behavior.
+No new pixel threshold or track sizing shortcut is introduced.
+
+Three native cases fail before repair and pass afterward: columns, rows and
+zero-fr spans. Three guards retain single-track, explicit item and intrinsic
+track minima. Five Chromium column controls and one row control agree. The
+combined RI-176/177 qualification passes all 36 focused native cases and layout
+integer lint; source/capture clocks and budgets remain unchanged. Evidence:
+`temp/online-visual-round136/grid-before-final.log`, `grid-row-before.log`,
+`grid-height-after.log`, `browser-grid.json` and `browser-height.json`.
+
+<a id="ri-175"></a>
+
+### RI-175 — CSSOM reports internal table rows as block
+
+**Fixed 2026-11-21.** Shared computed display follows **D9.1.3v2 /
+D9.5.6v2**. The display model stores table-row as an internal role with a block
+outer box. CSSOM serialized only the outer enum and returned block, while
+layout output had separate table-role mappings. The existing shared
+css_display_special_name helper now uses is_table_internal_display and the
+registered CSS enum name. CSSOM and layout output reuse that helper, with no
+new tag map or geometry change. The rollback matrix verifies table, table-row
+and table-cell names, and all 78 focused native render controls pass.
+Evidence: Lambda `temp/online-visual-round131/`.
+
+<a id="ri-174"></a>
+
+### RI-174 — Display rollback reapplies the discarded all reset and shows metadata text
+
+**Fixed 2026-11-21.** Radiant's used display and shared CSSOM follow
+**D9.1.3v2 / D9.5.6v2**. Mode uses all:unset with display:revert. The cascade
+correctly removes author declarations for display, including all, and returns
+no surviving author winner. The display resolver then independently reapplied
+the global all reset's initial inline display. Head, style and script text
+became visible instead of receiving their UA defaults.
+
+The resolver now falls through to the existing css_default_display_for_element
+when no cascaded display survives. Actual winning initial/unset declarations
+continue through ordinary value resolution. No unconditional suppression of
+script/style tags or page-specific rule is added. Six before controls fail
+(all initial/unset/inherit crossed with revert/revert-layer); three guards
+already pass (winning initial/unset and explicit visible style). All nine pass
+after the fix and RI-175's shared table-role serialization correction.
+
+All 78 focused native rendering controls and integer lint pass. Mode's current
+capture again shows its landing page, with a large residual difference; the
+intermediate source-text diagnostic is not imported. Dock's whole-page capture
+is qualified separately under RI-031. No source admission, capture deadline,
+clock or vendor change. Evidence: Lambda `temp/online-visual-round131/`.
+
+<a id="ri-173"></a>
+
+### RI-173 — SVG stroke-phase attributes force full HTML layout on every animation frame
+
+**Fixed 2026-11-21.** Shared DOM/host ownership follows **D9.1.3v2 /
+D9.5.6v2**; SVG paint-cache lifetime follows **D5.5.1**. FramerAuth's late
+animation batches mix ordinary HTML transform writes with SVG path
+`stroke-dashoffset` updates. The attribute record discarded property identity,
+so one SVG record rejected the entire retained paint batch. Repeated whole-page
+flow reached the 150-second capture deadline.
+
+The native mutation record now retains the SVG paint-property hint. Its
+attribute kind, observer delivery and ordinary document/style epochs remain
+unchanged. The SVG paint path requires a connected element, rendered SVG
+viewport, no attribute-selector/attr() dependency and no transition or relevant
+animation sampling requirement. It refreshes SVG CSS and repaints without HTML
+flow. SVG batches request full repaint; no local ink-bound assumption is added.
+Existing global SVG cache epochs still invalidate inherited values and shared
+references. The motion guard is shared with HTML admission instead of copied.
+
+Four reduced cases fail before repair with eleven layouts instead of one:
+ordinary attributes, null-namespace writes, inherited group attributes and
+CSSOM property writes. All preserve observer records, geometry and final pixels
+after repair while retaining one layout. Attribute-selector and active
+transition controls keep ordinary cascade/layout; the transition fixture keeps
+its initial zero-time phase. All **30 focused native checks** pass, along with
+seven comparison-tool controls and integer lint. The 17-category layout
+checkpoint reports **5,609 passed, 294 partial and the existing RI-171 failure**.
+No reference or baseline entry is weakened.
+
+The unchanged live FramerAuth request now loads and captures in **70.04s**,
+within the existing 150-second deadline at the same 1000ms post-load frame.
+The main hero remains absent, so its manual high review is retained. Current
+Chromium records Web Animations opacity effects from an authored 0.001 to 1 on
+its heading, copy and actions; automatic native playback remains a documented
+feature gap. No opacity, timing, URL or admission exception is introduced.
+
+Evidence: `temp/online-visual-round124/framerauth-attributes.log`,
+`temp/online-visual-round125/`, and
+`test/online/render_svg_dash_mutation.test.cjs`.
+
+<a id="ri-172"></a>
+
+### RI-172 — Retained transform resets leave fixed descendants in the old containing block
+
+**Fixed 2026-11-21.** Retained geometry ownership follows **D9.1.3v2**;
+effect/geometry admission follows **CI-18**. The paint-only guard rejected the
+literal `none` keyword but admitted CSS-wide resets and pending substitutions.
+These can compute to `none`, removing the transform's containing block. The
+property resolved correctly while fixed descendants retained their old layout.
+
+The guard now requires a non-keyword value with no pending substitution before
+retaining an existing transform's geometry. Other values use ordinary CSS
+resolution and layout. This covers `transform`, `translate`, `rotate` and
+`scale` without changing parsing, inheritance or CSS variable semantics.
+
+All sixteen reduced before cases fail: `var(--clear)` (defined as `none`),
+`initial`, `unset` and `inherit` leave the fixed child at y75 instead of the
+viewport-relative y5. All pass after repair. The full focused selection passes
+**24 checks** (11 inline-style and 13 metadata); concrete transform writes still
+retain one layout while moving geometry/pixels. Integer lint passes. The
+round122 layout checkpoint is not repeated for this guard correction.
+
+Evidence: `temp/online-visual-round124/transform-reset-before-expanded.log`,
+`focused-after.log` and `test/online/render_inline_style_mutation.test.cjs`.
+No live page clearance is established by these controls.
+
+<a id="ri-170"></a>
+
+### RI-170 — Retained paint publication leaves mutation layout dirtiness pending
+
+**Fixed 2026-11-21.** Geometry publication and selected-frame ownership follow
+**D9.1.3v2 / D10.1.7**. The retained paint reconciler resolved an eligible
+property and published its input versions, but mutation recording had dirtied
+the target, descendants and ancestors. The next geometry checkpoint therefore
+performed full flow despite the successful paint commit.
+
+When a proven paint or detached batch publishes against the same viewport,
+font, cascade and layout environment, publication now consumes dirty flags via
+the existing layout visitor. Pending reflow, scheduler work, selector-dependent
+writes, transitions and transform containing-block changes retain their
+existing guards. No paint eligibility is broadened here.
+
+The CSSOM transform control changes geometry and pixels correctly with one
+layout rather than eleven. All six inline-style and thirteen metadata controls
+pass; the integer-cast lint passes. Before this fix the transform count still
+fails after property notification is repaired (JS13-L30). Evidence:
+`temp/online-visual-round121/` and
+`test/online/render_inline_style_mutation.test.cjs`. Live performance and page
+clearance require separate capture evidence.
+
 <a id="ri-138"></a>
 
 ### RI-138 — Trial flow resets the scroll position of an EPUB frame

@@ -132,6 +132,7 @@ const char radiant_dom_interface_decl[] =
     "    get_root_node: fn(a0: any) any, remove: pn() any,\n"
     "    replace_with: pn(a0: any) any, after: pn(a0: any) any, before: pn(a0: any) any,\n"
     "    has_child_nodes: fn() any, clone_node: pn(a0: any) any,\n"
+    "    lookup_namespace_uri: fn(prefix: any) any,\n"
     "    add_event_listener: pn(a0: any, a1: any, a2: any) any,\n"
     "    remove_event_listener: pn(a0: any, a1: any, a2: any) any,\n"
     "    dispatch_event: pn(a0: any) any\n"
@@ -1205,9 +1206,10 @@ static const JubeMemberBind radiant_dom_node_members[] = {
     // null for them). Routing it to the row would skip that branch -- the row
     // has to grow a non-element path before the member can hold it.
     BIND_CALL_JS("clone_node", "cloneNode", radiant_dom_m4d_clone_node),
-    BIND_CALL_JS("add_event_listener", "addEventListener", radiant_dom_m4d_add_event_listener),
-    BIND_CALL_JS("remove_event_listener", "removeEventListener", radiant_dom_m4d_remove_event_listener),
-    BIND_CALL_JS("dispatch_event", "dispatchEvent", radiant_dom_m4d_dispatch_event),
+    // these JS methods are inherited from EventTarget, not projected own slots.
+    {"add_event_listener", "addEventListener", NULL, NULL, radiant_dom_m4d_add_event_listener, NULL, JUBE_MEMBER_PROTOTYPE},
+    {"remove_event_listener", "removeEventListener", NULL, NULL, radiant_dom_m4d_remove_event_listener, NULL, JUBE_MEMBER_PROTOTYPE},
+    {"dispatch_event", "dispatchEvent", NULL, NULL, radiant_dom_m4d_dispatch_event, NULL, JUBE_MEMBER_PROTOTYPE},
 };
 
 static const JubeMemberBind radiant_dom_html_element_members[] = {
@@ -1648,9 +1650,9 @@ static const JubeMemberBind radiant_document_members[] = {
     DOC_METHOD("compare_document_position", "compareDocumentPosition", radiant_doc_call_compare_document_position),
     DOC_METHOD("get_root_node", "getRootNode", radiant_doc_call_get_root_node),
     DOC_METHOD("clone_node", "cloneNode", radiant_dom_document_clone_node),
-    DOC_METHOD("add_event_listener", "addEventListener", radiant_doc_call_add_event_listener),
-    DOC_METHOD("remove_event_listener", "removeEventListener", radiant_doc_call_remove_event_listener),
-    DOC_METHOD("dispatch_event", "dispatchEvent", radiant_doc_call_dispatch_event),
+    {"add_event_listener", "addEventListener", NULL, NULL, radiant_doc_call_add_event_listener, NULL, JUBE_MEMBER_PROTOTYPE},
+    {"remove_event_listener", "removeEventListener", NULL, NULL, radiant_doc_call_remove_event_listener, NULL, JUBE_MEMBER_PROTOTYPE},
+    {"dispatch_event", "dispatchEvent", NULL, NULL, radiant_doc_call_dispatch_event, NULL, JUBE_MEMBER_PROTOTYPE},
     DOC_METHOD("create_tree_walker", "createTreeWalker", radiant_doc_call_create_tree_walker),
     DOC_METHOD("create_event", "createEvent", radiant_doc_call_create_event),
     DOC_METHOD("exec_command", "execCommand", radiant_doc_call_exec_command),

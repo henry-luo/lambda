@@ -53,6 +53,7 @@
 #include "../../dom/dom.h"      // dom_set_document for HTML event handlers
 #include "radiant/form_controls.hpp"
 #include "radiant/stylesheet_sync.hpp"
+#include "radiant/network_integration.h"
 #include "../../dom/dom_cssom.h" // inline style writes still use the script adapter
 #include "../../dom/dom_events.h" // dom_dispatch_event + native event factories
 #include "../../dom/dom_history.h"
@@ -6096,8 +6097,11 @@ static bool dom_js_node_is_stylesheet_related(DomNode* node) {
         elem = lam::dom_require_element(node->parent);
     }
     if (!elem || !elem->tag_name()) return false;
-    return str_icmp_cstr(elem->tag_name(), "style") == 0 ||
-           str_icmp_cstr(elem->tag_name(), "link") == 0;
+    if (str_icmp_cstr(elem->tag_name(), "style") == 0) return true;
+    if (str_icmp_cstr(elem->tag_name(), "link") != 0) return false;
+    // preload/icon metadata cannot change a sheet; a formerly associated link still can.
+    return radiant_html_has_token(elem->get_attribute("rel"), "stylesheet") ||
+        dom_cssom_element_sheet(elem) != nullptr;
 }
 
 typedef enum DomJsStructuralDependency {
@@ -6310,8 +6314,24 @@ static bool dom_js_selector_mentions_attribute(CssSelector* selector, void* data
 }
 
 static bool dom_js_rule_has_attribute_value_dependency(CssRule* rule, void* data) {
-    // scope/container/keyframe state has dependencies beyond a style rule's selector list.
-    if (rule->type == CSS_RULE_SCOPE || rule->type == CSS_RULE_CONTAINER || rule->type == CSS_RULE_KEYFRAMES)
+    // keyframes have no selectors; only an actual attribute function depends on DOM attributes.
+    if (rule->type == CSS_RULE_KEYFRAMES) {
+        const char* content = rule->data.generic_rule.content;
+        if (!content || !*content) return false;
+        Pool* scratch = pool_create();
+        if (!scratch) return true;
+        size_t count = 0;
+        CssToken* tokens = css_tokenize(content, strlen(content), scratch, &count);
+        bool dependency = !tokens;
+        for (size_t i = 0; tokens && i < count && !dependency; i++) {
+            StrView name = css_token_function_name(&tokens[i]);
+            dependency = str_icmp(name.str, name.length, "attr", 4) == 0;
+        }
+        pool_destroy(scratch);
+        return dependency;
+    }
+    // scope/container state has dependencies beyond a style rule's selector list.
+    if (rule->type == CSS_RULE_SCOPE || rule->type == CSS_RULE_CONTAINER)
         return true;
     if (radiant_css_rule_selector_has_match(rule, dom_js_selector_mentions_attribute, data)) return true;
     if (rule->type != CSS_RULE_STYLE && rule->type != CSS_RULE_NESTING && rule->type != CSS_RULE_NESTED_DECLARATIONS)
@@ -7213,13 +7233,49 @@ static bool post_html_handler_incremental_rebuild(
     return true;
 }
 
-// A presentation-channel write of leaf visibility, opacity, or a transform that stays a
+// A property write of leaf visibility, opacity, or a transform that stays a
 // transform, changes paint and hit testing but never layout: Radiant reads
 // transforms in layout only to decide containing-block establishment and
 // computes overflow without them, and stacking order is collected at paint.
-// Presentation writes also leave attributes, and so selector matching, intact.
+// Authored CSSOM writes enter here only after excluding style-attribute CSS dependencies.
+static bool dom_js_paint_requires_motion_sample(DomElement* element, CssPropertyCode property) {
+    StyleTree* style = element->specified_style;
+    if (!style) return true;
+    // transitions can start on this write; unrelated animations need no resampling.
+    static const CssPropertyCode motion[] = {
+        CSS_PROPERTY_TRANSITION, CSS_PROPERTY_TRANSITION_PROPERTY,
+        CSS_PROPERTY_TRANSITION_DURATION};
+    for (CssPropertyCode code : motion) if (style_tree_get_declaration(style, code)) return true;
+    return (element->web_animation_state() || style_tree_get_declaration(style, CSS_PROPERTY_ANIMATION) ||
+        style_tree_get_declaration(style, CSS_PROPERTY_ANIMATION_NAME)) &&
+        css_animation_needs_computed_sample(element, property);
+}
+
+static DomElement* dom_js_svg_paint_only_target(DomDocument* doc, const DomJsMutationRecord* record) {
+    if (record->presentation_property != CSS_PROPERTY_STROKE_DASHOFFSET ||
+        (record->kind != DOM_JS_MUTATION_ATTRIBUTE && record->kind != DOM_JS_MUTATION_INLINE_STYLE &&
+         record->kind != DOM_JS_MUTATION_STYLE_REPAINT) || !record->was_connected || !record->target)
+        return nullptr;
+    DomElement* element = record->target->as_element();
+    if (!element || element->doc != doc || !dom_element_is_svg(element) ||
+        !dom_node_is_connected(element)) return nullptr;
+    // stroke phase changes ink, not the SVG viewport; selectors/attr() can still change HTML flow.
+    if (record->kind == DOM_JS_MUTATION_ATTRIBUTE &&
+        radiant_attribute_has_css_dependency(doc, element, "stroke-dashoffset")) return nullptr;
+    DomElement* viewport = nullptr;
+    for (DomElement* root = element; root; root = dom_parent_element(root)) {
+        if (root->tag() == MARKUP_NAME_SVG && dom_element_is_svg(root) &&
+            !root->is_synthetic() && root->view_type != RDT_VIEW_NONE) { viewport = root; break; }
+    }
+    if (!viewport) return nullptr;
+    // SVG paint uses presentation attributes and CSS without requiring HTML flow.
+    radiant_cascade_styles_for_element(element);
+    return dom_js_paint_requires_motion_sample(element, record->presentation_property) ? nullptr : viewport;
+}
+
 static DomElement* dom_js_paint_only_target(DomDocument* doc, const DomJsMutationRecord* record) {
     CssPropertyCode property = record->presentation_property;
+    if (property == CSS_PROPERTY_STROKE_DASHOFFSET) return dom_js_svg_paint_only_target(doc, record);
     bool background_position = property == CSS_PROPERTY_BACKGROUND_POSITION_X ||
         property == CSS_PROPERTY_BACKGROUND_POSITION_Y;
     bool transform_property = property == CSS_PROPERTY_TRANSFORM || css_individual_transform_index(property) >= 0;
@@ -7234,15 +7290,7 @@ static DomElement* dom_js_paint_only_target(DomDocument* doc, const DomJsMutatio
     StyleTree* style = element->specified_style;
     CssDeclaration* declaration = style_tree_get_declaration(style, property);
     if (!declaration || !declaration->value) return nullptr;
-    // A transition can start on this write. An animation of another property
-    // does not require resampling or relayout (for example a sprite's Y row).
-    static const CssPropertyCode motion[] = {
-        CSS_PROPERTY_TRANSITION, CSS_PROPERTY_TRANSITION_PROPERTY,
-        CSS_PROPERTY_TRANSITION_DURATION};
-    for (CssPropertyCode code : motion) if (style_tree_get_declaration(style, code)) return nullptr;
-    if ((element->web_animation_state() || style_tree_get_declaration(style, CSS_PROPERTY_ANIMATION) ||
-         style_tree_get_declaration(style, CSS_PROPERTY_ANIMATION_NAME)) &&
-        css_animation_needs_computed_sample(element, property)) return nullptr;
+    if (dom_js_paint_requires_motion_sample(element, property)) return nullptr;
     if (background_position) return element;
     if (color_filter) {
         // Nonempty color filters keep an existing leaf's containing block,
@@ -7276,17 +7324,19 @@ static DomElement* dom_js_paint_only_target(DomDocument* doc, const DomJsMutatio
         return element->transformp()->transform_style == CSS_VALUE_PRESERVE_3D ? nullptr : element;
     }
     const CssValue* value = declaration->value;
-    bool becomes_none = value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE;
-    return transform_has_functions(element->transform_prop()) && !becomes_none ? element : nullptr;
+    // CSS-wide resets and pending substitutions can remove the containing block.
+    bool keeps_transform = value->type != CSS_VALUE_TYPE_KEYWORD &&
+        !css_value_contains_pending_substitution(value);
+    return transform_has_functions(element->transform_prop()) && keeps_transform ? element : nullptr;
 }
 
 static bool post_html_handler_paint_only_commit(EventContext* evcon, DomDocument* doc,
-                                               uint64_t t0, int mutations) {
+                                               uint64_t t0, int mutations, bool trace) {
     DocState* state = (DocState*)doc->state;
     if (!state || !doc->view_tree || !doc->root || doc->js.mutation_record_count == 0 ||
         doc->js.mutation_record_overflow || doc->js.inline_stylesheet_mutation_count ||
         doc->js.reflow_pending_before_batch || state->reflow_scheduler.pending) {
-        if (active_frame_profile) log_notice("[FRAME_PRESENTATION_PENDING] before_batch=%u scheduled=%u records=%u overflow=%u stylesheet=%u",
+        if (trace) log_notice("[FRAME_PRESENTATION_PENDING] before_batch=%u scheduled=%u records=%u overflow=%u stylesheet=%u",
             doc->js.reflow_pending_before_batch, state && state->reflow_scheduler.pending ? 1u : 0u,
             doc->js.mutation_record_count, doc->js.mutation_record_overflow,
             doc->js.inline_stylesheet_mutation_count);
@@ -7295,8 +7345,18 @@ static bool post_html_handler_paint_only_commit(EventContext* evcon, DomDocument
     for (int i = 0; i < doc->js.mutation_record_count; i++) {
         if (!dom_js_paint_only_target(doc, &doc->js.mutation_records[i])) {
             const DomJsMutationRecord& record = doc->js.mutation_records[i];
-            if (active_frame_profile) log_notice("[FRAME_PRESENTATION_LAYOUT] target=%u kind=%u property=%u", record.target_id,
-                (unsigned)record.kind, (unsigned)record.presentation_property);
+            DomElement* element = record.target ? record.target->as_element() : nullptr;
+            if (trace) log_notice("[FRAME_PRESENTATION_LAYOUT] target=%u kind=%u property=%u tag=%s style=%.240s", record.target_id,
+                (unsigned)record.kind, (unsigned)record.presentation_property,
+                element ? element->node_name() : "",
+                element && element->get_attribute("style") ? element->get_attribute("style") : "");
+            if (trace && element) {
+                DomAttributeIterator attributes = dom_element_attribute_iterator(element);
+                DomAttributeView attribute;
+                while (dom_element_next_attribute(&attributes, &attribute))
+                    log_notice("[FRAME_PRESENTATION_ATTRIBUTE] target=%u %s=%.120s", record.target_id,
+                        attribute.qualified_name, attribute.value ? attribute.value : "");
+            }
             return false;
         }
     }
@@ -7304,9 +7364,15 @@ static bool post_html_handler_paint_only_commit(EventContext* evcon, DomDocument
     lycon.doc = lam::up(doc);
     lycon.ui_context = lam::up(evcon->ui_context);
     lycon.pool = lam::up(doc->view_tree->prop_pool);
+    bool svg_paint = false;
     for (int i = 0; i < doc->js.mutation_record_count; i++) {
         const DomJsMutationRecord* record = &doc->js.mutation_records[i];
         DomElement* element = record->target->as_element();
+        if (record->presentation_property == CSS_PROPERTY_STROKE_DASHOFFSET) {
+            // preflight refreshed CSS; the SVG paint cache consumes the ordinary document epoch.
+            svg_paint = true;
+            continue;
+        }
         lycon.view = lam::up(static_cast<View*>(element));
         lycon.elmt = lam::up(element);
         // the same resolver layout uses writes the retained view prop
@@ -7334,7 +7400,7 @@ static bool post_html_handler_paint_only_commit(EventContext* evcon, DomDocument
         for (int j = 0; j < target_count; j++) seen = seen || targets[j] == element;
         if (!seen) targets[target_count++] = element;
     }
-    if (presentation_damage_commit(state, doc, targets, target_count)) {
+    if (!svg_paint && presentation_damage_commit(state, doc, targets, target_count)) {
         doc_state_request_region_repaint(state);
     } else {
         state->dirty_tracker.full_repaint = true;
@@ -7470,7 +7536,8 @@ static void post_html_handler_rebuild_impl(EventContext* evcon,
         dom_js_mutation_reset_records(doc);
         return;
     }
-    if (post_html_handler_paint_only_commit(evcon, doc, t0, mutations)) {
+    if (post_html_handler_paint_only_commit(evcon, doc, t0, mutations,
+            active_frame_profile || (debug.enabled_categories & radiant::LAYOUT_DEBUG_CACHE))) {
         dom_js_mutation_reset_records(doc);
         return;
     }

@@ -172,12 +172,16 @@ function main(args = process.argv.slice(2)) {
             row.severity_reason = 'Below the major triage threshold.';
         }
     }
+    const summary = writeComparisonReport(rows, output, snapshots);
+    process.stdout.write(JSON.stringify(summary) + '\n');
+}
+
+function writeComparisonReport(rows, output, snapshots, generatedAt = new Date().toISOString()) {
     const severityRank = {critical: 0, high: 1, low: 2};
     rows.sort((a, b) => severityRank[a.severity] - severityRank[b.severity] ||
         (b.mean_error || 0) - (a.mean_error || 0) ||
         (b.changed_area || 0) - (a.changed_area || 0) || a.label.localeCompare(b.label));
     fs.mkdirSync(output, {recursive: true});
-    const generatedAt = new Date().toISOString();
     const summary = {catalog: rows.length, compared: rows.filter((r) => r.status === 'compared').length,
         generated_at: generatedAt,
         major_candidates: rows.filter((r) => r.major_candidate).length,
@@ -189,8 +193,8 @@ function main(args = process.argv.slice(2)) {
     fs.writeFileSync(path.join(output, 'results.json'), JSON.stringify({summary, rows}, null, 2) + '\n');
     fs.writeFileSync(path.join(output, 'results.csv'), serializeCsv([...new Set(rows.flatMap(Object.keys))], rows));
     fs.writeFileSync(path.join(output, 'index.html'), reviewHtml(rows, output, snapshots, generatedAt));
-    process.stdout.write(JSON.stringify(summary) + '\n');
+    return summary;
 }
 
 if (require.main === module) main();
-module.exports = {coarseImage, compareImages, pngLibrary, captureTimingError};
+module.exports = {coarseImage, compareImages, pngLibrary, captureTimingError, writeComparisonReport};

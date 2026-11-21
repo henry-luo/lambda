@@ -6,6 +6,247 @@ remain in the [active issue ledger](Lib_Input_Issue_Ledger.md).
 
 ## Fixed issues
 
+<a id="li-096"></a>
+
+### LI-096 — A sole double-position color is rejected as one gradient stop
+
+**Fixed 2026-11-21.** Input owns CSS value validation under **D9.1.1v4 /
+D9.1.3v2**. `css_gradient_stop_list_valid` counted comma-separated color
+groups, rejecting `linear-gradient(#010a14 0% 100%)` even though its color
+expands into two stops. Radial component validation also required two color
+groups after a geometry prelude. The shared validator now counts expanded
+positions and radial geometry accepts one group. Linear/conic leading hints
+remain invalid; radial length preludes retain their separate geometry rules.
+No color parser or alternate gradient implementation is introduced.
+
+The native parser suite passes all124 tests, including13 valid declarations
+and six malformed controls in the new regression. Twelve shared PNG cases
+fail before the combined LI-096/RI-186 repair; all12 pass afterward and in
+Chromium, with25 existing color controls also passing. The cases cover all
+three gradient types, repeats, and forms with/without geometry preludes.
+The [CSS Images color-stop rule](https://www.w3.org/TR/css-images-4/#color-stop-syntax)
+defines a two-position color as two stops of the same color. A sole color
+without two positions remains unsupported. Evidence:
+`temp/online-visual-round150/`, `parser-before.log`, `parser-final.log`,
+`gradient-before.log`, `gradient-after.log`, `browser-gradient-results.json`.
+No remaining blocker for the repaired form; no broad baseline is repeated.
+
+<a id="li-095"></a>
+
+### LI-095 — Default document construction left the tag-name map uninitialized
+
+**Fixed 2026-11-21.** The document owns its lazy tag-name map under **D5.5.1 /
+D9.1.3v2**. With Input `5af070c`, a placement-construction probe over nonzero
+storage left the `tag_name_overrides` pointer bytes untouched. Document teardown
+passed that indeterminate pointer to `hashmap_free`, crashing
+`SvgFilterTest.ComponentTransferUsesStraightChannelsAndRemappedAlpha` and
+`SecondaryViewTest.PictureSelectionPrecedesFallbackAndPreservesDataUrlCommas`.
+The member now starts null on ordinary C++ construction, as it already does on
+the factory's zeroed storage. The probe passes with the initializer. All 250
+vector and 180 selected paged-media tests pass. Evidence is in Lambda's
+`temp/radiant-baseline-build-fix/`, including the probe and crash reports.
+
+<a id="li-093"></a>
+
+### LI-093 — Namespace lookup ignores an element's expanded name
+
+**Fixed 2026-11-21.** Input owns the shared namespace resolver under
+**D9.1.1v4 / D9.1.3v2**; DOM consumers share it under **D9.5.6v2**.
+The old lookup searches declarations, returning null for an HTML element's
+default namespace and for namespaced elements created without declarations.
+A namespaced element's own prefix/URI must precede a conflicting declaration.
+The separate parser namespace-binding helper remains unchanged.
+
+The existing lookup now checks expanded names and actual XMLNS attributes in
+ancestor order, stops at native fragment wrappers, retains reserved prefixes
+and empty resets, and ignores literal HTML xmlns aliases. JS13-L37 publishes
+Node.lookupNamespaceURI through the shared DOM catalog and dispatches node
+kinds. There is no second namespace resolver or page-specific namespace value.
+
+The combined repair passes four native/Chromium fixtures and13 existing
+Node/URL/SVG controls; all630 baseline-js cases pass. The fixtures include
+HTML/SVG/XML, declaration shadowing/removal, an own-name/declaration conflict,
+null-namespace children in fragments, attributes, captured calls and conversion.
+The four API fixtures fail before the combined repair; no separate before/after
+Input unit count is claimed. Coda's consent-wrapper TypeErrors disappear,
+leaving its explicit IndexedDB failure. Evidence: Lambda
+`temp/online-visual-round139/`. Full XML and namespace-method conformance
+remain outside this qualification. No budget, capture-clock or vendor change.
+
+
+<a id="li-092"></a>
+
+### LI-092 — Shared shorthand projection omits existing font components
+
+**Fixed 2026-11-21.** Input owns shared CSS syntax/projection under
+**D9.1.1v4 / D9.1.3v2**. The generic component projector handles grid,
+container, gap and flex, but lacks font despite the existing font parser and
+component decoder. Once a consumer selects a font declaration, it cannot
+obtain its weight/style/family through the generic API.
+
+The generic projector now delegates font to the existing
+css_font_shorthand_longhand helper using property registry metadata.
+There is no second grammar or registry change. RI-178 repairs the native
+consumer's selection and variable-substitution path. A standalone initialized
+API probe projects700, and the combined repair passes15 native/Chromium font
+cases plus eight existing font/button controls. Seven original regressions
+fail before the combined repair; the later-component guard already passes.
+Broader font reset/system-font conformance is outside this qualification.
+Evidence: Lambda `temp/online-visual-round137/`, `font-ast.log`,
+`font-before.log`, `font-extra-before.log`, `focused-ua-final.log` and
+`browser-font.json`.
+
+
+<a id="li-091"></a>
+
+### LI-091 — Absent shorthand selects unsupported property code zero and overrides valid CSS
+
+**Fixed 2026-11-21.** The shared cascade remains Input-owned under
+**D9.1.1v4 / D9.1.3v2**. Dock's product screen is ordinary HTML. Its authored
+960px by603.85px grid became a narrow zero-height box. A small component
+reproduces without the full page; removing the descendant all reset or applying
+a later/inline size makes the original math work.
+
+A native cascade probe isolates the defect. The stored WIDTH declaration has
+higher specificity than ALL, and an explicit WIDTH/ALL component query selects
+it correctly. The ordinary lookup additionally passes zero from
+`css_property_cascade_shorthand` as its absent marker. A retained code-zero
+`text-size-adjust:none` declaration then wins that candidate slot by later
+priority, overriding valid dimensions with none. Other retained unknown values
+can similarly reach unrelated consumers, including length resolution.
+
+The shared candidate lookup now excludes source codes outside the real
+property domain before AVL lookup. Unknown authored storage and CSSOM are
+retained; the empty shorthand marker never participates in a real cascade.
+No page-specific style, alias substitution, forced dimension or vendor patch.
+
+A new native unit fails four selection assertions before repair. All48
+style-node units and69 focused native rendering controls pass after it.
+Three new paint controls fail before and pass after for text-size-adjust
+none/auto/100%. The original component resolves its declared960 by603.85 size
+afterward (778.46 by489.66 after its authored scale), instead of185.67 by0.
+Whole-page qualification is recorded separately under RI-031. Evidence:
+Lambda `temp/online-visual-round130/`. Source and capture budgets are unchanged.
+
+<a id="li-090"></a>
+
+### LI-090 — Absent properties repeatedly resolve the same all-only rollback
+
+**Fixed 2026-11-21.** Shared cascade ownership follows **D9.1.3v2**; canonical
+declaration storage retains **D5.2.3 / D5.5.1**. Dock resets descendants through
+`all:revert`. A property with no own declaration or implicit shorthand repeatedly
+walked the same all-only rollback chain because only present property nodes had
+cached winners. A release reduction reproduces that repeated read cost.
+
+When neither an own declaration nor a supported implicit shorthand exists,
+ordinary reads without a borrowed fallback now call the existing ALL lookup.
+That path initializes and invalidates its cached winner normally, including
+cached null results. Authored-only, shorthand, local and borrowed candidates
+retain their original selection. No new cache, allocation, cache key, layout
+skip or epoch exemption is introduced.
+
+All 47 style-node tests pass, including later global declarations, user-origin
+rollback, local/shorthand overrides, removal and clear. The reduced release
+workload (2000 losing declarations, an all rollback and 20000 absent-property
+reads) takes 153.845ms CPU before and 0.222ms after. This is a reduction result,
+not a live-page performance claim. The new unit fixture uses FLEX/FLEX_GROW
+because that is an implicit projection supported by this raw tree; margin is
+expanded before tree insertion and is not such a projection.
+Evidence: Lambda `temp/online-visual-round129/`. Whole-page capture is
+qualified separately under RI-031; source and capture budgets remain unchanged.
+
+<a id="li-089"></a>
+
+### LI-089 — Relative Oklab/Oklch backgrounds are rejected despite existing color/channel support
+
+**Fixed 2026-11-21.** Shared CSS computation follows **D9.1.1v4 / D9.1.3v2**;
+retained computed expressions remain Input/pool-owned under **D5.5.1**. Dock's
+actual parent hero background is `oklch(from var(--color-blue-deep)
+calc(l + .02) c h)`. Its rejection leaves white hero text on a white page.
+The engine already had relative RGB/HSL channel math and absolute Oklab/Oklch
+conversion, but its relative-function guard excluded the perceptual models.
+
+A shared model table now supplies channel names and analogous missing
+components. Oklab/Oklch sources preserve their components before channel math,
+including values outside sRGB. Polar conversion is extracted from the existing
+RGBA consumer and reused. Alpha inheritance, deferred currentColor, explicit
+channel math and computed-model serialization share the existing path. No
+authored color, page selector, clock or admission limit is substituted.
+
+Two new parser groups and three native paint controls fail before repair.
+Afterward **16 focused color/condition/parser tests and 41 native rendering
+controls pass**, including RGB/HSL regressions, chained source conversions,
+extended components, alpha, invalid channels/units, currentColor, custom
+properties and live origin updates. An old negative case used newly supported
+valid syntax; it now uses an actually invalid channel name instead.
+
+The processing rules follow [CSS Color 5 sections4.1,4.7 and4.9](https://www.w3.org/TR/css-color-5/#relative-colors).
+The current draft preserves extended component ranges and analogous missing
+references. Chromium 148 instead clamps one extended L/C sample and resolves
+bare missing references to zero; these differences are retained, not forced to
+match. Other relative spaces, new gradient interpolation spaces and gamut
+mapping remain outside this repair. Evidence: Lambda
+`temp/online-visual-round128/`; whole-page outcomes are recorded separately.
+
+<a id="li-088"></a>
+
+### LI-088 — Component cascade selection rescans sorted losing declarations
+
+**Fixed 2026-11-21.** Input owns the shared cascade under **D9.1.3v2**.
+A release CPU sample of Dock identifies repeated
+`style_tree_best_property_candidate` and cascade comparisons during nested
+intrinsic measurement. That selector walked every losing declaration after
+finding an eligible winner, although `weak_list_insert` maintains descending
+cascade order and `winning_decl` precedes that list.
+
+Each source now stops at its first eligible candidate, after comparing it with
+the best result from other sources and any borrowed fallback. Rejected ceiling,
+rollback and presentation candidates are still skipped. Cross-source rollback
+recursion and mutation/cache ownership are unchanged; no new cache is added.
+
+All46 style-node unit tests pass, including a new chained layer rollback
+control across `color`/`all`, authored presentation filtering and borrowed
+fallback. All38 metadata/inline-style/SVG native controls also pass. An isolated
+release reduction with2000 declarations and20000 component reads takes138.318ms
+CPU before and0.056ms after; this measures the reduction, not a live-page
+speedup. Dock's fresh capture outcome is recorded separately under RI-031.
+Evidence: Lambda `temp/online-visual-round127/`. No source/capture budget,
+layout algorithm, vendor code or formal ruling changes.
+
+<a id="li-087"></a>
+
+### LI-087 — Stable inert presence always invalidates native style storage
+
+**Fixed 2026-11-21.** Attribute storage remains Input-owned under
+**D9.1.1v4 / D9.1.3v2**. The existing metadata writer accepted only data/ARIA
+attributes. Rewriting an already present `inert` attribute therefore discarded
+native style state even though its boolean presence stayed true. Shared
+`dom_element_can_write_metadata` now includes that stable-presence case; the
+host retains responsibility for lexical-value CSS dependencies and attribute
+notifications. First enable and removal retain the ordinary path.
+
+Four pre-repair controls fail with eleven layouts rather than one (three inert
+entry points and unrelated null-namespace data metadata). The rebuilt release
+passes 38 focused metadata, inline-style and SVG controls plus integer lint.
+Changed inert selector values, first-enable focus suppression, removal,
+namespace collisions, observers and callback-triggered layout remain covered.
+No boolean state, admission limit, capture clock or vendor code is changed.
+Evidence: Lambda `temp/online-visual-round126/`; host API parity is JS13-L32.
+
+<a id="li-082"></a>
+
+### LI-082 — Merged fragment geometry structure lacks its closing brace
+
+**Fixed 2026-11-21.** The merged `DomFragmentGeometry` declaration omitted
+its closing `};` before `DomToggleTaskTracker`. Subsequent declarations were
+therefore parsed as nested members, producing template-specialization and
+storage-class errors throughout Radiant consumers. Restoring that brace
+preserves the intended extracted geometry structure and ownership under
+**D9.1.1v4 / D9.1.3v2 / D5.5.1**. The Input, Radiant, runtime and host-adapter
+release archives compile afterward, and the rebuilt host passes 35 focused
+render/lifecycle controls. No field, layout algorithm or vendor source changes.
+Evidence: Lambda `temp/online-visual-round120/`.
+
 <a id="li-081"></a>
 
 ### LI-081 — Adopted nodes were walked after their source arena was freed

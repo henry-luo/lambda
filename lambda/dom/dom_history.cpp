@@ -295,7 +295,7 @@ extern "C" void js_history_install_globals(void) {
     }
     js_history_state->history_object = history_root.get();
     dom_install_history_interface(global_root.get(), history_root.get());
-    dom_realm_set_cstr(global_root.get(), "location", js_get_document_object_value());
+    dom_realm_set_cstr(global_root.get(), "location", dom_location_for_document(js_get_document_object_value()));
     dom_realm_set_cstr(history_root.get(), "scrollRestoration", make_string_item(dom_engine_history_scroll_restoration(document)));
     dom_realm_set_cstr(global_root.get(), "history", history_root.get());
     dom_realm_set_native(global_root.get(), js_name_item("focus"), js_history_window_noop);

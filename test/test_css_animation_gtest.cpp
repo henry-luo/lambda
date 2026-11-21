@@ -25,6 +25,7 @@
 #include "radiant/render_css3d.hpp"
 #include "radiant/resource_loaders.h"
 #include "radiant/network_integration.h"
+#include "radiant_style_test_utils.hpp"
 #include "lambda/input/input.hpp"
 #include "lambda/io/mark_builder.hpp"
 #include "lambda/input/css/css_engine.hpp"
@@ -2214,6 +2215,7 @@ TEST_F(MotionCascadeTest, ContainmentInheritsComputedModesWithoutImplicitContain
     element.parent = lam::up(static_cast<DomNode*>(&parent));
     doc.root = lam::up(&parent);
     BlockProp parent_block = BLOCK_PROP_DEFAULT, child_block = BLOCK_PROP_DEFAULT;
+    TestBlockContainment parent_containment(parent_block);
     parent.blk = lam::view_prop(&parent_block);
     element.blk = lam::view_prop(&child_block);
     LayoutContext context = {};
@@ -2222,23 +2224,23 @@ TEST_F(MotionCascadeTest, ContainmentInheritsComputedModesWithoutImplicitContain
     context.view = lam::up(static_cast<DomNode*>(&element));
     CssDeclaration* inherited = css_parse_declaration_text("contain:inherit", 15, pool);
     ASSERT_NE(inherited, nullptr);
-    parent_block.computed_containment = CSS_CONTAIN_LAYOUT | CSS_CONTAIN_STYLE | CSS_CONTAIN_PAINT;
+    parent_containment.value.computed_containment = CSS_CONTAIN_LAYOUT | CSS_CONTAIN_STYLE | CSS_CONTAIN_PAINT;
     resolve_css_property(CSS_PROPERTY_CONTAIN, inherited, &context);
-    EXPECT_EQ(child_block.computed_containment, parent_block.computed_containment);
-    EXPECT_TRUE(child_block.contain_positioning);
-    EXPECT_TRUE(child_block.contain_paint);
-    EXPECT_FALSE(child_block.contain_size);
+    EXPECT_EQ(child_block.containment().computed_containment, parent_block.containment().computed_containment);
+    EXPECT_TRUE(child_block.containment().contain_positioning);
+    EXPECT_TRUE(child_block.containment().contain_paint);
+    EXPECT_FALSE(child_block.containment().contain_size);
 
     // query-container size containment is a used effect, not the parent's contain value.
-    parent_block.computed_containment = 0;
-    parent_block.container_axes = CSS_CONTAINER_INLINE | CSS_CONTAINER_BLOCK;
-    parent_block.contain_size = parent_block.contain_inline_size = true;
+    parent_containment.value.computed_containment = 0;
+    parent_containment.value.container_axes = CSS_CONTAINER_INLINE | CSS_CONTAINER_BLOCK;
+    parent_containment.value.contain_size = parent_containment.value.contain_inline_size = true;
     resolve_css_property(CSS_PROPERTY_CONTAIN, inherited, &context);
-    EXPECT_EQ(child_block.computed_containment, 0);
-    EXPECT_FALSE(child_block.contain_size);
-    EXPECT_FALSE(child_block.contain_inline_size);
-    EXPECT_FALSE(child_block.contain_positioning);
-    EXPECT_FALSE(child_block.contain_paint);
+    EXPECT_EQ(child_block.containment().computed_containment, 0);
+    EXPECT_FALSE(child_block.containment().contain_size);
+    EXPECT_FALSE(child_block.containment().contain_inline_size);
+    EXPECT_FALSE(child_block.containment().contain_positioning);
+    EXPECT_FALSE(child_block.containment().contain_paint);
 
     const struct {const char* text; uint8_t flags;} modes[] = {
         {"strict", CSS_CONTAIN_SIZE | CSS_CONTAIN_LAYOUT | CSS_CONTAIN_STYLE | CSS_CONTAIN_PAINT},
@@ -2254,15 +2256,15 @@ TEST_F(MotionCascadeTest, ContainmentInheritsComputedModesWithoutImplicitContain
     CssDeclaration* visibility = css_parse_declaration_text("content-visibility:inherit", 26, pool);
     ASSERT_NE(visibility, nullptr);
     // relevance belongs to each element's view; inherit the computed mode, never the parent's skipped bit.
-    parent_block.content_visibility = CSS_VALUE_AUTO;
-    parent_block.content_visibility_skipped = true;
+    parent_containment.value.content_visibility = CSS_VALUE_AUTO;
+    parent_containment.value.content_visibility_skipped = true;
     resolve_css_property(CSS_PROPERTY_CONTENT_VISIBILITY, visibility, &context);
-    EXPECT_EQ(child_block.content_visibility, CSS_VALUE_AUTO);
-    EXPECT_FALSE(child_block.content_visibility_skipped);
-    parent_block.content_visibility = CSS_VALUE_HIDDEN;
+    EXPECT_EQ(child_block.containment().content_visibility, CSS_VALUE_AUTO);
+    EXPECT_FALSE(child_block.containment().content_visibility_skipped);
+    parent_containment.value.content_visibility = CSS_VALUE_HIDDEN;
     resolve_css_property(CSS_PROPERTY_CONTENT_VISIBILITY, visibility, &context);
-    EXPECT_EQ(child_block.content_visibility, CSS_VALUE_HIDDEN);
-    EXPECT_TRUE(child_block.content_visibility_skipped);
+    EXPECT_EQ(child_block.containment().content_visibility, CSS_VALUE_HIDDEN);
+    EXPECT_TRUE(child_block.containment().content_visibility_skipped);
     element.blk = nullptr;
     element.parent = nullptr;
 }
@@ -2306,8 +2308,9 @@ TEST(CssContainment, VisibilityApplicabilityFollowsSizeContainmentBoxes) {
     DomElement parent = {}, child = {};
     parent.node_type = child.node_type = DOM_NODE_ELEMENT;
     BlockProp block = BLOCK_PROP_DEFAULT;
-    block.content_visibility = CSS_VALUE_HIDDEN;
-    block.content_visibility_skipped = true;
+    TestBlockContainment containment(block);
+    containment.value.content_visibility = CSS_VALUE_HIDDEN;
+    containment.value.content_visibility_skipped = true;
     parent.blk = lam::view_prop(&block);
     child.parent = lam::up(static_cast<DomNode*>(&parent));
     for (const auto& test_case : cases) {
@@ -2333,18 +2336,18 @@ TEST_F(MotionCascadeTest, IntrinsicSizeNoneClearsFallbackWithoutDiscardingAutoma
         resolve_css_property(declaration->property_code, declaration, &context);
     };
     resolve("contain-intrinsic-size:auto 20px 30px");
-    EXPECT_FLOAT_EQ(block.contain_intrinsic_width, 20.0f);
-    EXPECT_FLOAT_EQ(block.contain_intrinsic_height, 30.0f);
+    EXPECT_FLOAT_EQ(block.containment().contain_intrinsic_width, 20.0f);
+    EXPECT_FLOAT_EQ(block.containment().contain_intrinsic_height, 30.0f);
     resolve("contain-intrinsic-size:auto none");
-    EXPECT_FLOAT_EQ(block.contain_intrinsic_width, -1.0f);
-    EXPECT_FLOAT_EQ(block.contain_intrinsic_height, -1.0f);
-    EXPECT_TRUE(block.contain_intrinsic_width_auto);
-    EXPECT_TRUE(block.contain_intrinsic_height_auto);
+    EXPECT_FLOAT_EQ(block.containment().contain_intrinsic_width, -1.0f);
+    EXPECT_FLOAT_EQ(block.containment().contain_intrinsic_height, -1.0f);
+    EXPECT_TRUE(block.containment().contain_intrinsic_width_auto);
+    EXPECT_TRUE(block.containment().contain_intrinsic_height_auto);
     resolve("contain-intrinsic-size:none");
-    EXPECT_FALSE(block.contain_intrinsic_width_auto);
-    EXPECT_FALSE(block.contain_intrinsic_height_auto);
+    EXPECT_FALSE(block.containment().contain_intrinsic_width_auto);
+    EXPECT_FALSE(block.containment().contain_intrinsic_height_auto);
     resolve("contain-intrinsic-height:auto none");
-    EXPECT_TRUE(block.contain_intrinsic_height_auto);
+    EXPECT_TRUE(block.containment().contain_intrinsic_height_auto);
     element.blk = nullptr;
 }
 
@@ -2363,17 +2366,17 @@ TEST_F(MotionCascadeTest, IntrinsicSizeMathUsesComputedFontAndClampsNegativeResu
     CssDeclaration* declaration = css_parse_declaration_text(text, strlen(text), pool);
     ASSERT_NE(declaration, nullptr);
     resolve_css_property(declaration->property_code, declaration, &context);
-    EXPECT_FLOAT_EQ(block.contain_intrinsic_width, 12.0f);
-    EXPECT_FLOAT_EQ(block.contain_intrinsic_height, 20.0f);
+    EXPECT_FLOAT_EQ(block.containment().contain_intrinsic_width, 12.0f);
+    EXPECT_FLOAT_EQ(block.containment().contain_intrinsic_height, 20.0f);
     font.font_size = context.font.current_font_size = 20.0f;
     resolve_css_property(declaration->property_code, declaration, &context);
-    EXPECT_FLOAT_EQ(block.contain_intrinsic_width, 22.0f);
-    EXPECT_FLOAT_EQ(block.contain_intrinsic_height, 40.0f);
+    EXPECT_FLOAT_EQ(block.containment().contain_intrinsic_width, 22.0f);
+    EXPECT_FLOAT_EQ(block.containment().contain_intrinsic_height, 40.0f);
     text = "contain-intrinsic-height:calc(1px - 2px)";
     declaration = css_parse_declaration_text(text, strlen(text), pool);
     ASSERT_NE(declaration, nullptr);
     resolve_css_property(declaration->property_code, declaration, &context);
-    EXPECT_FLOAT_EQ(block.contain_intrinsic_height, 0.0f);
+    EXPECT_FLOAT_EQ(block.containment().contain_intrinsic_height, 0.0f);
     element.blk = nullptr;
 }
 
@@ -3235,7 +3238,8 @@ TEST_F(MotionCascadeTest, IntrinsicMeasurementsSharePhysicalLogicalCascadeAndCom
     element.view_type = RDT_VIEW_BLOCK;
     element.display = {CSS_VALUE_BLOCK, CSS_VALUE_FLOW};
     BlockProp block = BLOCK_PROP_DEFAULT;
-    block.contain_size = true;
+    TestBlockContainment containment(block);
+    containment.value.contain_size = true;
     element.blk = lam::view_prop(&block);
     LayoutContext context = {};
     context.pool = lam::up(pool); context.doc = lam::up(&doc);
@@ -3262,8 +3266,9 @@ TEST_F(MotionCascadeTest, IntrinsicMeasurementsSharePhysicalLogicalCascadeAndCom
     DomElement parent = {};
     parent.node_type = DOM_NODE_ELEMENT;
     BlockProp inherited = BLOCK_PROP_DEFAULT;
-    inherited.contain_intrinsic_width = 36.0f;
-    inherited.contain_intrinsic_height = 48.0f;
+    TestBlockContainment inherited_containment(inherited);
+    inherited_containment.value.contain_intrinsic_width = 36.0f;
+    inherited_containment.value.contain_intrinsic_height = 48.0f;
     parent.blk = lam::view_prop(&inherited);
     element.parent = lam::up(static_cast<DomNode*>(&parent));
     declare("contain-intrinsic-size:inherit!important");
@@ -3291,8 +3296,9 @@ TEST_F(MotionCascadeTest, RememberedContainmentSizesBelongToCommittedSelectedVie
     context.run_mode = radiant::RunMode::PerformLayout;
     element.view_type = RDT_VIEW_BLOCK;
     BlockProp properties = BLOCK_PROP_DEFAULT;
-    properties.content_visibility = CSS_VALUE_AUTO;
-    properties.contain_intrinsic_width_auto = properties.contain_intrinsic_height_auto = true;
+    TestBlockContainment containment(properties);
+    containment.value.content_visibility = CSS_VALUE_AUTO;
+    containment.value.contain_intrinsic_width_auto = containment.value.contain_intrinsic_height_auto = true;
     element.blk = lam::view_prop(&properties);
     element.width = 80.0f; element.height = 120.0f;
     ViewBlock* block = lam::view_require_block(&element);
@@ -3310,14 +3316,15 @@ TEST_F(MotionCascadeTest, RememberedContainmentSizesBelongToCommittedSelectedVie
     ASSERT_TRUE(layout_get_last_remembered_size(&context, &element, false, &size));
     EXPECT_FLOAT_EQ(size, 60.0f);
     context.selected_view_tree = lam::up(&first);
-    properties.content_visibility_skipped = true;
+    containment.value.content_visibility_skipped = true;
     layout_store_last_remembered_size(&context, block, true);
     ASSERT_TRUE(layout_get_last_remembered_size(&context, &element, false, &size));
     EXPECT_FLOAT_EQ(size, 120.0f);
-    properties.content_visibility_skipped = false;
+    containment.value.content_visibility_skipped = false;
     DomElement ancestor = {};
     BlockProp ancestor_properties = BLOCK_PROP_DEFAULT;
-    ancestor_properties.content_visibility_skipped = true;
+    TestBlockContainment ancestor_containment(ancestor_properties);
+    ancestor_containment.value.content_visibility_skipped = true;
     ancestor.blk = lam::view_prop(&ancestor_properties);
     ancestor.view_type = RDT_VIEW_BLOCK;
     ancestor.node_type = DOM_NODE_ELEMENT;
@@ -3332,23 +3339,23 @@ TEST_F(MotionCascadeTest, RememberedContainmentSizesBelongToCommittedSelectedVie
     ASSERT_TRUE(layout_get_last_remembered_size(&context, &element, true, &size));
     EXPECT_FLOAT_EQ(size, 80.0f);
     context.css_query_probe = false;
-    properties.content_visibility = CSS_VALUE_VISIBLE;
+    containment.value.content_visibility = CSS_VALUE_VISIBLE;
     layout_store_last_remembered_size(&context, block);
     ASSERT_TRUE(layout_get_last_remembered_size(&context, &element, false, &size));
     EXPECT_FLOAT_EQ(size, 120.0f);
-    properties.contain_size = true;
+    containment.value.contain_size = true;
     layout_store_last_remembered_size(&context, block, true);
     ASSERT_TRUE(layout_get_last_remembered_size(&context, &element, false, &size));
     EXPECT_FLOAT_EQ(size, 120.0f);
-    properties.contain_size = false;
-    properties.contain_intrinsic_height_auto = false;
+    containment.value.contain_size = false;
+    containment.value.contain_intrinsic_height_auto = false;
     layout_store_last_remembered_size(&context, block, true);
     ASSERT_TRUE(layout_get_last_remembered_size(&context, &element, true, &size));
     EXPECT_FLOAT_EQ(size, 140.0f);
     // losing auto clears only that axis, including while the box is skipped.
     EXPECT_FALSE(layout_get_last_remembered_size(&context, &element, false, &size));
-    properties.content_visibility_skipped = true;
-    properties.contain_intrinsic_width_auto = false;
+    containment.value.content_visibility_skipped = true;
+    containment.value.contain_intrinsic_width_auto = false;
     layout_store_last_remembered_size(&context, block, true);
     EXPECT_FALSE(layout_get_last_remembered_size(&context, &element, true, &size));
     element.blk = nullptr;
@@ -3879,6 +3886,7 @@ TEST(CssTransform, GroupingEffectsFlattenUsedTransformStyle) {
     ScrollProp scroll = SCROLL_PROP_DEFAULT;
     InlineProp inline_prop = INLINE_PROP_DEFAULT;
     BlockProp block = BLOCK_PROP_DEFAULT;
+    TestBlockContainment containment(block);
     FilterProp filter = {};
     FilterFunction function = {};
     element.set_synthetic(true);
@@ -3906,9 +3914,9 @@ TEST(CssTransform, GroupingEffectsFlattenUsedTransformStyle) {
     filter.functions = lam::own(&function);
     EXPECT_FALSE(radiant::transform_preserves_3d(&element));
     filter.functions = nullptr;
-    block.contain_paint = true;
+    containment.value.contain_paint = true;
     EXPECT_FALSE(radiant::transform_preserves_3d(&element));
-    block.contain_paint = false;
+    containment.value.contain_paint = false;
     EXPECT_TRUE(radiant::transform_preserves_3d(&element));
     EXPECT_EQ(transform.transform_style, CSS_VALUE_PRESERVE_3D);
 }
@@ -4427,17 +4435,27 @@ protected:
     }
 
     struct MockElement {
-        uint8_t buf[4096];
-        InlineProp in_line;
-        DomStyleExt props;
+        DomElement element = {};
+        InlineProp in_line = {};
+        DomStyleExt props = {};
+        AnimationScheduler* scheduler = nullptr;
+
+        ~MockElement() {
+            if (!scheduler) return;
+            // retire effects before their stack-backed target and style storage expire.
+            for (AnimationInstance* effect = scheduler->first; effect; effect = effect->next) {
+                if (effect->target == &element) effect->suppress_cancel_event = true;
+            }
+            animation_scheduler_remove_by_target(scheduler, &element);
+        }
     };
 
     DomElement* createMockElement(MockElement* mock) {
-        memset(mock, 0, sizeof(*mock));
-        DomElement* element = (DomElement*)mock->buf;
+        mock->scheduler = scheduler;
+        DomElement* element = &mock->element;
         element->node_type = DOM_NODE_ELEMENT;
         element->doc = lam::up(&doc);
-        ((ViewSpan*)element)->in_line = lam::view_ref(&mock->in_line);
+        element->in_line = lam::view_ref(&mock->in_line);
         element->ext = lam::own(&mock->props);
         return element;
     }
@@ -4538,14 +4556,15 @@ protected:
 };
 
 TEST_F(AnimationTickTest, QueryMeasurementAndSkippedContentsDeferNewMotion) {
-    MockElement mock;
-    DomElement* element = createMockElement(&mock);
     DomElement parent = {};
     parent.node_type = DOM_NODE_ELEMENT;
     parent.display.outer = CSS_VALUE_BLOCK;
     parent.display.inner = CSS_VALUE_FLOW;
     BlockProp block = BLOCK_PROP_DEFAULT;
+    TestBlockContainment containment(block);
     parent.blk = lam::view_prop(&block);
+    MockElement mock;
+    DomElement* element = createMockElement(&mock);
     element->parent = lam::up(static_cast<DomNode*>(&parent));
     opacityKeyframes();
     setAnimationStyle(element, "animation:schedulerFade 1s linear forwards;transition:opacity 1s linear");
@@ -4557,26 +4576,27 @@ TEST_F(AnimationTickTest, QueryMeasurementAndSkippedContentsDeferNewMotion) {
 
     layout.css_query_probe = false;
     for (CssEnum mode : {CSS_VALUE_HIDDEN, CSS_VALUE_AUTO}) {
-        block.content_visibility = mode;
-        block.content_visibility_skipped = true;
+        containment.value.content_visibility = mode;
+        containment.value.content_visibility_skipped = true;
         css_animation_resolve(element, &layout);
         EXPECT_EQ(scheduler->count, 0);
         EXPECT_TRUE(layout_content_visibility_suppresses_transition(&layout, element));
     }
-    block.content_visibility_skipped = false;
+    containment.value.content_visibility_skipped = false;
     css_animation_resolve(element, &layout);
     EXPECT_EQ(scheduler->count, 1);
 }
 
 TEST_F(AnimationTickTest, SkippedEffectsDeferLifecycleAndCatchUpOnActivation) {
-    MockElement mock;
-    DomElement* element = createMockElement(&mock);
     DomElement parent = {};
     parent.node_type = DOM_NODE_ELEMENT;
     parent.display.outer = CSS_VALUE_BLOCK;
     parent.display.inner = CSS_VALUE_FLOW;
     BlockProp block = BLOCK_PROP_DEFAULT;
+    TestBlockContainment containment(block);
     parent.blk = lam::view_prop(&block);
+    MockElement mock;
+    DomElement* element = createMockElement(&mock);
     element->parent = lam::up(static_cast<DomNode*>(&parent));
     parent.set_styles_resolved(true);
     setAnimationStyle(element, "opacity:0");
@@ -4586,8 +4606,8 @@ TEST_F(AnimationTickTest, SkippedEffectsDeferLifecycleAndCatchUpOnActivation) {
     ASSERT_NE(instance, nullptr);
     animation_scheduler_tick(scheduler, .25, nullptr);
     EXPECT_FLOAT_EQ(mock.in_line.opacity, .25f);
-    block.content_visibility = CSS_VALUE_HIDDEN;
-    block.content_visibility_skipped = true;
+    containment.value.content_visibility = CSS_VALUE_HIDDEN;
+    containment.value.content_visibility_skipped = true;
     animation_scheduler_tick(scheduler, 2.0, nullptr);
     EXPECT_FLOAT_EQ(mock.in_line.opacity, .25f);
     EXPECT_EQ(instance->play_state, ANIM_PLAY_RUNNING);
@@ -4603,7 +4623,7 @@ TEST_F(AnimationTickTest, SkippedEffectsDeferLifecycleAndCatchUpOnActivation) {
     EXPECT_FLOAT_EQ(mock.in_line.opacity, 1.0f);
     EXPECT_EQ(instance->play_state, ANIM_PLAY_RUNNING);
     EXPECT_FALSE(instance->finish_notified);
-    block.content_visibility_skipped = false;
+    containment.value.content_visibility_skipped = false;
     animation_scheduler_tick(scheduler, 2.0, nullptr);
     EXPECT_EQ(instance->play_state, ANIM_PLAY_FINISHED);
     EXPECT_TRUE(instance->finish_notified);
@@ -4630,10 +4650,10 @@ TEST_F(AnimationTickTest, PausedEffectSamplesAndResumesFromFrozenTime) {
 }
 
 TEST_F(AnimationTickTest, BackgroundPositionStepsPauseAndMixedUnitsReachPaintOffsets) {
-    MockElement mock;
-    DomElement* element = createMockElement(&mock);
     BoundaryProp boundary = {};
     BackgroundProp background = {};
+    MockElement mock;
+    DomElement* element = createMockElement(&mock);
     element->bound = lam::view_prop(&boundary);
     boundary.background = lam::own(&background);
     ASSERT_NE(parsedKeyframes("sheet{from{background-position-x:0px;background-position-y:0%}"
@@ -4662,10 +4682,10 @@ TEST_F(AnimationTickTest, BackgroundPositionStepsPauseAndMixedUnitsReachPaintOff
 }
 
 TEST_F(AnimationTickTest, BackgroundPositionPercentageRemainsRelativeToImageFreeSpace) {
-    MockElement mock;
-    DomElement* element = createMockElement(&mock);
     BoundaryProp boundary = {};
     BackgroundProp background = {};
+    MockElement mock;
+    DomElement* element = createMockElement(&mock);
     element->bound = lam::view_prop(&boundary);
     boundary.background = lam::own(&background);
     ASSERT_NE(parsedKeyframes("position{from{background-position-x:100%}to{background-position-x:40px}}", "position"), nullptr);
@@ -4679,12 +4699,12 @@ TEST_F(AnimationTickTest, BackgroundPositionPercentageRemainsRelativeToImageFree
 }
 
 TEST_F(AnimationTickTest, IndividualTransformsAnimateTogetherAndRetainIndependentSnapshots) {
-    MockElement mock;
-    DomElement* element = createMockElement(&mock);
     TransformProp transform = {};
     IndividualTransformProp individual = {};
     transform.individual = lam::own(&individual);
     FontProp font = {};
+    MockElement mock;
+    DomElement* element = createMockElement(&mock);
     font.font_size = 16.0f;
     setTransformContext(element, &transform, &font);
     individual.values[0].type = TRANSFORM_TRANSLATE;
@@ -4712,15 +4732,15 @@ TEST_F(AnimationTickTest, IndividualTransformsAnimateTogetherAndRetainIndependen
 }
 
 TEST_F(AnimationTickTest, WebCancellationRestoresAllTransformSlotsBeforeSameTimeSeek) {
-    MockElement mock;
-    DomElement* element = createMockElement(&mock);
     TransformProp transform = {};
     IndividualTransformProp individual = {};
     transform.individual = lam::own(&individual);
     FontProp font = {};
+    TransformFunction underlying = {};
+    MockElement mock;
+    DomElement* element = createMockElement(&mock);
     font.font_size = 16.0f;
     setTransformContext(element, &transform, &font);
-    TransformFunction underlying = {};
     underlying.type = TRANSFORM_TRANSLATE;
     underlying.params.translate.x = 7.0f;
     transform.functions = lam::shared(&underlying);
@@ -4762,10 +4782,10 @@ TEST_F(AnimationTickTest, WebCancellationRestoresAllTransformSlotsBeforeSameTime
 }
 
 TEST_F(AnimationTickTest, DiscreteBackgroundImagesResolveStylesheetUrlsAndRestoreOnCancel) {
-    MockElement mock;
-    DomElement* element = createMockElement(&mock);
     BoundaryProp boundary = {};
     BackgroundProp background = {};
+    MockElement mock;
+    DomElement* element = createMockElement(&mock);
     background.image = pool_strdup(pool, "authored.png");
     element->bound = lam::view_prop(&boundary);
     boundary.background = lam::own(&background);
@@ -4795,10 +4815,10 @@ TEST_F(AnimationTickTest, DiscreteBackgroundImagesResolveStylesheetUrlsAndRestor
 }
 
 TEST_F(AnimationTickTest, FilterListsPadIdentityInterpolateMathAndRestoreOnCancel) {
-    MockElement mock;
-    DomElement* element = createMockElement(&mock);
     FilterProp filter = {};
     FilterFunction authored = {};
+    MockElement mock;
+    DomElement* element = createMockElement(&mock);
     authored.type = FILTER_BRIGHTNESS;
     authored.params.amount = .8f;
     filter.functions = lam::own(&authored);
@@ -4827,9 +4847,9 @@ TEST_F(AnimationTickTest, FilterListsPadIdentityInterpolateMathAndRestoreOnCance
 }
 
 TEST_F(AnimationTickTest, FilterListsUseDiscreteMismatchAndIdentityForShorterTail) {
+    FilterProp filter = {};
     MockElement mock;
     DomElement* element = createMockElement(&mock);
-    FilterProp filter = {};
     element->set_filter_prop(&filter);
     ASSERT_NE(parsedKeyframes("filters{0%{filter:brightness(.5)}50%{filter:brightness(1) saturate(3)}"
         "100%{filter:contrast(2)}}", "filters"), nullptr);
@@ -5305,10 +5325,10 @@ TEST_F(AnimationTickTest, TransitionRestyleRetargetsCancelsAndReleasesCompletedE
 }
 
 TEST_F(AnimationTickTest, CalculatedTimeAndPiecewiseAnimationRetainClockAcrossCurveChanges) {
-    MockElement mock;
-    DomElement* element = createMockElement(&mock);
     TransformProp transform = {};
     FontProp font = {};
+    MockElement mock;
+    DomElement* element = createMockElement(&mock);
     font.font_size = 10.0f;
     setTransformContext(element, &transform, &font);
     ASSERT_NE(parsedKeyframes("motion{from{opacity:0;transform:translateX(0px)}"
@@ -5619,13 +5639,13 @@ TEST_F(AnimationTickTest, NeutralOpacityAndColorEndpointsKeepUnderlyingValues) {
     };
     for (const auto& test_case : cases) {
         SCOPED_TRACE(test_case.rule);
+        BoundaryProp boundary = {};
+        BackgroundProp background = {};
         MockElement mock;
         DomElement* element = createMockElement(&mock);
         mock.in_line.opacity = .2f;
         mock.in_line.color = Color{0xFF008000};
         mock.in_line.has_color = true;
-        BoundaryProp boundary = {};
-        BackgroundProp background = {};
         background.color = Color{0xFF008000};
         boundary.background = lam::own(&background);
         element->bound = lam::view_prop(&boundary);
@@ -5704,9 +5724,9 @@ TEST(CssContainerIdentity, FlatTreeParentUsesShadowHostsAndNamedSlotAssignments)
 }
 
 TEST_F(AnimationTickTest, MissingStopsUsePropertyIntervalsAndInteriorNeutralEndpoints) {
+    BlockProp sizing = {};
     MockElement mock;
     DomElement* element = createMockElement(&mock);
-    BlockProp sizing = {};
     sizing.given_width = 80.0f;
     element->blk = lam::view_prop(&sizing);
     mock.in_line.opacity = .8f;
@@ -5752,9 +5772,9 @@ TEST_F(AnimationTickTest, LengthCompositionUsesAuthoredEndpointsBeforeInterpolat
     };
     for (const auto& sample : cases) {
         SCOPED_TRACE(sample.rule);
+        BlockProp sizing = {};
         MockElement mock;
         DomElement* element = createMockElement(&mock);
-        BlockProp sizing = {};
         sizing.given_width = 40.0f;
         element->blk = lam::view_prop(&sizing);
         CssAnimProp config = defaultAnimProp("compose", 1.0f);
@@ -5820,10 +5840,10 @@ TEST_F(AnimationTickTest, NeutralTransformsCopyUnderlyingListsAndPadWithIdentity
         {false, false}, {true, false}, {false, true}, {true, true}
     };
     for (const auto& sample : cases) {
-        MockElement mock;
-        DomElement* element = createMockElement(&mock);
         TransformProp transform = {};
         TransformFunction source = {};
+        MockElement mock;
+        DomElement* element = createMockElement(&mock);
         source.type = TRANSFORM_TRANSLATEX;
         source.params.translate.x = 10.0f;
         source.translate_x_percent = source.translate_y_percent = NAN;
@@ -5861,10 +5881,10 @@ TEST_F(AnimationTickTest, TypedTransformEndpointsKeepUnitsAndPercentageComponent
     };
     for (const auto& test_case : cases) {
         SCOPED_TRACE(test_case.rule);
-        MockElement mock;
-        DomElement* element = createMockElement(&mock);
         TransformProp transform = {};
         FontProp font = {};
+        MockElement mock;
+        DomElement* element = createMockElement(&mock);
         font.font_size = 10.0f;
         setTransformContext(element, &transform, &font);
         StrBuf* content = strbuf_new();
@@ -5901,10 +5921,10 @@ TEST_F(AnimationTickTest, TransformMathSpatialPrimitivesAndMatricesSampleCompute
     };
     for (const auto& sample : cases) {
         SCOPED_TRACE(sample.to);
-        MockElement mock;
-        DomElement* element = createMockElement(&mock);
         TransformProp transform = {};
         FontProp font = {};
+        MockElement mock;
+        DomElement* element = createMockElement(&mock);
         font.font_size = 10.0f;
         setTransformContext(element, &transform, &font);
         StrBuf* content = strbuf_new();
@@ -5957,10 +5977,10 @@ TEST_F(AnimationTickTest, SpatialRotationPerspectiveAndMatrixPairsInterpolateThe
     };
     for (const auto& sample : cases) {
         SCOPED_TRACE(sample.to);
-        MockElement mock;
-        DomElement* element = createMockElement(&mock);
         TransformProp transform = {};
         FontProp font = {};
+        MockElement mock;
+        DomElement* element = createMockElement(&mock);
         setTransformContext(element, &transform, &font);
         StrBuf* content = strbuf_new();
         strbuf_append_format(content, "spatialPair{from{transform:%s}to{transform:%s}}", sample.from, sample.to);
@@ -5994,10 +6014,10 @@ TEST_F(AnimationTickTest, PercentageMathAndMatrixSuffixesFollowTheUsedReferenceB
     };
     for (const auto& sample : cases) {
         SCOPED_TRACE(sample.to);
-        MockElement mock;
-        DomElement* element = createMockElement(&mock);
         TransformProp transform = {};
         FontProp font = {};
+        MockElement mock;
+        DomElement* element = createMockElement(&mock);
         font.font_size = 10.0f;
         setTransformContext(element, &transform, &font);
         // effects resolve before initial layout has assigned the element's dimensions.
@@ -6037,10 +6057,10 @@ TEST_F(AnimationTickTest, PercentageMathAndMatrixSuffixesFollowTheUsedReferenceB
 }
 
 TEST_F(AnimationTickTest, ComputedTransformMathSnapshotsSurviveTheirSourcePool) {
-    MockElement mock;
-    DomElement* element = createMockElement(&mock);
     TransformProp transform = {};
     FontProp font = {};
+    MockElement mock;
+    DomElement* element = createMockElement(&mock);
     font.font_size = 10.0f;
     setTransformContext(element, &transform, &font);
     Pool* source_pool = pool_create();
@@ -6059,10 +6079,10 @@ TEST_F(AnimationTickTest, ComputedTransformMathSnapshotsSurviveTheirSourcePool) 
 }
 
 TEST_F(AnimationTickTest, SingularMatrixSuffixSelectsTheEntireTransformDiscretely) {
-    MockElement mock;
-    DomElement* element = createMockElement(&mock);
     TransformProp transform = {};
     FontProp font = {};
+    MockElement mock;
+    DomElement* element = createMockElement(&mock);
     font.font_size = 10.0f;
     setTransformContext(element, &transform, &font);
     ASSERT_NE(parsedKeyframes("singular{from{transform:rotate(0deg) matrix(0,0,0,0,0,0)}"
@@ -6089,13 +6109,14 @@ TEST_F(AnimationTickTest, TransformValueCachesRefreshPerElementAndOwnInheritedLi
     CssKeyframes* keyframes = parsedKeyframes(
         "transformContext{from{transform:translateX(1em)}to{transform:var(--motion)}}", "transformContext");
     ASSERT_NE(keyframes, nullptr);
-    MockElement mocks[2];
     FontProp fonts[2] = {};
     TransformProp transforms[2] = {};
+    MockElement parent_mock, child_mock;
+    MockElement* mocks[] = {&child_mock, &parent_mock};
     DomElement* elements[2] = {};
     AnimationInstance* instances[2] = {};
     for (int index = 0; index < 2; index++) {
-        elements[index] = createMockElement(&mocks[index]);
+        elements[index] = createMockElement(mocks[index]);
         elements[index]->font = lam::view_prop(&fonts[index]);
         elements[index]->ext->transform = lam::view_prop(&transforms[index]);
         fonts[index].font_size = index == 0 ? 10.0f : 20.0f;
@@ -6161,11 +6182,11 @@ TEST_F(AnimationTickTest, PhysicalSidesApplyColorAndLengthSamplesToConsumerField
     };
     for (size_t family = 0; family < sizeof(families) / sizeof(families[0]); family++) {
         for (int side = CSS_BOX_SIDE_TOP; side <= CSS_BOX_SIDE_LEFT; side++) {
-            MockElement mock;
-            DomElement* element = createMockElement(&mock);
             BoundaryProp boundary = {};
             BorderProp border = {};
             PositionProp position = {};
+            MockElement mock;
+            DomElement* element = createMockElement(&mock);
             element->bound = lam::view_prop(&boundary);
             boundary.border = lam::own(&border);
             element->position = lam::view_prop(&position);
@@ -6219,11 +6240,11 @@ TEST_F(AnimationTickTest, PhysicalSidesApplyColorAndLengthSamplesToConsumerField
 }
 
 TEST_F(AnimationTickTest, PhysicalSideTransitionsGrowTracksAndKeepRetargetSnapshots) {
-    MockElement mock;
-    DomElement* element = createMockElement(&mock);
     BoundaryProp boundary = {};
     BorderProp border = {};
     PositionProp position = {};
+    MockElement mock;
+    DomElement* element = createMockElement(&mock);
     element->bound = lam::view_prop(&boundary);
     boundary.border = lam::own(&border);
     element->position = lam::view_prop(&position);
@@ -6350,12 +6371,13 @@ TEST_F(AnimationTickTest, TypedValueCachesStayPerElementAndRefreshVariables) {
 }
 
 TEST_F(AnimationTickTest, SkippedComputedReadsRefreshInheritedEndpointsAndPreserveEvents) {
+    BlockProp block = BLOCK_PROP_DEFAULT;
+    TestBlockContainment containment(block);
     MockElement parent_mock, child_mock;
     DomElement* parent = createMockElement(&parent_mock);
     DomElement* child = createMockElement(&child_mock);
     parent->display = {CSS_VALUE_BLOCK, CSS_VALUE_FLOW};
     child->parent = lam::up(static_cast<DomNode*>(parent));
-    BlockProp block = BLOCK_PROP_DEFAULT;
     parent->blk = lam::view_prop(&block);
     ASSERT_NE(parsedKeyframes("hiddenRead{from{opacity:.2}to{opacity:var(--end)}}", "hiddenRead"), nullptr);
     setAnimationStyle(parent, "--end:.8");
@@ -6367,8 +6389,8 @@ TEST_F(AnimationTickTest, SkippedComputedReadsRefreshInheritedEndpointsAndPreser
     ASSERT_NE(effect, nullptr);
     animation_scheduler_tick(scheduler, .25, nullptr);
     EXPECT_NEAR(child_mock.in_line.opacity, .35f, .00001f);
-    block.content_visibility = CSS_VALUE_HIDDEN;
-    block.content_visibility_skipped = true;
+    containment.value.content_visibility = CSS_VALUE_HIDDEN;
+    containment.value.content_visibility_skipped = true;
     animation_scheduler_tick(scheduler, 2.0, nullptr);
     setAnimationStyle(parent, "--end:.6");
     char computed[64] = {};
@@ -6379,7 +6401,7 @@ TEST_F(AnimationTickTest, SkippedComputedReadsRefreshInheritedEndpointsAndPreser
         EXPECT_FALSE(effect->finish_notified);
         EXPECT_DOUBLE_EQ(effect->start_time, 0.0);
     }
-    block.content_visibility_skipped = false;
+    containment.value.content_visibility_skipped = false;
     animation_scheduler_tick(scheduler, 2.0, nullptr);
     EXPECT_TRUE(effect->finish_notified);
 }
@@ -6419,14 +6441,14 @@ TEST_F(AnimationTickTest, TypedLengthsResolvePerElementAndRefreshAfterRelayout) 
     CssKeyframes* keyframes = keyframe_registry_find(registry, "units");
     ASSERT_NE(keyframes, nullptr);
 
-    MockElement mocks[2];
     BlockProp blocks[2] = {};
     FontProp fonts[2] = {};
     BoundaryProp boundaries[2] = {};
     PositionProp positions[2] = {};
+    BlockContext parent = {};
+    MockElement mocks[2];
     DomElement* elements[2] = {};
     AnimationInstance* instances[2] = {};
-    BlockContext parent = {};
     parent.content_width = 200.0f;
     parent.content_height = parent.given_height = 100.0f;
     layout.block.parent = lam::up(&parent);
@@ -6474,9 +6496,9 @@ TEST_F(AnimationTickTest, TypedLengthsResolvePerElementAndRefreshAfterRelayout) 
 }
 
 TEST_F(AnimationTickTest, WebLengthEffectsInvalidateWithoutDomMutations) {
+    BlockProp block = {};
     MockElement mock;
     DomElement* element = createMockElement(&mock);
-    BlockProp block = {};
     element->blk = lam::view_prop(&block);
     block.given_width = 40.0f;
     CssAnimatedProp properties[2] = {};
@@ -6514,9 +6536,9 @@ TEST_F(AnimationTickTest, WebLengthEffectsInvalidateWithoutDomMutations) {
 }
 
 TEST_F(AnimationTickTest, TransformAnimationMarksDocumentOwnedList) {
+    TransformProp transform = {};
     MockElement mock;
     DomElement* element = createMockElement(&mock);
-    TransformProp transform = {};
     element->ext->transform = lam::view_prop(&transform);
 
     TransformFunction keyframe_function = {};

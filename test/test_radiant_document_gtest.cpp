@@ -1423,7 +1423,9 @@ TEST_F(RadiantDocumentTest, InteractionColorsRepaintLeafAncestorsAndInheritedCur
 TEST_F(RadiantDocumentTest, UnstyledMetadataPreservesGeometryAndCssDependenciesReflow) {
     DomElement* result = load_script_source(
         "<!doctype html><style id=theme>#result{width:40px;height:20px}"
-        "[data-sized] #result{width:80px}</style><link id=sheet><div id=outer><div id=result></div></div>");
+        "[data-sized] #result{width:80px}</style>"
+        "<link id=sheet rel=stylesheet href=xhtml_names.css>"
+        "<link id=hint rel=preload as=style><div id=outer><div id=result></div></div>");
     ASSERT_NE(result, nullptr);
     ASSERT_NE(radiant_document_ensure_state(document, "metadata-layout-test"), nullptr);
     ASSERT_TRUE(layout_update_document(&ui, document));
@@ -1449,8 +1451,13 @@ TEST_F(RadiantDocumentTest, UnstyledMetadataPreservesGeometryAndCssDependenciesR
     for (const char* id : {"theme", "sheet"}) {
         DomElement* owner = dom_find_element_by_id(document->root->as_element(), id);
         ASSERT_NE(owner, nullptr);
+        ASSERT_NE(dom_cssom_element_sheet(owner), nullptr);
         EXPECT_FALSE(dom_set_non_style_metadata(owner, "data-revision", "true"));
     }
+    // preload links have no stylesheet lifecycle to invalidate on metadata writes.
+    DomElement* hint = dom_find_element_by_id(document->root->as_element(), "hint");
+    ASSERT_NE(hint, nullptr);
+    EXPECT_TRUE(dom_set_non_style_metadata(hint, "data-revision", "true"));
 }
 
 TEST_F(RadiantDocumentTest, AttrValuesKeepMetadataStyleInvalidation) {
@@ -13152,7 +13159,7 @@ TEST_F(RadiantDocumentTest, FixedColumnHintsRespectCascadeSpansAndFirstRowPriori
             if (strcmp(containment, "size") == 0) {
                 ASSERT_TRUE(hint->blk);
                 // size containment excludes the reusable computed record; hint semantics stay the same.
-                ASSERT_NE(hint->block()->container_axes, 0);
+                ASSERT_NE(hint->block()->containment().container_axes, 0);
             }
             expect_tracks(entry.first);
         }
@@ -17705,13 +17712,14 @@ TEST_F(RadiantDocumentTest, RubyParallelTextFragmentsPreserveSourceAndMatchExpli
         IntrinsicSizes sizes = measure_physical_widths(group);
         EXPECT_FLOAT_EQ(sizes.max_content, 100.0f);
         EXPECT_TRUE(sizes.has_min_content_break);
-        const DomFragmentGeometry* group_geometry = group->fragment_geometry();
-        EXPECT_TRUE(group_geometry && group_geometry->has_ruby_parallel_fragments);
-        DomText* kept_base = first_text_leaf(find("nowrap"));
+        ASSERT_NE(group->fragment_geometry(), nullptr);
+        EXPECT_TRUE(group->fragment_geometry()->has_ruby_parallel_fragments);
+        DomElement* nowrap = find("nowrap");
+        ASSERT_NE(nowrap, nullptr);
+        DomText* kept_base = first_text_leaf(nowrap);
         ASSERT_NE(kept_base->rect, nullptr);
         EXPECT_EQ(kept_base->rect->next, nullptr);
-        const DomFragmentGeometry* kept_geometry = find("nowrap")->fragment_geometry();
-        EXPECT_FALSE(kept_geometry && kept_geometry->has_ruby_parallel_fragments);
+        EXPECT_FALSE(nowrap->fragment_geometry() && nowrap->fragment_geometry()->has_ruby_parallel_fragments);
     };
     for (bool retained : {false, true}) {
         layout_html_doc(&ui, document, retained);
@@ -17824,8 +17832,10 @@ TEST_F(RadiantDocumentTest, RubyTextRunsFollowCommonOwnerWrappingAndRetainSource
             IntrinsicSizes widths = measure_physical_widths(find(entry.ruby));
             EXPECT_FLOAT_EQ(widths.max_content, entry.maximum);
             EXPECT_TRUE(widths.has_min_content_break);
-            const DomFragmentGeometry* geometry = find(entry.ruby)->fragment_geometry();
-            EXPECT_TRUE(geometry && geometry->has_ruby_parallel_fragments);
+            DomElement* ruby = find(entry.ruby);
+            ASSERT_NE(ruby, nullptr);
+            ASSERT_NE(ruby->fragment_geometry(), nullptr);
+            EXPECT_TRUE(ruby->fragment_geometry()->has_ruby_parallel_fragments);
         }
         ASSERT_NE(radiant_document_ensure_state(document,"ruby-text-runs"),nullptr);
         DomRange* range = dom_range_create(document->state);
@@ -18581,8 +18591,7 @@ TEST_F(RadiantDocumentTest, RubyZeroSizeExplicitBasesRetainTheirBlockAxisEnvelop
             EXPECT_FLOAT_EQ(tail.x, annotation.x + 80.0f);
             if (entry.explicit_base) {
                 EXPECT_FLOAT_EQ(base.height, entry.mutable_font ? font_size : 20.0f);
-                const DomFragmentGeometry* geometry = ruby->fragment_geometry();
-                EXPECT_FALSE(geometry && geometry->has_empty_ruby_base);
+                EXPECT_FALSE(ruby->fragment_geometry() && ruby->fragment_geometry()->has_empty_ruby_base);
             }
             EXPECT_EQ(first_text_leaf(reading), entry.reading);
             EXPECT_EQ(entry.reading->parent.get(), entry.parent);

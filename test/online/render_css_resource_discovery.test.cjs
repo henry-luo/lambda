@@ -5,12 +5,40 @@ const path = require('node:path');
 const http = require('node:http');
 const {parseOptions, runLambdaRender} = require('./capture_snapshots.cjs');
 const {pngLibrary} = require('./compare_snapshots.cjs');
-const {rgb, renderFixtures} = require('./render_fixture.cjs');
+const {rgb, renderFixtures, loggedResult} = require('./render_fixture.cjs');
 const renderLocalMedia = renderFixtures('media-resource-local');
+const {scriptCompletionSource, scriptCompletionHtml} = require('./script_completion_fixtures.cjs');
 const root = path.resolve(__dirname, '../..');
 const scratch = fs.mkdtempSync(path.join(root, 'temp/css-resource-discovery-'));
 const requests = [];
 let server, origin;
+
+function fetchBaseHtml(run, local = false, xhr = false) {
+    return `<!doctype html><head><template><base href="${origin}/ignored/"></template>
+        <base id="active-base" href="${origin}/base/assets/"><base href="${origin}/later/">
+        </head><body><script>
+        (async () => {
+            const rows = [];
+            const request = ${xhr ? `reference => new Promise((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+                xhr.open('GET', reference);
+                xhr.onload = () => resolve(JSON.parse(xhr.responseText));
+                xhr.onerror = () => reject(new Error('XHR failed'));
+                xhr.send();
+            })` : `reference => fetch(reference).then(response => response.json())`};
+            const read = async (reference) => rows.push((await request(reference + '?run=${run}')).path);
+            await read('value');
+            await read('/value');
+            document.getElementById('active-base').href = '${origin}/changed/';
+            await read('value');
+            document.getElementById('active-base').remove();
+            await read('value');
+            document.querySelectorAll('base').forEach(base => base.remove());
+            await read(${local ? JSON.stringify(origin + '/base/value') : "'value'"});
+            console.log('FETCH_BASE_RESULT', JSON.stringify({rows}));
+        })().catch(error => console.log('FETCH_BASE_RESULT', JSON.stringify({error:String(error)})));
+        </script></body>`;
+}
 
 function mediaSourceHtml(run, source = `/media.mp4?run=${run}`) {
     const deferred = run === 'media-none';
@@ -26,6 +54,26 @@ before(async () => {
         const run = url.searchParams.get('run');
         requests.push({run, path: url.pathname, initial: url.searchParams.has('initial')});
         response.setHeader('Cache-Control', 'no-store');
+        if (url.pathname === '/script-completion-page') {
+            response.writeHead(200, {'Content-Type': 'text/html'});
+            response.end(scriptCompletionHtml(run));
+            return;
+        }
+        if (url.pathname === '/script-completion.js') {
+            response.writeHead(run === 'fetch-error' ? 404 : 200, {'Content-Type': 'application/javascript'});
+            response.end(run === 'fetch-error' ? '' : scriptCompletionSource(run));
+            return;
+        }
+        if (url.pathname.endsWith('/value')) {
+            response.writeHead(200, {'Content-Type': 'application/json'});
+            response.end(JSON.stringify({path: url.pathname}));
+            return;
+        }
+        if (url.pathname === '/base/fetch-page') {
+            response.writeHead(200, {'Content-Type': 'text/html'});
+            response.end(fetchBaseHtml(run, false, run.includes('xhr')));
+            return;
+        }
         if (url.pathname === '/media.mp4') {
             response.writeHead(200, {'Content-Type': 'video/mp4'});
             response.end(fs.readFileSync(path.join(root, 'test/media/test_video.mp4')));
@@ -131,6 +179,9 @@ before(async () => {
             css += `@media print{#probe{background-image:url(/inactive-media.svg?run=${run})}}` +
                 `@supports(display:bogus){#probe{background-image:url(/inactive-supports.svg?run=${run})}}`;
             if (run === 'variable') css += `:root{--art:url(../used.svg?run=${run})}#probe{background-image:var(--art)}`;
+            else if (run === 'quoted') css += `#probe{background-image:url("../used.svg?run=${run}")}`;
+            else if (run === 'quoted-query') css += `#probe{background-image:url("../used+hero.svg?run=${run}&crop=0,11,1440,1602")}`;
+            else if (run === 'image-set-string') css += `#probe{background-image:image-set("../used.svg?run=${run}" type("image/svg+xml") 1x)}`;
             else if (run === 'activation') css += `#probe.active{background-image:url(../used.svg?run=${run})}`;
             else css += `#probe{background-image:url(../used.svg?run=${run})}`;
             if (run === 'pseudo') css += `#probe::before{content:"";display:block;width:40px;height:40px;background-image:url(../pseudo.svg?run=${run})}`;
@@ -143,7 +194,9 @@ before(async () => {
             ? '<script>document.getElementById("probe").className="active";</script>'
             : run === 'dynamic-sheet' ? `<script>var link=document.createElement('link');link.rel='stylesheet';link.href='/styles/sheet.css?run=${run}';document.head.appendChild(link);</script>` : '';
         const link = run === 'dynamic-sheet' ? '' : `<link rel="stylesheet" href="/styles/sheet.css?run=${run}">`;
-        response.end(`<!doctype html><head>${link}</head><body><div id="probe"></div><img src="/hero.svg?run=${run}" width="80" height="80">${script}</body>`);
+        const inline = run === 'quoted-query-inline'
+            ? ` style="background-image:url(&quot;${origin}/used+hero.svg?run=${run}&amp;crop=0,11,1440,1602&quot;)"` : '';
+        response.end(`<!doctype html><head>${link}</head><body><div id="probe"${inline}></div><img src="/hero.svg?run=${run}" width="80" height="80">${script}</body>`);
     });
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     origin = `http://127.0.0.1:${server.address().port}`;
@@ -162,6 +215,34 @@ async function renderHttpFixture(run, route = '/page') {
         log: fs.readFileSync(path.join(scratch, result.outputLog), 'utf8')};
 }
 
+for (const run of ['blocking', 'defer', 'async', 'module', 'throw', 'empty', 'removed', 'fetch-error', 'inline', 'inline-module']) {
+    test('script completion: ' + run, async () => {
+        const {image, log} = await renderHttpFixture(run, '/script-completion-page');
+        const state = loggedResult(log, 'SCRIPT_COMPLETION_RESULT');
+        const inline = run === 'inline' || run === 'inline-module';
+        const fetched = run !== 'fetch-error';
+        const executes = fetched && run !== 'empty';
+        const loads = !inline && fetched ? 1 : 0;
+        assert.equal(state.loads, loads);
+        assert.equal(state.errors, fetched ? 0 : 1);
+        assert.equal(state.ready, executes);
+        assert.equal(state.listeners, executes && loads ? 1 : 0);
+        assert.equal(state.shape, true, 'load/error event shape and restored currentScript');
+        assert.equal(state.scope, executes && run !== 'module' && run !== 'inline-module' ? 'resource' : null);
+        assert.equal(state.handlerMicrotask, !!loads);
+        if (loads) {
+            if (executes) assert(state.steps.indexOf('execute-microtask') < state.steps.indexOf('load'));
+            assert(state.steps.indexOf('load-microtask') < state.steps.indexOf('window'));
+            if (run !== 'async') assert.equal(state.headTail, !['blocking', 'throw', 'empty'].includes(run));
+        }
+        assert.deepEqual(rgb(image, 40, 40), [0, 128, 0]);
+        assert.deepEqual(rgb(image, 120, 40), executes ? [0, 128, 0] : [255, 255, 255],
+            'script completion must retain stylesheets inserted during evaluation');
+        assert.deepEqual(rgb(image, 40, 100), [0, 0, 255],
+            'load/error dispatch must retain earlier bootstrap stylesheet writes');
+    });
+}
+
 test('HTML base resolves initial dependencies without changing document identity', async () => {
     const {image, log} = await renderHttpFixture('html-base', '/base/page');
     assert.match(log, /BASE_URL_CONTROL true,true,true,true,true/);
@@ -174,6 +255,19 @@ test('HTML base resolves initial dependencies without changing document identity
     assert(!selected.some(row => row.path.startsWith('/ignored/') || row.path.startsWith('/later/')));
 });
 
+for (const xhr of [false, true]) for (const local of [false, true]) {
+    test(`${xhr ? 'XHR' : 'fetch'} uses the active HTML base through mutations in ${local ? 'file' : 'HTTP'} documents`, async () => {
+        const run = `${xhr ? 'xhr' : 'fetch'}-base-${local ? 'file' : 'http'}`;
+        const {log} = local
+            ? await renderLocalMedia(run, fetchBaseHtml(run, true, xhr))
+            : await renderHttpFixture(run, '/base/fetch-page');
+        assert.deepEqual(loggedResult(log, 'FETCH_BASE_RESULT'), {
+            rows: ['/base/assets/value', '/value', '/changed/value', '/later/value', '/base/value']
+        });
+        assert(!requests.some(row => row.run === run && row.path.startsWith('/ignored/')));
+    });
+}
+
 test('HTML template contents neither activate nor acquire document resources', async () => {
     const {image, log} = await renderHttpFixture('inert-template', '/template-page');
     assert.match(log, /TEMPLATE_RESOURCE_CONTROL true true/);
@@ -183,16 +277,18 @@ test('HTML template contents neither activate nor acquire document resources', a
         JSON.stringify(requests.filter(row => row.run === 'inert-template')));
 });
 
-for (const run of ['capacity', 'variable', 'pseudo', 'activation', 'dynamic-sheet']) {
+for (const run of ['capacity', 'variable', 'pseudo', 'activation', 'dynamic-sheet', 'quoted', 'quoted-query', 'quoted-query-inline', 'image-set-string']) {
     test('CSS resource discovery: ' + run, async () => {
         const {image} = await renderHttpFixture(run);
         assert.deepEqual(rgb(image, 60, 60), [0, 255, 0], 'selected CSS background is ready');
         assert.deepEqual(rgb(image, 20, 100), [0, 0, 255], 'visible image retains resource admission');
         if (run === 'pseudo') assert.deepEqual(rgb(image, 20, 20), [255, 0, 255]);
         const selected = requests.filter(row => row.run === run);
-        assert(selected.some(row => row.path === '/used.svg'), 'stylesheet-relative URL is requested');
+        assert(selected.some(row => row.path === (run.startsWith('quoted-query') ? '/used+hero.svg' : '/used.svg')),
+            'selected stylesheet/inline URL is requested');
         assert(!selected.some(row => row.path.startsWith('/unused/')), 'unmatched icon rules acquired resources');
         assert(!selected.some(row => row.path.startsWith('/inactive-')), 'inactive rules acquired resources');
+        assert(!requests.some(row => row.path === '/styles/image/svg+xml'), 'image-set type string became a URL');
     });
 }
 
