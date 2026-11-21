@@ -1624,6 +1624,8 @@ interp-bench:
 	@python3 test/interp/repl_bench.py
 
 test-lambda-baseline: TEST_BUILD_QUIET := 1
+test-lambda-baseline: export LAMBDA_AUDIO_OUTPUT := offline
+test-lambda-baseline: export LAMBDA_TEST_HEADLESS := 1
 test-lambda-baseline: build-lambda-baseline test-gtest-result-counts
 	@echo "Clearing HTTP cache for clean test runs..."
 	@$(MAKE) --no-print-directory debug
@@ -2000,6 +2002,8 @@ run-layout-baseline-suites:
 	@$(LAYOUT_TEST_ENV) node test/run_layout_baseline.js --suites "$(LAYOUT_BASELINE_SUITES)" \
 		--jobs $(LAYOUT_BASELINE_CONCURRENCY) --results "$(LAYOUT_BASELINE_RESULTS)"
 
+test-radiant-baseline: export LAMBDA_AUDIO_OUTPUT := offline
+test-radiant-baseline: export LAMBDA_TEST_HEADLESS := 1
 test-radiant-baseline: build-radiant-baseline test-gtest-result-counts
 	@$(MAKE) --no-print-directory run-radiant-baseline
 

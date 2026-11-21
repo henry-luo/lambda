@@ -10596,7 +10596,7 @@ static bool run_form_submit_activation(EventContext* evcon, View* target) {
         ViewBlock* block = radiant_mouse_click_block(evcon, target);
         ImageSurface* image = render_media_image_surface(block);
         if (image) {
-            DomStyleRareExt* state = elem->ensure_ext();
+            DomStyleRareExt* state = elem->ensure_rare_ext();
             if (state) {
                 LayoutContentBox content = layout_content_box(block);
                 Rect image_box = render_media_image_rect(block, image,

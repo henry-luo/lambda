@@ -3998,7 +3998,7 @@ TEST(CssVariableSubstitutionTest, DocumentLimitsBoundBytesTokensAndAuthoredText)
         entry.value_text = lam::up(declaration->value_text);
         entry.value_text_len = declaration->value_text_len;
         // the entry borrows stack storage only for this resolver call (D5.5.1).
-        DomStyleRareExt* state = node->ensure_ext();
+        DomStyleRareExt* state = node->ensure_rare_ext();
         ASSERT_NE(state, nullptr);
         state->css_variables = lam::own(&entry);
         StrView text = {};

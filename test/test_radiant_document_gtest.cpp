@@ -7433,9 +7433,9 @@ static uint64_t retained_subtree_geometry(DomElement* root) {
             float content[] = {element->content_width, element->content_height,
                 element->block()->first_line_baseline, element->block()->last_line_baseline};
             digest->hash = hash_fnv1a_64_extend(digest->hash, content, sizeof(content));
-            if (element->ext) {
-                digest->hash = hash_fnv1a_64_extend(digest->hash, element->ext->frags, sizeof(element->ext->frags));
-                digest->hash = hash_fnv1a_64_extend_u64le(digest->hash, element->ext->fragment_presence_mask);
+            if (const DomFragmentGeometry* geometry = element->fragment_geometry()) {
+                digest->hash = hash_fnv1a_64_extend(digest->hash, geometry->frags, sizeof(geometry->frags));
+                digest->hash = hash_fnv1a_64_extend_u64le(digest->hash, geometry->fragment_presence_mask);
             }
             if (element->embed && element->embedp()->grid && element->embedp()->grid->used_track_text)
                 digest->hash = hash_fnv1a_64_extend_cstr(digest->hash, element->embedp()->grid->used_track_text);
@@ -17705,11 +17705,13 @@ TEST_F(RadiantDocumentTest, RubyParallelTextFragmentsPreserveSourceAndMatchExpli
         IntrinsicSizes sizes = measure_physical_widths(group);
         EXPECT_FLOAT_EQ(sizes.max_content, 100.0f);
         EXPECT_TRUE(sizes.has_min_content_break);
-        EXPECT_EQ(group->ext->has_ruby_parallel_fragments, true);
+        const DomFragmentGeometry* group_geometry = group->fragment_geometry();
+        EXPECT_TRUE(group_geometry && group_geometry->has_ruby_parallel_fragments);
         DomText* kept_base = first_text_leaf(find("nowrap"));
         ASSERT_NE(kept_base->rect, nullptr);
         EXPECT_EQ(kept_base->rect->next, nullptr);
-        EXPECT_FALSE(find("nowrap")->ext->has_ruby_parallel_fragments);
+        const DomFragmentGeometry* kept_geometry = find("nowrap")->fragment_geometry();
+        EXPECT_FALSE(kept_geometry && kept_geometry->has_ruby_parallel_fragments);
     };
     for (bool retained : {false, true}) {
         layout_html_doc(&ui, document, retained);
@@ -17822,7 +17824,8 @@ TEST_F(RadiantDocumentTest, RubyTextRunsFollowCommonOwnerWrappingAndRetainSource
             IntrinsicSizes widths = measure_physical_widths(find(entry.ruby));
             EXPECT_FLOAT_EQ(widths.max_content, entry.maximum);
             EXPECT_TRUE(widths.has_min_content_break);
-            EXPECT_TRUE(find(entry.ruby)->ext->has_ruby_parallel_fragments);
+            const DomFragmentGeometry* geometry = find(entry.ruby)->fragment_geometry();
+            EXPECT_TRUE(geometry && geometry->has_ruby_parallel_fragments);
         }
         ASSERT_NE(radiant_document_ensure_state(document,"ruby-text-runs"),nullptr);
         DomRange* range = dom_range_create(document->state);
@@ -18578,7 +18581,8 @@ TEST_F(RadiantDocumentTest, RubyZeroSizeExplicitBasesRetainTheirBlockAxisEnvelop
             EXPECT_FLOAT_EQ(tail.x, annotation.x + 80.0f);
             if (entry.explicit_base) {
                 EXPECT_FLOAT_EQ(base.height, entry.mutable_font ? font_size : 20.0f);
-                EXPECT_FALSE(ruby->ext->has_empty_ruby_base);
+                const DomFragmentGeometry* geometry = ruby->fragment_geometry();
+                EXPECT_FALSE(geometry && geometry->has_empty_ruby_base);
             }
             EXPECT_EQ(first_text_leaf(reading), entry.reading);
             EXPECT_EQ(entry.reading->parent.get(), entry.parent);
@@ -22249,6 +22253,21 @@ TEST_F(RadiantDecodedAudio, FirstOfflineFrameIncludesElapsedTimeSinceVoiceAdmiss
     EXPECT_DOUBLE_EQ(radiant_audio_clock(document), 0.02); EXPECT_FALSE(radiant_audio_frames_pending(document));
 }
 
+TEST_F(RadiantDecodedAudio, HeadlessAudioStaysOffDeviceAndAdvancesOnDocumentClock) {
+    audio_bus_set_offline(false);
+    ASSERT_NE(load("test/ui/audio_shared_bus.html", true), nullptr);
+    double start = 0; ASSERT_TRUE(radiant_document_clock(document, &start));
+    uint64_t token = open_clip(960); ASSERT_NE(token, 0u);
+    ASSERT_TRUE(radiant_audio_play(document, token, 1));
+    float output[16] = {}; audio_bus_mix(output, 8);
+    for (float sample : output) EXPECT_FLOAT_EQ(sample, 0);
+    EXPECT_DOUBLE_EQ(radiant_audio_clock(document), 0);
+    EXPECT_TRUE(radiant_audio_tick(document, start + 10));
+    EXPECT_DOUBLE_EQ(radiant_audio_clock(document), 0.01);
+    radiant_audio_tick(document, start + 20);
+    EXPECT_STREQ(radiant_audio_state(document, token), "ended");
+}
+
 
 TEST_F(RadiantDecodedAudio, AudioClockReaderUsesItsOwnerWhenAnotherRealmIsVirtual) {
     ASSERT_NE(load("test/lambda/ui/_window_fullscreen.ls"), nullptr);
@@ -22535,7 +22554,8 @@ TEST_F(RadiantDecodedAudio, TakingOverAnOwnedCueReaderRetiresItsPrivateVoiceAndS
     ASSERT_EQ(audio_cues_commit_locked(queue, 1, 1, &event, &bank, 1, 0), nullptr); audio_submix_unlock(mix);
     ASSERT_TRUE(radiant_audio_play(document, player, 1)); EXPECT_FALSE(audio_submix_has_voices(mix));
     audio_cue_owner_destroy(owner); audio_submix_destroy(mix);
-    float output[16]; audio_bus_mix(output, 8); EXPECT_FLOAT_EQ(output[0], .5f); EXPECT_FLOAT_EQ(output[1], -.25f);
+    float output[16]; ASSERT_TRUE(audio_submix_render(radiant_document_submix(document), output, 8));
+    EXPECT_FLOAT_EQ(output[0], .5f); EXPECT_FLOAT_EQ(output[1], -.25f);
     EXPECT_STREQ(radiant_audio_state(document, player), "playing"); EXPECT_EQ(radiant_audio_frame(document), 8u);
 }
 

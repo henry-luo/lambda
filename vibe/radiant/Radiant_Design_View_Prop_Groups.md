@@ -57,7 +57,7 @@ The view pool owns the optional payloads. Retained style resolution releases sta
 
 ### DV6.1 — Keep document extensions independently lazy
 
-`DomElement::ext` lazily owns a `DomStyleRareExt` in the document pool. The extension tracks the physical storage owner for adoption (D5.5.1). It holds uncommon DOM state, typed slots for uncommon view features, and pointers to the separately allocated attribute and fragment groups. The document pool owns `DomAttributeCache` (48 B) and `DomFragmentGeometry` (164 B). Layout resets the geometry group as needed. The attributes group holds expanded-name, synthetic attribute, and name-cache state. The extension packs its 12 Boolean flags into the gap before its pointer fields. It stores form-image offsets as fractional CSS pixels and rounds them when FormData or dialog submission serializes them (D9.5.6v2).
+`DomElement::rare_ext` lazily owns a `DomStyleRareExt` in the document pool. The extension tracks the physical storage owner for adoption (D5.5.1). It holds uncommon DOM state, typed slots for uncommon view features, and pointers to the separately allocated attribute and fragment groups. The document pool owns `DomAttributeCache` (48 B) and `DomFragmentGeometry` (164 B). Layout resets the geometry group as needed. The attributes group holds expanded-name, synthetic attribute, and name-cache state. The extension packs its 12 Boolean flags into the gap before its pointer fields. It stores form-image offsets as fractional CSS pixels and rounds them when FormData or dialog submission serializes them (D9.5.6v2).
 
 The custom-property list and its lookup index live in `DomStyleRareExt`. The first write that needs custom-property storage allocates the extension. Mutation invalidates the index, and the list and index follow the physical storage owner through adoption (D5.5.1). [Custom-property storage](../../lambda-input/lambda/input/css/dom_element.cpp)
 
@@ -65,7 +65,7 @@ The custom-property list and its lookup index live in `DomStyleRareExt`. The fir
 
 `PopoverStyle` holds the popover modes, visibility, toggle task, and opening order. It also holds the top-layer membership and implicit anchor shared with modal dialogs. The physical document pool allocates this `ViewProp` on demand. Relayout preserves it, and node retirement releases it (D5.5.1). The opening order is an unsigned 64-bit sequence and reserves zero for entries outside the popover stacks. On arm64, the group is a 40-byte record. The original split reduced `DomStyleRareExt` from 304 to 280 bytes and its minimum pool block by 16 bytes under the allocator then in use (D5.1.4, D5.2.4).
 
-`DomStyleExt` holds a second lazy directory in the node's physical document pool. It owns private pseudo specified styles through the 80-byte `PseudoStyle` group and borrows namespace URI bytes. A directory stays live while any of its bindings are present. Node retirement clears document-owned state and borrows under D5.5.1 and D5.5.2. [Element extensions](../../lambda-input/lambda/input/css/dom_element.hpp) · [Release paths](../../lambda-input/lambda/input/css/dom_element.cpp)
+`DomElement::ext` lazily owns a `DomStyleExt` directory in the node's physical document pool. It owns private pseudo specified styles through the 80-byte `PseudoStyle` group and borrows namespace URI bytes. A directory stays live while any of its bindings are present. Node retirement clears document-owned state and borrows under D5.5.1 and D5.5.2. [Element extensions](../../lambda-input/lambda/input/css/dom_element.hpp) · [Release paths](../../lambda-input/lambda/input/css/dom_element.cpp)
 
 The document pool uses 8-byte alignment. On arm64 its block header takes 24 bytes, with 32-bit spans and an extent-size cap (D5.1.4, D5.5.1). `ShadowStyle` and `PopoverStyle` each need a minimum 64-byte pool block, down from 80 bytes. `DomStyleExt` needs 72 bytes, down from 80. The default pool alignment is 16 bytes. [Document pool creation](../../lambda-input/lambda/input/css/dom_element.cpp) · [Pool sizing](../../lambda-input/lib/mempool.c)
 
@@ -134,6 +134,8 @@ The fallback table costs one pointer per document and allocates entries only whe
 ## Appendix A. End-to-end release measurements
 
 The comparisons use native Clang arm64 release builds at `-O3` with full LTO. The original baseline includes the pre-existing `DomElement` field reorder. Each page uses local resources, a 1200 × 800 viewport, and disabled scripting. Samples come from `post_layout_pre_output` after first layout. Totals sum independent page processes. Tracked process memory includes the Input arena that can own parser-backed elements. The profiler accounts for logical storage and allocator-tracked memory in their respective scopes (D5.2.1–D5.2.4).
+
+In profile output, `slots.ext` counts `rare_ext` allocations and `ext_size` gives their record size. `prop_extensions` and `prop_ext_size` describe the `ext` directory.
 
 ### Current checkout and archived refactor endpoint
 

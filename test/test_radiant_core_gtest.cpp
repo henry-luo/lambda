@@ -138,7 +138,7 @@ TEST_F(RadiantCoreTest, TeardownReleasesFormPayloadBelowNonRenderingParents) {
         parent->display.inner = RDT_DISPLAY_REPLACED;
         forms[i].custom_validity_msg = mem_strdup("fallback control", MEM_CAT_LAYOUT);
         ASSERT_NE(forms[i].custom_validity_msg, nullptr);
-        child->style_ext = lam::own(&slots[i]);
+        child->ext = lam::own(&slots[i]);
         ASSERT_TRUE(child->set_form_storage(&forms[i]));
         ASSERT_TRUE(parent->DomNode::append_child(child));
         ASSERT_TRUE(owner->DomNode::append_child(parent));
@@ -158,7 +158,7 @@ TEST_F(RadiantCoreTest, RetainedResetPreservesScriptCreatedFormProperties) {
     form.custom_validity_msg = mem_strdup("invalid value", MEM_CAT_LAYOUT);
     ASSERT_NE(form.custom_validity_msg, nullptr);
     DomStyleExt slots = {};
-    control->style_ext = lam::own(&slots);
+    control->ext = lam::own(&slots);
     ASSERT_TRUE(control->set_form_storage(&form));
     control->set_role_kind(DomElement::ROLE_FORM);
     tree.root = lam::up(control);
@@ -2876,7 +2876,7 @@ TEST(DomRetirementOwnerArenaTest, AdoptedMetadataRetiresFromItsPhysicalPool) {
     const char* tag = child->tag_name();
     const char* cached_id = child->id;
     const char* cached_class = child->class_names()[0];
-    DomStyleRareExt* extension = child->ext;
+    DomStyleRareExt* extension = child->rare_ext;
     EXPECT_TRUE(pool_owns(doc.document_pool, cached_id));
     EXPECT_TRUE(pool_owns(doc.document_pool, cached_class));
     dom_node_schedule_detached(&target_doc, child);

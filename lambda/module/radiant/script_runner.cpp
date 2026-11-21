@@ -1812,8 +1812,8 @@ static bool script_scheduler_enqueue(DomDocument* document, JsScriptTaskCollecti
         JsScriptTask* task = (JsScriptTask*)arraylist_get(collection->scripts, i);
         bool scheduled = script_task_is_executable(task) || script_task_has_load_failure(task);
         DomElement* element = script_task_element(document, task);
-        if (dom_element_is_html_tag(element, MARKUP_NAME_SCRIPT) && (scheduled || element->ext)) {
-            if (DomStyleRareExt* state = element->ensure_ext()) state->script_parser_pending = scheduled;
+        if (dom_element_is_html_tag(element, MARKUP_NAME_SCRIPT) && (scheduled || element->rare_ext)) {
+            if (DomStyleRareExt* state = element->ensure_rare_ext()) state->script_parser_pending = scheduled;
         }
         if (!scheduled) continue;
 
@@ -1915,7 +1915,7 @@ static void prepare_connected_inline_script(DomElement* script, StrBuf** source_
     DomDocument* document = script->doc;
     if (!document || document->scripting_disabled || !dom_node_is_connected(script) ||
         dom_element_attribute_value_ns(script, "", "src")) return;
-    DomStyleRareExt* state = script->ensure_ext();
+    DomStyleRareExt* state = script->ensure_rare_ext();
     if (!state || state->script_parser_pending || state->script_already_started) return;
     const char* type = dom_element_attribute_value_ns(script, "", "type");
     char legacy_type[64];
@@ -1972,7 +1972,7 @@ static bool execute_script_task_queue(Runtime* runtime, ArrayList* queue,
         JsScriptTask* task = (JsScriptTask*)arraylist_get(queue, i);
         DomElement* script = script_task_element((DomDocument*)runtime->dom_doc, task);
         if (dom_element_is_html_tag(script, MARKUP_NAME_SCRIPT)) {
-            if (DomStyleRareExt* state = script->ensure_ext()) {
+            if (DomStyleRareExt* state = script->ensure_rare_ext()) {
                 state->script_parser_pending = false;
                 state->script_already_started = task->external || task->source_len > 0;
             }
