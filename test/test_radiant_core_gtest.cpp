@@ -22,6 +22,7 @@
 #include "lambda/input/css/css_formatter.hpp"
 #include "lambda/input/css/css_style_node.hpp"
 #include "lambda/io/mark_builder.hpp"
+#include "lambda/io/target.h"
 #include "lambda/core/mark_reader.hpp"
 #include "../lambda/runtime/transpiler.hpp"
 #include "../lambda/runtime/gc/gc_heap.h"
@@ -2548,18 +2549,25 @@ TEST_F(RadiantCoreTest, CanonicalCapFallsBackToOwnedStorage) {
 
 class DomRetirementTest : public ::testing::Test {
 protected:
-    Input input = {};
+    Pool* input_pool = nullptr;
+    Input* input = nullptr;
     DomDocument doc;
     Element* backing = nullptr;
 
     void SetUp() override {
-        ASSERT_TRUE(doc.init(&input));
+        ASSERT_TRUE(radiant_register_dom_engine_providers());
+        input_pool = pool_create();
+        ASSERT_NE(input_pool, nullptr);
+        input = Input::create(input_pool, nullptr);
+        ASSERT_NE(input, nullptr);
+        ASSERT_TRUE(doc.init(input));
         backing = elmt_arena(doc.node_arena);
         ASSERT_NE(backing, nullptr);
     }
 
     void TearDown() override {
         doc.destroy();
+        pool_destroy(input_pool);
     }
 
     DomElement* element(const char* tag) {
@@ -2722,7 +2730,7 @@ protected:
     }
 
     void init_adoption_target(bool separate_heap) {
-        ASSERT_TRUE(target_doc.init(&input));
+        ASSERT_TRUE(target_doc.init(input));
         target_initialized = true;
         target_heap.gc = gc_heap_create();
         ASSERT_NE(target_heap.gc, nullptr);
@@ -2830,6 +2838,9 @@ TEST_F(DomGcBackingTest, BorrowedAttributeBufferFollowsCompaction) {
     gc_collect(heap.gc, nullptr, 0);
     ASSERT_NE(source->data, original);
     EXPECT_EQ(dom_element_to_element(child)->data, source->data);
+    bool borrowed = false;
+    dom_node_borrowed_source_storage(&doc, child, nullptr, &borrowed);
+    EXPECT_TRUE(borrowed);
 }
 
 TEST_F(DomGcBackingTest, IndependentDomBuffersSurviveLaterOwnerCompaction) {
@@ -2873,7 +2884,7 @@ TEST(DomRetirementOwnerArenaTest, AdoptedMetadataRetiresFromItsPhysicalPool) {
     static_cast<DomNode*>(child)->id = id;
     child->doc = lam::up(&target_doc);
     EXPECT_EQ(child->storage_owner(), &doc);
-    EXPECT_TRUE(pool_owns(doc.document_pool, child->tag_name()));
+    EXPECT_EQ(child->tag_name(), well_known_name_view(MARKUP_NAME_SPAN).str);
     ASSERT_TRUE(child->set_attribute("id", "destination-id"));
     ASSERT_TRUE(child->set_attribute("class", "destination-class"));
     ASSERT_TRUE(child->set_attribute("data-storage", "destination"));
@@ -2885,7 +2896,7 @@ TEST(DomRetirementOwnerArenaTest, AdoptedMetadataRetiresFromItsPhysicalPool) {
     EXPECT_TRUE(pool_owns(doc.document_pool, cached_class));
     dom_node_schedule_detached(&target_doc, child);
     EXPECT_EQ(dom_retire_sweep(&target_doc), 1u);
-    EXPECT_FALSE(pool_owns(doc.document_pool, tag));
+    EXPECT_STREQ(tag, "span"); // canonical tag spelling survives retirement.
     EXPECT_FALSE(pool_owns(doc.document_pool, cached_id));
     EXPECT_FALSE(pool_owns(doc.document_pool, cached_class));
     EXPECT_FALSE(pool_owns(doc.document_pool, extension));
@@ -2904,7 +2915,7 @@ TEST_F(DomGcBackingTest, AdoptedOwnedTextTracksReplacementAndReturnPools) {
     ASSERT_TRUE(dom_node_registry_transfer(&doc, &target_doc, text, &id));
     text->id = id;
     ASSERT_TRUE(dom_text_adopt_document_string(text, &target_doc, original));
-    EXPECT_EQ(dom_node_registry_owned_string_pool(&target_doc, text), doc.document_pool);
+    EXPECT_EQ(dom_text_owned_string_pool(text), doc.document_pool);
     String* replacement = dom_document_create_string(&target_doc, "destination", 11);
     ASSERT_TRUE(dom_text_adopt_document_string(text, &target_doc, replacement));
     EXPECT_FALSE(pool_owns(doc.document_pool, original));
@@ -2912,7 +2923,7 @@ TEST_F(DomGcBackingTest, AdoptedOwnedTextTracksReplacementAndReturnPools) {
     id = dom_document_alloc_node_id(&doc);
     ASSERT_TRUE(dom_node_registry_transfer(&target_doc, &doc, text, &id));
     text->id = id;
-    EXPECT_EQ(dom_node_registry_owned_string_pool(&doc, text), target_doc.document_pool);
+    EXPECT_EQ(dom_text_owned_string_pool(text), target_doc.document_pool);
     dom_node_schedule_detached(&doc, text);
     EXPECT_EQ(dom_retire_sweep(&doc), 1u);
     EXPECT_FALSE(pool_owns(target_doc.document_pool, replacement));
@@ -2986,6 +2997,13 @@ TEST_F(DomGcBackingTest, TextAdoptionKeepsPhysicalStringHeapRoot) {
     text->id = id;
     EXPECT_EQ(heap.gc->root_slot_count, 1);
     EXPECT_EQ(target_heap.gc->root_slot_count, 0);
+    // rebinding the adopted occurrence can still borrow from the originating heap.
+    String* replacement = runtime_string();
+    ASSERT_NE(replacement, nullptr);
+    text->native_string = lam::up(replacement);
+    text->text = lam::up(replacement->chars);
+    text->length = replacement->len;
+    dom_node_set_backing_value(&target_doc, text, Item{.item = s2it(replacement)});
     dom_lifecycle_release_backing_roots(&doc);
     gc_collect(heap.gc, nullptr, 0);
     EXPECT_EQ(heap.gc->object_count, 1u);
@@ -3037,6 +3055,184 @@ TEST_F(DomRetirementTest, UnpinnedDetachedNodeRetiresAndRejectsStaleRef) {
     EXPECT_EQ(stats.retired_nodes, 1u);
     EXPECT_EQ(stats.retired_primary_bytes, sizeof(DomElement));
     EXPECT_EQ(stats.stale_ref_rejections, 1u);
+}
+
+TEST_F(DomRetirementTest, MovingLinkedChildrenSeversBothOldEdgesBeforeRetirement) {
+    DomElement* first = root();
+    DomElement* second = element("section");
+    DomElement* left = element("i");
+    DomElement* middle = element("em");
+    DomElement* right = element("b");
+    ASSERT_TRUE(attach(first, left));
+    ASSERT_TRUE(attach(first, middle));
+    ASSERT_TRUE(attach(first, right));
+    ASSERT_TRUE(attach(second, middle));
+    EXPECT_EQ(left->next_sibling.get(), right);
+    EXPECT_EQ(right->prev_sibling.get(), left);
+    EXPECT_EQ(second->first_child.get(), middle);
+    EXPECT_EQ(second->last_child.get(), middle);
+    ASSERT_TRUE(static_cast<DomNode*>(first)->insert_before(middle, left));
+    EXPECT_EQ(second->first_child.get(), nullptr);
+    EXPECT_EQ(second->last_child.get(), nullptr);
+    EXPECT_EQ(first->first_child.get(), middle);
+    EXPECT_EQ(left->prev_sibling.get(), middle);
+    EXPECT_FALSE(attach(middle, first));
+}
+
+TEST_F(DomRetirementTest, DocumentElementMovesPreserveTheDoctypeForwardLink) {
+    DomElement* document_node = root();
+    DomElement* html = element("html");
+    MarkBuilder builder(input);
+    auto* doctype = DomComment::create_detached(builder.element("!DOCTYPE").text("html").final().element, &doc);
+    ASSERT_NE(doctype, nullptr);
+    DomNode* proxy = document_node;
+    ASSERT_TRUE(proxy->append_child(doctype));
+    ASSERT_TRUE(proxy->append_child(html));
+    html->prev_sibling = nullptr; // document proxies expose the doctype edge only in forward traversal.
+    DomElement* inserted = element("i");
+    ASSERT_TRUE(proxy->insert_before(inserted, html));
+    EXPECT_EQ(document_node->first_child, doctype);
+    EXPECT_EQ(doctype->next_sibling, inserted);
+    ASSERT_TRUE(proxy->remove_child(inserted));
+    EXPECT_EQ(doctype->next_sibling, html);
+    ASSERT_TRUE(proxy->remove_child(html));
+    EXPECT_EQ(document_node->last_child, doctype);
+    EXPECT_EQ(doctype->next_sibling, nullptr);
+}
+
+TEST_F(DomRetirementTest, RebuildingAnOccurrenceSeversBothSidesOfItsOldLinks) {
+    DomElement* parent = root();
+    DomElement* branch = element("section");
+    DomElement* neighbor = element("aside");
+    DomElement* child = element("i");
+    ASSERT_TRUE(attach(parent, branch));
+    ASSERT_TRUE(attach(parent, neighbor));
+    ASSERT_TRUE(attach(branch, child));
+    ASSERT_EQ(DomElement::create_in(branch, &doc, "section", backing), branch);
+    EXPECT_EQ(parent->first_child, neighbor);
+    EXPECT_EQ(neighbor->prev_sibling, nullptr);
+    EXPECT_EQ(branch->parent, nullptr);
+    EXPECT_EQ(branch->first_child, nullptr);
+    EXPECT_EQ(child->parent, nullptr);
+    ASSERT_TRUE(attach(branch, child));
+    ASSERT_TRUE(attach(parent, branch));
+    EXPECT_EQ(parent->last_child, branch);
+}
+
+TEST_F(DomRetirementTest, ShadowDescendantHoldsItsDetachedHost) {
+    DomElement* tree = root();
+    DomElement* host = element("div");
+    ASSERT_TRUE(attach(tree, host));
+    DomElement* shadow = dom_attach_shadow_root(host, {});
+    ASSERT_NE(shadow, nullptr);
+    DomElement* child = element("b");
+    ASSERT_TRUE(attach(shadow, child));
+    DomNodeRef ref = dom_node_ref(child);
+    ASSERT_TRUE(dom_node_pin(&doc, ref, DOM_NODE_PIN_EXTERNAL));
+    ASSERT_TRUE(tree->remove_child(host));
+    EXPECT_EQ(dom_retire_sweep(&doc), 0u);
+    EXPECT_EQ(shadow->shadow_host_element(), host);
+    ASSERT_TRUE(dom_node_unpin(&doc, ref, DOM_NODE_PIN_EXTERNAL));
+    EXPECT_EQ(dom_retire_sweep(&doc), 3u);
+    EXPECT_EQ(dom_node_ref_validate(&doc, ref), nullptr);
+}
+
+TEST_F(DomRetirementTest, UnattachedFormTeardownFollowsAdoptionBeforeFirstLayout) {
+    DomDocument destination;
+    ASSERT_TRUE(destination.init(input));
+    DomElement* attached = element("input");
+    ASSERT_TRUE(attach(root(), attached));
+    DomElement* detached = element("textarea");
+    ASSERT_NE(tc_get_or_create_form(attached), nullptr);
+    FormControlProp* form = tc_get_or_create_form(detached);
+    ASSERT_NE(form, nullptr);
+    uint32_t id = dom_document_alloc_node_id(&destination);
+    ASSERT_TRUE(dom_node_registry_transfer(&doc, &destination, detached, &id));
+    static_cast<DomNode*>(detached)->id = id;
+    EXPECT_EQ(doc.services.form_controls, attached->form_storage());
+    EXPECT_EQ(destination.services.form_controls, form);
+    form_control_release_document(&doc, false);
+    EXPECT_NE(attached->form_storage(), nullptr);
+    form_control_release_document(&destination, false);
+    EXPECT_EQ(detached->form_storage(), nullptr);
+    EXPECT_EQ(destination.services.form_controls, nullptr);
+    destination.destroy();
+}
+
+TEST_F(DomRetirementTest, ManualAssignmentsMoveWithEitherEndpoint) {
+    DomDocument other;
+    ASSERT_TRUE(other.init(input));
+    DomElement* host = root();
+    DomElement* slot = element("slot");
+    DomElement* a = element("i");
+    DomElement* b = element("b");
+    ASSERT_TRUE(attach(host, a));
+    ASSERT_TRUE(attach(host, b));
+    DomManualSlotInput assigned[] = {{&doc, b}, {&doc, a}, {&doc, b}};
+    ASSERT_TRUE(dom_slot_set_manual_assignment(slot, assigned, 3, nullptr));
+    DomSlotAssignment manual{slot, host, true};
+    EXPECT_EQ(dom_slot_assigned_adjacent(manual), b);
+    EXPECT_EQ(dom_slot_assigned_adjacent(manual, b), a);
+    DomManualSlotInput invalid[] = {{&doc, a}, {&other, b}};
+    EXPECT_FALSE(dom_slot_set_manual_assignment(slot, invalid, 2, nullptr));
+    EXPECT_EQ(dom_slot_assigned_adjacent(manual), b);
+    ASSERT_TRUE(host->remove_child(b));
+    uint32_t moved_id = dom_document_alloc_node_id(&other);
+    ASSERT_TRUE(dom_node_registry_transfer(&doc, &other, b, &moved_id));
+    static_cast<DomNode*>(b)->id = moved_id;
+    other.destroy();
+    EXPECT_EQ(dom_slot_assigned_adjacent(manual), a);
+    EXPECT_EQ(dom_slot_assigned_adjacent(manual, a), nullptr);
+    ASSERT_TRUE(dom_slot_set_manual_assignment(slot, nullptr, 0, nullptr));
+    EXPECT_EQ(hashmap_count(doc.services.manual_slot_endpoints), 0u);
+}
+
+TEST_F(DomRetirementTest, FailedSubtreeAdoptionPreservesEarlierMembersAndCanRetry) {
+    DomDocument destination;
+    ASSERT_TRUE(destination.init(input));
+    DomElement* branch = element("section");
+    DomElement* first = element("i");
+    ASSERT_TRUE(attach(branch, first));
+    DomElement* shadow = dom_attach_shadow_root(branch, {});
+    ASSERT_NE(shadow, nullptr);
+    DomElement* layout_only = DomElement::create_in(doc.document_pool);
+    ASSERT_NE(layout_only, nullptr);
+    ASSERT_TRUE(attach(branch, layout_only));
+    DomNodeRef ref = dom_node_ref(first);
+    ASSERT_FALSE(dom_adopt_detached_subtree(&doc, &destination, branch));
+    EXPECT_EQ(branch->doc.get(), &doc);
+    EXPECT_EQ(shadow->doc.get(), &doc);
+    EXPECT_EQ(dom_node_ref_validate(&doc, ref), first);
+    EXPECT_EQ(dom_node_ref_validate(&destination, ref), nullptr);
+    ASSERT_TRUE(branch->remove_child(layout_only));
+    ASSERT_TRUE(dom_adopt_detached_subtree(&doc, &destination, branch));
+    EXPECT_EQ(branch->doc.get(), &destination);
+    EXPECT_EQ(first->doc.get(), &destination);
+    EXPECT_EQ(shadow->doc.get(), &destination);
+    EXPECT_TRUE(destination.js.has_shadow_roots);
+    destination.destroy();
+}
+
+TEST_F(DomRetirementTest, SourceWrapperKeepsAdoptedNodeAliveUntilReleased) {
+    Input other_input = {};
+    DomDocument destination;
+    ASSERT_TRUE(destination.init(&other_input));
+    DomElement* child = element("adopted");
+    DomNodeRef source_ref = dom_node_ref(child);
+    ASSERT_TRUE(dom_node_pin(&doc, source_ref, DOM_NODE_PIN_WRAPPER));
+    uint32_t id = dom_document_alloc_node_id(&destination);
+    ASSERT_TRUE(dom_node_registry_transfer(&doc, &destination, child, &id));
+    static_cast<DomNode*>(child)->id = id;
+    child->doc = lam::up(&destination);
+    DomNodeRef moved_ref = dom_node_ref(child);
+    dom_node_schedule_detached(&destination, child);
+    EXPECT_EQ(dom_retire_sweep(&destination), 0u);
+    EXPECT_EQ(dom_node_ref_validate(&doc, source_ref), child);
+    ASSERT_TRUE(dom_node_unpin(&doc, source_ref, DOM_NODE_PIN_WRAPPER));
+    EXPECT_EQ(dom_retire_sweep(&destination), 1u);
+    EXPECT_EQ(dom_node_ref_validate(&doc, source_ref), nullptr);
+    EXPECT_EQ(dom_node_ref_validate(&destination, moved_ref), nullptr);
+    destination.destroy();
 }
 
 TEST_F(DomRetirementTest, AttributePinKeepsDetachedOwnerAndRetiresTogether) {
@@ -3521,12 +3717,11 @@ TEST_F(DomRetirementTest, VariableTextSizesReuseArenaBlocksAfterWarmup) {
 TEST(DomRetirementOwnerArenaTest, FatLambdaNodeReturnsToItsInputArena) {
     Pool* input_pool = pool_create();
     ASSERT_NE(input_pool, nullptr);
-    Arena* input_arena = arena_create_default();
-    ASSERT_NE(input_arena, nullptr);
-    Input input = {};
-    input.arena = input_arena;
+    Input* input = Input::create(input_pool);
+    ASSERT_NE(input, nullptr);
+    Arena* input_arena = input->arena;
     DomDocument doc;
-    ASSERT_TRUE(doc.init(&input));
+    ASSERT_TRUE(doc.init(input));
 
     DomElement* root = DomElement::create(&doc, "root", nullptr);
     ASSERT_NE(root, nullptr);
@@ -3550,7 +3745,6 @@ TEST(DomRetirementOwnerArenaTest, FatLambdaNodeReturnsToItsInputArena) {
     EXPECT_EQ(after.retire_count, before.retire_count + 1u);
 
     doc.destroy();
-    arena_destroy(input_arena);
     pool_destroy(input_pool);
 }
 
@@ -3765,14 +3959,14 @@ TEST(DomRetirementOwnerArenaTest, SharedUiSourceSurvivesMutationRetirementAndRed
     String* text = builder.createDomTextString("Retained history", 16);
     ASSERT_NE(text, nullptr);
     Item nested = builder.element("span").child(Item{.item = s2it(text)}).final();
-    Item source = builder.element("p").attr("title", "original").child(nested).final();
+    Target* ns = namespace_target(pool, input->name_pool, "urn:test:retirement", "sample", ':');
+    ASSERT_NE(ns, nullptr);
+    Item source = builder.element("p").namespace_tag(ns).attr("title", "original").child(nested).final();
     source.element->cow_state |= COW_STATE_SHARED;
     auto* source_type = (TypeElmt*)source.element->type;
-    Target ns = {};
     TypeNominal nominal = {};
     // D3.1.1 resolves nominal tags through their declared type name.
     nominal.type_name = source_type->name;
-    source_type->ns = &ns;
     source_type->nominal = &nominal;
     source_type->is_nominal = true;
     Item* source_items = source.element->items;
@@ -3784,10 +3978,12 @@ TEST(DomRetirementOwnerArenaTest, SharedUiSourceSurvivesMutationRetirementAndRed
     DomElement* occurrence = build_dom_tree_from_element(source.element, &doc, root);
     ASSERT_NE(occurrence, nullptr);
     EXPECT_NE(dom_element_to_element(occurrence), source.element);
-    EXPECT_EQ(dom_node_registry_backing_source(&doc, occurrence), source.element);
+    EXPECT_EQ(dom_node_backing_source(&doc, occurrence), source.element);
     auto* occurrence_type = (TypeElmt*)occurrence->elmt.type;
     EXPECT_NE(occurrence_type, source_type);
-    EXPECT_EQ(occurrence_type->ns, &ns);
+    ASSERT_NE(occurrence_type->ns, nullptr);
+    EXPECT_EQ(occurrence_type->ns->original, ns->original); // both URIs share the Input name pool.
+    EXPECT_STREQ(occurrence_type->ns->name_prefix, ns->name_prefix);
     EXPECT_EQ(occurrence_type->nominal, &nominal);
     ASSERT_TRUE(occurrence->set_attribute("title", "edited"));
     ASSERT_TRUE(occurrence->set_attribute("data-added", "new"));
