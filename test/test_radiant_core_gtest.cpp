@@ -1,3 +1,4 @@
+#include "lambda/io/mark_editor.hpp"
 #include "../lambda/module/radiant/radiant_runtime_init.hpp"
 #include <gtest/gtest.h>
 
@@ -3227,12 +3228,33 @@ TEST_F(DomRetirementTest, SourceWrapperKeepsAdoptedNodeAliveUntilReleased) {
     DomNodeRef moved_ref = dom_node_ref(child);
     dom_node_schedule_detached(&destination, child);
     EXPECT_EQ(dom_retire_sweep(&destination), 0u);
-    EXPECT_EQ(dom_node_ref_validate(&doc, source_ref), child);
+    // the physical handle is still live, but the source document no longer owns its identity.
+    EXPECT_EQ(dom_node_ref_validate(&doc, source_ref), nullptr);
+    EXPECT_EQ(source_ref.address->doc, &destination);
+    EXPECT_EQ(dom_node_ref_validate(&destination, moved_ref), child);
     ASSERT_TRUE(dom_node_unpin(&doc, source_ref, DOM_NODE_PIN_WRAPPER));
     EXPECT_EQ(dom_retire_sweep(&destination), 1u);
     EXPECT_EQ(dom_node_ref_validate(&doc, source_ref), nullptr);
     EXPECT_EQ(dom_node_ref_validate(&destination, moved_ref), nullptr);
     destination.destroy();
+}
+
+TEST_F(DomRetirementTest, InputBackedPinCanReleaseAfterIssuingDocumentCloses) {
+    DomDocument issuer;
+    ASSERT_TRUE(issuer.init(input));
+    DomText* text = DomText::create_in(input->arena, 0);
+    ASSERT_NE(text, nullptr);
+    text->id = dom_document_alloc_node_id(&issuer);
+    ASSERT_TRUE(dom_node_registry_register(&issuer, text, sizeof(DomText) + sizeof(String) + 1, true));
+    DomNodeRef handle = dom_node_ref(text);
+    dom_observe_native_pins(&issuer);
+    ASSERT_TRUE(dom_node_pin(&issuer, handle, DOM_NODE_PIN_EVENT_QUEUE));
+    ASSERT_TRUE(dom_adopt_detached_subtree(&issuer, &doc, text));
+    issuer.destroy();
+    dom_node_schedule_detached(&doc, text);
+    EXPECT_EQ(dom_retire_sweep(&doc), 0u);
+    ASSERT_TRUE(dom_node_unpin(&issuer, handle, DOM_NODE_PIN_EVENT_QUEUE));
+    EXPECT_EQ(dom_retire_sweep(&doc), 1u);
 }
 
 TEST_F(DomRetirementTest, AttributePinKeepsDetachedOwnerAndRetiresTogether) {
@@ -3327,7 +3349,7 @@ TEST_F(DomRetirementTest, UnregisteredLayoutBoxDoesNotRetainAuthoredSubtree) {
     EXPECT_EQ(dom_node_ref_validate(&doc, ref), nullptr);
 }
 
-TEST_F(DomRetirementTest, RetirementRepairsStaleEdgesOnceForTheWholeBatch) {
+TEST_F(DomRetirementTest, RemovingWideSubtreePreservesSurvivingLinksWithoutScanningDocument) {
     DomElement* parent = root();
     DomElement* branch = element("branch");
     ASSERT_TRUE(attach(parent, branch));
@@ -3337,11 +3359,14 @@ TEST_F(DomRetirementTest, RetirementRepairsStaleEdgesOnceForTheWholeBatch) {
     DomElement* retained = element("retained");
     ASSERT_TRUE(attach(parent, retained));
 
-    // A backing-tree edit can leave raw edges in a surviving wrapper.
+    // the verifier diagnoses a second owner while the subtree is still live.
     retained->first_child = branch->first_child;
     retained->last_child = branch->last_child;
+    EXPECT_FALSE(dom_child_links_valid(retained));
+    retained->first_child = nullptr;
+    retained->last_child = nullptr;
     ASSERT_TRUE(parent->remove_child(branch));
-    retained->prev_sibling = lam::up(branch);
+    EXPECT_TRUE(dom_child_links_valid(parent));
     EXPECT_EQ(dom_retire_sweep(&doc), 1025u);
     EXPECT_EQ(retained->first_child, nullptr);
     EXPECT_EQ(retained->last_child, nullptr);
@@ -3350,7 +3375,7 @@ TEST_F(DomRetirementTest, RetirementRepairsStaleEdgesOnceForTheWholeBatch) {
     EXPECT_EQ(parent->last_child, retained);
     DomLifecycleStats stats = {};
     dom_lifecycle_get_stats(&doc, &stats);
-    EXPECT_EQ(stats.retirement_edge_visits, stats.registered_nodes);
+    EXPECT_EQ(stats.retirement_edge_visits, 0u);
 }
 
 TEST_F(DomRetirementTest, ConsumedMutationRecordsReleaseDetachedSubtree) {
@@ -3559,7 +3584,53 @@ TEST_F(DomRetirementTest, NodeArenaGrowthPlateausAcrossTenThousandRetirements) {
     EXPECT_GE(after.bump_back_count - warm.bump_back_count, 10000u);
 }
 
-TEST_F(DomRetirementTest, RecycledNodesReleaseTheirRegistryRecords) {
+TEST_F(DomRetirementTest, AttachedTextNeedsNoLifecyclePoolAllocation) {
+    DomElement* parent = root();
+    PoolStats before = {}, after = {};
+    pool_get_detailed_stats(doc.document_pool, &before);
+    DomNodeRef first = {};
+    for (unsigned i = 0; i < 512; ++i) {
+        DomText* text = DomText::create_detached_copy(&doc, "t", 1);
+        ASSERT_NE(text, nullptr);
+        ASSERT_TRUE(static_cast<DomNode*>(parent)->append_child(text));
+        ASSERT_EQ(text->detached_root_slot, 0u);
+        if (!i) first = dom_node_ref(text);
+    }
+    pool_get_detailed_stats(doc.document_pool, &after);
+    EXPECT_EQ(after.live_bytes, before.live_bytes);
+    EXPECT_EQ(dom_node_ref_validate(&doc, first), parent->first_child);
+    EXPECT_EQ(dom_node_ref_validate(&doc, {reinterpret_cast<DomNode*>(uintptr_t(1)), first.expected_id}), nullptr);
+}
+
+TEST_F(DomRetirementTest, MarkEditorKeepsSeparateOccurrencesAfterRepeatedInsertion) {
+    input->ui_mode = true;
+    MarkBuilder builder(input);
+    Item source = builder.element("div").child(builder.element("i").text("leaf").final()).final();
+    DomElement* parent = build_dom_tree_from_element(source.element, &doc, nullptr);
+    ASSERT_NE(parent, nullptr);
+    doc.root = lam::up(parent);
+    DomNode* first = parent->first_child;
+    ASSERT_NE(first, nullptr);
+    Element* backing = dom_element_to_element(parent);
+    Item target = {.element = backing};
+    MarkEditor editor(&doc, EDIT_MODE_INLINE);
+    ASSERT_EQ(editor.elmt_insert_child(target, 1, backing->items[0]).element, backing);
+    ASSERT_TRUE(dom_child_links_valid(parent));
+    DomNode* second = first->next_sibling;
+    ASSERT_NE(second, nullptr);
+    ASSERT_NE(first, second);
+    ASSERT_EQ(backing->items[1].element, dom_element_to_element(second->as_element()));
+    ASSERT_EQ(editor.elmt_insert_child(target, 2, builder.element("b").final()).element, backing);
+    EXPECT_TRUE(dom_child_links_valid(parent));
+    EXPECT_EQ(first->next_sibling, second);
+    EXPECT_EQ(second->next_sibling, parent->last_child);
+    ASSERT_TRUE(static_cast<DomNode*>(parent)->remove_child(first));
+    EXPECT_TRUE(dom_child_links_valid(parent));
+    EXPECT_EQ(dom_retire_sweep(&doc), 2u);
+    EXPECT_EQ(parent->first_child, second);
+}
+
+TEST_F(DomRetirementTest, RecycledNodesReleaseDetachedOwnershipStorage) {
     DomElement* parent = root();
     PoolStats warm = {};
     pool_get_detailed_stats(doc.document_pool, &warm);
@@ -3575,7 +3646,7 @@ TEST_F(DomRetirementTest, RecycledNodesReleaseTheirRegistryRecords) {
     }
     for (int i = 0; i < 64; i++) ASSERT_TRUE(parent->remove_child(children[i]));
     EXPECT_EQ(dom_retire_sweep(&doc), 64u);
-    // a record outlives no recycled slot; a stale ref still fails validation
+    // detached ownership storage returns to its initial footprint after the batch
     PoolStats after = {};
     pool_get_detailed_stats(doc.document_pool, &after);
     EXPECT_EQ(after.live_bytes, warm.live_bytes);

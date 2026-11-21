@@ -594,7 +594,7 @@ static void dom_drain_script_reactions(DomDocument* document) {
     js.pending_scripts = js.pending_scripts_tail = nullptr;
     while (js.running_scripts != stop) {
         DomScriptReaction* reaction = js.running_scripts;
-        DomNode* node = dom_node_ref_validate(document, reaction->script);
+        DomNode* node = reaction->script.address;
         DomElement* script = node ? node->as_element() : nullptr;
         if (script && script->doc == document && !document->scripting_disabled &&
             dom_node_is_connected(node) && js.prepare_inline_script)
@@ -1210,7 +1210,7 @@ static bool dom_remove_and_update_slots(DomElement* parent, DomNode* child,
     bool removed = remove(parent, child);
     if (removed) {
         dom_slots_after_child_change(parent);
-        if (DomNode* detached = dom_node_ref_validate(doc, detached_slot_tree))
+        if (DomNode* detached = detached_slot_tree.address)
             dom_update_slots_in_tree(detached);
     }
     if (detached_slot_tree.address) dom_node_unpin(doc, detached_slot_tree, DOM_NODE_PIN_RECONCILE);
@@ -4090,7 +4090,7 @@ extern "C" Item dom_window_prompt(Item message_item, Item default_item) {
 // ----------------------------------------------------------------------------
 static void _dispatch_pending_load(DomElement* element, DomDocument* owner_doc,
                                    DomNodeRef ref, const char* type="load") {
-    if (element && dom_node_ref_validate(owner_doc,ref)) {
+    if (element && ref.address == element) {
         dom_dispatch_resource_event(element, type);
     }
     if (owner_doc && ref.address) {
@@ -13713,7 +13713,7 @@ extern "C" void dom_scroll_to_fragment_target(void* target, bool dispatch_before
         node = parent;
     }
     for (const AncestorReveal& action : ancestors) {
-        DomNode* live = dom_node_ref_validate(document, action.ref);
+        DomNode* live = action.ref.address;
         DomElement* ancestor = live ? live->as_element() : nullptr;
         if (!ancestor || ancestor->doc != document || !dom_node_is_connected(ancestor)) break;
         if (action.details) {

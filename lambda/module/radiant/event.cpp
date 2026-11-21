@@ -10549,7 +10549,7 @@ struct HoverEventPath {
 
     View* at(size_t index) const {
         return index < count
-            ? static_cast<View*>(dom_node_ref_validate(document, nodes[index])) : nullptr;
+            ? static_cast<View*>(nodes[index].address) : nullptr;
     }
 };
 
@@ -12076,19 +12076,16 @@ static bool navigation_request_is_live(const RadiantNavigationRequest* request,
     if (out_target) *out_target = nullptr;
     if (out_fragment) *out_fragment = nullptr;
     if (!request) return false;
-    DomNode* source = dom_node_ref_validate(request->source_document,
-                                            request->source_ref);
+    DomNode* source = request->source_ref.address;
     if (!source || !source->is_element()) return false;
     if (out_source) *out_source = source->as_element();
     if (request->target_kind == RADIANT_NAVIGATION_TARGET_EXISTING) {
-        DomNode* target = dom_node_ref_validate(request->target_document,
-                                                request->target_ref);
+        DomNode* target = request->target_ref.address;
         if (!target || !target->is_element()) return false;
         if (out_target) *out_target = target->as_element();
     }
     if (request->fragment_ref.address) {
-        DomNode* fragment = dom_node_ref_validate(request->fragment_document,
-                                                  request->fragment_ref);
+        DomNode* fragment = request->fragment_ref.address;
         if (!fragment || !fragment->is_element()) return false;
         if (out_fragment) *out_fragment = fragment->as_element();
     }

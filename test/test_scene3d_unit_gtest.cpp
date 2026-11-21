@@ -4774,6 +4774,7 @@ TEST_F(Scene3dTest, ParticlesNoiseAdmissionRejectsMalformedAndRetainedLifetimeDo
 TEST_F(Scene3dTest, DocumentListenerRetirementReleasesOnlyItsOwnNativePins) {
     auto *loaded = load_page("test/scene3d/particles-cpu.html");
     ASSERT_NE(loaded, nullptr);
+    dom_observe_native_pins(loaded);
     ASSERT_FALSE(item_is_error(run_js(
         "globalThis.listenerPeer=document.implementation.createHTMLDocument('peer');"
         "globalThis.listenerHits=0;globalThis.pinListener=()=>listenerHits++;"

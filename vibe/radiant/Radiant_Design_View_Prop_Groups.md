@@ -12,7 +12,7 @@ The largest savings come from the payload allocated for common elements. Moving 
 
 | Record | Before, arm64 | Retained, arm64 |
 |---|---:|---:|
-| `DomElement` | 376 B | 328 B |
+| `DomElement` | 376 B | 344 B |
 | `DomStyleRareExt` | 568 B | 256 B |
 | `DomStyleExt` | — | 48 B |
 | `BlockProp` | 456 B | 344 B |
@@ -22,7 +22,7 @@ The largest savings come from the payload allocated for common elements. Moving 
 | `BoundaryProp` | 224 B | 192 B |
 | `LayoutCache` | 1,240 B | 864 B |
 
-These are direct compiler record sizes. Earlier captures use the name `DomElementExt` for `DomStyleRareExt`. Optional allocations and shared storage contribute to the measured totals in Appendix A. [Element records](../../lambda-input/lambda/input/css/dom_element.hpp) · [View payloads](../../radiant/radiant/view.hpp) · [Layout cache](../../radiant/radiant/layout.hpp)
+These are direct compiler record sizes. The property refactor reached 328 B per element. Removing the separate lifecycle record subsequently added 16 B of inline ownership data to the node header. Earlier captures use the name `DomElementExt` for `DomStyleRareExt`. Optional allocations and shared storage contribute to the measured totals in Appendix A. [Element records](../../lambda-input/lambda/input/css/dom_element.hpp) · [View payloads](../../radiant/radiant/view.hpp) · [Layout cache](../../radiant/radiant/layout.hpp)
 
 ## 2. Split properties by use and lifetime
 
@@ -177,6 +177,10 @@ The pseudo-style stage passed 142 native CSS/DOM integration tests and 3,857 sta
 
 The November 21 profiles and comparison with the shared-reset endpoint are under `temp/view-prop-doc-refresh/`. The join with the original baseline is in `temp/view-prop-doc-refresh/end-to-end/comparison.csv` and `summary.json`. The archived shared-reset comparison is under `temp/view-prop-overall/`.
 
+### DOM lifecycle ownership
+
+Removing the 104-byte per-node lifecycle record reduced document-pool and node-arena bytes after construction from 50.55 to 32.46 MiB across all 224 pages (35.79%). All document-tagged allocator bytes, including Input-owned nodes and view properties, fell from 342.07 to 326.00 MiB after first layout (4.70%). Both builds used the same property groups. This comparison measures the lifecycle change independently of earlier property sharing and cache changes (D5.2.4, D5.5.1–D5.5.3). [Lifecycle measurements](Radiant_Design_DOM_Node_Lifecycle.md#release-memory-after-record-removal)
+
 ### Document-pool alignment trial
 
 The allocator-only trial paired the same 224 pages. Live document-pool block spans, including headers and padding, fell from 105.17 to 97.01 MiB (7.76%). The document pool and active node arena together fell from 110.07 to 101.90 MiB (7.42%). Committed document-pool memory fell from 137.98 to 127.41 MiB (7.67%). All 224 normalized layout trees matched. The figures are in `temp/doc-pool-alignment/summary.json` (D5.1.4, D5.2.4).
@@ -212,7 +216,7 @@ The main integration points are [typed defaults](../../radiant/radiant/view_prop
 
 - ~~Target **at most 96 B** for the common payload in the first prototype, including its extension link.~~ The 80 B probe held 14 logical properties. The retained block core keeps the co-read sizing and flow fields in DV4.2.
 - ~~Target **128–160 B** for the populated `DomStyleRareExt` shell, including admitted moved slots.~~ DV6.1 and DV6.2 describe the 256 B rare extension and 48 B directory.
-- ~~On this ABI, those candidates represent **56 B of inline slots** in total. If all move with no added inline storage or padding, the node could reach **320 B** from 376 B.~~ The first slot moves produced a 352 B node. The tag and class changes in DV6.6 and DV6.7 contributed to the current 328 B layout.
+- ~~On this ABI, those candidates represent **56 B of inline slots** in total. If all move with no added inline storage or padding, the node could reach **320 B** from 376 B.~~ The first slot moves produced a 352 B node. The tag and class changes in DV6.6 and DV6.7 contributed to the 328 B property-refactor endpoint.
 - ~~Store fallback tag spellings in the optional element directory.~~ That trial found 102 fallback nodes and brought the directory from 48 to 56 B. DV6.6 uses a sparse document table for fallback spellings, so the directory uses 48 B.
 - ~~Move the class-cache pointer into `DomStyleExt`.~~ The 224-page census projected 19,323 additional directory allocations and 1,000,816 more bytes of allocation spans with that placement. DV6.7 keeps one pointer on the element.
 
