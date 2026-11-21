@@ -4097,7 +4097,11 @@
               "radiant/form_controls.cpp",
               "radiant/loader_runtime_host.cpp",
               "radiant/reactive_render_host.cpp",
-              "radiant/stylesheet_sync.cpp"
+              "radiant/stylesheet_sync.cpp",
+              "radiant/dom_inline_stylesheet.cpp",
+              "radiant/resource_css.cpp",
+              "radiant/resource_observer.cpp",
+              "radiant/html_token.cpp"
             ],
             "binary": "test_radiant_input_value_gtest.exe"
           },
@@ -4345,9 +4349,10 @@
           {
             "source": "test/test_layout_custom_gtest.cpp",
             "name": "Custom Layout Engine Tests",
+            "radiant_native_sources_independent": true,
             "dependencies": [
-              "radiant",
-              "lambda-data"
+              "lambda-data",
+              "lambda-lib"
             ],
             "libraries": [
               "gtest",
@@ -4357,8 +4362,14 @@
               "radiant/layout_custom.cpp",
               "radiant/package_layout_host.cpp",
               "radiant/layout_box.cpp",
+              "radiant/layout_render_tree.cpp",
+              "radiant/layout_tags.cpp",
               "radiant/stacking_order.cpp",
-              "test/test_unlinked_layout_stubs.cpp"
+              "radiant/view_effect_queries.cpp",
+              "radiant/view_prop_defaults.cpp",
+              "radiant/view_prop_ensure.cpp",
+              "test/test_unlinked_layout_stubs.cpp",
+              "test/test_unlinked_style_stubs.cpp"
             ],
             "binary": "test_layout_custom_gtest.exe",
             "icon": "\ud83d\udcd0"
@@ -4439,9 +4450,10 @@
           {
             "source": "test_state_store_gtest.cpp",
             "name": "StateStore DOM Mutation Tests",
+            "radiant_native_sources_independent": true,
             "dependencies": [
-              "radiant",
-              "lambda-data"
+              "lambda-data",
+              "lambda-lib"
             ],
             "libraries": [
               "gtest",
@@ -4461,6 +4473,7 @@
               "radiant/dom_range.cpp",
               "radiant/dom_range_resolver.cpp",
               "radiant/dom_mutation_record.cpp",
+              "radiant/dom_inline_stylesheet.cpp",
               "radiant/dom_mutation_state.cpp",
               "radiant/dom_backed_tree.cpp",
               "radiant/select_options.cpp",
@@ -4472,6 +4485,7 @@
               "radiant/editing_dom_waist.cpp",
               "radiant/form_control_model.cpp",
               "radiant/layout_tags.cpp",
+              "radiant/layout_render_tree.cpp",
               "radiant/text_metrics.cpp",
               "radiant/view_geometry.cpp",
               "radiant/editing_host.cpp",
@@ -4481,9 +4495,13 @@
               "radiant/scroll_request.cpp",
               "radiant/state_store.cpp",
               "radiant/state_store_host.cpp",
+              "radiant/state_batch.cpp",
               "radiant/symbol_resolver.cpp",
+              "radiant/view_prop_defaults.cpp",
+              "radiant/view_prop_ensure.cpp",
               "radiant/view_select.cpp",
               "test/test_state_store_stubs.cpp",
+              "test/test_unlinked_style_stubs.cpp",
               "lib/test_utils.c",
               "lib/test_utils_pool.c"
             ],

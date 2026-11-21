@@ -20,6 +20,13 @@ observations still require re-verification. Add new Radiant issues here.
 
 ## Open issues
 
+<a id="ri-199"></a>
+
+### RI-199 — FIXED
+
+The native test harness link failures are recorded in the
+[test harness repair](<Radiant_Issue_Ledger (fixed).md#ri-199>).
+
 <a id="ri-198"></a>
 
 ### RI-198 — Four named replays exceed five seconds in the full debug baseline
