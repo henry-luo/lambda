@@ -1213,7 +1213,7 @@ TEST(DomDocumentOwnership, LambdaOnlyEvaluatorClosesDocumentsAtResetAndTeardown)
     // weak script carriers cannot collect a document still owned by the evaluator.
     heap_gc_collect();
     EXPECT_EQ(destroyed, 0u);
-    EXPECT_STREQ(document->root->tag_name, "html");
+    EXPECT_STREQ(document->root->tag_name(), "html");
     free_document(document);
     EXPECT_EQ(virtual_host_data(node_wrapper), nullptr);
     heap_unregister_gc_root(&node_wrapper.item);
@@ -1681,7 +1681,7 @@ TEST(CssPropTable, CommittedStylesIgnoreRangeDocumentWrapper) {
     element.node_type = document_wrapper.node_type = DOM_NODE_ELEMENT;
     element.set_synthetic(true);
     document_wrapper.set_synthetic(true);
-    document_wrapper.tag_name = lam::up("#document");
+    document_wrapper.tag_id = MARKUP_NAME_DOM_DOCUMENT;
     element.doc = lam::up(&doc);
     element.parent = lam::up(static_cast<DomNode*>(&document_wrapper));
     element.set_styles_resolved(true);
@@ -3440,7 +3440,7 @@ TEST_F(MotionCascadeTest, PresentationCustomPropertiesReplaceRetainCascadeAndCle
         ASSERT_TRUE(dom_element_set_presentation_style(&element, "--height", i % 2 ? "41px" : "40px", &changed));
     }
     unsigned count = 0;
-    for (CssCustomProp* prop = element.css_variables; prop; prop = prop->next) count++;
+    for (CssCustomProp* prop = element.css_variables(); prop; prop = prop->next) count++;
     EXPECT_EQ(count, 3u);
     dom_element_clear_cascaded_styles(&element);
     value = dom_element_lookup_custom_property(&child, "--height", &owner);
@@ -3883,8 +3883,8 @@ TEST(CssTransform, GroupingEffectsFlattenUsedTransformStyle) {
     FilterFunction function = {};
     element.set_synthetic(true);
     element.ext = lam::own(&extension);
-    DomPropExt slots = {};
-    element.prop_ext = lam::own(&slots);
+    DomStyleExt slots = {};
+    element.style_ext = lam::own(&slots);
     slots.transform = lam::view_prop(&transform);
     element.scroller = lam::view_prop(&scroll);
     element.in_line = lam::view_ref(&inline_prop);
@@ -3945,10 +3945,10 @@ TEST(CssTransform, PaintProjectsNestedDepthOnceAndHonorsFlattening) {
         scene_prop.transform_style = preserve ? CSS_VALUE_PRESERVE_3D : CSS_VALUE_FLAT;
         scene_prop.functions = lam::shared(&translation);
         plane_prop.functions = lam::shared(&translation);
-        DomPropExt slots[3] = {};
-        camera.prop_ext = lam::own(&slots[0]);
-        scene.prop_ext = lam::own(&slots[1]);
-        plane.prop_ext = lam::own(&slots[2]);
+        DomStyleExt slots[3] = {};
+        camera.style_ext = lam::own(&slots[0]);
+        scene.style_ext = lam::own(&slots[1]);
+        plane.style_ext = lam::own(&slots[2]);
         slots[0].transform = lam::view_prop(&camera_prop);
         slots[1].transform = lam::view_prop(&scene_prop);
         slots[2].transform = lam::view_prop(&plane_prop);
@@ -4429,7 +4429,7 @@ protected:
     struct MockElement {
         uint8_t buf[4096];
         InlineProp in_line;
-        DomPropExt props;
+        DomStyleExt props;
     };
 
     DomElement* createMockElement(MockElement* mock) {
@@ -4438,7 +4438,7 @@ protected:
         element->node_type = DOM_NODE_ELEMENT;
         element->doc = lam::up(&doc);
         ((ViewSpan*)element)->in_line = lam::view_ref(&mock->in_line);
-        element->prop_ext = lam::own(&mock->props);
+        element->style_ext = lam::own(&mock->props);
         return element;
     }
 
@@ -4446,7 +4446,7 @@ protected:
         // transform bounds consume a laid-out block view, as the render fixtures do.
         element->view_type = RDT_VIEW_BLOCK;
         element->font = lam::view_prop(font);
-        element->prop_ext->transform = lam::view_prop(transform);
+        element->style_ext->transform = lam::view_prop(transform);
         element->width = 40.0f;
         element->height = 10.0f;
         layout.view = lam::up(static_cast<View*>(element));
@@ -5828,7 +5828,7 @@ TEST_F(AnimationTickTest, NeutralTransformsCopyUnderlyingListsAndPadWithIdentity
         source.params.translate.x = 10.0f;
         source.translate_x_percent = source.translate_y_percent = NAN;
         if (sample.has_base) transform.functions = lam::shared(&source);
-        element->prop_ext->transform = lam::view_prop(&transform);
+        element->style_ext->transform = lam::view_prop(&transform);
         CssAnimProp config = defaultAnimProp("neutralTransform", 1.0f);
         AnimationInstance* instance = css_animation_create(scheduler, element, &config,
             parsedKeyframes(sample.ends_none
@@ -6097,7 +6097,7 @@ TEST_F(AnimationTickTest, TransformValueCachesRefreshPerElementAndOwnInheritedLi
     for (int index = 0; index < 2; index++) {
         elements[index] = createMockElement(&mocks[index]);
         elements[index]->font = lam::view_prop(&fonts[index]);
-        elements[index]->prop_ext->transform = lam::view_prop(&transforms[index]);
+        elements[index]->style_ext->transform = lam::view_prop(&transforms[index]);
         fonts[index].font_size = index == 0 ? 10.0f : 20.0f;
         layout.view = lam::up(static_cast<View*>(elements[index]));
         layout.elmt = lam::up(elements[index]);
@@ -6517,7 +6517,7 @@ TEST_F(AnimationTickTest, TransformAnimationMarksDocumentOwnedList) {
     MockElement mock;
     DomElement* element = createMockElement(&mock);
     TransformProp transform = {};
-    element->prop_ext->transform = lam::view_prop(&transform);
+    element->style_ext->transform = lam::view_prop(&transform);
 
     TransformFunction keyframe_function = {};
     keyframe_function.type = TRANSFORM_TRANSLATEX;

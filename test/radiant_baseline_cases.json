@@ -427,7 +427,6 @@
     "UIAutomation/UIAutomationTest.RunTest/css_text_background_clip",
     "UIAutomation/UIAutomationTest.RunTest/css_text_background_tiles",
     "UIAutomation/UIAutomationTest.RunTest/css_text_clamp_intrinsic",
-    "UIAutomation/UIAutomationTest.RunTest/css_text_clamp_legacy",
     "UIAutomation/UIAutomationTest.RunTest/css_text_clamp_math",
     "UIAutomation/UIAutomationTest.RunTest/css_text_emphasis",
     "UIAutomation/UIAutomationTest.RunTest/css_text_ink_bounds",

@@ -7112,11 +7112,11 @@ TEST(RenderOutputParity, OverflowEllipsisAndClampMatchExplicitTextAcrossOutputs)
         {"text_overflow_mixed","text-overflow:ellipsis",
             "<span style='color:red'>ABCD</span><span style='color:blue'>EFGHIJ</span>",
             "<span style='color:red'>ABCD</span>…"},
-        {"text_overflow_clamp","white-space:normal;word-break:break-all;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:1",
+        {"text_overflow_clamp","white-space:normal;word-break:break-all;display:flow-root;line-clamp:1",
             "ABCDEFGHIJ","ABCD…"},
         {"text_overflow_clip","text-overflow:clip","ABCDEFGHIJ","ABCDEFGHIJ"},
         {"text_overflow_fits","text-overflow:ellipsis","ABCD","ABCD"},
-        {"text_overflow_clamp_fits","white-space:normal;word-break:break-all;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:1",
+        {"text_overflow_clamp_fits","white-space:normal;word-break:break-all;display:flow-root;line-clamp:1",
             "ABCD","ABCD"},
         {"text_overflow_grapheme","text-overflow:ellipsis","ÁBCDEFGHIJ","ÁBCD…"},
         {"text_overflow_first_cluster","text-overflow:ellipsis","ABCDEFGHIJ","A","width:8px"},
@@ -7124,7 +7124,7 @@ TEST(RenderOutputParity, OverflowEllipsisAndClampMatchExplicitTextAcrossOutputs)
         {"text_overflow_absolute_runs","text-overflow:ellipsis",
             "<span style='color:red;width:999px'>ABCD</span><span style='color:blue'>EFGHIJ</span>",
             "<span style='color:red'>ABCD</span>…","position:absolute;left:0;top:0"},
-        {"text_overflow_clamp_two_lines","white-space:normal;word-break:break-all;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2",
+        {"text_overflow_clamp_two_lines","white-space:normal;word-break:break-all;display:flow-root;line-clamp:2",
             "ABCDEFGHIJKLMNO","ABCDE<br>FGHI…","height:48px"},
         {"text_overflow_full_transform","text-overflow:ellipsis;text-transform:uppercase","ßabcdefghij","SSAB…"},
         {"text_overflow_mixed_font_opacity","text-overflow:ellipsis",
@@ -7194,7 +7194,7 @@ TEST(RenderOutputParity, RtlTwoLineClampMatchesExplicitVisualLinesAcrossOutputs)
     for (const auto& item : cases) {
         char name[96], actual[2048], reference[2048];
         snprintf(name, sizeof(name), "rtl_two_line_%s", item.name);
-        snprintf(actual, sizeof(actual), format, "display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2", item.style, item.actual);
+        snprintf(actual, sizeof(actual), format, "display:flow-root;line-clamp:2", item.style, item.actual);
         snprintf(reference, sizeof(reference), format, "", item.style, item.reference);
         expect_html_pair_output_parity(name, actual, reference, true);
     }
@@ -8111,14 +8111,14 @@ TEST(RenderOutputParity, CalculatedLineClampCountsMatchLiteralCountsAcrossOutput
         {"variable", "var(--count)", "2", "--count:calc(40px / 1em)"},
         {"invalid_variable", "var(--count)", "none", "--count:1px"},
         {"fallback", "var(--missing,calc(40px / 1em))", "2"},
-        {"inherit_owner", "inherit", "2", "-webkit-line-clamp:calc(40px / 1em)", "font-size:30px"}
+        {"inherit_owner", "inherit", "2", "line-clamp:calc(40px / 1em)", "font-size:30px"}
     };
     const char* format = "<!doctype html><meta charset='utf-8'><style>"
         "@font-face{font-family:FixtureMono;src:url(../../test/layout/data/font/LiberationMono-Regular.ttf)}"
         "html,body{margin:0;width:160px;background:white}.owner{font:20px/24px FixtureMono;%s}"
         ".box{width:62px;overflow:hidden;word-break:break-all;color:blue;"
-        "display:-webkit-box;-webkit-box-orient:vertical;%s;"
-        "-webkit-line-clamp:4;-webkit-line-clamp:%s}"
+        "display:flow-root;%s;"
+        "line-clamp:4;line-clamp:%s}"
         "</style><div class=owner><div class=box><span style='color:red'>"
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcd</span></div></div>";
     for (const Case& item : cases) {
@@ -8127,67 +8127,6 @@ TEST(RenderOutputParity, CalculatedLineClampCountsMatchLiteralCountsAcrossOutput
         snprintf(reference,sizeof(reference),format,item.owner,item.child,item.count);
         for (int scale = 1; scale <= 2; scale++) {
             char name[128];snprintf(name,sizeof(name),"clamp_math_%s_%dx",item.name,scale);
-            SCOPED_TRACE(name);
-            expect_html_pair_output_parity(name,actual,reference,true,scale);
-        }
-    }
-}
-
-TEST(RenderOutputParity, LegacyBoxClampApplicabilityMatchesVisibleReferences) {
-    const char* full_text = "<span style='color:red'>ABCDEFGHIJKLMNOPQRSTUVWXYZabcd</span>";
-    const char* clamped_text = "<span style='color:red'>ABCDE<br>FGHI</span>…";
-    const struct Case {
-        const char* name; const char* style; bool clamped;
-        const char* reference_display = "block";
-        const char* owner = "";
-        const char* reference_owner = "";
-        const char* content = nullptr;
-        const char* reference_style = "";
-    } cases[] = {
-        {"block", "display:block;-webkit-box-orient:vertical", false},
-        {"default", "display:-webkit-box", false},
-        {"vertical", "display:-webkit-box;-webkit-box-orient:vertical", true},
-        {"horizontal", "display:-webkit-box;-webkit-box-orient:horizontal", false},
-        {"inline", "display:-webkit-inline-box;-webkit-box-orient:vertical", true, "inline-block"},
-        {"flow_root", "display:flow-root;-webkit-box-orient:vertical", false},
-        {"flex", "display:flex;-webkit-box-orient:vertical", false},
-        {"grid", "display:grid;-webkit-box-orient:vertical", false},
-        {"variable", "display:-webkit-box;--axis:vertical;-webkit-box-orient:var(--axis)", true},
-        {"invalid_variable", "display:-webkit-box;--axis:invalid;-webkit-box-orient:var(--axis)", false},
-        {"inline_axis", "display:-webkit-box;-webkit-box-orient:inline-axis", false},
-        {"block_axis", "display:-webkit-box;-webkit-box-orient:block-axis", true},
-        {"inherit_axis", "display:-webkit-box;-webkit-box-orient:inherit", true,
-            "block", "-webkit-box-orient:vertical"},
-        {"unset_axis", "display:-webkit-box;-webkit-box-orient:unset", false,
-            "block", "-webkit-box-orient:vertical"},
-        {"initial_axis", "display:-webkit-box;-webkit-box-orient:initial", false,
-            "block", "-webkit-box-orient:vertical"},
-        {"invalid_declaration", "display:-webkit-box;-webkit-box-orient:vertical;-webkit-box-orient:row", true},
-        {"display_variable", "--display:-webkit-box;display:var(--display);-webkit-box-orient:vertical", true},
-        {"count_none", "display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:none", false},
-        {"inherit_box", "display:inherit;-webkit-box-orient:vertical", true, "block",
-            "display:-webkit-box;-webkit-box-orient:horizontal", "display:flex"},
-        {"children_horizontal", "display:-webkit-box;-webkit-box-orient:horizontal;-webkit-line-clamp:none",
-            false, "flex", "", "", "<i></i><i></i><i></i>", "flex-direction:row"},
-        {"children_vertical", "display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:none",
-            false, "flex", "", "", "<i></i><i></i><i></i>", "flex-direction:column"},
-        {"children_direction", "display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:none;flex-direction:row-reverse",
-            false, "flex", "", "", "<i></i><i></i><i></i>", "flex-direction:column"}
-    };
-    const char* format = "<!doctype html><meta charset='utf-8'><style>"
-        "@font-face{font-family:FixtureMono;src:url(../../test/layout/data/font/LiberationMono-Regular.ttf)}"
-        "html,body{margin:0;width:160px;background:white}.owner{width:100px;font:20px/24px FixtureMono;%s}"
-        ".box{width:62px;overflow:hidden;word-break:break-all;color:blue;"
-        "-webkit-line-clamp:2;%s}.box>i{display:block;width:20px;height:10px;background:red;flex-shrink:0}"
-        "</style><div class=owner><div class=box>%s</div></div>";
-    for (const Case& item : cases) {
-        char actual[2048], reference[2048], reference_style[128];
-        snprintf(actual,sizeof(actual),format,item.owner,item.style,item.content ? item.content : full_text);
-        snprintf(reference_style,sizeof(reference_style),"display:%s;-webkit-line-clamp:none;%s",item.reference_display,item.reference_style);
-        snprintf(reference,sizeof(reference),format,item.reference_owner,reference_style,
-            item.content ? item.content : item.clamped ? clamped_text : full_text);
-        for (int scale = 1; scale <= 2; scale++) {
-            char name[128];snprintf(name,sizeof(name),"clamp_legacy_%s_%dx",item.name,scale);
             SCOPED_TRACE(name);
             expect_html_pair_output_parity(name,actual,reference,true,scale);
         }

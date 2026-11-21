@@ -405,13 +405,13 @@ static Item _custom_elements_record(Item registry, Item name, bool create) {
 
 static Item custom_element_definition(Item element) {
     DomElement* node = (DomElement*)dom_unwrap_element(element);
-    if (!node || !node->is_element() || !node->tag_name || !strchr(node->tag_name, '-'))
+    if (!node || !node->is_element() || !node->tag_name() || !strchr(node->tag_name(), '-'))
         return make_js_undefined();
     RootFrame roots(2);
     Rooted<Item> owner(roots, element);
     Rooted<Item> registry(roots, js_get_key_cstr(js_get_global_this(), "customElements"));
     if (get_type_id(registry.get()) != LMD_TYPE_MAP) return make_js_undefined();
-    return _custom_elements_record(registry.get(), js_name_item(node->tag_name), false);
+    return _custom_elements_record(registry.get(), js_name_item(node->tag_name()), false);
 }
 
 static Item custom_element_state(Item element, bool create) {

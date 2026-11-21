@@ -523,7 +523,7 @@ static void fd_append_selected_option(DomElement* option, void* opaque) {
     if (context->completed || !dom_option_is_selected(option) || option->has_attribute("disabled")) return;
     for (DomNode* parent = option->parent; parent && parent != context->select; parent = parent->parent) {
         DomElement* element = parent->as_element();
-        if (element && element->tag_name && str_icmp_cstr(element->tag_name, "optgroup") == 0 &&
+        if (element && element->tag_name() && str_icmp_cstr(element->tag_name(), "optgroup") == 0 &&
             element->has_attribute("disabled")) return;
     }
     const char* value = option->get_attribute("value");

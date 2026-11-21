@@ -300,7 +300,7 @@ static bool radiant_dom_is_attr_name_projection(const char* name) {
 }
 
 static bool radiant_dom_is_tag(DomElement* elem, const char* tag) {
-    return elem && elem->tag_name && tag && str_icmp_cstr(elem->tag_name, tag) == 0;
+    return elem && elem->tag_name() && tag && str_icmp_cstr(elem->tag_name(), tag) == 0;
 }
 
 static bool radiant_dom_node_is_dom_element(DomNode* node) {
@@ -308,7 +308,7 @@ static bool radiant_dom_node_is_dom_element(DomNode* node) {
     DomElement* elem = node->as_element();
     // Document/fragment shells share DomElement storage internally but are
     // not Elements in the DOM type hierarchy.
-    return elem && elem->tag_name && elem->tag_name[0] != '#';
+    return elem && elem->tag_name() && elem->tag_name()[0] != '#';
 }
 
 static int64_t radiant_dom_reflected_int_value(DomElement* elem, const char* attr_name,
@@ -574,8 +574,8 @@ static VirtualOpStatus radiant_dom_velmt_splice_readonly(
 static VirtualOpStatus radiant_dom_velmt_tag(void* data, Item* out) {
     DomNode* node = (DomNode*)data;
     if (!node || !out) return VIRTUAL_OP_MISSING;
-    const char* name = node->is_element() && node->as_element()->tag_name
-        ? node->as_element()->tag_name : node->node_name();
+    const char* name = node->is_element() && node->as_element()->tag_name()
+        ? node->as_element()->tag_name() : node->node_name();
     *out = radiant_dom_string_item(name ? name : "");
     return VIRTUAL_OP_OK;
 }
@@ -1428,7 +1428,7 @@ static int radiant_dom_member_property(Item receiver, const char* property, Item
     }
 
 RADIANT_MEMBER_GET(radiant_dom_member_tag_name,
-    (Item){.item = s2it(radiant_dom_uppercase_name(elem->tag_name))})
+    (Item){.item = s2it(radiant_dom_uppercase_name(elem->tag_name()))})
 RADIANT_C_API int radiant_dom_member_local_name(Item receiver, Item* out) {
     return radiant_dom_member_property(receiver, "localName", out);
 }
@@ -1464,13 +1464,13 @@ RADIANT_MEMBER_GET(radiant_dom_member_attributes, radiant_dom_attributes_item(el
 // keep their centralized invariant hooks.
 static bool radiant_dom_member_tag_set(Item receiver, const char* tags) {
     DomElement* elem = radiant_dom_member_elem(receiver);
-    if (!elem || !elem->tag_name || !tags) return false;
+    if (!elem || !elem->tag_name() || !tags) return false;
     const char* tag = tags;
     while (*tag) {
         while (*tag == ' ') tag++;
         const char* end = tag;
         while (*end && *end != ' ') end++;
-        if (end != tag && str_ieq(elem->tag_name, strlen(elem->tag_name),
+        if (end != tag && str_ieq(elem->tag_name(), strlen(elem->tag_name()),
                                   tag, (size_t)(end - tag))) return true;
         tag = end;
     }

@@ -3136,7 +3136,7 @@ static void collect_handlers_recursive(DomElement* elem,
 
             log_debug("collect_handlers: %s on <%s> → %s()",
                       EVENT_HANDLER_ATTRS[i].attr_name,
-                      elem->tag_name ? elem->tag_name : "?",
+                      elem->tag_name() ? elem->tag_name() : "?",
                       func_name);
         }
     }
@@ -3239,11 +3239,11 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
                 installed++;
                 log_debug("collect_and_compile_event_handlers: installed %s on <%s>",
                           attr_name,
-                          h->element && h->element->tag_name ? h->element->tag_name : "?");
+                          h->element && h->element->tag_name() ? h->element->tag_name() : "?");
             } else {
                 log_error("collect_and_compile_event_handlers: failed to install %s on <%s>",
                           attr_name,
-                          h->element && h->element->tag_name ? h->element->tag_name : "?");
+                          h->element && h->element->tag_name() ? h->element->tag_name() : "?");
             }
             h = h->next;
         }

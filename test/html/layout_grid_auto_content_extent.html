@@ -10,7 +10,7 @@ button, input, select { font: inherit; color: inherit; }
 .tile { display: flex; flex-direction: column; align-items: center; min-width: 0; padding: 12px 5px 10px; gap: 8px; font-size: 12px; }
 .tile:hover { background: #f4f7fa; }
 .graphic { width: 76px; height: 68px; flex-shrink: 0; background: lightblue; }
-.label { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; line-height: 1.5; max-width: 120px; }
+.label { display:flow-root; line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; line-height: 1.5; max-width: 120px; }
 .size { font-size: 10px; }
 </style></head><body><div id="result"><div class="workspace"><div class="browser"><div id="viewport"><div id="grid">
 <button class="tile"><span class="graphic"></span><span id="label" class="label">verify-wasm-setup.sh</span><span class="size">3.2 KB</span></button>

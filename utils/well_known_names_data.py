@@ -58,7 +58,22 @@ MARKUP_TRAILING_ENTRIES = [
     ("CSS_POSITION_ANCHOR", "position-anchor"),
     ("CSS_POSITION_AREA", "position-area"),
     ("CSS_COLOR_SCHEME", "color-scheme"),
-
+    # Internal nodes use catalog names even when they have no document pool.
+    ("DOM_DOCUMENT", "#document"),
+    ("DOM_DOCUMENT_FRAGMENT", "#document-fragment"),
+    ("DOM_ANONYMOUS_TEXT_ITEM", "anonymous-text-item"),
+    ("DOM_ANON_TABLE", "::anon-table"),
+    ("DOM_ANON_TBODY", "::anon-tbody"),
+    ("DOM_ANON_TR", "::anon-tr"),
+    ("DOM_ANON_TD", "::anon-td"),
+    ("DOM_FIRST_LETTER", "::first-letter"),
+    ("DOM_BEFORE", "::before"),
+    ("DOM_AFTER", "::after"),
+    ("DOM_MARKER", "::marker"),
+    ("DOM_BACKDROP", "::backdrop"),
+    ("DOM_GENERATED", "::generated"),
+    ("DOM_LEADER", "::leader"),
+    ("DOM_MARGIN", "::margin"),
 ]
 MARKUP_ENTRY_SYMBOLS = {
     spelling: symbol for symbol, spelling in MARKUP_TAG_ENTRIES + MARKUP_EXTRA_ENTRIES + MARKUP_TRAILING_ENTRIES

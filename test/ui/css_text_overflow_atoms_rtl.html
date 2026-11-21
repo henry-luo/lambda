@@ -6,7 +6,7 @@ html,body{margin:0;background:white}button{position:absolute;top:0;width:90px;he
 #atoms{top:40px}#image{top:80px}#wide{top:120px}#fits{top:160px}
 i{display:inline-block;height:20px;background:red;vertical-align:top}img{vertical-align:top}
 #host{position:absolute;left:150px;top:60px;font:20px/24px FixtureMono;direction:rtl}
-.clamp{width:62px;overflow:hidden;word-break:break-all;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2}
+.clamp{width:62px;overflow:hidden;word-break:break-all;display:flow-root;line-clamp:2}
 </style><button id="width">Widen</button><button id="small">Small font</button><button id="restore">Restore</button><button id="count">Four lines</button>
 <div id="atoms" class="single">AB<i id="endatom" style="width:40px"></i>CD</div>
 <div id="image" class="single">ABCD<img id="endimage" width="20" height="20" src="css_text_overflow_atoms_rtl.svg"></div>
@@ -24,7 +24,7 @@ document.getElementById('small').onclick=function(){
  paragraph.style.width='62px';host.style.fontSize='10px';host.style.direction='ltr';
 };
 document.getElementById('restore').onclick=function(){
- host.style.fontSize='20px';host.style.direction='rtl';paragraph.style.webkitLineClamp='2';
+ host.style.fontSize='20px';host.style.direction='rtl';paragraph.style.lineClamp='2';
 };
-document.getElementById('count').onclick=function(){paragraph.style.webkitLineClamp='4';};
+document.getElementById('count').onclick=function(){paragraph.style.lineClamp='4';};
 </script>

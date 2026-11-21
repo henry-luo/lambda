@@ -14,7 +14,7 @@ The largest savings come from the payload allocated for common elements. Moving 
 |---|---:|---:|
 | `DomElement` | 376 B | 352 B |
 | `DomElementExt` | 568 B | 240 B |
-| `DomPropExt` | — | 48 B |
+| `DomStyleExt` | — | 48 B |
 | `BlockProp` | 456 B | 344 B |
 | `ScrollProp` | 216 B | 80 B |
 | `TransformProp` | 408 B | 56 B |
@@ -57,11 +57,21 @@ The view pool owns the optional payloads. Retained style resolution releases sta
 
 ### DV6.1 — Keep document extensions independently lazy
 
-`DomElementExt` tracks the physical storage owner for adoption. It holds uncommon DOM state, typed slots for uncommon view features, and pointers to the separately allocated attribute and fragment groups. The document pool owns `DomAttributeCache` (48 B) and `DomFragmentGeometry` (164 B). Layout resets the geometry group as needed. The attributes group holds expanded-name, synthetic attribute, and name-cache state. The extension packs 14 Boolean flags into two bytes. It stores form-image offsets as fractional CSS pixels and rounds them when FormData or dialog submission serializes them (D9.5.6v2).
+`DomElementExt` tracks the physical storage owner for adoption. It holds uncommon DOM state, typed slots for uncommon view features, and pointers to the separately allocated attribute and fragment groups. The document pool owns `DomAttributeCache` (48 B) and `DomFragmentGeometry` (164 B). Layout resets the geometry group as needed. The attributes group holds expanded-name, synthetic attribute, and name-cache state. The extension packs its 12 Boolean flags into the gap before its pointer fields. It stores form-image offsets as fractional CSS pixels and rounds them when FormData or dialog submission serializes them (D9.5.6v2).
 
-`DomPropExt` holds a second lazy directory in the node's physical document pool. It owns private pseudo specified styles and borrows namespace URI bytes. Shared or generated view payloads follow their own owner. A directory stays live while any of its bindings are present. Node retirement clears document-owned state and borrows under D5.5.1 and D5.5.2. [Element extensions](../../lambda-input/lambda/input/css/dom_element.hpp) · [Release paths](../../lambda-input/lambda/input/css/dom_element.cpp)
+`ShadowStyle` holds the shadow host and root links, root options, declaration position, and borrowed scoped inline stylesheet. The physical document pool allocates this `ViewProp` only for elements that need one of those fields. It survives view teardown and is freed when its node retires (D5.5.1). The declaration position uses the backing element's signed 64-bit child index width (D3.1.1, D5.5.3). On arm64, the group is a 40-byte record. The original split reduced `DomElementExt` from 280 to 256 bytes and its minimum pool block by 32 bytes under the allocator then in use (D5.1.4, D5.2.4).
 
-### DV6.2 — Place the measured role slots in `DomPropExt`
+`PopoverStyle` holds the popover modes, visibility, toggle task, and opening order. It also holds the top-layer membership and implicit anchor shared with modal dialogs. The physical document pool allocates this `ViewProp` on demand. Relayout preserves it, and node retirement releases it (D5.5.1). The opening order is an unsigned 64-bit sequence and reserves zero for entries outside the popover stacks. On arm64, the group is a 40-byte record. The original split reduced `DomElementExt` from 304 to 280 bytes and its minimum pool block by 16 bytes under the allocator then in use (D5.1.4, D5.2.4).
+
+`DomStyleExt` holds a second lazy directory in the node's physical document pool. It owns private pseudo specified styles through `PseudoStyle` and borrows namespace URI bytes. Shared or generated view payloads follow their own owner. A directory stays live while any of its bindings are present. Node retirement clears document-owned state and borrows under D5.5.1 and D5.5.2. [Element extensions](../../lambda-input/lambda/input/css/dom_element.hpp) · [Release paths](../../lambda-input/lambda/input/css/dom_element.cpp)
+
+The document pool uses 8-byte alignment. On arm64 its block header takes 24 bytes, with 32-bit spans and an extent-size cap (D5.1.4, D5.5.1). `ShadowStyle` and `PopoverStyle` each need a minimum 64-byte pool block, down from 80 bytes. `DomStyleExt` needs 72 bytes, down from 80. The default pool alignment is 16 bytes. [Document pool creation](../../lambda-input/lambda/input/css/dom_element.cpp) · [Pool sizing](../../lambda-input/lib/mempool.c)
+
+In the paired 224-page arm64 release comparison at first layout, live document-pool block spans fell from 105.17 to 97.01 MiB (7.76%). The document pool and active node arena together fell from 110.07 to 101.90 MiB (7.42%). Committed document-pool memory fell from 137.98 to 127.41 MiB (7.67%). The census counted live block spans, including headers and padding, and all 224 normalized layout trees matched (D5.2.4).
+
+The element owns `EmbedStyle` through `lam::Own<EmbedStyle>`. The physical document pool allocates it on demand, including when image decoding finishes before the first view exists (D5.5.1). Flex and grid props and the selected image URL use the view pool. Retained layout resets those payloads and preserves an iframe's loaded document (D5.5.3). View teardown and node retirement release the document allocation. [Allocation](../../radiant/radiant/view_prop_ensure.cpp) · [Teardown](../../radiant/radiant/view_pool.cpp)
+
+### DV6.2 — Place the measured role slots in `DomStyleExt`
 
 The lazy directory holds `tb`, `form`, `transform`, and `pseudo`. Each is a `ViewProp` with teardown registered in `DomViewSlot`. `pseudo` carries generated-content view state. The `pseudo_styles` pointer owns private cascaded pseudo declarations and follows document lifetime. View teardown can release the directory when its last binding clears. Adoption preserves its physical owner under D5.5.1.
 
@@ -79,15 +89,27 @@ Use payload bytes for logical totals and allocator charges for physical totals. 
 
 ### DV6.3 — Intern namespace URIs and derive local names
 
-Elements, attributes, XML namespace targets, and parsed `xmlns` and XHTML metadata share URI spellings from the Input NamePool. The document caches the HTML URI and empty URI. Ordinary HTML identity uses an inline flag. Other explicitly resolved namespaces can use the borrowed pointer in `DomPropExt`. Copies into another Input intern in its pool. Adopted nodes keep access to the bytes owned by their retained source Input (D5.5.1, D5.6.1–D5.6.2).
+Elements, attributes, XML namespace targets, and parsed `xmlns` and XHTML metadata share URI spellings from the Input NamePool. The document caches the HTML URI and empty URI. Ordinary HTML identity uses an inline flag. Other explicitly resolved namespaces can use the borrowed pointer in `DomStyleExt`. Copies into another Input intern in its pool. Adopted nodes keep access to the bytes owned by their retained source Input (D5.5.1, D5.6.1–D5.6.2).
 
-The local name comes from `tag_name` or its qualified suffix. Identity flags distinguish a literal colon from the separator in a qualified name. Namespace matching compares URI content and preserves the XHTML expanded name and case under S8.2.2v6 and D10.1.4. [URI allocation and namespace targets](../../lambda-input/lambda/io/target.cpp) · [Element namespace identity](../../lambda-input/lambda/input/css/dom_element.cpp)
+The local name comes from `tag_name()` or its qualified suffix. Identity flags distinguish a literal colon from the separator in a qualified name. Namespace matching compares URI content and preserves the XHTML expanded name and case under S8.2.2v6 and D10.1.4. [URI allocation and namespace targets](../../lambda-input/lambda/io/target.cpp) · [Element namespace identity](../../lambda-input/lambda/input/css/dom_element.cpp)
 
 ### DV6.4 — Share universal pseudo resets at document scope
 
 The normal selector matcher and active stylesheet checks determine eligibility for each element. A universal `::before` or `::after` rule can share a tree when it sets only `box-sizing` to a literal `content-box` or `border-box`. The owning document caches an independent declaration snapshot at its original cascade priority. Two four-bit indexes in existing node padding select the shared trees. Elements use zero for an absent shared tree. Each document can cache 15 distinct snapshots. Rules that need another snapshot when the cache is full use the private path.
 
 An element reads its private pseudo tree when present and otherwise reads the selected shared tree. Adding a conflicting declaration or requesting a writable slot materializes the shared tree in the node's pool before applying the override. Layout and pseudo CSSOM use this same lookup, including when a pseudo generates no box. The physical source document keeps a shared snapshot available after adoption. Recascade clears the node's shared indexes, and retained generated boxes follow the existing borrow-retirement path when a private tree is replaced (D5.5.1, D5.5.3, DV9c). [Matching path](../../radiant/radiant/css_cascade.cpp) · [Storage and promotion](../../lambda-input/lambda/input/css/dom_element.cpp) · [Pseudo CSSOM](../../radiant/radiant/css_prop_table.cpp)
+
+### DV6.5 — Retire WebKit box display in Radiant
+
+Radiant rejects `display: -webkit-box` and `display: -webkit-inline-box` before cascade, so a valid fallback declaration can win. Use `flex` or `inline-flex` with `flex-direction` for flex layout, and the unprefixed `line-clamp` for clamped text. The shared CSS property metadata still accepts `-webkit-box-orient` and `-webkit-line-clamp` for declaration and computed style inspection. Neither prefixed property affects Radiant layout (D9.1.1v4, D9.1.3v2).
+
+Remove the legacy box, orientation, and clamp flags from element and display storage. `DisplayValue` holds the outer role and the inner mode. The inner field also retains the standard `list-item` modifier. A first-layout census of the 224 page release corpus found none of the three legacy flags set across 72,015 connected elements. A focused fixture exercised all three flags. This evidence supports removing the compatibility path and its state (D5.1.4, D5.2.4). [Display storage](../../lambda-input/lambda/input/css/dom_element.hpp) · [Display resolution](../../radiant/radiant/css_display.cpp)
+
+### DV6.6 — Share element tag spellings
+
+`tag_name()` looks up exact catalog matches by `tag_id`. For a backed custom tag such as `<my-card>`, it reads the spelling from the embedded element's `TypeElmt`. This reuses the name shared through the Input type tree (D3.4.3, D5.5.3, D5.6.2). If the spelling cannot be read from either source, the physical document keeps it in a sparse lookup table. This covers names whose XML prefix and local name are stored separately, as well as explicit constructor aliases. The table borrows interned strings from the physical owner's Input, which adoption keeps alive under D5.5.1. Tag dispatch and exact spelling follow S8.2.2v6 and D10.1.4. Generated boxes and document wrappers use catalog entries, including the anonymous boxes that live only for a layout pass. [Tag access](../../lambda-input/lambda/input/css/dom_element.hpp) · [Generated spellings](../../utils/well_known_names_data.py)
+
+Removing the original inline pointer took `DomElement` from 344 to 336 bytes on arm64 and reduced the arena allocation from 352 to 336 bytes (D5.1.4). That revision used `DomStyleExt` for 102 fallback spellings in the 72,015-element release census. The projection saved 854,000 bytes of allocator spans, compared with 851,520 bytes for `DomElementExt` (D5.2.4). Removing the spelling pointer from `DomStyleExt` takes that record from 56 to 48 bytes. The fallback table costs one pointer per document and allocates entries only when used.
 
 ## 4. Make each group's storage contract explicit
 

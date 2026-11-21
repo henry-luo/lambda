@@ -320,7 +320,7 @@ static Html5Parser* dom_create_fragment_parser(DomDocument* doc,
     // Fragment backing is inserted into the Mark tree, so keep it in the
     // document Input arena rather than the separate DOM-wrapper arena.
     return html5_fragment_parser_create(doc->document_pool, doc->input->arena,
-        doc->input, context ? context->tag_name : nullptr,
+        doc->input, context ? context->tag_name() : nullptr,
         context && dom_element_is_svg(context));
 }
 
@@ -775,11 +775,11 @@ extern "C" void* dom_form_first_submitter(void* form_ptr, bool skip_disabled) {
 
 extern "C" bool dom_css_element_is_default(void* element_ptr) {
     DomElement* element = (DomElement*)element_ptr;
-    if (!element || !element->tag_name) return false;
-    if (str_icmp_cstr(element->tag_name, "option") == 0) {
+    if (!element || !element->tag_name()) return false;
+    if (str_icmp_cstr(element->tag_name(), "option") == 0) {
         return element->has_attribute("selected");
     }
-    if (str_icmp_cstr(element->tag_name, "input") == 0) {
+    if (str_icmp_cstr(element->tag_name(), "input") == 0) {
         const char* type = dom_input_type_lower(element);
         if (strcmp(type, "checkbox") == 0 || strcmp(type, "radio") == 0) {
             return element->has_attribute("checked");
@@ -792,11 +792,11 @@ extern "C" bool dom_css_element_is_default(void* element_ptr) {
 
 extern "C" bool dom_css_element_is_indeterminate(void* element_ptr) {
     DomElement* element = (DomElement*)element_ptr;
-    if (!element || !element->tag_name) return false;
-    if (str_icmp_cstr(element->tag_name, "progress") == 0) {
+    if (!element || !element->tag_name()) return false;
+    if (str_icmp_cstr(element->tag_name(), "progress") == 0) {
         return !element->has_attribute("value");
     }
-    if (str_icmp_cstr(element->tag_name, "input") != 0) return false;
+    if (str_icmp_cstr(element->tag_name(), "input") != 0) return false;
     const char* type = dom_input_type_lower(element);
     if (strcmp(type, "checkbox") == 0) return dom_get_indeterminate(element);
     if (strcmp(type, "radio") == 0) return !dom_radio_group_has_checked(element);
@@ -1269,14 +1269,14 @@ static Item dom_custom_element_visit_tree(DomNode* node, DomCustomElementTreeAct
     Rooted<Item> child_owner(roots, ItemNull);
     Rooted<Item> next_owner(roots, ItemNull);
     DomElement* element = node->as_element();
-    if (element->tag_name && strchr(element->tag_name, '-')) {
+    if (element->tag_name() && strchr(element->tag_name(), '-')) {
         if (action == DOM_CUSTOM_UPGRADE) {
             Item result = dom_realm_custom_element_upgrade(owner.get());
             if (item_is_error(result)) return result;
         } else dom_realm_custom_element_connection(owner.get(), action == DOM_CUSTOM_CONNECT);
     }
     // template contents are inert; importing/inserting them upgrades their nodes.
-    if (element->tag_name && !strcmp(element->tag_name, "template")) return owner.get();
+    if (element->tag_name() && !strcmp(element->tag_name(), "template")) return owner.get();
     // anonymous layout boxes have no DOM identity and cannot own reactions.
     for (DomNode* child = dom_source_child(element, true); child;) {
         DomNode* next = dom_source_sibling(child, true);
@@ -1831,10 +1831,10 @@ extern "C" bool dom_set_event_handler_function(void* dom_elem,
 // attribute.
 // ------------------------------------------------------------------
 
-// Lowercase tag-name comparison helper. Returns true if elem->tag_name
+// Lowercase tag-name comparison helper. Returns true if elem->tag_name()
 // case-insensitively matches `name`.
 static inline bool _is_tag(DomElement* elem, const char* name) {
-    return elem && elem->tag_name && str_icmp_cstr(elem->tag_name, name) == 0;
+    return elem && elem->tag_name() && str_icmp_cstr(elem->tag_name(), name) == 0;
 }
 
 static bool dom_resolve_selector_pseudo_state(void* context,
@@ -2313,11 +2313,11 @@ extern "C" const char* dom_html_interface_ctor_name(int index) {
 
 extern "C" const char* dom_html_interface_name(void* element) {
     DomElement* elem = (DomElement*)element;
-    if (!elem || !elem->tag_name || elem->tag_name[0] == '#') return nullptr;
+    if (!elem || !elem->tag_name() || elem->tag_name()[0] == '#') return nullptr;
     int count = (int)(sizeof(s_dom_html_interfaces) /
         sizeof(s_dom_html_interfaces[0]));
     for (int i = 0; i < count; i++) {
-        if (str_icmp_cstr(elem->tag_name, s_dom_html_interfaces[i].tag_name) == 0) {
+        if (str_icmp_cstr(elem->tag_name(), s_dom_html_interfaces[i].tag_name) == 0) {
             return s_dom_html_interfaces[i].constructor_name;
         }
     }
@@ -2395,7 +2395,7 @@ extern "C" Item dom_get_prototype_value(Item obj) {
     }
     if (node && node->is_element()) {
         DomElement* elem = node->as_element();
-        if (elem && elem->tag_name && strcmp(elem->tag_name, "#document-fragment") == 0) {
+        if (elem && elem->tag_name() && strcmp(elem->tag_name(), "#document-fragment") == 0) {
             ctor_name = elem->shadow_host_element() ? "ShadowRoot" : "DocumentFragment";
         } else {
             // HTML DOM wrappers need HTMLElement as their immediate prototype so
@@ -2403,14 +2403,14 @@ extern "C" Item dom_get_prototype_value(Item obj) {
             const char* svg_interface = dom_svg_interface_name(elem);
             const char* html_interface = svg_interface ? nullptr : dom_html_interface_name(elem);
             ctor_name = svg_interface ? svg_interface : (html_interface ? html_interface :
-                ((elem && elem->tag_name && elem->tag_name[0] != '#')
+                ((elem && elem->tag_name() && elem->tag_name()[0] != '#')
                     ? "HTMLElement" : "Element"));
         }
     }
     if (node && node->is_element()) {
         DomElement* elem = node->as_element();
-        if (elem && elem->tag_name && strchr(elem->tag_name, '-')) {
-            Item custom_proto = dom_realm_custom_element_prototype(elem->tag_name);
+        if (elem && elem->tag_name() && strchr(elem->tag_name(), '-')) {
+            Item custom_proto = dom_realm_custom_element_prototype(elem->tag_name());
             if (custom_proto.item != ItemNull.item) return custom_proto;
         }
     }
@@ -2553,7 +2553,7 @@ static bool dom_collection_varray_matches(DomElement* elem,
     case DOM_VARRAY_DATALIST_OPTIONS:
         return dom_element_is_html_tag(elem, MARKUP_NAME_OPTION);
     case DOM_VARRAY_DOCUMENT_FORMS:
-        return elem->tag_name && str_icmp_cstr(elem->tag_name, "form") == 0;
+        return elem->tag_name() && str_icmp_cstr(elem->tag_name(), "form") == 0;
     case DOM_VARRAY_DOCUMENT_LINKS:
         // HTMLDocument.links contains only hyperlink-bearing a and area elements.
         return elem->has_attribute("href") &&
@@ -2562,13 +2562,13 @@ static bool dom_collection_varray_matches(DomElement* elem,
         return _is_listed_form_control(elem) &&
             (!query[0] || dom_collection_element_has_name(elem, query));
     case DOM_VARRAY_LOOKUP_TAG:
-        return elem->tag_name && query &&
+        return elem->tag_name() && query &&
             ((query[0] == '*' && query[1] == '\0') ||
-             str_icmp_cstr(elem->tag_name, query) == 0);
+             str_icmp_cstr(elem->tag_name(), query) == 0);
     case DOM_VARRAY_LOOKUP_CLASS:
-        for (int index = 0; query && index < elem->class_count; index++) {
-            if (elem->class_names[index] &&
-                    strcmp(elem->class_names[index], query) == 0) return true;
+        for (int index = 0; query && index < elem->class_count(); index++) {
+            if (elem->class_names()[index] &&
+                    strcmp(elem->class_names()[index], query) == 0) return true;
         }
         return false;
     case DOM_VARRAY_LOOKUP_NAME: {
@@ -2576,8 +2576,8 @@ static bool dom_collection_varray_matches(DomElement* elem,
         return name && query && strcmp(name, query) == 0;
     }
     case DOM_VARRAY_DIRECT_TAG:
-        return elem->tag_name && query &&
-            str_icmp_cstr(elem->tag_name, query) == 0;
+        return elem->tag_name() && query &&
+            str_icmp_cstr(elem->tag_name(), query) == 0;
     default:
         return false;
     }
@@ -3690,7 +3690,7 @@ static Item dom_parent_element_or_null(DomNode* node) {
         DomElement* elem = parent->as_element();
         // Document and fragment nodes reuse DomElement storage but cannot be
         // exposed through the Element-only parentElement relation.
-        if (elem && elem->tag_name && elem->tag_name[0] != '#') {
+        if (elem && elem->tag_name() && elem->tag_name()[0] != '#') {
             return dom_wrap_element(elem);
         }
     }
@@ -4007,7 +4007,7 @@ JS_FORWARD_ITEM(dom_iframe_get_content_window, (DomElement* iframe), dom_iframe_
 
 static void dom_collect_frame_windows(DomElement* elem, Item frames) {
     if (!elem) return;
-    if (elem->tag_name && strcmp(elem->tag_name, "iframe") == 0) {
+    if (elem->tag_name() && strcmp(elem->tag_name(), "iframe") == 0) {
         js_array_push(frames, dom_iframe_get_content_window(elem));
     }
     DomNode* child = elem->first_child;
@@ -4306,7 +4306,7 @@ static DomElement* dom_find_iframe_by_name(DomNode* node, const char* target_nam
     while (node) {
         if (node->is_element()) {
             DomElement* elem = node->as_element();
-            if (elem->tag_name && str_icmp_cstr(elem->tag_name, "iframe") == 0) {
+            if (elem->tag_name() && str_icmp_cstr(elem->tag_name(), "iframe") == 0) {
                 const char* name = elem->get_attribute("name");
                 if (name && strcmp(name, target_name) == 0) {
                     return elem;
@@ -4584,12 +4584,12 @@ static Item dom_get_inline_style_wrapper(DomElement* elem) {
 }
 
 static Item js_classlist_value_item(DomElement* elem) {
-    if (!elem || elem->class_count == 0) {
+    if (!elem || elem->class_count() == 0) {
         return js_name_item("");
     }
     StrBuf* sb = strbuf_new_cap(64);
-    for (int i = 0; i < elem->class_count; i++) {
-        strbuf_append_all(sb, 2, i > 0 ? " " : "", elem->class_names[i]);
+    for (int i = 0; i < elem->class_count(); i++) {
+        strbuf_append_all(sb, 2, i > 0 ? " " : "", elem->class_names()[i]);
     }
     Item result = js_name_item(sb->str ? sb->str : "");
     strbuf_free(sb);
@@ -4664,7 +4664,7 @@ extern "C" Item dom_get_computed_style(Item elem_item, Item pseudo_item) {
     Item wrapper = dom_cssom_wrap_element_style(elem, host, true);
 
     log_debug("dom_get_computed_style: created wrapper for <%s> pseudo=%d",
-              elem->tag_name ? elem->tag_name : "?", pseudo_type);
+              elem->tag_name() ? elem->tag_name() : "?", pseudo_type);
 
     return wrapper;
 }
@@ -4898,8 +4898,14 @@ static bool dom_button_can_invoke(DomElement* button) {
 
 enum DomToggleTaskKind { DOM_DIALOG_TOGGLE, DOM_POPOVER_TOGGLE };
 
-static DomToggleTaskTracker& dom_toggle_tracker(DomElementExt* state, DomToggleTaskKind kind) {
-    return kind == DOM_DIALOG_TOGGLE ? state->dialog_toggle : state->popover_toggle;
+static DomToggleTaskTracker* dom_toggle_tracker(DomElement* element, DomToggleTaskKind kind,
+                                               bool ensure) {
+    if (kind == DOM_DIALOG_TOGGLE) {
+        DomElementExt* state = ensure ? element->ensure_ext() : element->ext.get();
+        return state ? &state->dialog_toggle : nullptr;
+    }
+    PopoverStyle* state = ensure ? element->ensure_popover_style() : element->popover_style();
+    return state ? &state->toggle : nullptr;
 }
 
 static Item dom_deliver_toggle_task(Item env_item) {
@@ -4908,15 +4914,15 @@ static Item dom_deliver_toggle_task(Item env_item) {
     Rooted<Item> target(roots, env[0]), source(roots, env[1]), event(roots, ItemNull);
     DomNode* node = (DomNode*)dom_unwrap_element(target.get());
     DomElement* elem = node ? node->as_element() : nullptr;
-    if (!elem || !elem->ext) return make_js_undefined();
-    DomToggleTaskTracker& tracker = dom_toggle_tracker(elem->ext, (DomToggleTaskKind)it2i(env[2]));
-    if (!tracker.pending || tracker.generation != (uint32_t)it2i(env[3]))
+    if (!elem) return make_js_undefined();
+    DomToggleTaskTracker* tracker = dom_toggle_tracker(elem, (DomToggleTaskKind)it2i(env[2]), false);
+    if (!tracker || !tracker->pending || tracker->generation != (uint32_t)it2i(env[3]))
         return make_js_undefined();
 
-    bool old_open = tracker.old_open;
+    bool old_open = tracker->old_open;
     bool new_open = it2b(env[4]);
     // A transition from inside a toggle listener starts a new pending task.
-    tracker.pending = false;
+    tracker->pending = false;
     event.set(js_create_native_toggle_event("toggle", old_open, new_open, false, source.get()));
     JS_RETURN_IF_ERROR(event.get());
     return dom_dispatch_event(target.get(), event.get());
@@ -4925,14 +4931,13 @@ static Item dom_deliver_toggle_task(Item env_item) {
 static void dom_queue_toggle_task(DomElement* element, Item target, Item source,
                                   DomToggleTaskKind kind, bool opening) {
     if (!dom_realm_active()) return;
-    DomElementExt* state = element->ensure_ext();
-    if (!state) return;
-    DomToggleTaskTracker& tracker = dom_toggle_tracker(state, kind);
-    if (!tracker.pending) tracker.old_open = !opening;
-    tracker.pending = true;
+    DomToggleTaskTracker* tracker = dom_toggle_tracker(element, kind, true);
+    if (!tracker) return;
+    if (!tracker->pending) tracker->old_open = !opening;
+    tracker->pending = true;
     // Leave superseded callbacks inert and enqueue the replacement at the
     // tail. Task IDs belong to a realm and cannot be canceled after adoption.
-    uint32_t generation = ++tracker.generation;
+    uint32_t generation = ++tracker->generation;
     Item values[] = {target, source, {.item = i2it(kind)}, {.item = i2it(generation)},
                      {.item = b2it(opening)}};
     js_schedule_native_env(dom_schedule_task, dom_deliver_toggle_task, 0, values, 5);
@@ -5089,12 +5094,13 @@ static void dom_find_popover_ancestors(DomPopoverBoundary& boundary, DomElement*
                                       DomDocument* document) {
     for (DomElement* ancestor = dom_flat_tree_parent(element); ancestor;
          ancestor = dom_flat_tree_parent(ancestor)) {
-        if (ancestor->doc != document || !ancestor->is_popover_open()) continue;
-        const DomElementExt* state = ancestor->ext;
-        if (state->popover_opened_mode == DOM_POPOVER_AUTO && state->popover_order > boundary.automatic)
-            boundary.automatic = state->popover_order;
-        if (state->popover_opened_mode == DOM_POPOVER_HINT && state->popover_order > boundary.hint)
-            boundary.hint = state->popover_order;
+        if (ancestor->doc != document) continue;
+        const PopoverStyle* state = ancestor->popover_style();
+        if (!state || !state->open) continue;
+        if (state->opened_mode == DOM_POPOVER_AUTO && state->order > boundary.automatic)
+            boundary.automatic = state->order;
+        if (state->opened_mode == DOM_POPOVER_HINT && state->order > boundary.hint)
+            boundary.hint = state->order;
     }
 }
 
@@ -5107,8 +5113,8 @@ static Item dom_hide_popover_stack_until(DomDocument* document,
         DomPopoverStackEntry entry = stack.back();
         DomNode* node = dom_node_ref_validate(document, entry.ref);
         DomElement* element = node ? node->as_element() : nullptr;
-        if (!element || element->doc != document || !element->is_popover_open() ||
-            element->ext->popover_order != entry.order) {
+        const PopoverStyle* state = element ? element->popover_style() : nullptr;
+        if (!state || element->doc != document || !state->open || state->order != entry.order) {
             stack.remove(stack.size() - 1);
             continue;
         }
@@ -5121,19 +5127,19 @@ static Item dom_hide_popover_stack_until(DomDocument* document,
 
 class DomPopoverHidingScope {
 public:
-    DomPopoverHidingScope(DomPopoverStacks& popovers, bool& hiding)
-        : popovers_(popovers), hiding_(hiding), nested_(hiding) {
-        hiding_ = true;
+    DomPopoverHidingScope(DomPopoverStacks& popovers, PopoverStyle& state)
+        : popovers_(popovers), state_(state), nested_(state.hiding) {
+        state_.hiding = true;
         popovers_.hiding++;
     }
     ~DomPopoverHidingScope() {
-        hiding_ = nested_;
+        state_.hiding = nested_;
         popovers_.hiding--;
     }
     bool nested() const { return nested_; }
 private:
     DomPopoverStacks& popovers_;
-    bool& hiding_;
+    PopoverStyle& state_;
     bool nested_;
 };
 
@@ -5148,25 +5154,25 @@ private:
 static Item dom_hide_popover(DomElement* element, DomElement* invoker, unsigned flags) {
     // A listener that changes the attribute or detaches the element can
     // finish this close in a nested call.
-    if (element && element->ext && element->ext->popover_hiding && !element->is_popover_open())
+    PopoverStyle* state = element ? element->popover_style() : nullptr;
+    if (state && state->hiding && !state->open)
         return (Item){.item = ITEM_FALSE};
     bool throw_exception = flags & DOM_POPOVER_CLOSE_THROW;
     bool attribute_change = flags & DOM_POPOVER_CLOSE_REMOVED_ATTRIBUTE;
     Item valid = dom_check_popover_validity(element, true, nullptr, throw_exception, attribute_change);
     if (valid.item != ITEM_TRUE) return valid;
     DomDocument* document = element->doc;
-    DomElementExt* state = element->ext;
     DomPopoverStacks* stacks = dom_popover_stacks(document);
     if (!stacks) return (Item){.item = ITEM_FALSE};
     DomPopoverStacks& popovers = *stacks;
     RootFrame roots(2);
-    DomPopoverHidingScope scope(popovers, state->popover_hiding);
+    DomPopoverHidingScope scope(popovers, *state);
     bool fire_events = (flags & DOM_POPOVER_CLOSE_EVENTS) && !scope.nested() && dom_realm_active();
     Rooted<Item> target(roots, fire_events ? dom_wrap_element(element) : ItemNull);
     Rooted<Item> source(roots, fire_events && invoker ? dom_wrap_element(invoker) : ItemNull);
 
-    uint64_t order = state->popover_order;
-    auto* stack = dom_popover_stack(popovers, state->popover_opened_mode);
+    uint64_t order = state->order;
+    auto* stack = dom_popover_stack(popovers, state->opened_mode);
     unsigned descendant_flags = flags & DOM_POPOVER_CLOSE_RESTORE_FOCUS;
     if (fire_events) descendant_flags |= DOM_POPOVER_CLOSE_EVENTS;
     bool initially_focused_inside = dom_shadow_including_contains(
@@ -5196,10 +5202,10 @@ static Item dom_hide_popover(DomElement* element, DomElement* invoker, unsigned 
         stack->remove(stack->size() - 1);
     }
     if (popovers.hint.empty() || popovers.hint_parent == order) popovers.hint_parent = 0;
-    state->popover_attribute_mode = DOM_POPOVER_NONE;
-    state->popover_opened_mode = DOM_POPOVER_NONE;
-    state->popover_order = 0;
-    element->set_popover_open(false);
+    state->attribute_mode = DOM_POPOVER_NONE;
+    state->opened_mode = DOM_POPOVER_NONE;
+    state->order = 0;
+    state->open = false;
     dom_top_layer_remove(element);
     if (fire_events) dom_queue_toggle_task(
         element, target.get(), source.get(), DOM_POPOVER_TOGGLE, false);
@@ -5216,7 +5222,7 @@ static Item dom_show_popover(DomElement* element, DomElement* invoker, bool thro
         return dom_popover_invalid_state(throw_exception);
     Item valid = dom_check_popover_validity(element, false, nullptr, throw_exception);
     if (valid.item != ITEM_TRUE) return valid;
-    DomElementExt* state = element->ensure_ext();
+    PopoverStyle* state = element->ensure_popover_style();
     DomPopoverStacks* stacks = dom_popover_stacks(document, true);
     if (!state || !stacks) return ItemError;
     DomPopoverStacks& popovers = *stacks;
@@ -5261,21 +5267,21 @@ static Item dom_show_popover(DomElement* element, DomElement* invoker, bool thro
             stack->remove(stack->size() - 1);
             return ItemError;
         }
-        state->popover_order = order;
+        state->order = order;
         if (opened_mode == DOM_POPOVER_HINT && !boundary.hint &&
             dom_popover_stack_entry(&popovers.automatic, boundary.automatic))
             popovers.hint_parent = boundary.automatic;
     } else if (!dom_top_layer_add(element, invoker)) return ItemError;
-    state->popover_attribute_mode = mode;
-    state->popover_opened_mode = opened_mode;
-    element->set_popover_open(true);
+    state->attribute_mode = mode;
+    state->opened_mode = opened_mode;
+    state->open = true;
     dom_notify_mutation(DOM_JS_MUTATION_STYLE, element, element->parent);
     // Focus handlers may remove the popover. The opening event task still
     // belongs to the element that entered the showing state.
     dom_focus_open_popup(element);
     if (previous_focus.address && element->doc == document && element->is_popover_open()) {
         auto* entry = dom_popover_stack_entry(
-            dom_popover_stack(popovers, opened_mode), state->popover_order);
+            dom_popover_stack(popovers, opened_mode), state->order);
         if (entry) entry->previous_focus = previous_focus;
     }
     dom_queue_toggle_task(element, target.get(), source.get(), DOM_POPOVER_TOGGLE, true);
@@ -5283,8 +5289,9 @@ static Item dom_show_popover(DomElement* element, DomElement* invoker, bool thro
 }
 
 static void dom_popover_attribute_changed(DomElement* element) {
-    if (!element || !element->is_popover_open()) return;
-    if (element->ext->popover_attribute_mode != dom_element_popover_mode(element)) {
+    const PopoverStyle* state = element ? element->popover_style() : nullptr;
+    if (!state || !state->open) return;
+    if (state->attribute_mode != dom_element_popover_mode(element)) {
         // The reflected attribute can already be absent. Close by the mode
         // in which the popover opened and preserve the listener's final write.
         dom_hide_popover(element, nullptr, DOM_POPOVER_CLOSE_EVENTS |
@@ -5325,32 +5332,32 @@ struct DomPopoverRebuild {
 };
 
 static void dom_rebind_open_popover(DomElement* element, void* userdata) {
-    if (!element->is_popover_open()) return;
+    PopoverStyle* previous = element->popover_style();
+    if (!previous || !previous->open) return;
     auto* rebuild = (DomPopoverRebuild*)userdata;
     DomNode* match = (DomNode*)rebuild->match(element, rebuild->old_root, rebuild->new_root);
     DomElement* candidate = match ? match->as_element() : nullptr;
     if (candidate == element) return;
-    DomElementExt* previous = element->ext;
-    DomElementExt* next = candidate && dom_element_popover_mode(candidate) == previous->popover_attribute_mode
-        ? candidate->ensure_ext() : nullptr;
+    PopoverStyle* next = candidate && dom_element_popover_mode(candidate) == previous->attribute_mode
+        ? candidate->ensure_popover_style() : nullptr;
     if (!next) {
         dom_hide_popover(element, nullptr, DOM_POPOVER_CLOSE_REMOVED_ATTRIBUTE);
         return;
     }
     // The replacement keeps its order and effective mode. Detaching the old
     // wrapper cannot leave a second entry or change the stack boundary.
-    next->popover_open = true;
-    next->popover_order = previous->popover_order;
-    next->popover_opened_mode = previous->popover_opened_mode;
-    next->popover_attribute_mode = previous->popover_attribute_mode;
+    next->open = true;
+    next->order = previous->order;
+    next->opened_mode = previous->opened_mode;
+    next->attribute_mode = previous->attribute_mode;
     auto* entry = dom_popover_stack_entry(
-        dom_popover_stack(rebuild->popovers, next->popover_opened_mode), next->popover_order);
+        dom_popover_stack(rebuild->popovers, next->opened_mode), next->order);
     if (entry) entry->ref = dom_node_ref(candidate);
     dom_top_layer_rebind(element, candidate);
-    previous->popover_open = false;
-    previous->popover_order = 0;
-    previous->popover_opened_mode = DOM_POPOVER_NONE;
-    previous->popover_attribute_mode = DOM_POPOVER_NONE;
+    previous->open = false;
+    previous->order = 0;
+    previous->opened_mode = DOM_POPOVER_NONE;
+    previous->attribute_mode = DOM_POPOVER_NONE;
 }
 
 extern "C" void dom_popover_follow_rebuild(void* doc, void* old_root, void* new_root,
@@ -5361,13 +5368,13 @@ extern "C" void dom_popover_follow_rebuild(void* doc, void* old_root, void* new_
     dom_walk_shadow_including_elements(rebuild.old_root, dom_rebind_open_popover, &rebuild);
 }
 
-static const DomElementExt* dom_clicked_popover(DomElement* target) {
-    const DomElementExt* inside = nullptr;
-    const DomElementExt* invoked = nullptr;
+static const PopoverStyle* dom_clicked_popover(DomElement* target) {
+    const PopoverStyle* inside = nullptr;
+    const PopoverStyle* invoked = nullptr;
     for (DomElement* current = target; current && !(inside && invoked);
          current = dom_flat_tree_parent(current)) {
-        if (!inside && current->is_popover_open() && current->ext->popover_order)
-            inside = current->ext;
+        const PopoverStyle* state = current->popover_style();
+        if (!inside && state && state->open && state->order) inside = state;
         if (invoked) continue;
         DomElement* candidate = (DomElement*)dom_popover_target_for_button(current);
         if (dom_element_is_html_tag(current, MARKUP_NAME_BUTTON) && !dom_is_disabled(current) &&
@@ -5378,13 +5385,13 @@ static const DomElementExt* dom_clicked_popover(DomElement* target) {
                     ? command_target : nullptr;
             }
         }
-        if (candidate && candidate->is_popover_open() && candidate->ext->popover_order)
-            invoked = candidate->ext;
+        const PopoverStyle* candidate_state = candidate ? candidate->popover_style() : nullptr;
+        if (candidate_state && candidate_state->open && candidate_state->order) invoked = candidate_state;
     }
     if (!inside || !invoked) return inside ? inside : invoked;
-    if (inside->popover_opened_mode != invoked->popover_opened_mode)
-        return inside->popover_opened_mode == DOM_POPOVER_HINT ? inside : invoked;
-    return inside->popover_order > invoked->popover_order ? inside : invoked;
+    if (inside->opened_mode != invoked->opened_mode)
+        return inside->opened_mode == DOM_POPOVER_HINT ? inside : invoked;
+    return inside->order > invoked->order ? inside : invoked;
 }
 
 extern "C" void dom_popover_pointer_event(void* doc_ptr, void* target_ptr,
@@ -5408,8 +5415,8 @@ extern "C" void dom_popover_pointer_event(void* doc_ptr, void* target_ptr,
         if (strcmp(type, "pointerup") != 0) return;
         popovers.pointer_down_id = 0;
     }
-    const DomElementExt* clicked = dom_clicked_popover((DomElement*)target_ptr);
-    uint64_t order = clicked ? clicked->popover_order : 0;
+    const PopoverStyle* clicked = dom_clicked_popover((DomElement*)target_ptr);
+    uint64_t order = clicked ? clicked->order : 0;
     if (down) {
         popovers.pointer_down_id = pointer_id;
         popovers.pointer_down_order = order;
@@ -5418,7 +5425,7 @@ extern "C" void dom_popover_pointer_event(void* doc_ptr, void* target_ptr,
     // A drag across popup boundaries is distinct from a click on either side.
     if (order != popovers.pointer_down_order) return;
     DomPopoverBoundary boundary;
-    if (clicked && clicked->popover_opened_mode == DOM_POPOVER_HINT) boundary.hint = order;
+    if (clicked && clicked->opened_mode == DOM_POPOVER_HINT) boundary.hint = order;
     else boundary.automatic = order;
     dom_hide_popovers_until(document, boundary);
 }
@@ -5633,7 +5640,7 @@ static bool dom_is_editing_host(DomElement* elem) {
 }
 
 static int dom_default_tab_index(DomElement* elem) {
-    if (!elem || !elem->tag_name) return -1;
+    if (!elem || !elem->tag_name()) return -1;
     if (_is_tag(elem, "input") || _is_tag(elem, "button") ||
         _is_tag(elem, "select") || _is_tag(elem, "textarea") ||
         _is_tag(elem, "iframe") || _is_tag(elem, "object")) {
@@ -6098,18 +6105,18 @@ static void collect_inner_html(DomNode* node, StrBuf* sb,
 static void collect_html_children(DomElement* element, StrBuf* buffer,
                                   const DomShadowSerialization* shadows) {
     DomElement* root = shadows ? element->shadow_root_element() : nullptr;
-    if (root) {
-        const DomElementExt* state = root->ext;
-        bool selected = shadows->serializable && state->shadow_serializable;
+    const ShadowStyle* state = root ? root->shadow_style() : nullptr;
+    if (state) {
+        bool selected = shadows->serializable && state->serializable;
         for (DomElement* explicit_root : shadows->explicit_roots)
             if (root == explicit_root) { selected = true; break; }
         if (selected) {
-            strbuf_append_str(buffer, state->shadow_closed
+            strbuf_append_str(buffer, state->closed
                 ? "<template shadowrootmode=\"closed\"" : "<template shadowrootmode=\"open\"");
-            if (state->shadow_delegates_focus) strbuf_append_str(buffer, " shadowrootdelegatesfocus=\"\"");
-            if (state->shadow_serializable) strbuf_append_str(buffer, " shadowrootserializable=\"\"");
-            if (state->shadow_clonable) strbuf_append_str(buffer, " shadowrootclonable=\"\"");
-            if (state->shadow_manual_slot_assignment) strbuf_append_str(buffer, " shadowrootslotassignment=\"manual\"");
+            if (state->delegates_focus) strbuf_append_str(buffer, " shadowrootdelegatesfocus=\"\"");
+            if (state->serializable) strbuf_append_str(buffer, " shadowrootserializable=\"\"");
+            if (state->clonable) strbuf_append_str(buffer, " shadowrootclonable=\"\"");
+            if (state->manual_slot_assignment) strbuf_append_str(buffer, " shadowrootslotassignment=\"manual\"");
             strbuf_append_char(buffer, '>');
             collect_html_children(root, buffer, shadows);
             strbuf_append_str(buffer, "</template>");
@@ -6133,7 +6140,7 @@ static void collect_inner_html(DomNode* node, StrBuf* sb, const DomShadowSeriali
             if (parent && name != MARKUP_NAME_TITLE && name != MARKUP_NAME_TEXTAREA &&
                 (name != MARKUP_NAME_NOSCRIPT || dom_doc_has_browsing_context(parent->doc)) &&
                 !strcmp(dom_element_namespace_uri(parent), "http://www.w3.org/1999/xhtml") &&
-                html_is_raw_text_element_id(name, parent->tag_name, strlen(parent->tag_name))) {
+                html_is_raw_text_element_id(name, parent->tag_name(), strlen(parent->tag_name()))) {
                 strbuf_append_str_n(sb, text->text, text->length);
             } else {
                 collect_html_text_value(text->text, text->length, sb);
@@ -6157,7 +6164,7 @@ static void collect_inner_html(DomNode* node, StrBuf* sb, const DomShadowSeriali
         const char* uri = dom_element_namespace_uri(elem);
         bool local_tag = !strcmp(uri, "http://www.w3.org/1999/xhtml") ||
             !strcmp(uri, "http://www.w3.org/2000/svg") || !strcmp(uri, "http://www.w3.org/1998/Math/MathML");
-        const char* tag = local_tag ? elem->local_name() : elem->tag_name.get();
+        const char* tag = local_tag ? elem->local_name() : elem->tag_name();
         strbuf_append_all(sb, 2, "<", tag);
         DomAttributeIterator iterator = dom_element_attribute_iterator(elem);
         DomAttributeView attribute;
@@ -6301,7 +6308,7 @@ static bool dom_replace_inner_html(DomElement* elem, const char* html_str,
         dom_mutation_notify();
     }
     log_debug("dom_replace_inner_html: replaced <%s>",
-              elem->tag_name ? elem->tag_name : "?");
+              elem->tag_name() ? elem->tag_name() : "?");
     return true;
 }
 
@@ -6343,7 +6350,7 @@ static bool dom_replace_text_content(DomElement* elem, const char* text) {
     Item argument = replacement.get();
     if (item_is_error(dom_replace_children(parent.get(), &argument, *text ? 1 : 0))) return false;
     // Stylesheet text changes CSS globally; ordinary text is subtree-local.
-    DomJsMutationKind kind = elem->tag_name && str_icmp_cstr(elem->tag_name, "style") == 0
+    DomJsMutationKind kind = elem->tag_name() && str_icmp_cstr(elem->tag_name(), "style") == 0
         ? DOM_JS_MUTATION_STYLE : DOM_JS_MUTATION_TEXT;
     // style text needs reparsing even though its mutation is classified as STYLE.
     if (kind == DOM_JS_MUTATION_STYLE) radiant_dom_record_inline_stylesheet_owner(elem->doc, elem);
@@ -6551,8 +6558,8 @@ static DomElement* dom_inline_offset_scope(DomElement* elem) {
         const char* editable =
             current_elem->get_attribute("contenteditable");
         if (editable) return current_elem;
-        if (current_elem->tag_name &&
-            str_icmp_cstr(current_elem->tag_name, "body") == 0) {
+        if (current_elem->tag_name() &&
+            str_icmp_cstr(current_elem->tag_name(), "body") == 0) {
             return current_elem;
         }
     }
@@ -7183,7 +7190,7 @@ static Item dom_document_get_property_for(DomDocument* doc_arg, Item prop_name) 
         while (child) {
             if (child->is_element()) {
                 DomElement* elem = child->as_element();
-                if (elem->tag_name && str_icmp_cstr(elem->tag_name, "body") == 0) {
+                if (elem->tag_name() && str_icmp_cstr(elem->tag_name(), "body") == 0) {
                     return dom_wrap_element(elem);
                 }
             }
@@ -7198,7 +7205,7 @@ static Item dom_document_get_property_for(DomDocument* doc_arg, Item prop_name) 
         while (child) {
             if (child->is_element()) {
                 DomElement* elem = child->as_element();
-                if (elem->tag_name && str_icmp_cstr(elem->tag_name, "head") == 0) {
+                if (elem->tag_name() && str_icmp_cstr(elem->tag_name(), "head") == 0) {
                     return dom_wrap_element(elem);
                 }
             }
@@ -7214,13 +7221,13 @@ static Item dom_document_get_property_for(DomDocument* doc_arg, Item prop_name) 
         while (child) {
             if (child->is_element()) {
                 DomElement* elem = child->as_element();
-                if (elem->tag_name && str_icmp_cstr(elem->tag_name, "head") == 0) {
+                if (elem->tag_name() && str_icmp_cstr(elem->tag_name(), "head") == 0) {
                     DomNode* hchild = elem->first_child;
                     while (hchild) {
                         if (hchild->is_element()) {
                             DomElement* title_elem = hchild->as_element();
-                            if (title_elem->tag_name &&
-                                str_icmp_cstr(title_elem->tag_name, "title") == 0) {
+                            if (title_elem->tag_name() &&
+                                str_icmp_cstr(title_elem->tag_name(), "title") == 0) {
                                 StrBuf* sb = strbuf_new_cap(64);
                                 dom_collect_text_content((DomNode*)title_elem, sb);
                                 String* result = heap_create_name(sb->str ? sb->str : "");
@@ -7977,8 +7984,8 @@ static Item js_text_data_body(Item callee, Item this_value, Item* args,
 //   - readonly
 //   - element has a datalist ancestor
 static bool _elem_is_barred(DomElement* elem) {
-    if (!elem || !elem->tag_name) return true;
-    const char* tag = elem->tag_name;
+    if (!elem || !elem->tag_name()) return true;
+    const char* tag = elem->tag_name();
     if (str_icmp_cstr(tag, "output") == 0 || str_icmp_cstr(tag, "object") == 0 ||
         str_icmp_cstr(tag, "fieldset") == 0 || str_icmp_cstr(tag, "datalist") == 0) {
         return true;
@@ -8013,7 +8020,7 @@ static bool _elem_is_barred(DomElement* elem) {
         while (p) {
             if (p->is_element()) {
                 DomElement* pe = p->as_element();
-                if (pe->tag_name && str_icmp_cstr(pe->tag_name, "datalist") == 0) return true;
+                if (pe->tag_name() && str_icmp_cstr(pe->tag_name(), "datalist") == 0) return true;
             }
             p = p->parent;
         }
@@ -8024,8 +8031,8 @@ static bool _elem_is_barred(DomElement* elem) {
 
 // Get the current value of a form element as a C-string (UTF-8).
 extern "C" const char* dom_form_control_current_value(DomElement* elem) {
-    if (!elem || !elem->tag_name) return "";
-    const char* tag = elem->tag_name;
+    if (!elem || !elem->tag_name()) return "";
+    const char* tag = elem->tag_name();
     if (str_icmp_cstr(tag, "input") == 0) {
         RadiantInputValueKind kind = (RadiantInputValueKind)dom_engine_input_value_kind(
             elem->get_attribute("type"));
@@ -8224,7 +8231,7 @@ extern "C" Item dom_text_control_set_value_bridge(void* dom_elem, Item value) {
     JS_RETURN_IF_ERROR(text.get());
     const char* s = fn_to_cstr(text.get());
     if (!s) s = "";
-    if (elem->tag_name && str_icmp_cstr(elem->tag_name, "input") == 0) {
+    if (elem->tag_name() && str_icmp_cstr(elem->tag_name(), "input") == 0) {
         const char* itype = radiant_form_control_type(elem);
         bool single_line = strcmp(itype, "text") == 0 || strcmp(itype, "search") == 0 ||
                            strcmp(itype, "tel") == 0 || strcmp(itype, "url") == 0 ||
@@ -8321,7 +8328,7 @@ extern "C" Item dom_text_control_set_default_value_bridge(void* dom_elem, Item v
     if (!elem || !tc_is_text_control_elem(elem)) return value;
     const char* s = fn_to_cstr(value);
     if (!s) s = "";
-    if (elem->tag_name && str_icmp_cstr(elem->tag_name, "textarea") == 0) {
+    if (elem->tag_name() && str_icmp_cstr(elem->tag_name(), "textarea") == 0) {
         bool dom_children_changed = elem->first_child != nullptr || *s;
         dom_detach_all_children(elem);
         if (*s) {
@@ -8938,9 +8945,9 @@ static bool _select_value_missing(DomElement* sel) {
 // Reset a single form-control element to its default state, per HTML
 // spec §4.10.21.4 "Form reset" + each control's reset algorithm.
 static void _reset_form_control(DomElement* elem) {
-    if (!elem || !elem->tag_name) return;
+    if (!elem || !elem->tag_name()) return;
     dom_set_user_validity(elem, false);
-    const char* tag = elem->tag_name;
+    const char* tag = elem->tag_name();
     if (str_icmp_cstr(tag, "input") == 0) {
         const char* itype = radiant_form_control_type(elem);
         if (strcmp(itype, "checkbox") == 0 || strcmp(itype, "radio") == 0) {
@@ -9044,11 +9051,11 @@ typedef struct FormResetCtx {
 } FormResetCtx;
 
 static bool _is_form_control_tag(DomElement* elem) {
-    return elem->tag_name &&
-        (str_icmp_cstr(elem->tag_name, "input") == 0 ||
-         str_icmp_cstr(elem->tag_name, "textarea") == 0 ||
-         str_icmp_cstr(elem->tag_name, "select") == 0 ||
-         str_icmp_cstr(elem->tag_name, "output") == 0);
+    return elem->tag_name() &&
+        (str_icmp_cstr(elem->tag_name(), "input") == 0 ||
+         str_icmp_cstr(elem->tag_name(), "textarea") == 0 ||
+         str_icmp_cstr(elem->tag_name(), "select") == 0 ||
+         str_icmp_cstr(elem->tag_name(), "output") == 0);
 }
 
 // nearest ancestor <form> of `elem`, stopping at (and including) `limit`
@@ -9057,7 +9064,7 @@ static DomElement* _nearest_enclosing_form(DomElement* elem, DomElement* limit) 
         if (p == (DomNode*)limit) return limit;
         if (!p->is_element()) continue;
         DomElement* pe = (DomElement*)p;
-        if (pe->tag_name && str_icmp_cstr(pe->tag_name, "form") == 0) return pe;
+        if (pe->tag_name() && str_icmp_cstr(pe->tag_name(), "form") == 0) return pe;
     }
     return NULL;
 }
@@ -9065,7 +9072,7 @@ static DomElement* _nearest_enclosing_form(DomElement* elem, DomElement* limit) 
 static bool _form_reset_visit(DomElement* elem, void* ctx) {
     FormResetCtx* state = (FormResetCtx*)ctx;
     if (state->associated_only && elem == state->form_elem) return false;
-    if (!elem->tag_name) return false;
+    if (!elem->tag_name()) return false;
     if (_is_form_control_tag(elem)) {
         const char* form_attr = elem->get_attribute("form");
         DomElement* owner = NULL;
@@ -9116,7 +9123,7 @@ typedef struct RadioGroupScanCtx {
 
 static bool _radio_group_visit(DomElement* elem, void* ctx) {
     RadioGroupScanCtx* state = (RadioGroupScanCtx*)ctx;
-    if (!elem->tag_name || str_icmp_cstr(elem->tag_name, "input") != 0) return true;
+    if (!elem->tag_name() || str_icmp_cstr(elem->tag_name(), "input") != 0) return true;
     if (strcmp(dom_input_type_lower(elem), "radio") != 0) return true;
     const char* name = elem->get_attribute("name");
     if (!name || strcmp(name, state->name) != 0) return true;
@@ -9173,7 +9180,7 @@ static DomValiditySnapshot dom_compute_validity(DomElement* elem) {
             custom_error = true;
         }
 
-        const char* tag = elem->tag_name ? elem->tag_name : "";
+        const char* tag = elem->tag_name() ? elem->tag_name() : "";
         const char* val = dom_form_control_current_value(elem);
         bool val_empty = dom_element_value_is_empty(elem, val);
 
@@ -9211,7 +9218,7 @@ static DomValiditySnapshot dom_compute_validity(DomElement* elem) {
                     for (DomNode* p = elem->parent; p; p = p->parent) {
                         if (p->is_element()) {
                             DomElement* pe = (DomElement*)p;
-                            if (pe->tag_name && str_icmp_cstr(pe->tag_name, "form") == 0) {
+                            if (pe->tag_name() && str_icmp_cstr(pe->tag_name(), "form") == 0) {
                                 form_scope = pe; break;
                             }
                         }
@@ -9331,7 +9338,7 @@ static DomValiditySnapshot dom_compute_validity(DomElement* elem) {
     // valueMissing flag even when barred (they're not "mutable" per say,
     // but their suffering condition isn't gated on mutability).
     if (barred) {
-        const char* tag = elem ? elem->tag_name : "";
+        const char* tag = elem ? elem->tag_name() : "";
         bool is_input = elem && tag && str_icmp_cstr(tag, "input") == 0;
         bool gate_value_missing = false;
         if (is_input) {
@@ -9382,11 +9389,11 @@ extern "C" Item dom_validity_state_flag(Item state, Item name) {
     return make_js_undefined();
 }
 static bool dom_is_constraint_control(DomElement* elem) {
-    if (!elem || !elem->tag_name || _elem_is_barred(elem)) return false;
-    return str_icmp_cstr(elem->tag_name, "input") == 0 ||
-           str_icmp_cstr(elem->tag_name, "select") == 0 ||
-           str_icmp_cstr(elem->tag_name, "textarea") == 0 ||
-           str_icmp_cstr(elem->tag_name, "button") == 0;
+    if (!elem || !elem->tag_name() || _elem_is_barred(elem)) return false;
+    return str_icmp_cstr(elem->tag_name(), "input") == 0 ||
+           str_icmp_cstr(elem->tag_name(), "select") == 0 ||
+           str_icmp_cstr(elem->tag_name(), "textarea") == 0 ||
+           str_icmp_cstr(elem->tag_name(), "button") == 0;
 }
 
 typedef struct DomInvalidDescendantScan {
@@ -9410,8 +9417,8 @@ static bool dom_invalid_descendant_visit(DomElement* element, void* context) {
 extern "C" int dom_css_element_matches_validity(void* element_ptr,
         bool invalid, bool user) {
     DomElement* element = (DomElement*)element_ptr;
-    if (!element || !element->tag_name) return 0;
-    const char* tag = element->tag_name;
+    if (!element || !element->tag_name()) return 0;
+    const char* tag = element->tag_name();
     bool form = str_icmp_cstr(tag, "form") == 0;
     bool fieldset = str_icmp_cstr(tag, "fieldset") == 0;
     if (user && (form || fieldset ||
@@ -9450,7 +9457,7 @@ typedef struct DomFormUserValidityScan {
 
 static bool dom_form_user_validity_visit(DomElement* element, void* context) {
     DomFormUserValidityScan* scan = (DomFormUserValidityScan*)context;
-    if (element->tag_name &&
+    if (element->tag_name() &&
         (_is_tag(element, "input") || _is_tag(element, "textarea") ||
          _is_tag(element, "select")) &&
         dom_find_form_owner(element) == scan->form_storage() &&
@@ -9498,7 +9505,7 @@ static void dom_check_form_control_descendants(DomNode* node, bool* all_valid) {
 
 extern "C" Item dom_form_reset_bridge(Item form_item) {
     DomElement* elem = (DomElement*)dom_unwrap_element(form_item);
-    if (!elem || !elem->tag_name || str_icmp_cstr(elem->tag_name, "form") != 0) {
+    if (!elem || !elem->tag_name() || str_icmp_cstr(elem->tag_name(), "form") != 0) {
         return make_js_undefined();
     }
     Item ev = js_create_event("reset", /*bubbles=*/true, /*cancelable=*/true);
@@ -9512,9 +9519,9 @@ extern "C" Item dom_form_reset_bridge(Item form_item) {
 static Item dom_check_or_report_validity(Item elem_item, bool report) {
     (void)report;
     DomElement* elem = (DomElement*)dom_unwrap_element(elem_item);
-    if (!elem || !elem->tag_name) return (Item){.item = ITEM_TRUE};
+    if (!elem || !elem->tag_name()) return (Item){.item = ITEM_TRUE};
 
-    if (str_icmp_cstr(elem->tag_name, "form") == 0) {
+    if (str_icmp_cstr(elem->tag_name(), "form") == 0) {
         bool all_valid = true;
         dom_check_form_control_descendants(elem->first_child, &all_valid);
         return (Item){.item = b2it(all_valid)};
@@ -9551,7 +9558,7 @@ static DomElement* dom_first_invalid_control(DomNode* node) {
 // side effect required by the form submission policy.
 extern "C" bool dom_focus_first_invalid_form_control(void* form_ptr) {
     DomElement* form = (DomElement*)form_ptr;
-    if (!form || !form->tag_name || str_icmp_cstr(form->tag_name, "form") != 0) {
+    if (!form || !form->tag_name() || str_icmp_cstr(form->tag_name(), "form") != 0) {
         return false;
     }
     DomElement* invalid = dom_first_invalid_control(form->first_child);
@@ -9598,10 +9605,10 @@ JS_DOM_TAGS(JS_DOM_TAG_BIT_CONST)
 static const uint32_t DOM_TAG_ANY = 0xFFFFFFFFu;
 
 static uint32_t dom_tag_bit(DomElement* elem) {
-    if (!elem || !elem->tag_name) return 0;
+    if (!elem || !elem->tag_name()) return 0;
     if (dom_element_is_html_tag(elem, MARKUP_NAME_SLOT)) return DOM_TAG_SLOT;
 #define JS_DOM_TAG_BIT_MATCH(name, text) \
-    if (DOM_TAG_##name != DOM_TAG_SLOT && str_icmp_cstr(elem->tag_name, text) == 0) return DOM_TAG_##name;
+    if (DOM_TAG_##name != DOM_TAG_SLOT && str_icmp_cstr(elem->tag_name(), text) == 0) return DOM_TAG_##name;
     JS_DOM_TAGS(JS_DOM_TAG_BIT_MATCH)
 #undef JS_DOM_TAG_BIT_MATCH
     return 0;
@@ -9827,8 +9834,8 @@ static const char* _normalise_enctype(const char* v) {
 // <input type=image> from `form.elements` (per spec note for the elements
 // IDL attribute) but `<fieldset>` is included.
 static bool _is_listed_form_control(DomElement* e) {
-    if (!e || !e->tag_name) return false;
-    const char* t = e->tag_name;
+    if (!e || !e->tag_name()) return false;
+    const char* t = e->tag_name();
     if (str_icmp_cstr(t, "input") == 0) {
         const char* it = radiant_form_control_type(e);
         return strcmp(it, "image") != 0;
@@ -9849,7 +9856,7 @@ static void _collect_form_related_rec(DomNode* node, Item arr, bool controls) {
             DomElement* elem = node->as_element();
             bool selected = controls
                 ? _is_listed_form_control(elem)
-                : (elem->tag_name && str_icmp_cstr(elem->tag_name, "form") == 0);
+                : (elem->tag_name() && str_icmp_cstr(elem->tag_name(), "form") == 0);
             if (selected) {
                 js_array_push(arr, dom_wrap_element(elem));
             }
@@ -10057,8 +10064,8 @@ extern "C" Item dom_core_node_name(Item n) {
     // "#document", "#document-fragment" and friends are spec-fixed names, not
     // tag names: uppercasing them yields "#DOCUMENT", which no DOM exposes
     // (ESO93).
-    if (elem->tag_name && elem->tag_name[0] == '#') return js_name_item(elem->tag_name);
-    return (Item){.item = s2it(uppercase_tag_name(elem->tag_name))};
+    if (elem->tag_name() && elem->tag_name()[0] == '#') return js_name_item(elem->tag_name());
+    return (Item){.item = s2it(uppercase_tag_name(elem->tag_name()))};
 }
 
 extern "C" Item dom_core_node_value(Item n) {
@@ -10283,9 +10290,9 @@ extern "C" Item dom_fp_outer_html(Item n) {
 }
 
 static bool dom_is_root_scroll_target(const DomElement* elem) {
-    return elem && elem->tag_name &&
-        (str_icmp_cstr(elem->tag_name, "html") == 0 ||
-         str_icmp_cstr(elem->tag_name, "body") == 0);
+    return elem && elem->tag_name() &&
+        (str_icmp_cstr(elem->tag_name(), "html") == 0 ||
+         str_icmp_cstr(elem->tag_name(), "body") == 0);
 }
 
 static void dom_scroll_observed_position(DomElement* elem, float* x, float* y) {
@@ -10485,7 +10492,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     // -- from parent_node(documentElement) or ownerDocument -- could read none
     // of them, and the two doors disagreed about what a document even is.
     // Answering here, from the node's own doc, makes one object play both roles.
-    if (elem->tag_name && strcmp(elem->tag_name, "#document") == 0) {
+    if (elem->tag_name() && strcmp(elem->tag_name(), "#document") == 0) {
         Item as_document = dom_document_get_property_for(elem->doc, prop_name);
         if (get_type_id(as_document) != LMD_TYPE_UNDEFINED &&
                 get_type_id(as_document) != LMD_TYPE_ERROR) {
@@ -10514,7 +10521,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
 
     // tagName (uppercased per spec)
     if (prop_id == JS_DOM_PROP_TAG_NAME) {
-        return (Item){.item = s2it(uppercase_tag_name(elem->tag_name))};
+        return (Item){.item = s2it(uppercase_tag_name(elem->tag_name()))};
     }
 
     // localName excludes the qualified XML prefix while preserving parsed name case.
@@ -10525,7 +10532,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     // html requires template contents to be exposed through a detached
     // DocumentFragment, so cloning does not clone the hidden template wrapper.
     if (prop_id == JS_DOM_PROP_CONTENT &&
-        elem->tag_name && str_icmp_cstr(elem->tag_name, "template") == 0) {
+        elem->tag_name() && str_icmp_cstr(elem->tag_name(), "template") == 0) {
         return dom_template_content(elem);
     }
 
@@ -10538,13 +10545,13 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     }
 
     if (prop_id == JS_DOM_PROP_OWNER_SVGELEMENT) {
-        if (!dom_element_is_svg(elem) || str_icmp_cstr(elem->tag_name, "svg") == 0) {
+        if (!dom_element_is_svg(elem) || str_icmp_cstr(elem->tag_name(), "svg") == 0) {
             return ItemNull;
         }
         for (DomNode* current = elem->parent; current; current = current->parent) {
             if (!current->is_element()) continue;
             DomElement* ancestor = current->as_element();
-            if (ancestor && ancestor->tag_name && str_icmp_cstr(ancestor->tag_name, "svg") == 0) {
+            if (ancestor && ancestor->tag_name() && str_icmp_cstr(ancestor->tag_name(), "svg") == 0) {
                 return dom_wrap_element(ancestor);
             }
         }
@@ -10553,9 +10560,9 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
 
     if (prop_id == JS_DOM_PROP_PREFIX) {
         const char* local = elem->local_name();
-        const char* colon = strchr(elem->tag_name, ':');
+        const char* colon = strchr(elem->tag_name(), ':');
         return colon && !strcmp(local, colon + 1)
-            ? (Item){.item = s2it(heap_create_name(elem->tag_name, colon - elem->tag_name.get()))} : ItemNull;
+            ? (Item){.item = s2it(heap_create_name(elem->tag_name(), colon - elem->tag_name()))} : ItemNull;
     }
 
     // iframe.contentDocument / contentWindow — lazy-create a foreign HTML
@@ -11017,7 +11024,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
                 for (DomNode* p = sel->parent; p; p = p->parent) {
                     if (p->is_element()) {
                         DomElement* pe = (DomElement*)p;
-                        if (pe->tag_name && str_icmp_cstr(pe->tag_name, "form") == 0)
+                        if (pe->tag_name() && str_icmp_cstr(pe->tag_name(), "form") == 0)
                             return dom_wrap_element(pe);
                     }
                 }
@@ -11070,7 +11077,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         }
         if (prop_id == JS_DOM_PROP_DEFAULT_VALUE) {
             // <input>: getAttribute("value"); <textarea>: text content of children.
-            if (elem->tag_name && str_icmp_cstr(elem->tag_name, "textarea") == 0) {
+            if (elem->tag_name() && str_icmp_cstr(elem->tag_name(), "textarea") == 0) {
                 StrBuf* sb = strbuf_new_cap(64);
                 dom_collect_text_content((DomNode*)elem, sb);
                 String* s = heap_create_name(sb->str ? sb->str : "");
@@ -11435,11 +11442,11 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     // ------------------------------------------------------------------
     // willValidate: true if element is a candidate for constraint validation
     if (prop_id == JS_DOM_PROP_WILL_VALIDATE) {
-        bool is_form_ctrl = elem->tag_name && (
-            str_icmp_cstr(elem->tag_name, "input") == 0 ||
-            str_icmp_cstr(elem->tag_name, "select") == 0 ||
-            str_icmp_cstr(elem->tag_name, "textarea") == 0 ||
-            str_icmp_cstr(elem->tag_name, "button") == 0);
+        bool is_form_ctrl = elem->tag_name() && (
+            str_icmp_cstr(elem->tag_name(), "input") == 0 ||
+            str_icmp_cstr(elem->tag_name(), "select") == 0 ||
+            str_icmp_cstr(elem->tag_name(), "textarea") == 0 ||
+            str_icmp_cstr(elem->tag_name(), "button") == 0);
         if (!is_form_ctrl) return (Item){.item = ITEM_FALSE};
         return (Item){.item = b2it(!_elem_is_barred(elem))};
     }
@@ -11450,11 +11457,11 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     // validationMessage: custom validity message or empty string
     if (prop_id == JS_DOM_PROP_VALIDATION_MESSAGE) {
         // Barred elements (disabled, readonly, etc.) always have empty validationMessage
-        bool is_form_ctrl = elem->tag_name && (
-            str_icmp_cstr(elem->tag_name, "input") == 0 ||
-            str_icmp_cstr(elem->tag_name, "select") == 0 ||
-            str_icmp_cstr(elem->tag_name, "textarea") == 0 ||
-            str_icmp_cstr(elem->tag_name, "button") == 0);
+        bool is_form_ctrl = elem->tag_name() && (
+            str_icmp_cstr(elem->tag_name(), "input") == 0 ||
+            str_icmp_cstr(elem->tag_name(), "select") == 0 ||
+            str_icmp_cstr(elem->tag_name(), "textarea") == 0 ||
+            str_icmp_cstr(elem->tag_name(), "button") == 0);
         if (!is_form_ctrl || _elem_is_barred(elem)) {
             return js_name_item("");
         }
@@ -11531,7 +11538,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     }
 
     log_debug("dom_get_property: unknown property '%s' on <%s>",
-              prop, elem->tag_name ? elem->tag_name : "?");
+              prop, elem->tag_name() ? elem->tag_name() : "?");
     return make_js_undefined();
 }
 
@@ -11640,12 +11647,12 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
     // container nodeValue and Document/DocumentType textContent setters are inert.
     if (prop_id == JS_DOM_PROP_NODE_VALUE ||
             (prop_id == JS_DOM_PROP_TEXT_CONTENT &&
-             elem->tag_name && strcmp(elem->tag_name, "#document") == 0)) return value;
+             elem->tag_name() && strcmp(elem->tag_name(), "#document") == 0)) return value;
 
     // Document writes (title, location, designMode, ...) land on the Document,
     // and the document node is the Document (ESO101). Without this the node
     // would read as a Document but not accept one's writes.
-    if (elem->tag_name && strcmp(elem->tag_name, "#document") == 0) {
+    if (elem->tag_name() && strcmp(elem->tag_name(), "#document") == 0) {
         return dom_document_proxy_set_property(prop_name, value);
     }
     if (DomGaugeField gauge_field = dom_gauge_field(elem, prop)) {
@@ -11713,7 +11720,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
         elem->set_styles_resolved(false);
         dom_mutation_notify(DOM_JS_MUTATION_INLINE_STYLE, (DomNode*)elem, elem->parent);
         log_debug("dom_set_property: set style='%.50s' on <%s>",
-                  style_text, elem->tag_name ? elem->tag_name : "?");
+                  style_text, elem->tag_name() ? elem->tag_name() : "?");
         return value;
     }
 
@@ -11795,7 +11802,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
             elem->doc->pending_viewport_scroll_x = next_x;
             elem->doc->pending_viewport_scroll_y = next_y;
             log_debug("dom_set_property: pending viewport %s=%.1f on <%s>",
-                      prop, is_vertical ? next_y : next_x, elem->tag_name);
+                      prop, is_vertical ? next_y : next_x, elem->tag_name());
             dom_queue_scroll_event(elem, old_scroll_x, old_scroll_y);
             return value;
         }
@@ -11854,7 +11861,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
             if (is_vertical) elem->set_has_pending_element_scroll_y(false);
             else elem->set_has_pending_element_scroll_x(false);
             log_debug("dom_set_property: set %s=%.1f on <%s>",
-                      prop, scroll_value, elem->tag_name ? elem->tag_name : "?");
+                      prop, scroll_value, elem->tag_name() ? elem->tag_name() : "?");
             dom_queue_scroll_event(elem, old_scroll_x, old_scroll_y);
             return value;
         }
@@ -11890,7 +11897,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
             elem->set_has_pending_element_scroll_x(true);
         }
         log_debug("dom_set_property: pending element %s=%.1f on <%s>",
-                  prop, scroll_value, elem->tag_name ? elem->tag_name : "?");
+                  prop, scroll_value, elem->tag_name() ? elem->tag_name() : "?");
         dom_queue_scroll_event(elem, old_scroll_x, old_scroll_y);
         return value;
     }
@@ -11909,13 +11916,13 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
     if (prop_id == JS_DOM_PROP_CLASS_NAME || prop_id == JS_DOM_PROP_CLASS_LIST) {
         const char* class_str = dom_to_attr_cstr(value);
         {
-            // set_attribute owns the pooled class cache; writing class_names
+            // set_attribute owns the pooled class cache; writing the class list
             // directly bypasses its persistent-field lifetime bookkeeping.
             elem->set_attribute("class", class_str);
             dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent,
                                 "class");
             log_debug("dom_set_property: set className='%s' on <%s>",
-                      class_str, elem->tag_name ? elem->tag_name : "?");
+                      class_str, elem->tag_name() ? elem->tag_name() : "?");
         }
         return value;
     }
@@ -11997,7 +12004,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
             elem->set_attribute("id", id_str);
             dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
             log_debug("dom_set_property: set id='%s' on <%s>",
-                      id_str, elem->tag_name ? elem->tag_name : "?");
+                      id_str, elem->tag_name() ? elem->tag_name() : "?");
         }
         return value;
     }
@@ -12051,7 +12058,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
                 p++;
             }
             log_debug("dom_set_property: set innerText on <%s>",
-                      elem->tag_name ? elem->tag_name : "?");
+                      elem->tag_name() ? elem->tag_name() : "?");
             // innerText is parent-local child replacement, so keep the detailed
             // remove/insert records for incremental reconcile.
             dom_mutation_notify();
@@ -12069,7 +12076,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
         if (text_str) {
             if (!dom_replace_text_content(elem, text_str)) return ItemNull;
             log_debug("dom_set_property: set textContent on <%s>",
-                      elem->tag_name ? elem->tag_name : "?");
+                      elem->tag_name() ? elem->tag_name() : "?");
         }
         return value;
     }
@@ -12915,13 +12922,13 @@ static DomElement* dom_offset_parent_element(DomElement* elem) {
     while (p) {
         if (p->is_element()) {
             DomElement* pe = p->as_element();
-            if (pe->tag_name && str_icmp_cstr(pe->tag_name, "body") == 0)
+            if (pe->tag_name() && str_icmp_cstr(pe->tag_name(), "body") == 0)
                 return pe;
             // CSSOM View §7: table ancestors are offset parents only for static elements.
-            if (static_position && pe->tag_name &&
-                (str_icmp_cstr(pe->tag_name, "table") == 0 ||
-                 str_icmp_cstr(pe->tag_name, "td") == 0 ||
-                 str_icmp_cstr(pe->tag_name, "th") == 0)) {
+            if (static_position && pe->tag_name() &&
+                (str_icmp_cstr(pe->tag_name(), "table") == 0 ||
+                 str_icmp_cstr(pe->tag_name(), "td") == 0 ||
+                 str_icmp_cstr(pe->tag_name(), "th") == 0)) {
                 return pe;
             }
             if (pe->position && dom_engine_position_property(pe)->position != CSS_VALUE_STATIC)
@@ -12946,8 +12953,8 @@ static int64_t dom_offset_coordinate(DomElement* elem, bool x_axis) {
 
     DomElement* offset_parent = dom_offset_parent_element(elem);
     if (offset_parent) {
-        if (!offset_parent->tag_name ||
-            str_icmp_cstr(offset_parent->tag_name, "body") != 0) {
+        if (!offset_parent->tag_name() ||
+            str_icmp_cstr(offset_parent->tag_name(), "body") != 0) {
             RdtLogicalPoint parent_origin = dom_node_document_origin(
                 static_cast<View*>(offset_parent));
             value -= x_axis ? parent_origin.x : parent_origin.y;
@@ -12961,7 +12968,7 @@ static int64_t dom_offset_coordinate(DomElement* elem, bool x_axis) {
 }
 
 static bool dom_element_from_point_skips_subtree(DomElement* elem) {
-    if (!elem || !elem->tag_name) return false;
+    if (!elem || !elem->tag_name()) return false;
     // fallback geometry must not resurrect a subtree rejected by the engine's face test.
     if (dom_node_is_inert(elem) || dom_engine_hit_test_skips_subtree(elem)) return true;
     return _is_tag(elem, "head") ||
@@ -12996,7 +13003,7 @@ static float dom_shadow_node_synthetic_height(DomNode* node) {
     int64_t height = dom_headless_dimension(node->as_element(), false);
     return height > 0 ? (float)height : 1.0f;
 }
-JS_FORWARD_STATIC_EXPRESSION(bool, dom_is_document_fragment_element, (DomElement* elem), (elem && elem->tag_name && strcmp(elem->tag_name, "#document-fragment") == 0))
+JS_FORWARD_STATIC_EXPRESSION(bool, dom_is_document_fragment_element, (DomElement* elem), (elem && elem->tag_name() && strcmp(elem->tag_name(), "#document-fragment") == 0))
 
 static DomElement* dom_shadow_element_from_point_walk(DomNode* node,
                                                          float abs_x,
@@ -13055,7 +13062,7 @@ static DomElement* dom_element_from_point_walk(DomNode* node,
 
     DomElement* elem = node->as_element();
     if (dom_element_from_point_skips_subtree(elem)) return nullptr;
-    if (elem->tag_name && str_icmp_cstr(elem->tag_name, "svg") == 0) {
+    if (elem->tag_name() && str_icmp_cstr(elem->tag_name(), "svg") == 0) {
         // SVG's geometry walker is authoritative: falling through to the DOM
         // layout box would resurrect elements rejected by pointer-events.
         return (DomElement*)dom_svg_element_from_point(elem, px, py);
@@ -13447,7 +13454,7 @@ static Item dom_scroll_into_view_with_options(DomElement* elem,
     }
     dom_queue_scroll_into_view(elem, false, false, block, inline_align, behavior);
     log_debug("dom_scrollIntoView: queued target <%s>",
-              elem->tag_name ? elem->tag_name : "?");
+              elem->tag_name() ? elem->tag_name() : "?");
     return make_js_undefined();
 }
 
@@ -13638,7 +13645,7 @@ extern "C" bool dom_parser_move_child(void* parent_ptr, void* child_ptr) {
     }
     // parser staging preserves backing order without publishing script mutations or reactions.
     bool appended = dom_append_backed_child(parent, child, false);
-    if (!appended) log_error("dom_parser_move: could not append node type=%d to %s", child->node_type, parent->tag_name);
+    if (!appended) log_error("dom_parser_move: could not append node type=%d to %s", child->node_type, parent->tag_name());
     return appended;
 }
 
@@ -13865,7 +13872,7 @@ static bool dom_replace_document_element(DomElement* old_root,
 static bool dom_is_document_element_child(DomNode* node) {
     if (!node || !node->is_element()) return false;
     DomElement* element = node->as_element();
-    const char* tag = element->tag_name;
+    const char* tag = element->tag_name();
     // Processing instructions retain their target as tag_name but the Mark
     // backing uses '?' to distinguish them from document elements.
     const Element* backing = dom_element_to_element(element);
@@ -13898,8 +13905,8 @@ static bool dom_document_can_append(DomElement* parent, DomNode* child) {
     }
 
     if (child->is_text() || child->node_type == DOM_NODE_DOCUMENT) return false;
-    if (child->is_element() && child->as_element()->tag_name &&
-            strcmp(child->as_element()->tag_name, "#document-fragment") == 0) {
+    if (child->is_element() && child->as_element()->tag_name() &&
+            strcmp(child->as_element()->tag_name(), "#document-fragment") == 0) {
         int element_count = 0;
         for (DomNode* node = child->as_element()->first_child; node;
              node = node->next_sibling) {
@@ -13936,7 +13943,7 @@ extern "C" Item dom_append_child_bridge(void* parent_ptr, Item child_arg) {
     DomScriptReactionScope script_reactions(elem->doc);
     if (child_node->is_element()) {
         DomElement* child_elem = child_node->as_element();
-        if (child_elem->tag_name && strcmp(child_elem->tag_name, "#document-fragment") == 0) {
+        if (child_elem->tag_name() && strcmp(child_elem->tag_name(), "#document-fragment") == 0) {
             if (!dom_append_fragment_children(elem, child_elem)) return ItemNull;
             dom_document_refresh_root(elem);
             return child_arg;
@@ -13951,14 +13958,14 @@ extern "C" Item dom_append_child_bridge(void* parent_ptr, Item child_arg) {
         _select_ask_for_reset(elem);
     }
     log_debug("dom-edit tree trace: append parent=%s first=%s",
-              elem->tag_name ? elem->tag_name : "?",
+              elem->tag_name() ? elem->tag_name() : "?",
               elem->first_child && elem->first_child->is_element()
-                  ? elem->first_child->as_element()->tag_name
+                  ? elem->first_child->as_element()->tag_name()
                   : elem->first_child && elem->first_child->is_text() ? "#text" : "null");
     dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT, child_node, (DomNode*)elem);
     if (child_node->is_element()) {
         DomElement* ce = child_node->as_element();
-        if (ce->tag_name && strcmp(ce->tag_name, "iframe") == 0) {
+        if (ce->tag_name() && strcmp(ce->tag_name(), "iframe") == 0) {
             _schedule_iframe_load(ce);
         }
     }
@@ -14007,7 +14014,7 @@ extern "C" Item dom_insert_before_bridge(void* parent_ptr, Item new_child_arg,
     DomScriptReactionScope script_reactions(elem->doc);
     if (new_child->is_element()) {
         DomElement* new_elem = new_child->as_element();
-        if (new_elem->tag_name && strcmp(new_elem->tag_name, "#document-fragment") == 0) {
+        if (new_elem->tag_name() && strcmp(new_elem->tag_name(), "#document-fragment") == 0) {
             if (!dom_insert_fragment_children_before(elem, new_elem, ref_child)) {
                 return ItemNull;
             }
@@ -14019,9 +14026,9 @@ extern "C" Item dom_insert_before_bridge(void* parent_ptr, Item new_child_arg,
         return ItemNull;
     }
     log_debug("dom-edit tree trace: insert parent=%s first=%s",
-              elem->tag_name ? elem->tag_name : "?",
+              elem->tag_name() ? elem->tag_name() : "?",
               elem->first_child && elem->first_child->is_element()
-                  ? elem->first_child->as_element()->tag_name
+                  ? elem->first_child->as_element()->tag_name()
                   : elem->first_child && elem->first_child->is_text() ? "#text" : "null");
     return new_child_arg;
 }
@@ -14216,8 +14223,8 @@ static DomNode* dom_clone_node_into_document(DomNode* node,
     // clones need a fresh native element; sharing the source buffer makes later
     // attribute removal on the clone dangle the original's native attribute data.
     MarkBuilder _clone_builder(destination->input);
-    Item _clean_elem = _clone_builder.element(elem->tag_name).final();
-    DomElement* clone = dom_element_create(destination, elem->tag_name, _clean_elem.element);
+    Item _clean_elem = _clone_builder.element(elem->tag_name()).final();
+    DomElement* clone = dom_element_create(destination, elem->tag_name(), _clean_elem.element);
     if (!clone) return nullptr;
     dom_clone_content_attributes(elem, clone);
     // Script clones keep the preparation result and have no parser owner.
@@ -14241,11 +14248,11 @@ static DomNode* dom_clone_node_into_document(DomNode* node,
     };
     if (deep && !clone_children(elem, clone)) return nullptr;
     DomElement* shadow = elem->shadow_root_element();
-    if (shadow && shadow->ext->shadow_clonable) {
-        const DomElementExt* state = shadow->ext;
+    const ShadowStyle* state = shadow ? shadow->shadow_style() : nullptr;
+    if (state && state->clonable) {
         DomElement* shadow_copy = dom_attach_shadow_root(clone, {
-            state->shadow_closed, state->shadow_delegates_focus, state->shadow_manual_slot_assignment,
-            true, state->shadow_serializable, state->shadow_declarative,
+            state->closed, state->delegates_focus, state->manual_slot_assignment,
+            true, state->serializable, state->declarative,
         });
         if (!shadow_copy || !clone_children(shadow, shadow_copy)) return nullptr;
     }
@@ -14720,8 +14727,8 @@ extern "C" Item dom_append_variadic_bridge(void* elem_ptr, Item* args, int argc)
             }
             if (child_node->is_element()) {
                 DomElement* child_elem = child_node->as_element();
-                if (child_elem->tag_name &&
-                    strcmp(child_elem->tag_name, "#document-fragment") == 0) {
+                if (child_elem->tag_name() &&
+                    strcmp(child_elem->tag_name(), "#document-fragment") == 0) {
                     if (!dom_append_fragment_children(elem, child_elem)) {
                         return (Item){.item = ITEM_JS_UNDEFINED};
                     }
@@ -15976,11 +15983,12 @@ extern "C" Item dom_core_attach_shadow(Item n, Item init) {
         !dom_html_shadow_host_name(elem->local_name()))
         return dom_raise_exception("NotSupportedError", "Invalid shadow host");
     if (DomElement* existing = elem->shadow_root_element()) {
-        if (!existing->ext->shadow_declarative || existing->ext->shadow_closed != closed)
+        ShadowStyle* state = existing->shadow_style();
+        if (!state || !state->declarative || state->closed != closed)
             return dom_raise_exception("NotSupportedError", "Element already has a shadow root");
         // hydration retains root identity and options while removing its parsed children.
         option.set(dom_wrap_element(existing));
-        existing->ext->shadow_declarative = false;
+        state->declarative = false;
         if (!dom_replace_inner_html(existing, "", true)) return ItemError;
         return option.get();
     }
@@ -16000,7 +16008,7 @@ Item dom_read_shadow_property(Item receiver, DomShadowProperty property) {
     if (property == DomShadowProperty::root) {
         if (!element || !dom_is_element(receiver)) return dom_raise_type_error("Element receiver required");
         DomElement* shadow = element->shadow_root_element();
-        return shadow && !shadow->ext->shadow_closed ? dom_wrap_element(shadow) : ItemNull;
+        return shadow && !shadow->is_closed_shadow_root() ? dom_wrap_element(shadow) : ItemNull;
     }
     if (property == DomShadowProperty::assigned_element_slot || property == DomShadowProperty::assigned_text_slot) {
         bool text_receiver = property == DomShadowProperty::assigned_text_slot;
@@ -16008,12 +16016,13 @@ Item dom_read_shadow_property(Item receiver, DomShadowProperty property) {
             return dom_raise_type_error(text_receiver ? "Text receiver required" : "Element receiver required");
         DomElement* slot = dom_find_assigned_slot(node);
         DomElement* shadow = dom_shadow_root(slot);
-        return shadow && !shadow->ext->shadow_closed ? dom_wrap_element(slot) : ItemNull;
+        return shadow && !shadow->is_closed_shadow_root() ? dom_wrap_element(slot) : ItemNull;
     }
-    DomElement* host = element ? element->shadow_host_element() : nullptr;
+    const ShadowStyle* state = element ? element->shadow_style() : nullptr;
+    DomElement* host = state ? state->host.get() : nullptr;
     if (!host) return dom_raise_type_error("ShadowRoot receiver required");
     if (property == DomShadowProperty::host) return dom_wrap_element(host);
-    if (property == DomShadowProperty::mode) return js_name_item(element->ext->shadow_closed ? "closed" : "open");
+    if (property == DomShadowProperty::mode) return js_name_item(state->closed ? "closed" : "open");
     if (property == DomShadowProperty::style_sheets) return dom_cssom_get_shadow_stylesheets(receiver);
     if (property == DomShadowProperty::active_element) {
         DomElement* focused = dom_active_focus_target(element->doc);
@@ -16021,10 +16030,10 @@ Item dom_read_shadow_property(Item receiver, DomShadowProperty property) {
         return adjusted && dom_shadow_root(adjusted) == element ? dom_wrap_element(adjusted) : ItemNull;
     }
     if (property == DomShadowProperty::slot_assignment)
-        return js_name_item(element->ext->shadow_manual_slot_assignment ? "manual" : "named");
-    if (property == DomShadowProperty::clonable) return (Item){.item = b2it(element->ext->shadow_clonable)};
-    if (property == DomShadowProperty::serializable) return (Item){.item = b2it(element->ext->shadow_serializable)};
-    return (Item){.item = b2it(element->ext->shadow_delegates_focus)};
+        return js_name_item(state->manual_slot_assignment ? "manual" : "named");
+    if (property == DomShadowProperty::clonable) return (Item){.item = b2it(state->clonable)};
+    if (property == DomShadowProperty::serializable) return (Item){.item = b2it(state->serializable)};
+    return (Item){.item = b2it(state->delegates_focus)};
 }
 
 static Item dom_collect_slot_nodes(DomElement* slot, bool flatten, bool elements_only, Item result) {
@@ -16417,7 +16426,7 @@ extern "C" Item dom_core_select_add(Item n, Item new_item, Item before_item) {
     DomElement* elem = dom_op_element(n);
     if (!elem || !_is_tag(elem, "select")) return ItemNull;
     DomElement* new_opt = (DomElement*)dom_unwrap_element(new_item);
-    if (!new_opt || !new_opt->tag_name) return ItemNull;
+    if (!new_opt || !new_opt->tag_name()) return ItemNull;
     // per spec the argument must be an option or optgroup, otherwise TypeError
     if (!_is_tag(new_opt, "option") && !_is_tag(new_opt, "optgroup")) return ItemNull;
     // inserting an ancestor of the select is a HierarchyRequestError
@@ -16982,16 +16991,16 @@ extern "C" Item dom_element_operation_impl(Item elem_item,
     // F-3: form.reset() — fire `reset` event (cancelable), then run reset
     // algorithm on all listed form controls.
     // ----------------------------------------------------------------
-    if (operation == JUBE_DOM_RESET && elem->tag_name && str_icmp_cstr(elem->tag_name, "form") == 0) {
+    if (operation == JUBE_DOM_RESET && elem->tag_name() && str_icmp_cstr(elem->tag_name(), "form") == 0) {
         return dom_form_reset_bridge(elem_item);
     }
 
-    if (operation == JUBE_DOM_SUBMIT && elem->tag_name &&
-        str_icmp_cstr(elem->tag_name, "form") == 0) {
+    if (operation == JUBE_DOM_SUBMIT && elem->tag_name() &&
+        str_icmp_cstr(elem->tag_name(), "form") == 0) {
         return dom_form_submit_bridge(elem_item);
     }
-    if (operation == JUBE_DOM_REQUEST_SUBMIT && elem->tag_name &&
-        str_icmp_cstr(elem->tag_name, "form") == 0) {
+    if (operation == JUBE_DOM_REQUEST_SUBMIT && elem->tag_name() &&
+        str_icmp_cstr(elem->tag_name(), "form") == 0) {
         return dom_form_request_submit_bridge(elem_item,
             argc >= 1 ? args[0] : make_js_undefined());
     }
@@ -17213,7 +17222,7 @@ extern "C" Item dom_classlist_get_property(Item elem_item, Item prop_name) {
 
     // length
     if (strcmp(prop, "length") == 0) {
-        return (Item){.item = i2it((int64_t)elem->class_count)};
+        return (Item){.item = i2it((int64_t)elem->class_count())};
     }
 
     // value — space-separated class string
@@ -17420,7 +17429,7 @@ static bool dom_nodes_are_equal(DomNode* left, DomNode* right) {
 
     DomElement* left_elem = left->as_element();
     DomElement* right_elem = right->as_element();
-    if (!dom_equal_cstr(left_elem->tag_name, right_elem->tag_name)) return false;
+    if (!dom_equal_cstr(left_elem->tag_name(), right_elem->tag_name())) return false;
 
     int left_attr_count = 0;
     const char** left_attr_names = left_elem->attribute_names(&left_attr_count);

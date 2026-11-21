@@ -282,8 +282,8 @@ static DomDocument* node_owning_doc(DomNode* n) {
 static bool node_is_document_fragment(DomNode* n) {
     if (!n || !n->is_element()) return false;
     DomElement* elem = n->as_element();
-    return elem && elem->tag_name &&
-        strcmp(elem->tag_name, "#document-fragment") == 0;
+    return elem && elem->tag_name() &&
+        strcmp(elem->tag_name(), "#document-fragment") == 0;
 }
 
 // Returns true iff `n` is reachable from the selection's associated document.

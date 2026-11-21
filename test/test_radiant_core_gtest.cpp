@@ -40,18 +40,18 @@ TEST(RadiantHostPropertyTest, PreservesNativeDefaultsAndStoredProperties) {
     EXPECT_EQ(dom_engine_boundary_property(&element), &BOUNDARY_PROP_DEFAULT);
     EXPECT_EQ(dom_engine_scroll_property(&element), &SCROLL_PROP_DEFAULT);
     EXPECT_EQ(dom_engine_position_property(&element), &POSITION_PROP_DEFAULT);
-    EXPECT_EQ(dom_engine_embed_property(&element), &EMBED_PROP_DEFAULT);
+    EXPECT_EQ(dom_engine_embed_property(&element), &EMBED_STYLE_DEFAULT);
     EXPECT_EQ(dom_engine_scroll_property(&element)->scroll_behavior, CSS_VALUE_AUTO);
     EXPECT_EQ(dom_engine_embed_property(&element)->flex, nullptr);
 
     BoundaryProp boundary = {};
     ScrollProp scroll = {};
     PositionProp position = {};
-    EmbedProp embed = {};
+    EmbedStyle embed = {};
     element.bound = lam::view_prop(&boundary);
     element.scroller = lam::view_prop(&scroll);
     element.position = lam::view_prop(&position);
-    element.embed = lam::view_prop(&embed);
+    element.embed = lam::own(&embed);
     EXPECT_EQ(dom_engine_boundary_property(&element), &boundary);
     EXPECT_EQ(dom_engine_scroll_property(&element), &scroll);
     EXPECT_EQ(dom_engine_position_property(&element), &position);
@@ -61,10 +61,13 @@ TEST(RadiantHostPropertyTest, PreservesNativeDefaultsAndStoredProperties) {
 class RadiantCoreTest : public ::testing::Test {
 protected:
     ViewTree tree = {};
+    DomDocument document = {};
 
     void SetUp() override {
         tree.prop_pool = lam::own(pool_create());
         ASSERT_NE(tree.prop_pool, nullptr);
+        document.document_pool = lam::own(pool_create());
+        ASSERT_NE(document.document_pool, nullptr);
         view_tree_canonical_init(&tree);
         ASSERT_NE(tree.canonical_prop_arena, nullptr);
     }
@@ -73,6 +76,8 @@ protected:
         view_tree_canonical_destroy(&tree);
         pool_destroy(tree.prop_pool);
         tree.prop_pool = nullptr;
+        pool_destroy(document.document_pool);
+        document.document_pool = nullptr;
     }
 
     DomElement* element() {
@@ -82,10 +87,49 @@ protected:
     }
 };
 
+TEST_F(RadiantCoreTest, EmbedStyleUsesDocumentPoolBeforeAndAfterViewCreation) {
+    DomElement* owner = element();
+    owner->set_synthetic(false);
+    owner->view_type = RDT_VIEW_BLOCK;
+    owner->doc = lam::up(&document);
+    ASSERT_EQ(document.view_tree, nullptr);
+    EmbedStyle* style = owner->ensure_embed();
+    ASSERT_NE(style, nullptr);
+    Pool* doc_pool = document.document_pool;
+    EXPECT_GE(pool_allocation_size(doc_pool, style), sizeof(EmbedStyle));
+    EXPECT_EQ(pool_allocation_size(tree.prop_pool, style), 0u);
+    EXPECT_EQ(style->object_fit, CSS_VALUE_FILL);
+
+    document.view_tree = lam::own(&tree);
+    LayoutContext context = {};
+    context.doc = lam::up(&document);
+    alloc_grid_prop(&context, lam::view_require_block(owner));
+    ASSERT_NE(style->grid, nullptr);
+    EXPECT_GE(pool_allocation_size(tree.prop_pool, style->grid), sizeof(GridProp));
+    EXPECT_EQ(owner->ensure_embed(), style);
+
+    view_pool_reset_retained_subtree(&tree, owner);
+    EXPECT_EQ(owner->embed, style);
+    EXPECT_EQ(style->grid, nullptr);
+    view_tree_release_retired_subtree(&tree, owner);
+    EXPECT_EQ(owner->embed, nullptr);
+    PoolStats stats = {};
+    pool_get_detailed_stats(doc_pool, &stats);
+    EXPECT_EQ(stats.live_bytes, 0u);
+
+    // node retirement also handles a style allocated before a view was ever created
+    document.view_tree = nullptr;
+    ASSERT_NE(owner->ensure_embed(), nullptr);
+    dom_element_release_retired_storage(owner);
+    EXPECT_EQ(owner->embed, nullptr);
+    pool_get_detailed_stats(doc_pool, &stats);
+    EXPECT_EQ(stats.live_bytes, 0u);
+}
+
 TEST_F(RadiantCoreTest, TeardownReleasesFormPayloadBelowNonRenderingParents) {
     DomElement* owner = element();
     FormControlProp forms[2] = {};
-    DomPropExt slots[2] = {};
+    DomStyleExt slots[2] = {};
     NameId tags[] = {MARKUP_NAME_IMG, MARKUP_NAME_OBJECT};
     for (size_t i = 0; i < 2; i++) {
         DomElement* parent = element();
@@ -94,7 +138,7 @@ TEST_F(RadiantCoreTest, TeardownReleasesFormPayloadBelowNonRenderingParents) {
         parent->display.inner = RDT_DISPLAY_REPLACED;
         forms[i].custom_validity_msg = mem_strdup("fallback control", MEM_CAT_LAYOUT);
         ASSERT_NE(forms[i].custom_validity_msg, nullptr);
-        child->prop_ext = lam::own(&slots[i]);
+        child->style_ext = lam::own(&slots[i]);
         ASSERT_TRUE(child->set_form_storage(&forms[i]));
         ASSERT_TRUE(parent->DomNode::append_child(child));
         ASSERT_TRUE(owner->DomNode::append_child(parent));
@@ -113,8 +157,8 @@ TEST_F(RadiantCoreTest, RetainedResetPreservesScriptCreatedFormProperties) {
     form.control_type = FORM_CONTROL_TEXT;
     form.custom_validity_msg = mem_strdup("invalid value", MEM_CAT_LAYOUT);
     ASSERT_NE(form.custom_validity_msg, nullptr);
-    DomPropExt slots = {};
-    control->prop_ext = lam::own(&slots);
+    DomStyleExt slots = {};
+    control->style_ext = lam::own(&slots);
     ASSERT_TRUE(control->set_form_storage(&form));
     control->set_role_kind(DomElement::ROLE_FORM);
     tree.root = lam::up(control);
@@ -392,6 +436,7 @@ TEST_F(RadiantCoreTest, AnonymousTableRepairPreservesSourceInheritance) {
 
 TEST_F(RadiantCoreTest, IntrinsicGridUsesResolvedTracksInsteadOfAuthoredLineNames) {
     DomElement* grid_element = element();
+    grid_element->doc = lam::up(&document);
     grid_element->view_type = RDT_VIEW_BLOCK;
     grid_element->display.outer = CSS_VALUE_BLOCK;
     grid_element->display.inner = CSS_VALUE_GRID;
@@ -405,7 +450,9 @@ TEST_F(RadiantCoreTest, IntrinsicGridUsesResolvedTracksInsteadOfAuthoredLineName
     ASSERT_TRUE(style_tree_apply_declaration(grid_element->specified_style, declaration));
     GridProp* grid = (GridProp*)pool_calloc(tree.prop_pool, sizeof(GridProp));
     ASSERT_NE(grid, nullptr);
-    grid_element->ensure_embed(&tree)->grid = lam::own(grid);
+    EmbedStyle* embed = grid_element->ensure_embed();
+    ASSERT_NE(embed, nullptr);
+    embed->grid = lam::own(grid);
     grid->grid_template_columns = lam::own(create_grid_track_list(tree.prop_pool, 3));
     ASSERT_NE(grid->grid_template_columns, nullptr);
     GridTrackList* tracks = grid->grid_template_columns;
@@ -540,7 +587,7 @@ TEST(LineClampGrammar, RejectsNonIntegerTokensAndRetainsCalculatedCounts) {
     pool_destroy(pool);
 }
 
-TEST(LegacyBoxGrammar, OrientationAndDisplayRejectInvalidTokens) {
+TEST(LegacyBoxGrammar, RejectsLegacyDisplayAndValidatesPrefixedOrientation) {
     Pool* pool = pool_create(); ASSERT_NE(pool, nullptr);
     const char* valid[] = {"horizontal", "vertical", "inline-axis", "block-axis",
         "inherit", "initial", "unset", "revert-layer", "var(--axis)"};
@@ -557,7 +604,7 @@ TEST(LegacyBoxGrammar, OrientationAndDisplayRejectInvalidTokens) {
     const char* displays[] = {"-webkit-box", "-webkit-inline-box"};
     for (const char* value : displays) {
         SCOPED_TRACE(value);
-        EXPECT_NE(css_parse_property_declaration("display",7,value,strlen(value),pool),nullptr);
+        EXPECT_EQ(css_parse_property_declaration("display",7,value,strlen(value),pool),nullptr);
     }
     pool_destroy(pool);
 }
@@ -2822,13 +2869,13 @@ TEST(DomRetirementOwnerArenaTest, AdoptedMetadataRetiresFromItsPhysicalPool) {
     static_cast<DomNode*>(child)->id = id;
     child->doc = lam::up(&target_doc);
     EXPECT_EQ(child->storage_owner(), &doc);
-    EXPECT_TRUE(pool_owns(doc.document_pool, child->tag_name));
+    EXPECT_TRUE(pool_owns(doc.document_pool, child->tag_name()));
     ASSERT_TRUE(child->set_attribute("id", "destination-id"));
     ASSERT_TRUE(child->set_attribute("class", "destination-class"));
     ASSERT_TRUE(child->set_attribute("data-storage", "destination"));
-    const char* tag = child->tag_name;
+    const char* tag = child->tag_name();
     const char* cached_id = child->id;
-    const char* cached_class = child->class_names[0];
+    const char* cached_class = child->class_names()[0];
     DomElementExt* extension = child->ext;
     EXPECT_TRUE(pool_owns(doc.document_pool, cached_id));
     EXPECT_TRUE(pool_owns(doc.document_pool, cached_class));
@@ -4295,7 +4342,7 @@ TEST_F(StyleEpochTest, RecascadeRetiresStylesheetCustomPropertyRecords) {
         dom_element_clear_cascaded_styles(child);
         apply(document_root, custom, child);
         size_t records = 0;
-        for (CssCustomProp* prop = child->css_variables; prop; prop = prop->next) records++;
+        for (CssCustomProp* prop = child->css_variables(); prop; prop = prop->next) records++;
         EXPECT_EQ(records, 1u);
         EXPECT_NE(dom_element_lookup_own_custom_property_entry(child, "theme"), nullptr);
     }
@@ -4578,15 +4625,15 @@ TEST_F(StyleEpochTest, ReplacingInlineValuesReclaimsParserPayloads) {
             CSS_PROPERTY_TRANSFORM);
         ASSERT_NE(transform, nullptr);
         EXPECT_TRUE(transform->owns_payload);
-        ASSERT_NE(child->css_variables, nullptr);
-        ASSERT_NE(child->css_variables->declaration, nullptr);
+        ASSERT_NE(child->css_variables(), nullptr);
+        ASSERT_NE(child->css_variables()->declaration, nullptr);
     }
     PoolStats repeated = {};
     pool_get_detailed_stats(doc.document_pool, &repeated);
     EXPECT_LE(repeated.live_bytes, warm.live_bytes + 4096u);
     ASSERT_TRUE(child->remove_attribute("style"));
     EXPECT_EQ(dom_element_get_specified_value(child, CSS_PROPERTY_TRANSFORM), nullptr);
-    EXPECT_EQ(child->css_variables, nullptr);
+    EXPECT_EQ(child->css_variables(), nullptr);
 }
 
 TEST_F(StyleEpochTest, RejectedRuleDoesNotRetainCascadeCopies) {
@@ -4784,7 +4831,7 @@ TEST_F(StyleEpochTest, LineClampComputedCountsUseDeclarationOwnersWithoutRetaine
     }
 }
 
-TEST_F(StyleEpochTest, LegacyBoxComputedReadsUseLiveDeclarationsAndReleaseScratch) {
+TEST_F(StyleEpochTest, LegacyDisplayFallsBackAndPrefixedOrientationRemainsInspectable) {
     ASSERT_TRUE(css_property_system_init(doc.document_pool));
     const CssProperty* orientation = css_property_get_by_name("-webkit-box-orient");
     ASSERT_NE(orientation, nullptr);
@@ -4793,15 +4840,15 @@ TEST_F(StyleEpochTest, LegacyBoxComputedReadsUseLiveDeclarationsAndReleaseScratc
     ASSERT_NE(child, nullptr); ASSERT_TRUE(parent->append_child(child));
     ASSERT_TRUE(parent->set_attribute("style", "-webkit-box-orient:vertical"));
     const struct Case { const char* style; const char* axis; const char* display; } cases[] = {
-        {"display:-webkit-box", "horizontal", "-webkit-box"},
-        {"display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2", "vertical", "flow-root"},
-        {"display:-webkit-inline-box;-webkit-box-orient:vertical;-webkit-line-clamp:2", "vertical", "inline-block"},
-        {"display:-webkit-box;-webkit-box-orient:inline-axis;-webkit-line-clamp:2", "horizontal", "-webkit-box"},
-        {"display:-webkit-box;-webkit-box-orient:block-axis;-webkit-line-clamp:2", "vertical", "flow-root"},
-        {"display:-webkit-box;-webkit-box-orient:inherit;-webkit-line-clamp:2", "vertical", "flow-root"},
-        {"display:-webkit-box;-webkit-box-orient:unset;-webkit-line-clamp:2", "horizontal", "-webkit-box"},
-        {"display:-webkit-box;--axis:block-axis;-webkit-box-orient:var(--axis);-webkit-line-clamp:2", "vertical", "flow-root"},
-        {"display:-webkit-box;--axis:invalid;-webkit-box-orient:var(--axis);-webkit-line-clamp:2", "horizontal", "-webkit-box"},
+        {"display:block;display:-webkit-box", "horizontal", "block"},
+        {"display:flex;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2", "vertical", "flex"},
+        {"display:inline-flex;display:-webkit-inline-box;-webkit-box-orient:vertical", "vertical", "inline-flex"},
+        {"display:grid;display:-webkit-box;-webkit-box-orient:inline-axis", "horizontal", "grid"},
+        {"display:block;-webkit-box-orient:block-axis", "vertical", "block"},
+        {"display:block;-webkit-box-orient:inherit", "vertical", "block"},
+        {"display:block;-webkit-box-orient:unset", "horizontal", "block"},
+        {"display:flex;--axis:block-axis;-webkit-box-orient:var(--axis)", "vertical", "flex"},
+        {"display:flex;--axis:invalid;-webkit-box-orient:var(--axis)", "horizontal", "flex"},
         {"display:flow-root;-webkit-box-orient:vertical;-webkit-line-clamp:2", "vertical", "flow-root"}
     };
     for (const Case& item : cases) {

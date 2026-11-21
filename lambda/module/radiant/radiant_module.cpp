@@ -1649,12 +1649,12 @@ RADIANT_C_API Item fn_radiant_get_state(Item node_item, Item name_item) {
     }
     if (kind == RSTATE_TEXT) {
         // Select values derive from option selectedness, not the text buffer.
-        if (elem->tag_name && str_icmp_cstr(elem->tag_name, "select") == 0)
+        if (elem->tag_name() && str_icmp_cstr(elem->tag_name(), "select") == 0)
             return radiant_host_api->dom_catalog->select_value_bridge(elem);
         // range/number values live outside the text buffer; use the same live
         // projection as DOM .value instead of exposing the default attribute.
-        if (elem->tag_name && (str_icmp_cstr(elem->tag_name, "input") == 0 ||
-                              str_icmp_cstr(elem->tag_name, "textarea") == 0)) {
+        if (elem->tag_name() && (str_icmp_cstr(elem->tag_name(), "input") == 0 ||
+                              str_icmp_cstr(elem->tag_name(), "textarea") == 0)) {
             return radiant_string_item(radiant_input_current_value(elem));
         }
         FormControlProp* f = elem->form_control();
@@ -1680,11 +1680,11 @@ static void radiant_option_selection_changed(DomElement* option, DocState* state
     for (DomNode* node = option ? option->parent : nullptr; node; node = node->parent) {
         if (!node->is_element()) continue;
         DomElement* ancestor = node->as_element();
-        if (ancestor->tag_name && str_icmp_cstr(ancestor->tag_name, "select") == 0) {
+        if (ancestor->tag_name() && str_icmp_cstr(ancestor->tag_name(), "select") == 0) {
             select = ancestor;
             break;
         }
-        if (ancestor->tag_name && str_icmp_cstr(ancestor->tag_name, "optgroup") != 0) break;
+        if (ancestor->tag_name() && str_icmp_cstr(ancestor->tag_name(), "optgroup") != 0) break;
     }
     if (!select || !state) return;
     int index = -1, i = 0;
@@ -1741,7 +1741,7 @@ RADIANT_C_API Item fn_radiant_set_state(Item node_item, Item name_item, Item val
         return (Item){.item = b2it(1)};
     }
     if (kind == RSTATE_OPTION_SELECTED) {
-        if (!elem->tag_name || str_icmp_cstr(elem->tag_name, "option") != 0) {
+        if (!elem->tag_name() || str_icmp_cstr(elem->tag_name(), "option") != 0) {
             log_error("JUBE_RADIANT_SET_STATE: 'selected' is only defined on <option>");
             return (Item){.item = b2it(0)};
         }
@@ -1773,7 +1773,7 @@ RADIANT_C_API Item fn_radiant_set_state(Item node_item, Item name_item, Item val
     bool got = state_get_bool(state, elem, interned);
     if (got != want) {
         log_error("JUBE_RADIANT_SET_STATE: '%s' did not take on <%s> (control state needs layout?)",
-                  name, elem->tag_name ? elem->tag_name : "?");
+                  name, elem->tag_name() ? elem->tag_name() : "?");
     }
     return (Item){.item = b2it(got == want ? 1 : 0)};
 }
@@ -1803,14 +1803,14 @@ static bool radiant_tag_ieq(const char* tag, const char* lower, const char* uppe
 }
 
 static bool radiant_named_peer_is_radio(DomElement* elem, const char* name) {
-    if (!radiant_tag_ieq(elem->tag_name, "input", "INPUT")) return false;
+    if (!radiant_tag_ieq(elem->tag_name(), "input", "INPUT")) return false;
     const char* type = elem->get_attribute("type");
     const char* peer = elem->get_attribute("name");
     return type && strcmp(type, "radio") == 0 && peer && strcmp(peer, name) == 0;
 }
 
 static bool radiant_named_peer_is_details(DomElement* elem, const char* name) {
-    if (!radiant_tag_ieq(elem->tag_name, "details", "DETAILS")) return false;
+    if (!radiant_tag_ieq(elem->tag_name(), "details", "DETAILS")) return false;
     const char* peer = elem->get_attribute("name");
     return peer && strcmp(peer, name) == 0;
 }
@@ -1852,7 +1852,7 @@ static DomNode* radiant_radio_scope(DomElement* elem) {
         if (n->node_type != DOM_NODE_ELEMENT) continue;
         DomElement* e = n->as_element();
         if (!e) continue;
-        const char* tag = e->tag_name;
+        const char* tag = e->tag_name();
         if (tag && (strcmp(tag, "FORM") == 0 || strcmp(tag, "form") == 0)) return n;
     }
     DomDocument* doc = radiant_dom_document_from_node((DomNode*)elem);
@@ -1866,7 +1866,7 @@ RADIANT_C_API Item fn_radiant_form_of(Item node_item) {
         if (n->node_type != DOM_NODE_ELEMENT) continue;
         DomElement* e = n->as_element();
         if (!e) continue;
-        const char* tag = e->tag_name;
+        const char* tag = e->tag_name();
         if (tag && (strcmp(tag, "FORM") == 0 || strcmp(tag, "form") == 0)) {
             return radiant_dom_wrap_node(e);
         }
@@ -1920,7 +1920,7 @@ static void* radiant_optional_dom_element(Item node_item) {
 // the resulting entry list and owns serialization/order decisions.
 RADIANT_C_API Item fn_radiant_form_entries(Item form_item, Item submitter_item) {
     DomElement* form = radiant_dom_element_from_item(form_item, "FORM_ENTRIES");
-    if (!form || !form->tag_name || str_icmp_cstr(form->tag_name, "form") != 0) {
+    if (!form || !form->tag_name() || str_icmp_cstr(form->tag_name(), "form") != 0) {
         return ItemNull;
     }
     return js_formdata_collect_form_entries(
@@ -1950,7 +1950,7 @@ RADIANT_C_API Item fn_radiant_form_encode(Item value_item) {
 
 RADIANT_C_API Item fn_radiant_submit_event(Item form_item, Item submitter_item) {
     DomElement* form = radiant_dom_element_from_item(form_item, "SUBMIT_EVENT");
-    if (!form || !form->tag_name || str_icmp_cstr(form->tag_name, "form") != 0) {
+    if (!form || !form->tag_name() || str_icmp_cstr(form->tag_name(), "form") != 0) {
         return radiant_bool_item(false);
     }
     return radiant_bool_item(radiant_dispatch_submit_event_from_script(
@@ -1958,11 +1958,11 @@ RADIANT_C_API Item fn_radiant_submit_event(Item form_item, Item submitter_item) 
 }
 
 static bool radiant_is_constraint_control(DomElement* elem) {
-    if (!elem || !elem->tag_name) return false;
-    return str_icmp_cstr(elem->tag_name, "input") == 0 ||
-           str_icmp_cstr(elem->tag_name, "select") == 0 ||
-           str_icmp_cstr(elem->tag_name, "textarea") == 0 ||
-           str_icmp_cstr(elem->tag_name, "button") == 0;
+    if (!elem || !elem->tag_name()) return false;
+    return str_icmp_cstr(elem->tag_name(), "input") == 0 ||
+           str_icmp_cstr(elem->tag_name(), "select") == 0 ||
+           str_icmp_cstr(elem->tag_name(), "textarea") == 0 ||
+           str_icmp_cstr(elem->tag_name(), "button") == 0;
 }
 
 static DomElement* radiant_first_invalid_form_control(DomNode* node,
@@ -1983,7 +1983,7 @@ static DomElement* radiant_first_invalid_form_control(DomNode* node,
 
 RADIANT_C_API Item fn_radiant_check_validity(Item form_item) {
     DomElement* form = radiant_dom_element_from_item(form_item, "CHECK_VALIDITY");
-    if (!form || !form->tag_name || str_icmp_cstr(form->tag_name, "form") != 0) {
+    if (!form || !form->tag_name() || str_icmp_cstr(form->tag_name(), "form") != 0) {
         return radiant_bool_item(false);
     }
     DomDocument* doc = radiant_dom_document_from_node((DomNode*)form);
@@ -2012,7 +2012,7 @@ RADIANT_C_API Item fn_radiant_check_validity(Item form_item) {
 
 RADIANT_C_API Item fn_radiant_reset_form(Item form_item) {
     DomElement* form = radiant_dom_element_from_item(form_item, "RESET_FORM");
-    if (!form || !form->tag_name || str_icmp_cstr(form->tag_name, "form") != 0) {
+    if (!form || !form->tag_name() || str_icmp_cstr(form->tag_name(), "form") != 0) {
         return radiant_bool_item(false);
     }
     dom_form_reset_bridge(form_item);
@@ -3373,7 +3373,7 @@ RADIANT_C_API Item fn_radiant_replace_range(Item node_item, Item start_item,
     if (!state || !elem) return (Item){.item = b2it(0)};
     if (!tc_is_text_control(elem)) {
         log_error("JUBE_RADIANT_REPLACE_RANGE: <%s> is not a text control",
-                  elem->tag_name ? elem->tag_name : "?");
+                  elem->tag_name() ? elem->tag_name() : "?");
         return (Item){.item = b2it(0)};
     }
     uint32_t len = 0;
@@ -5132,7 +5132,7 @@ RADIANT_C_API Item fn_radiant_measure_svg_text(Item html_item, Item width_item, 
     for (DomNode* node = body ? body->first_child : nullptr; node; node = node->next_sibling) {
         if (!node->is_element()) continue;
         DomElement* element = node->as_element();
-        if (element->tag_name && strcmp(element->tag_name, "svg") == 0) { svg = element; break; }
+        if (element->tag_name() && strcmp(element->tag_name(), "svg") == 0) { svg = element; break; }
     }
     if (!svg) {
         free_document(doc);
@@ -5142,7 +5142,7 @@ RADIANT_C_API Item fn_radiant_measure_svg_text(Item html_item, Item width_item, 
     for (DomNode* node = svg->first_child; node; node = node->next_sibling) {
         if (!node->is_element()) continue;
         DomElement* text = node->as_element();
-        if (text->tag_name && strcmp(text->tag_name, "text") == 0) count++;
+        if (text->tag_name() && strcmp(text->tag_name(), "text") == 0) count++;
     }
     SvgTextMeasurement* metrics = count ? (SvgTextMeasurement*)mem_calloc(count, sizeof(SvgTextMeasurement),
         MEM_CAT_RENDER) : nullptr;
@@ -5847,7 +5847,7 @@ static const ScrollProp* radiant_host_scroll_property(const DomElement* element)
 static const PositionProp* radiant_host_position_property(const DomElement* element) {
     return element ? element->positionp() : nullptr;
 }
-static const EmbedProp* radiant_host_embed_property(const DomElement* element) {
+static const EmbedStyle* radiant_host_embed_property(const DomElement* element) {
     return element ? element->embedp() : nullptr;
 }
 

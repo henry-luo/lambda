@@ -1817,10 +1817,10 @@ TEST_F(SecondaryViewTest, FoListsLowerToCommonNativeGridsAndKeepOriginalPartDiag
     ASSERT_EQ(translated->diagnostic.status, TYPESET_OK) << translated->diagnostic.reason;
     DomElement* generated = install_fo_translation(translated); ASSERT_NE(generated, nullptr);
     DomElement* item = generated->last_child_element()->last_child_element()->first_child_element()->first_child_element(); ASSERT_NE(item, nullptr);
-    EXPECT_STREQ(item->tag_name, "table"); EXPECT_STREQ(item->get_attribute("r:label-body-grid"), "true");
-    DomElement* row = item->first_child_element(); ASSERT_NE(row, nullptr); EXPECT_STREQ(row->tag_name, "tr");
+    EXPECT_STREQ(item->tag_name(), "table"); EXPECT_STREQ(item->get_attribute("r:label-body-grid"), "true");
+    DomElement* row = item->first_child_element(); ASSERT_NE(row, nullptr); EXPECT_STREQ(row->tag_name(), "tr");
     DomElement* label = row->first_child_element(); DomElement* body = row->last_child_element();
-    ASSERT_NE(label, nullptr); ASSERT_NE(body, nullptr); EXPECT_STREQ(label->tag_name, "td");
+    ASSERT_NE(label, nullptr); ASSERT_NE(body, nullptr); EXPECT_STREQ(label->tag_name(), "td");
     ViewTree* tree = secondary(); PagedLayoutOptions paged = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
     ASSERT_EQ(layout_secondary_view(tree, &paged, &diagnostic), TYPESET_OK) << diagnostic.reason;
     EXPECT_STREQ(row->get_attribute("r:style-transparent"), "true");
@@ -2016,7 +2016,7 @@ TEST_F(SecondaryViewTest, FoExternalGraphicsLowerToNativeContentSizingAndKeepRes
     ASSERT_EQ(translated->diagnostic.status, TYPESET_OK) << translated->diagnostic.reason;
     DomElement* generated = install_fo_translation(translated); ASSERT_NE(generated, nullptr);
     DomElement* image = generated->last_child_element()->last_child_element()->first_child_element()->first_child_element(); ASSERT_NE(image, nullptr);
-    EXPECT_STREQ(image->tag_name, "img"); EXPECT_STREQ(image->get_attribute("src"), paged_split_png);
+    EXPECT_STREQ(image->tag_name(), "img"); EXPECT_STREQ(image->get_attribute("src"), paged_split_png);
     ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
     ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
     LayoutViewNode* node = source_image_fragment(tree, image); ASSERT_NE(node, nullptr);
@@ -2204,7 +2204,7 @@ TEST_F(SecondaryViewTest, FoInstreamSvgUsesTheCommonImageOwnerAndTranslationBudg
     ASSERT_EQ(translated->diagnostic.status, TYPESET_OK) << translated->diagnostic.reason;
     DomElement* generated = install_fo_translation(translated); ASSERT_NE(generated, nullptr);
     DomElement* image = generated->last_child_element()->last_child_element()->first_child_element()->first_child_element(); ASSERT_NE(image, nullptr);
-    EXPECT_STREQ(image->tag_name, "img"); ASSERT_NE(image->get_attribute("src"), nullptr);
+    EXPECT_STREQ(image->tag_name(), "img"); ASSERT_NE(image->get_attribute("src"), nullptr);
     EXPECT_EQ(strncmp(image->get_attribute("src"), "data:image/svg+xml,", 19), 0);
     ViewTree* tree = secondary(); PagedLayoutOptions paged = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
     ASSERT_EQ(layout_secondary_view(tree, &paged, &diagnostic), TYPESET_OK) << diagnostic.reason;
@@ -2403,11 +2403,11 @@ TEST_F(SecondaryViewTest, SvgImageFactsRetainFractionalAxesAndIndependentRatioPr
         ASSERT_TRUE(layout_replaced_content_size(&facts, &constraints, 340.0f, &width, &height));
         EXPECT_FLOAT_EQ(width, used_widths[i]); EXPECT_FLOAT_EQ(height, used_heights[i]);
         if (ratios[i] > 0.0f) {
-            EmbedProp object = {}; object.object_fit = CSS_VALUE_CONTAIN;
+            EmbedStyle object = {}; object.object_fit = CSS_VALUE_CONTAIN;
             Rect rect = render_media_object_rect(&object, image, {0.0f, 0.0f, 40.0f, 20.0f}, 1.0f);
             EXPECT_FLOAT_EQ(rect.width, 40.0f); EXPECT_FLOAT_EQ(rect.height, 40.0f / ratios[i]);
         }
-        EmbedProp object = {};
+        EmbedStyle object = {};
         Rect filled = render_media_object_rect(&object, image, {0.0f, 0.0f, 40.0f, 20.0f}, 1.0f);
         EXPECT_FLOAT_EQ(filled.width, 40.0f); EXPECT_FLOAT_EQ(filled.height, 20.0f);
         object.object_fit = CSS_VALUE_NONE;
@@ -3378,7 +3378,7 @@ TEST_F(SecondaryViewTest, FileLoadedGroupedSelectorsRetainTheirFontShorthand) {
     ViewCssStyle* root = view_css_resolve(tree, session.document->root); ASSERT_NE(root, nullptr);
     CssDeclaration declaration = {};
     EXPECT_NE(view_css_property(tree, root, "font-family", &declaration), nullptr)
-        << session.document->root->tag_name;
+        << session.document->root->tag_name();
     EXPECT_STREQ(declaration.property_name, "font");
     if (declaration.value) {
         EXPECT_EQ(declaration.value->type, CSS_VALUE_TYPE_LIST);
@@ -3389,7 +3389,7 @@ TEST_F(SecondaryViewTest, FileLoadedGroupedSelectorsRetainTheirFontShorthand) {
     EXPECT_STREQ(css_font_family_name_from_value(family->type == CSS_VALUE_TYPE_LIST ? family->data.list.values[0] : family), "Arial");
     EXPECT_STREQ(root->font.family.get(), "Arial");
     for (ViewCssStyle* style = tree->model->css->styles; style; style = style->next) {
-        if (!style->pseudo_element && strcmp(style->source->tag_name, "p") == 0)
+        if (!style->pseudo_element && strcmp(style->source->tag_name(), "p") == 0)
             EXPECT_STREQ(style->font.family.get(), "Arial");
     }
     render_export_session_end(&session);
@@ -5640,7 +5640,7 @@ TEST_F(SecondaryViewTest, FoDirectCellsGroupIntoTransparentRowsWithSharedSpansAn
     DomElement* table = generated->last_child_element()->last_child_element()->first_child_element(); ASSERT_NE(table, nullptr);
     DomElement* body = table->last_child_element(); ASSERT_NE(body, nullptr);
     size_t rows = 0; for (DomElement* row = body->first_child_element(); row; row = row->next_sibling_element()) {
-        EXPECT_STREQ(row->tag_name, "tr"); EXPECT_STREQ(row->get_attribute("r:style-transparent"), "true"); rows++;
+        EXPECT_STREQ(row->tag_name(), "tr"); EXPECT_STREQ(row->get_attribute("r:style-transparent"), "true"); rows++;
     }
     EXPECT_EQ(rows, 4u);
     DomElement* a = body->first_child_element()->first_child_element(); ASSERT_NE(a, nullptr);
@@ -7068,7 +7068,7 @@ TEST_F(SecondaryViewTest, UnsupportedRepeatedGroupBreaksAndGroupHeightsAreDiagno
     for (DomElement* group : {header, footer, body}) {
         for (const char* policy : {"height: 40px", "break-before: page", "break-after: right"}) {
             if (group == body && strcmp(policy, "height: 40px")) continue;
-            SCOPED_TRACE(group->tag_name);
+            SCOPED_TRACE(group->tag_name());
             SCOPED_TRACE(policy);
             bool height = !strcmp(policy, "height: 40px");
             StrBuf* css = strbuf_new(); ASSERT_NE(css, nullptr);
@@ -10587,7 +10587,7 @@ TEST_F(SecondaryViewTest, FoBlocksTranslateToNativePagesAndHtmlWithOriginalInher
         EXPECT_NE(origin->source.address, nullptr); EXPECT_NE(origin->translated, nullptr); origins++;
     }
     EXPECT_EQ(origins, translated->node_count);
-    EXPECT_EQ(fo->parent.get(), nullptr); EXPECT_STREQ(fo->tag_name, "f:root");
+    EXPECT_EQ(fo->parent.get(), nullptr); EXPECT_STREQ(fo->tag_name(), "f:root");
     StrBuf* text = strbuf_new(); ASSERT_NE(text, nullptr);
     append_fragment_text(tree->model->root, text);
     EXPECT_NE(strstr(text->str, "Alpha"), nullptr); EXPECT_NE(strstr(text->str, "Beta"), nullptr); EXPECT_NE(strstr(text->str, "Second"), nullptr);
@@ -10619,7 +10619,7 @@ TEST_F(SecondaryViewTest, FoTablesShareCommonTracksRepeatedGroupsSpansAndCellCon
     ASSERT_EQ(translated->diagnostic.status, TYPESET_OK) << translated->diagnostic.reason;
     DomElement* generated = install_fo_translation(translated); ASSERT_NE(generated, nullptr);
     DomElement* table = generated->last_child_element()->last_child_element()->first_child_element(); ASSERT_NE(table, nullptr);
-    EXPECT_STREQ(table->tag_name, "table");
+    EXPECT_STREQ(table->tag_name(), "table");
     DomElement* repeated = table->first_child_element()->next_sibling_element(); ASSERT_NE(repeated, nullptr); EXPECT_STREQ(repeated->get_attribute("span"), "2");
     DomElement* header = repeated->next_sibling_element(); ASSERT_NE(header, nullptr);
     DomElement* footer = header->next_sibling_element(); ASSERT_NE(footer, nullptr);

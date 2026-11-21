@@ -761,7 +761,7 @@ TEST_F(DomRangeTest, DocumentFragmentCreate) {
     DomElement* frag = dom_document_fragment_create(&doc_storage);
     ASSERT_NE(frag, nullptr);
     EXPECT_TRUE(frag->is_element());
-    EXPECT_STREQ(frag->tag_name, "#document-fragment");
+    EXPECT_STREQ(frag->tag_name(), "#document-fragment");
     EXPECT_EQ(frag->doc, &doc_storage);
     EXPECT_EQ(frag->parent, nullptr);
     EXPECT_EQ(child_count(frag), 0u);
@@ -778,7 +778,7 @@ TEST_F(DomRangeTest, NodeCloneShallowText) {
 }
 
 TEST_F(DomRangeTest, NodeCloneDeepElement) {
-    span->tag_name = lam::up("span");
+    span->tag_id = MARKUP_NAME_SPAN;
     DomNode* clone = dom_node_clone(span, /*deep=*/true);
     ASSERT_NE(clone, nullptr);
     ASSERT_TRUE(clone->is_element());
@@ -823,7 +823,7 @@ TEST_F(DomRangeTest, ExtractContentsFromSingleText) {
     ASSERT_TRUE(dom_range_set_end  (r, hello, 4, &exc));
     DomElement* frag = dom_range_extract_contents(r, &exc);
     ASSERT_NE(frag, nullptr);
-    EXPECT_STREQ(frag->tag_name, "#document-fragment");
+    EXPECT_STREQ(frag->tag_name(), "#document-fragment");
     // fragment should contain a text node "ell"
     ASSERT_NE(frag->first_child, nullptr);
     ASSERT_TRUE(frag->first_child->is_text());
