@@ -1,0 +1,17 @@
+<!doctype html>
+<!-- A scroll container sized by flex keeps its descendants in its scroll range,
+     whatever its inner display: the grid list scrolls like the block list
+     (CSS Overflow 3 scrollable overflow). Browsers report 240/790 and 240/1600. -->
+<html><head><meta charset="utf-8"><style>
+body { margin: 0; display: flex; gap: 10px; }
+.side { height: 300px; width: 180px; display: flex; flex-direction: column; overflow: hidden; }
+.head { height: 60px; background: #eee; }
+.list { flex: 1; min-height: 0; overflow: auto; }
+.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: max-content; align-content: start; gap: 10px; }
+.card { height: 70px; background: #ddd; }
+.block .card { margin-bottom: 10px; }
+</style></head><body>
+<div class="side"><div class="head">filters</div><div id="grid" class="list grid"><div class="card" id="g0">0</div><div class="card" id="g1">1</div><div class="card" id="g2">2</div><div class="card" id="g3">3</div><div class="card" id="g4">4</div><div class="card" id="g5">5</div><div class="card" id="g6">6</div><div class="card" id="g7">7</div><div class="card" id="g8">8</div><div class="card" id="g9">9</div><div class="card" id="g10">10</div><div class="card" id="g11">11</div><div class="card" id="g12">12</div><div class="card" id="g13">13</div><div class="card" id="g14">14</div><div class="card" id="g15">15</div><div class="card" id="g16">16</div><div class="card" id="g17">17</div><div class="card" id="g18">18</div><div class="card" id="g19">19</div></div></div>
+<div class="side"><div class="head">filters</div><div id="block" class="list block"><div class="card" id="b0">0</div><div class="card" id="b1">1</div><div class="card" id="b2">2</div><div class="card" id="b3">3</div><div class="card" id="b4">4</div><div class="card" id="b5">5</div><div class="card" id="b6">6</div><div class="card" id="b7">7</div><div class="card" id="b8">8</div><div class="card" id="b9">9</div><div class="card" id="b10">10</div><div class="card" id="b11">11</div><div class="card" id="b12">12</div><div class="card" id="b13">13</div><div class="card" id="b14">14</div><div class="card" id="b15">15</div><div class="card" id="b16">16</div><div class="card" id="b17">17</div><div class="card" id="b18">18</div><div class="card" id="b19">19</div></div></div>
+<p id="out"></p>
+</body></html>

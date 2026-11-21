@@ -14,6 +14,113 @@ are unchanged. Full evidence is under `../../lambda/temp/kianhup-style/`.
 
 ## Fixed issues
 
+<a id="ri-183"></a>
+
+### RI-183 — A flex-sized grid scroll container has no scroll range
+
+**Fixed 2026-11-21.** Native layout and scrolling belong to Radiant under
+**D9.1.1v4 / D9.1.3v2**; the range follows CSS Overflow 3 scrollable overflow.
+Take an `overflow: auto` grid with `flex: 1; min-height: 0` in a fixed-height
+column flexbox. It was laid out at the right size, and script reported Chromium's
+`clientHeight/scrollHeight` (240/790), but the wheel never moved it. A block
+list in the same position scrolled. A fixed-height grid outside flex also
+scrolled. Homer Studio's Structures list (`.structure-list`) could not scroll.
+
+`finalize_block_flow` publishes a scroll container's range from its flow
+extent grown to its in-flow descendants' bounds. After line stretching,
+`flex_update_item_scroller` refreshed every scrolling flex item's range from
+`content_height` alone. For a block item that is its content extent. For a grid
+it is the block cursor, which grid layout never advances (the log shows
+`content_height:0.0`), so the refresh reset the vertical range to 0. The
+descendant-bounds step is now `layout_scroll_container_extent` (declared in
+`layout.hpp`), shared by `finalize_block_flow` and the flex refresh. The flex
+path therefore keeps the range block flow measured and adds only the stretched
+viewport.
+
+Verification: new UI fixture `test/ui/layout_flex_grid_item_scroll`
+(Chromium-captured 240/790 and 240/1600, plus a wheel step). It fails before
+the repair (the grid's `scrollTop` stays 0) and passes after. The reduced
+grid list scrolls from y 60 to −190, like the block list. The Homer Studio
+Structures list scrolls (`tests/panels.json`).
+
+<a id="ri-182"></a>
+
+### RI-182 — Auto grid rows grow to scroll containers' content in a definite container
+
+**Fixed 2026-11-21.** Native grid layout belongs to Radiant under
+**D9.1.1v4 / D9.1.3v2**; the behaviour follows CSS Grid §6.6 and §11.5–§11.7.
+Take a grid with `height: 300px` and one auto row whose items are
+`overflow: auto` or `overflow: hidden` with 1000 px content. Radiant made the
+row and every item 1000 px tall, so the scroll containers had nothing to scroll.
+Chromium 148 (headless shell) gives 300 px for all three items. Homer Studio's
+side panels (a `flex: 1` grid in a 100vh column) grew to 1682.8 px in a 772 px
+row and could not scroll.
+
+The grid algorithm sized the row correctly; the post-content correction pass
+in `layout_grid_multipass.cpp` then broke it. That pass raises each row to its
+items' laid-out heights. It applied the §6.6 automatic minimum (zero for a
+scroll container) only to `fr` rows of a definite container, so `auto` rows took
+the full content height. In a definite container, items raise a row's base size
+only through their minimum contributions; growth toward max-content just fills
+free space, which the algorithm pass already distributed. The pass now uses
+`grid_item_minimum_contribution` for every row of a definite container. The
+scroll test uses `layout_overflow_establishes_scroll_container`, so
+`overflow: clip` (not a scroll container) keeps its content minimum. Indefinite
+containers keep the max-content correction.
+
+Verification: new baseline case `grid_121_auto_row_scroll_container_items`
+covers a fixed-height grid and a `flex: 1` grid in a fixed column. Its reference
+was captured from Chromium's headless shell, and the case passes 100%. The
+reduced page gave 1000 px before the repair and 300 px after.
+`make layout pattern=grid` gives 396 of 402 both with and without the repair;
+the same six cases fail either way (four `grid_fr_span_2_proportion_*` cases
+and two `grid-item-input-type-*` cases). The Homer Studio panels now measure
+772 px and scroll on every tab.
+
+<a id="ri-180"></a>
+
+### RI-180 — Clips added by a scene3d re-render never receive host ticks
+
+**Fixed 2026-11-21.** Scene animation ownership belongs to Radiant under
+**D9.1.1v4 / D9.1.3v2**. No `S#`/`D#` ruling covers clock ownership on
+regeneration. The working rule is Radiant_Design_Scene3D §3.3: prepare an edit
+transactionally, and replace only the affected services.
+
+`scene3d_animation_refresh` builds the edited scene as a quiet staged replay
+(`scene3d_animation_create(..., replay = true)`), which always clears the
+candidate's `automatic` flag. The refresh then publishes the old owner's flag.
+A scene first rendered without clips (a still preview, or a character before a
+motion is picked) has `automatic = false`. When an edit adds an autoplay clip
+or a `<motion-controller>`, the new owner keeps that `false`. The clip samples
+its first pose and never advances in a live window. The headless
+`scene3d update` op only steps scenes that are not automatic, so fixtures that
+stepped clips by hand hid the defect. Homer Studio's Abilities preview and
+Character motions were frozen live.
+
+`automatic` carried two meanings, so it is now split. `playable` records that
+the template asks for the clock (an autoplay clip or a controller), captured
+before replay clears `automatic`. `manual` records that a seek, an adopted
+physics replay, or an explicit `scene3d_animation_automatic` host or script
+command chose the clock. Rescheduling goes through a private
+`scene3d_animation_schedule`, which leaves both flags unchanged. Refresh
+publishes `automatic || (!manual && candidate->playable)` and carries `manual`
+forward. A manually driven scene keeps its choice across edits, and a scene
+that loses its clips keeps the previous flag, as before.
+
+Verification: the new native case
+`AnimationReconciliationLetsAddedAutoplayClipsClaimTheClockUntilTheHostSeeks`
+covers both paths: an added clip advances on scheduler ticks, and after a seek
+a later clip stays at its seeked time. Each of the 87
+`Scene3dTest` animation, motion, controller and clip cases passes in its own
+process; RI-181 prevents running them in one process. All 132 positive scene3d
+view fixtures from `cases.inc` and `contracts.inc` pass headlessly. The 9
+expected-failure fixtures fail as designed. A reduced headless probe advanced
+with `advance_time` reproduced the defect before the repair: a clip added after
+the first render, autoplay or one-shot controller, held its t = 0 pose. After
+the repair it moves. `test_radiant_view_gtest.exe` itself was not run, because
+its link fails in `make build-test` for unrelated reasons. Evidence: the Homer
+Studio probes under `studio/temp/auto/`.
+
 <a id="ri-179"></a>
 
 ### RI-179 — Font inheritance overwrites local shorthand and re-evaluates ancestor declarations
