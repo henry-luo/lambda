@@ -167,11 +167,19 @@ pub fn natural_at(x, z) any^ => if (in_near(x, z)) grid_at(NATURAL, x, z) else n
 // ---- the far grid; inside the near grid's reach it sinks out of sight
 fn inside_near(x, z) any^ => x > X0 and x < X1 and z > Z0 and z < Z1
 pub let FAR_COLUMNS = [for (i in 0 to (FNX - 1), let x = FX0 + i * FAR_STEP) {x: x, cz: coast_z(x), sand: beach(x)}]
-fn broad_at(x, z) any^ => if (BROAD == null) 0.0 else noise.sample(BROAD, (x - X0) / LATTICE, (z - Z0) / LATTICE)
-pub let FGX = [for (j in 0 to (FNZ - 1), c in FAR_COLUMNS) c.x]
-pub let FGZ = [for (j in 0 to (FNZ - 1), c in FAR_COLUMNS) FZ0 + j * FAR_STEP]
-pub let FGCZ = [for (j in 0 to (FNZ - 1), c in FAR_COLUMNS) c.cz]
-pub let FGSAND = [for (j in 0 to (FNZ - 1), c in FAR_COLUMNS) c.sand]
+// reuse the column data for each row, just as for the near grid.
+let FAR_VERTICES = 0 to (FNX * FNZ - 1)
+let FAR_COL = FAR_VERTICES % FNX
+let FAR_ROW = FAR_VERTICES div FNX
+pub let FGX = FX0 + FAR_COL * FAR_STEP
+pub let FGZ = FZ0 + FAR_ROW * FAR_STEP
+let FAR_COLUMN_CZ = [for (c in FAR_COLUMNS) c.cz]
+let FAR_COLUMN_SAND = [for (c in FAR_COLUMNS) c.sand]
+pub let FGCZ = FAR_COLUMN_CZ[FAR_COL]
+pub let FGSAND = FAR_COLUMN_SAND[FAR_COL]
 pub let FAR_INSIDE = [for (k, x in FGX) inside_near(x, FGZ[k])]
-let FAR_RAW = natural(FGX, FGZ, [for (k, x in FGX) broad_at(x, FGZ[k])], FGCZ, FGSAND) ^ { [] }
+let FAR_NOISE = if (BROAD == null) 0.0 else flatten(noise.field_at(BROAD,
+    [for (c in FAR_COLUMNS) (c.x - X0) / LATTICE],
+    [for (j in 0 to (FNZ - 1)) (FZ0 + j * FAR_STEP - Z0) / LATTICE])^) ^ { 0.0 }
+let FAR_RAW = natural(FGX, FGZ, FAR_NOISE, FGCZ, FGSAND) ^ { [] }
 pub let FAR = [for (k, h in FAR_RAW) h - (if (FAR_INSIDE[k]) FAR_SINK else 0.0)]

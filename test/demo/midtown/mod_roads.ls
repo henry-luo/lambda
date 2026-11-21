@@ -72,11 +72,20 @@ fn moving_average(values, w) any^ {
 }
 // cut every rise and fall steeper than GRADE (peaks come down rather than valleys filling)
 fn limited(ys, ss) any^ {
-    let up = reduce([[ys[0]], *[for (k in 1 to (len(ys) - 1)) k]], (acc, k) any^ =>
-        [*acc, min(ys[k], acc[k - 1] + GRADE * (ss[k] - ss[k - 1]))])
-    let n = len(ys);
-    reverse(reduce([[up[n - 1]], *[for (k in 1 to (n - 1)) n - 1 - k]], (acc, k) any^ =>
-        [*acc, min(up[k], acc[len(acc) - 1] + GRADE * (ss[k + 1] - ss[k]))]))
+    // both sweeps only need the preceding sample; update one working buffer.
+    var profile = ys
+    let n = len(profile);
+    var k = 1
+    while (k < n) {
+        profile[k] = min(profile[k], profile[k - 1] + GRADE * (ss[k] - ss[k - 1]))
+        k = k + 1
+    }
+    k = n - 2
+    while (k >= 0) {
+        profile[k] = min(profile[k], profile[k + 1] + GRADE * (ss[k + 1] - ss[k]))
+        k = k - 1
+    }
+    profile
 }
 // spans of one kind: [first sample, last sample] index pairs
 fn spans(pts, kind) any^ => (let starts = [for (k, p in pts where p.kind == kind and (k == 0 or pts[k - 1].kind != kind)) k],

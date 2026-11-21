@@ -71,10 +71,11 @@ fn chalk_tip(seed, size: int) array^ {
 
 // a flat brush: a wide, short bar with soft ends; dab angle and aspect turn it into a nib.
 fn flat_tip(size: int) array {
-    let half = float(size) / 2.0;
-    as_float([for (y in 0 to (size - 1)) [for (x in 0 to (size - 1))
-        (let u = abs(float(x) + 0.5 - half) / half, let v = abs(float(y) + 0.5 - half) / half,
-         unit((0.96 - u) / 0.08) * unit((0.32 - v) / 0.08))]])
+    let half = float(size) / 2.0
+    let distance = [for (i in 0 to (size - 1)) abs(float(i) + 0.5 - half) / half]
+    let horizontal = [for (d in distance) unit((0.96 - d) / 0.08)]
+    let vertical = [for (d in distance) unit((0.32 - d) / 0.08)];
+    reshape(vertical, [size, 1]) * reshape(horizontal, [1, size])
 }
 
 // scattered round grains inside the disk, as a stippling or splatter brush leaves.
@@ -87,8 +88,30 @@ fn speckle_tip(seed, size: int) array^ {
          let r = math.sqrt(rng.unit(rng.derive(k, ["radius", i])^)) * 0.82,
          let s = 0.05 + 0.07 * rng.unit(rng.derive(k, ["size", i])^),
          [half + math.cos(a) * r * half, half + math.sin(a) * r * half, s * half])];
-    as_float([for (y in 0 to (size - 1)) [for (x in 0 to (size - 1))
-        max([0.0, *[for (d in dots) unit(1.0 - math.sqrt((float(x) + 0.5 - d[0]) ** 2 + (float(y) + 0.5 - d[1]) ** 2) / d[2])]])]])
+    // a grain contributes only inside its radius; visit its small pixel box once.
+    var coverage: float[] = fill(size * size, 0.0)^
+    var grain = 0
+    while (grain < count) {
+        let d = dots[grain]
+        let x0 = max(0, int(floor(d[0] - d[2] - 0.5))^)
+        let x1 = min(size - 1, int(ceil(d[0] + d[2] - 0.5))^)
+        let y0 = max(0, int(floor(d[1] - d[2] - 0.5))^)
+        let y1 = min(size - 1, int(ceil(d[1] + d[2] - 0.5))^)
+        var y = y0
+        while (y <= y1) {
+            let dy = (float(y) + 0.5 - d[1]) ** 2
+            var x = x0
+            while (x <= x1) {
+                let i = y * size + x
+                let value = unit(1.0 - math.sqrt((float(x) + 0.5 - d[0]) ** 2 + dy) / d[2])
+                coverage[i] = max(coverage[i], value)
+                x = x + 1
+            }
+            y = y + 1
+        }
+        grain = grain + 1
+    }
+    reshape(coverage, [size, size])
 }
 
 // tip(kind, options) -> an (h, w) coverage plane in [0, 1] for a brush's `tip`. Kinds: 'chalk'

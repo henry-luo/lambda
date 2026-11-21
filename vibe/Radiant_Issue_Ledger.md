@@ -20,6 +20,24 @@ observations still require re-verification. Add new Radiant issues here.
 
 ## Open issues
 
+<a id="ri-196"></a>
+
+### RI-196 — Interactive Scene3D View cases exceed the parallel debug budget
+
+**Open, 2026-11-22.** Run the existing Radiant View baseline with the
+`debug_native` executable and its normal nine-worker batch. The target is
+under five seconds per case and under 38.3 seconds for the batch.
+Collection spends most of its time loading, laying out and painting linked
+documents. Midtown spends time building the cold document, drawing the
+first frame and processing drive frames. Hamster spends most of its time
+in live edits and frames. Meadow meets the case budget after retaining
+seed-owned geometry.
+
+The engine retains native resources and updates the requested frame under
+**D5.5.2** and **D10.1.7**. The remaining timing gap affects the performance
+target. The replay checks and timing artifacts are recorded in the
+[UI tuning checkpoint](impl/Radiant_Impl_UI_Test_Tuning.md#current-checkpoint).
+
 <a id="ri-195"></a>
 
 ### RI-195 — FIXED

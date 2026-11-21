@@ -4,7 +4,7 @@ import data: .mod_data
 import model: .mod_model
 import assets: .mod_assets
 
-pub fn node(owner,id) => dom.query_selector(owner,"#" ++ id)
+pub let node = scene_dom.node
 
 fn vector(values) => join([for (v in values) string(v)]," ")
 

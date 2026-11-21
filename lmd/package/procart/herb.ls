@@ -34,7 +34,9 @@ fn pad() element^ {
     s.geometry([for (p in points) *p],{id:"herb-pad",normals:[for (p in points) *[0.0,1.0,0.0]],
         uvs:[for (p in points) *[0.5+0.5*p[0],0.5+0.5*p[2]]],indices:[for (i in 1 to segments) *[0,i+1,i]]})
 }
-pub fn resources() array => [s.sphere(8,12,{id:"herb-round"}),petal(),pad()]
+// every specimen shares the same immutable organ geometry.
+let PROTOTYPES = [s.sphere(8,12,{id:"herb-round"}),petal(),pad()]
+pub fn resources() array => PROTOTYPES
 fn piece(shape,position,scale,color,role,rotation=[0.0,0.0,0.0]) map^ =>
     {shape:shape,geometry:shape,matrix:t.matrix(position,rotation,scale)^,color:color,role:role}
 fn oval(position,radii,color,role,rotation=[0.0,0.0,0.0]) map^ => piece("herb-round",position,radii*2.0,color,role,rotation)
