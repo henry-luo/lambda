@@ -6724,6 +6724,35 @@ TEST_F(Scene3dTest, AnimationReconciliationResumesTheAutomaticDriverAfterSourceR
     EXPECT_FALSE(clock.faulted);
 }
 
+// a scene first rendered as a still must start its clock when an edit adds an autoplay clip, but a seek keeps
+// manual control over clips added later
+TEST_F(Scene3dTest, AnimationReconciliationLetsAddedAutoplayClipsClaimTheClockUntilTheHostSeeks) {
+    auto* plane = mesh();
+    attr(plane, "id", "late");
+    auto* state = scene3d_prepare_animations(root);
+    ASSERT_NE(state, nullptr);
+    auto* track = layer_track("late-motion", "late.position", "0 0 0 2 0 0");
+    attr(track->parent->as_element(), "autoplay", "true");
+    ASSERT_EQ(scene3d_prepare_animations(root), state);
+    ASSERT_NE(doc.state, nullptr);
+    auto* scheduler = doc.state->animation_scheduler;
+    ASSERT_NE(scheduler, nullptr);
+    EXPECT_EQ(scheduler->count, 1);
+    animation_scheduler_tick(scheduler, .2, nullptr);
+    animation_scheduler_tick(scheduler, .4, nullptr);
+    ASSERT_NE(scene3d_animation_action(state, "late-motion"), nullptr);
+    EXPECT_GT(scene3d_animation_action(state, "late-motion")->time, 0);
+    ASSERT_TRUE(scene3d_animation_seek(state, .1));
+    auto* later = layer_track("later-motion", "late.scale", "1 1 1 2 2 2");
+    attr(later->parent->as_element(), "autoplay", "true");
+    ASSERT_EQ(scene3d_prepare_animations(root), state);
+    double held = scene3d_animation_action(state, "late-motion")->time;
+    animation_scheduler_tick(scheduler, .6, nullptr);
+    animation_scheduler_tick(scheduler, .8, nullptr);
+    EXPECT_DOUBLE_EQ(scene3d_animation_action(state, "late-motion")->time, held);
+    EXPECT_DOUBLE_EQ(scene3d_animation_action(state, "later-motion")->time, 0);
+}
+
 TEST_F(Scene3dTest, AnimationReconciliationResetsOnlyNewOrIncompatibleClips) {
     auto* a = mesh();
     attr(a, "id", "a");

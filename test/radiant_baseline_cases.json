@@ -523,6 +523,7 @@
     "UIAutomation/UIAutomationTest.RunTest/js_load_commonjs_umd_global",
     "UIAutomation/UIAutomationTest.RunTest/lambda_continuous_events",
     "UIAutomation/UIAutomationTest.RunTest/lambda_equal_render",
+    "UIAutomation/UIAutomationTest.RunTest/layout_flex_grid_item_scroll",
     "UIAutomation/UIAutomationTest.RunTest/layout_grid_fr_scroll",
     "UIAutomation/UIAutomationTest.RunTest/media_owner",
     "UIAutomation/UIAutomationTest.RunTest/multicol_nested_paragraph_fragmentation",

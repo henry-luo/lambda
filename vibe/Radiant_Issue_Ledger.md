@@ -20,6 +20,47 @@ observations still require re-verification. Add new Radiant issues here.
 
 ## Open issues
 
+<a id="ri-194"></a>
+
+### RI-194 — FIXED
+
+A flex item that is a grid (or any container whose `content_height` stops at its
+own flow cursor) keeps its descendants in its scroll range, so the wheel scrolls
+it. See the [flex scroll-range repair](<Radiant_Issue_Ledger (fixed).md#ri-194>).
+
+<a id="ri-193"></a>
+
+### RI-193 — FIXED
+
+In a definite grid container, an auto row no longer grows to a scroll
+container item's content height, so `overflow: auto` grid items scroll as in
+Chromium. See the
+[minimum-contribution repair](<Radiant_Issue_Ledger (fixed).md#ri-193>).
+
+<a id="ri-192"></a>
+
+### RI-192 — Two Scene3dTest units in one process crash the scene3d unit binary
+
+**Open, 2026-11-21.** `test/test_scene3d_unit_gtest.exe` exits with SIGSEGV
+(139) when any two `Scene3dTest` cases run in one process. Examples are
+`ParticlesMotionLifetimeCurvesAndNearZeroDragMatchAnalyticalControls` followed by
+`ParticlesCpuBillboardsFaceRotatedCamerasWithoutAdvancingMotion`, and the two
+`AnimationNumericStream*` cases. Each case passes alone. The crash reproduces
+without the RI-180 repair, so it predates it. The cause is unconfirmed:
+suspected fixture teardown or shared native state between cases. It does not
+block Lambda work. Workaround: run each case in its own process with
+`--gtest_filter`. RI-191 was verified that way (87 animation, motion and clip
+cases).
+
+<a id="ri-191"></a>
+
+### RI-191 — FIXED
+
+Autoplay clips and motion controllers that an edit adds to a scene first
+rendered without clips now claim the host clock. A seek or an explicit host
+command still keeps manual control. See the
+[clock-claim repair](<Radiant_Issue_Ledger (fixed).md#ri-191>).
+
 <a id="ri-190"></a>
 
 ### RI-190 — FIXED
