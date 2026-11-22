@@ -3842,6 +3842,57 @@ TEST(DomViewCopyTest, RepeatedMarkupOwnsLinksAndBackingAcrossRebuilds) {
     pool_destroy(pool);
 }
 
+TEST(DomViewCopyTest, NumericAttributesAreReleasedWithTheirPresentationOccurrence) {
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+    Input* input = Input::create(pool, nullptr);
+    ASSERT_NE(input, nullptr);
+    input->ui_mode = true;
+    DomDocument doc;
+    ASSERT_TRUE(doc.init(input));
+    MarkBuilder builder(input);
+    // Nested ordinary arrays and a typed array both appear in model attributes.
+    double samples[] = {1.0 / 7.0, -3.0};
+    int64_t shape[] = {2};
+    Item typed = builder.createNumericArray(ELEM_FLOAT64, 1, shape, samples);
+    Item payload = builder.array().append(typed).append(builder.array().append(2.5).final()).final();
+    Item source = builder.element("geometry").attr("positions", payload).final();
+    Item tree = builder.element("section").child(source).final();
+    DomElement* root = build_dom_tree_from_element(tree.element, &doc, nullptr);
+    ASSERT_NE(root, nullptr);
+    doc.root = lam::up(root);
+    DomElement* first = root->first_child->as_element();
+    ASSERT_NE(first->occurrence_source, nullptr);
+    Arena* original = first->occurrence_source->numeric_attributes;
+    ASSERT_NE(original, nullptr);
+    auto copied = ElementReader(dom_element_to_element(first)).get_attr("positions").asArray();
+    ASSERT_EQ(copied.length(), 2);
+    EXPECT_TRUE(arena_owns(original, copied.get(0).item().array_num));
+    EXPECT_NE(copied.get(0).item().array_num, typed.array_num);
+    EXPECT_EQ(static_cast<double*>(copied.get(0).item().array_num->data)[0], samples[0]);
+    EXPECT_EQ(copied.get(1).asArray().get(0).item().get_double(), 2.5);
+
+    // Rebinding or pinning a node can keep it readable across replacement.
+    dom_node_set_backing_source(&doc, first, dom_element_to_element(first));
+    EXPECT_EQ(first->occurrence_source->numeric_attributes, original);
+    dom_node_retain_live(first);
+    DomElement* second = build_dom_tree_from_element_detached(source.element, &doc, root);
+    ASSERT_NE(second, nullptr);
+    ASSERT_TRUE(dom_node_replace_in_parent(root, first, second));
+    EXPECT_EQ(dom_retire_sweep(&doc), 0u);
+    EXPECT_EQ(static_cast<double*>(copied.get(0).item().array_num->data)[0], samples[0]);
+    dom_node_release_live(first);
+    EXPECT_EQ(dom_retire_sweep(&doc), 1u);
+    // The only registered payload now belongs to the new occurrence.
+    ASSERT_NE(doc.resources, nullptr);
+    EXPECT_EQ(doc.resources->next, nullptr);
+    EXPECT_EQ(doc.resources->data.get(), reinterpret_cast<DomDocumentResourceData*>(
+        second->occurrence_source->numeric_attributes));
+    EXPECT_EQ(static_cast<double*>(typed.array_num->data)[0], samples[0]);
+    doc.destroy();
+    pool_destroy(pool);
+}
+
 TEST(DomAttributeValueTest, RepeatedValuesReuseInputStorageAndPreserveSnapshots) {
     Pool* pool = pool_create();
     ASSERT_NE(pool, nullptr);

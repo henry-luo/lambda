@@ -15,6 +15,22 @@ Resolved records are in the [fixed issue ledger](<Lib_Input_Issue_Ledger (fixed)
 
 ## Open issues
 
+<a id="li-098"></a>
+
+### LI-098 — Reactive DOM replacements retain numeric attribute copies
+
+**Fix in verification, 2026-11-22.** Replacing a view occurrence repeatedly
+left copied numeric arrays in the document's Input arena after node
+retirement. Homer reproduced the growth by toggling Grid on Harbour village.
+An earlier macOS hang report recorded a 43.28 GB footprint while the process
+copied a replacement subtree. A renderer-free replay with a 500,001-value
+attribute reproduced the retention.
+
+The Input owner now puts numeric array copies in an occurrence-owned arena
+and releases the arena when the node retires or its document closes
+(D5.1.4, D5.5.1–D5.5.3). This blocks reliable long Homer sessions. Build and
+replay evidence is under `temp/homer-kill/`.
+
 <a id="li-097"></a>
 
 ### LI-097 — FIXED
