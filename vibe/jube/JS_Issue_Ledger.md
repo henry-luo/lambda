@@ -555,6 +555,26 @@ before/current captures. RI-166/RI-167/RI-168 separately repair native CSS defec
 and restore the cookie panel in its frozen source.
 
 
+### JS10-L2 — Missing PluralRules aborts Shopify localization — **FEATURE GAP**
+
+**2026-11-22.** Shared JavaScript behavior follows **D8.4.4**. The Intl
+namespace in js_runtime.cpp has no PluralRules constructor. Shopify's admitted
+shell-vendor module checks Intl.PluralRules during i18next initialization.
+Its configured logger in shell-CEw6rNTy.js throws Error for the compatibility
+warning, so hydration reaches the application error boundary. The first fatal
+construction is traced to that logger and the plural resolver check; later
+React stack probes produce many unrelated, caught TypeErrors.
+
+The exact reduced check reports pluralRules=undefined and threw=true in the
+qualified release, versus function and false in Chromium. A diagnostic with
+author scripts skipped renders the full SSR storefront; normal admission
+reproduces the error screen. That control is evidence, never a product fix.
+Implementing locale-aware plural selection is outside this existing-bug round.
+No fake constructor, site-specific fallback, disabled script or budget change
+is introduced. Shopify remains high. Evidence: temp/online-visual-round159/
+shopify-source-debug2-output.log and shopify-traces.json; round160/
+plural-rules.html, plural-rules-native-output.log and plural-browser-result.json.
+
 ### JS10 known issues
 
 1. **Catalog indexes are fixed-capacity construction structures.** Owner/property and ID lookups use bounded open-addressed indexes built from the catalog. They are absent from ordinary property reads, but realm construction should still profile collision and startup cost as the catalog grows.
@@ -594,6 +614,333 @@ and restore the cookie panel in its frozen source.
 9. **The NULL-buffer `.buffer` synthesis path is vestigial.** `js_typed_array_new` now always allocates and wraps a backing `JsArrayBuffer` eagerly (`:2100`), so the exotic-gate fallback that lazily synthesizes a buffer for a `ta->buffer == NULL` array (`js_runtime.cpp:3283`) should be unreachable for engine-constructed arrays; it survives as a guard for exotic construction paths and could be demoted to an assert.
 
 ## 13. Web Platform: DOM, CSSOM, Events & Fetch (JS13)
+
+<a id="js13-l54"></a>
+
+### JS13-L54 — Adjacent HTML insertion bypasses stylesheet and mutation publication — **FIXED FOR QUALIFIED HTML INSERTION**
+
+**2026-11-22.** Shared DOM mutation follows **D8.4.4 / D9.5.6v2** and precise
+ownership follows **D6.3.3**. Empathy679 and Mode173 execute CookieYes, which
+sanitizes CSS through DOMParser and inserts it with insertAdjacentHTML.
+The native implementation only rewired DOM sibling links. It bypassed Mark
+backing edits, stylesheet registration, observers and custom-element reactions.
+Consent content therefore appeared as unstyled page columns or filled the
+viewport instead of forming the authored overlay. A local style roundtrip
+reproduces the missing stylesheet and unchanged pixels.
+
+The method now uses the existing backed insertion transaction and shared
+fragment context selection. DOMString conversion, exception propagation,
+undefined return, and detached/Document-parent errors have focused controls.
+Legacy inserted scripts stay inert. Parent, reference, markup and fragment
+remain precisely rooted across parsing and callbacks. The fragment transaction
+also reported its parent as the added node; it now snapshots the actual
+inserted sequence for the aggregate child-list record.
+
+The existing observer snapshot helper is promoted and shared with fragment
+insertion and replaceChildren. Its native walk never requires a JavaScript
+iterator. An intermediate Array.from implementation passed JavaScript checks
+but regressed the Lambda-only fragment-insertion golden; it was never installed.
+Frozen167 passes that golden and the final native snapshot restores it.
+
+Six AST, six MIR and six Chromium groups qualify insertion positions,
+stylesheet activation, context/ownership, inert scripts, coercion, observers,
+custom-element lifecycle and GC reentry. The prior renderer fails four groups;
+the corrected stylesheet reduction independently fails before repair. Ten
+Range/stylesheet regressions and eight existing/new DOM and Lambda goldens
+pass. The 630 baseline-js layout cases pass. The broader layout suite reports
+3844 passes and eight failures; all eight reproduce on frozen167 with identical
+element pass rates. No references or expected results were changed.
+
+Fresh native Empathy and Mode captures restore consent layout and main page
+regions. Both retain major media omissions, and Mode's navigation remains
+unstyled, so neither receives a whole-page clearance. Empathy's source contains
+a GIF placeholder with the real primary image in noscript; client hydration
+is deferred by the current admission policy. No noscript image activation,
+source/transport budget, capture clock or vendor workaround is introduced.
+XML parsing, Trusted Types, source-fragment removal record details and complete
+DOM/IDL conformance remain unqualified.
+
+Evidence: temp/online-visual-round168/html-insertion-before.log,
+insertion-stylesheet-before-corrected.log, focused-native-snapshot.log,
+baseline-js-qualified.json, baseline-layout.json, baseline-old-structured.json
+and fresh browser/final capture directories. Rules follow
+[HTML adjacent insertion](https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#the-insertadjacenthtml()-method).
+
+<a id="js13-l53"></a>
+
+### JS13-L53 — Range contextual fragment parsing is absent — **FIXED FOR HTML AND SVG CONTEXTS**
+
+**2026-11-22.** Shared DOM behavior follows **D8.4.4 / D9.5.6v2**;
+temporary ownership follows **D6.3.3**. OneTrust's admitted diagnostic source
+calls createRange().createContextualFragment(), which had no native binding.
+The relationship to Aircall's missing main application is unconfirmed.
+
+The Range method now validates its receiver before DOMString conversion,
+then reads the live start boundary. Element contexts, Text/Comment parents,
+body fallback, SVG integration and foreign HTML document ownership use the
+existing fragment parser. The returned fragment and source stay precisely
+rooted across construction. A shared script mode permits execution on later
+insertion while preserving innerHTML's inert-script behavior. The DOM catalog
+row appends without moving existing slots (**D9.5.4**); Lambda and JavaScript
+reach the same body. XML parsing explicitly reports NotSupportedError;
+Trusted Types, MathML and complete Range WPT conformance remain unqualified.
+
+Six native AST, six MIR and six Chromium groups pass, covering context,
+ownership, range preservation, required arguments, coercion exceptions and
+script insertion/reinsertion. All six fail on frozen166. The Range-only
+candidate exposed a shared HTML parser defect, fixed separately as LI-101.
+Five nearby DOM golden scripts and the new Lambda-only contextual-fragment
+golden pass. Evidence: temp/online-visual-round167/range-before.log,
+range-ast-final.log, range-mir.log, range-browser.log, nearby-results.json and
+input-html.log. Rules follow [HTML contextual fragments](https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#dom-range-createcontextualfragment).
+
+No capture timing, source/transport budget or vendor change. No whole-page
+visual clearance is claimed. Fresh InfluxData capture still hides its server
+markup until the 277181-byte main module runs; that module exceeds the current
+admission policy. NVD's 2691323-byte application module is likewise deferred.
+These observations do not establish additional native API bugs.
+
+<a id="js13-l52"></a>
+
+### JS13-L52 — Message delivery loses undefined payloads — **FIXED FOR QUALIFIED DELIVERY**
+
+**2026-11-22.** Shared JavaScript behavior follows **D8.4.4 / D9.5.6v2**;
+precise temporary ownership follows **D6.3.3**. The MessagePort dequeue helper
+used undefined for both an empty queue and a valid queued payload. Async
+message delivery and Node receiveMessageOnPort therefore discarded valid
+messages. Owner, queue, removed payload and replacement queue also remained
+unrooted across queue-rebuilding allocations.
+
+The shared helper now reports presence separately from data and roots all
+live values, including the current copied entry. Both callers honor that
+presence result and propagate errors. A second cause affected transport
+MessageEvents: the generated data passed through MessageEventInit conversion,
+which changed undefined to the constructor's default null. The shared
+construction path now accepts the transport's rooted raw data; public
+constructor and initMessageEvent dictionary/argument defaults are retained.
+This follows [HTML MessageEvent](https://html.spec.whatwg.org/multipage/comms.html#the-messageevent-interface).
+
+Three MessagePort controls fail on the prior renderer (property handler,
+EventTarget listener and reentrant GC/FIFO delivery), as does a Window message
+control. The queue-only candidate exposes the second cause by delivering null
+instead of undefined and was never installed. All four final controls pass in
+native AST, MIR and Chromium, including unchanged public constructor defaults,
+false/zero/empty/null values, nested object data after collection and Window
+source identity. Four existing Node golden scripts pass in AST; the lifecycle
+script also passes in MIR. Its new own-message-property envelope check fails
+before repair. Evidence: temp/online-visual-round166/message-before.log,
+window-before.log, property-diagnostic.log, node-lifecycle-before.log,
+ast-message-final.log, mir-message-final.log, message-browser-final.log and
+focused-results-final.json.
+
+No source budget, capture clock, timer policy, private ABI or vendor change.
+Aircall's diagnostic page failure is not established as caused by this bug;
+no whole-page visual clearance is claimed. Full MessagePort/structured-clone
+and MessageEvent IDL conformance remain unqualified.
+
+<a id="js13-l51"></a>
+
+### JS13-L51 — ShadowRoot stylesheet adoption is absent — **FEATURE GAP**
+
+**2026-11-22.** CSSOM and native ownership meet through **D9.5.6v2 / D6.3.3**;
+input and rendering retain their owners under **D9.1.1v4 / D9.1.3v2**. Ebury's
+current admitted Webflow bundle executes a custom-element reaction that reads
+`this.shadowRoot.adoptedStyleSheets.filter(...)`. The native ShadowRoot surface
+has no adoptedStyleSheets property or stylesheet-adopter ownership path. The
+reaction throws TypeError. CSSStyleSheet construction and ShadowRoot.styleSheets
+exist, but neither supplies adoption or shared-sheet cascade invalidation.
+
+A bounded release trace identifies the call at bytes 448833..448884 in the
+page's ebury-staging1 bundle. A separate module 108.js (380005 bytes) and the
+consent/personalization bundles are skipped by the current source policy, so
+this exception is not established as the sole cause of the entirely white
+page. No empty-array shim, injected style element or source-limit increase is
+used. General stylesheet adoption needs its list mutation contract, ownership,
+multiple adopters and cascade invalidation; it is deferred under the online
+review's instruction to avoid major new features. Ebury remains high.
+Evidence: temp/online-visual-round165/ebury-traces.json,
+live/saas_landing_522/after/ and ebury-debug-output.log.
+
+<a id="js13-l50"></a>
+
+### JS13-L50 — Document URL fields are mistaken for shadow hosts — **FIXED FOR COMPONENT LOOKUP**
+
+**2026-11-22.** Interface ownership follows **D8.4.4 / D9.5.6v2**. Archive's
+router walks `getRootNode()` and recurses through `root.host` until reaching a
+Document. The declared Document interface and native public getter exposed
+Location's nine URL fields, so Document.host returned a string. The router
+then called getRootNode on that string. A native trace and a source-root
+reduction confirm this cause; it does not require a new Shadow DOM feature.
+
+The nine fields are removed from Document's declared interface and public
+getter. Location reads its private owning document's native URL through the
+existing component table. Its stringifier uses the same private read. Main,
+parsed and detached documents no longer expose those fields, and a Document
+host expando has normal assignment, descriptor and deletion behavior. Existing
+legacy Document navigation-method and stringifier aliases, component writes,
+and complete Document/Location conformance remain unqualified.
+
+All 26 focused native EventTarget/interface and URL groups pass, including
+three new ownership, expando and shadow-host traversal groups. Those three
+also pass in MIR and Chromium 148 and fail on the prior frozen renderer.
+Archive's custom-element reaction error disappears. Its current image remains
+missing application regions, so no visual clearance or improvement is claimed.
+Evidence: temp/online-visual-round163/document-ownership-before.log,
+root-host-before.log, archive-root3-output.log; temp/online-visual-round164/
+native-focused.log, mir-focused.log, document-browser.log and
+live/archive_org/after/. The full inventory remains 109 high.
+
+<a id="js13-l49"></a>
+
+### JS13-L49 — URL pathname writes leave serialized private state stale — **FIXED FOR PATHNAME WRITES**
+
+**2026-11-22.** Shared JS behavior follows **D8.4.4 / D9.5.6v2** and precise
+ownership follows **D6.3.3**. The global URL setter updated only its pathname
+array entry. href and stringification retained the old path. Archive's Web
+Components feature probe therefore rejected the native URL and selected a
+failing fallback constructor.
+
+Pathname writes now use the same rooted private-record replacement path as
+href/search. Input's coherent pathname setter supplies encoding and shared
+path normalization (LI-100). Query/fragment values and the live searchParams
+object survive. Conversion reentry, collection, throwing conversion, frozen
+owners, public shadows and opaque-path no-ops have focused coverage. Other
+URL component setters and full URL/IDL conformance remain unqualified.
+
+Five new native groups fail before repair. All 16 URL render groups and five
+additional MIR groups pass. Chromium 148 passes four complete new groups and
+all 16 HTTP encoding/authority assertions in the fifth. Its Windows file-URL
+control differs: /D|/a/../b becomes file:///D%7C/b, while native Input and Node
+produce file:///D:/b. That reference control stays red and is not treated as
+qualified browser interoperability. No assertion or browser API is weakened.
+The 630-case JS layout baseline passes once at this milestone. Archive's old
+URL fallback failure is gone, but the current frame loses regions visible in
+the earlier partial-startup frame. The page stays high; captures are retained
+as diagnostic evidence, not imported as a clearance. Evidence:
+temp/online-visual-round163/pathname-before-qualified.log,
+input-pathname-before.log, final-url-focused.log, final-pathname-mir.log,
+pathname-browser-final-trace.log, baseline-js.log and archive-final-traces.json.
+[URL pathname setter](https://url.spec.whatwg.org/#dom-url-pathname) ·
+[Path encoding](https://url.spec.whatwg.org/#path-percent-encode-set)
+
+<a id="js13-l48"></a>
+
+### JS13-L48 — DOM interface constructors lose their inheritance chain — **FIXED**
+
+**2026-11-22.** Shared behavior follows **D8.4.4 / D9.5.6v2**, with precise
+temporary ownership under **D6.3.3**. The shared interface-linking helper
+connected instance prototypes but omitted constructor objects. Node had a
+separate special case, while Text, Comment, Document, HTML and SVG subclasses
+failed constructor-parent checks and could not inherit Node.ELEMENT_NODE.
+
+The helper now roots both constructors and prototypes and links both chains.
+Node uses that same path instead of its duplicate special case. Ten
+representative constructor pairs and their inherited constants fail before
+repair. All seven focused EventTarget/interface groups, three additional MIR
+groups and three Chromium groups pass afterward. Evidence:
+temp/online-visual-round162/constructor-chain-before.log, final-focused.log,
+final-mir.log and constructor-chain-browser.log. No runtime-state layout or
+capture-policy change.
+
+<a id="js13-l47"></a>
+
+### JS13-L47 — Character-data interfaces are absent from Window — **FIXED FOR INTERFACE LOOKUP**
+
+**2026-11-22.** Interface exposure belongs to **D9.5.6v2** and the shared
+JavaScript contract **D8.4.4**. Archive's admitted Web Components polyfill
+traverses Text, Comment, CDATASection and ProcessingInstruction prototypes.
+The last two globals were absent, so setup threw before installing its DOM
+patches. The existing interface table now publishes CDATASection under Text
+and ProcessingInstruction under CharacterData, using the existing distinct
+interface constructors. These parent links and Window exposure follow
+[DOM §4.12–4.13](https://dom.spec.whatwg.org/#interface-cdatasection).
+
+The qualified Chromium 148 profile rejects direct construction even with
+arguments; the shared illegal-constructor body retains that behavior. This
+repair does not qualify XML node factories or the newer ProcessingInstruction
+construction/attribute API in the current DOM standard. It introduces no
+Shadow DOM implementation or vendor patch.
+
+Both interface-lookup and exact prototype-traversal controls fail before
+repair and pass in native, MIR and Chromium. Archive's polyfill exception
+disappears, and its current native frame restores the gray search region and
+main body content. Header branding and other startup differences remain;
+the page stays high and its canonical pair is preserved. Evidence:
+temp/online-visual-round162/character-data-before.log, browser controls,
+archive-final-traces.json and live/archive_org/after/.
+
+<a id="js13-l46"></a>
+
+### JS13-L46 — Collection bindings mask ordinary HTML element fields — **FIXED**
+
+**2026-11-22.** Native interface ownership follows **D9.5.6v2** and the
+shared JavaScript property contract **D8.4.4**. No ruling changes.
+
+Maple's small, admitted collapsible module saves a button in this.toggle.
+Its initialization then receives a native function instead of that button
+and throws while adding the click listener. The same failure reproduces with
+the original component body in isolation. The generic html_element interface
+incorrectly declares item, toggle and replace as native methods. These
+immutable virtual members mask author fields, descriptors and deletion.
+The token operations already belong to the separate
+[DOMTokenList interface](https://dom.spec.whatwg.org/#interface-domtokenlist).
+HTMLSelectElement also needs its own item method, scoped to selects.
+
+The three misplaced declarations and bindings are removed together. The
+existing token-list implementations, collection item methods and element
+expando machinery are retained. Select.item now delegates to its live options
+collection; the former generic binding returned the wrong result even on
+selects. A focused control covers both select.item(0) and select.options.item(0). No per-page exception, prototype fork,
+resource-limit or capture-timing change is introduced.
+
+Three shared cases cover assignment, explicit descriptors and custom-element
+class fields, including stored-button use, null assignment and deletion.
+All fail before repair and pass afterward on AST, MIR and Chromium. Their
+token-list and collection controls retain their behavior. Five related
+EventTarget controls also pass. The original component changes from init=false
+with an exception to init=true. The current full page has zero custom-element
+errors, but its large consent panel remains absent; the fresh matched pair
+stays high at 26.31% mean error / 41.14% changed area. No page clearance is
+claimed. The previous round's 630-case baseline is not repeated for this
+incremental interface correction.
+
+Evidence: `test/online/dom_expando_collisions_fixtures.cjs`,
+`temp/online-visual-round158/{expando-before.log,final-focused.log,
+final-mir.log,browser-preparation-results.json}`, the original-body
+`component-{before,after}-output.log`, and `live/saas_landing_082/`.
+
+<a id="js13-l45"></a>
+
+### JS13-L45 — Module source entry drains its enclosing callback's timers — **FIXED**
+
+**2026-11-22.** Callback ownership follows **D6.4.1 / D6.4.4** and the
+shared JavaScript contract **D8.4.4**. No ruling changes.
+
+A dynamically appended external module entered the standalone source-turn
+drain while its dispatch timer was still running. A reduced after-load module
+fired its 100ms timer before its script load event. A second reduction appends
+another module; the nested drain selects the still-active first script task
+again and frees it twice. Both that reduction and the live Wine Investment
+page abort in dynamic_script_dispatch on the previous executable. The earlier
+round156 release also faults while closing the active timer.
+
+The shared source-entry boundary now leaves timer/frame progression to the
+enclosing callback's host task and retains its microtask checkpoint. It uses
+the existing context-owned callback_running state, common to AST and MIR;
+independent script tasks remain asynchronous. No source cap, settling window,
+vendor code or task-queue serialization is changed. This preserves the
+[HTML task processing model](https://html.spec.whatwg.org/multipage/webappapis.html#event-loop-processing-model).
+
+The focused suite passes 38 dynamic-script controls, including the three new
+timer/chain cases; those three also pass on MIR and Chromium. Twenty related
+request-timing and parser-preparation controls pass. The JavaScript layout
+baseline passes 630/630 once at this milestone. Wine now captures without
+a crash and executes its admitted application modules. Its missing regional
+dialog remains a major difference; no page clearance is claimed.
+Evidence: `test/online/dynamic_script_fixtures.cjs`,
+`temp/online-visual-round157/{late-timer-before.log,late-chain-before.log,
+dynamic-focused.log,module-mir.log,module-browser.log,related-focused.log}`
+and `wine-{before,after}-output.log`.
 
 <a id="js13-l44"></a>
 
@@ -1823,8 +2170,9 @@ through the shared DOM root provider (Input LI-081). Root flags, closed
 access, matching-mode imperative hydration, cloning and opt-in HTML
 serialization have focused checks. The pinned attachment, basic and repeat
 fixtures pass all 674 subtests. Closed manual declarative assignment through
-`ElementInternals`, `Range.createContextualFragment()`, and streaming parser
-behavior remain open (**D9.1.1v4 / D9.1.3v2 / D6.3.3**).
+`ElementInternals` and streaming parser behavior remain open
+(**D9.1.1v4 / D9.1.3v2 / D6.3.3**). HTML/SVG contextual fragments now have
+focused qualification under JS13-L53; full parser conformance remains open.
 
 Focus survives native reflow through connected shadow hosts. The document's
 `activeElement` reports the outer host, and each root's `activeElement` reports
@@ -1858,6 +2206,31 @@ the normal resource cache. This does not establish Shadow DOM as the cause of
 every remaining blank page or of that site's remaining theme mismatch.
 
 ### JS13-L1 — snapshot script admission can leave the whole document hidden — **OPEN**
+
+Round172 (2026-11-22) rechecks two older media omissions with the qualified
+RI-204 renderer and the existing 1000ms frame. FigJam still lacks its large
+product media; eight settled tasks are skipped as large, including the
+1,094,814-byte chunk. Frame's customers page still lacks its image montage;
+ten settled tasks are skipped as large, including a 502,945-byte chunk.
+Neither attempt reports a task exception. The improved FigJam brand alone
+does not clear the page. NVD also retains its already recorded 2,691,323-byte
+main-module admission barrier. These are current admission observations,
+not proof that admitting the full apps would qualify their remaining behavior.
+No cap, visibility, canonical pair or browser reference changes. Evidence:
+`temp/online-visual-round172/admission-summary.json` and `review/live/`
+(**D8.4.4 / D10.1.7**).
+
+Round165 (2026-11-22) checks Aircall with only the pre-layout source limit
+disabled as a diagnostic. The release AST executes the 629523-byte GTM,
+585747-byte OneTrust and 514534-byte gtag sources; the consent panel appears,
+but the normal header/hero disappears. The native layout contains the consent
+panel and no normal application content; its backdrop is display:none. This
+is not a qualified policy change. All shipping admission limits remain intact.
+The separate MessagePort/transport-data defects found during this investigation
+are fixed under JS13-L52 without claiming they caused that page failure.
+Evidence: temp/online-visual-round165/admission-diagnostic/,
+aircall-admission-contact.png and aircall-diagnostic-layout-summary.json.
+
 
 Round146 (2026-11-21), using the qualified RI-184 renderer and the unchanged
 1000ms post-load frame, adds three focused observations. Figma pricing skips

@@ -1,4 +1,6 @@
 receive empty: undefined
+receive undefined envelope: true
+receive undefined payload: undefined
 receive first: alpha
 receive second: beta
 receive empty after: undefined

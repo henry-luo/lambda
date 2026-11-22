@@ -27,6 +27,8 @@ void dom_observers_mutation_notify(DomJsMutationKind kind,
 void dom_observers_child_replace_notify(void* parent, void* added,
                                            void* removed);
 void dom_observers_children_replace_notify(void* parent, Item added, Item removed);
+// snapshot native nodes without invoking a script iterator (D9.5.6v2 / D6.3.3).
+Item dom_observers_node_snapshot(void* first, bool siblings);
 void dom_observers_signal_slot_change(DomElement* slot);
 void dom_observers_post_layout(void);
 void dom_observers_release_document(DomDocument* document);

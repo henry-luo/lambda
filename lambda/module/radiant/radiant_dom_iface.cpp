@@ -52,6 +52,7 @@ const char radiant_dom_interface_decl[] =
     "    delete_contents: pn() null,\n"
     "    extract_contents: pn() any,\n"
     "    clone_contents: fn() any,\n"
+    "    create_contextual_fragment: pn(markup: string) any,\n"
     "    insert_node: pn(node: dom_node) null,\n"
     "    surround_contents: pn(node: dom_node) null\n"
     "}\n"
@@ -195,8 +196,7 @@ const char radiant_dom_interface_decl[] =
     "    report_validity: pn() any, set_custom_validity: pn(a0: any) any,\n"
     "    set_selection_range: pn(a0: any, a1: any, a2: any) any,\n"
     "    set_range_text: pn(a0: any, a1: any, a2: any, a3: any) any,\n"
-    "    select: pn() any, item: fn(a0: any) any, toggle: pn(a0: any, a1: any) any,\n"
-    "    replace: pn(a0: any, a1: any) any, attach_shadow: pn(a0: any) any,\n"
+    "    select: pn() any, attach_shadow: pn(a0: any) any,\n"
     "    to_string: fn() any,\n"
     "    __lambda_boundary_from_point: fn(a0: any, a1: any, a2: any) any,\n"
     "    __lambda_text_control_boundary_from_point: fn(a0: any, a1: any) any,\n"
@@ -248,6 +248,7 @@ const char radiant_dom_interface_decl[] =
     "type select_element : html_element {\n"
     "    multiple: bool, size: int, value: string, selected_index: int, length: int,\n"
     "    options: any, selected_options: any, 'type': string,\n"
+    "    item: fn(index: int) any,\n"
     "    named_item: fn(a0: any) any, add: pn(a0: any, a1: any) any, remove: pn(a0: any) any,\n"
     "    show_picker: pn() any\n"
     "}\n"
@@ -285,15 +286,6 @@ const char radiant_dom_interface_decl[] =
     "    title: string,\n"
     "    cookie: string,\n"
     "    url: string,\n"
-    "    href: string,\n"
-    "    protocol: string,\n"
-    "    hostname: string,\n"
-    "    port: string,\n"
-    "    pathname: string,\n"
-    "    search: string,\n"
-    "    hash: string,\n"
-    "    host: string,\n"
-    "    origin: string,\n"
     "    location: any,\n"
     "    document: any,\n"
     "    to_string: fn() string,\n"
@@ -505,6 +497,7 @@ RADIANT_METHOD_0(r_get_bounding_client_rect, range_get_bounding_client_rect)
 RADIANT_METHOD_0(r_delete_contents, range_delete_contents)
 RADIANT_METHOD_0(r_extract_contents, range_extract_contents)
 RADIANT_METHOD_0(r_clone_contents, range_clone_contents)
+RADIANT_METHOD_1(r_create_contextual_fragment, range_create_contextual_fragment)
 RADIANT_METHOD_1(r_insert_node, range_insert_node)
 RADIANT_METHOD_1(r_surround_contents, range_surround_contents)
 
@@ -650,6 +643,7 @@ static const JubeMemberBind radiant_range_members[] = {
     BIND_CALL("delete_contents", r_delete_contents),
     BIND_CALL("extract_contents", r_extract_contents),
     BIND_CALL("clone_contents", r_clone_contents),
+    {"create_contextual_fragment", NULL, NULL, NULL, r_create_contextual_fragment, NULL, JUBE_MEMBER_REQUIRED_ARGS(1)},
     BIND_CALL("insert_node", r_insert_node),
     BIND_CALL("surround_contents", r_surround_contents),
 };
@@ -1030,6 +1024,7 @@ extern "C" int radiant_dom_m4c_selection_direction_set(Item r, Item v, Item* out
 extern "C" int radiant_dom_m4c_get_defaultValue(Item r, Item* out);
 extern "C" int radiant_dom_m4c_default_value_set(Item r, Item v, Item* out);
 extern "C" int radiant_dom_m4c_get_options(Item r, Item* out);
+static int radiant_select_item(Item receiver, Item* args, int argc, Item* out);
 extern "C" int radiant_dom_m4c_get_selectedOptions(Item r, Item* out);
 extern "C" int radiant_dom_m4c_get_type(Item r, Item* out);
 extern "C" int radiant_dom_m4c_get_index(Item r, Item* out);
@@ -1213,6 +1208,7 @@ static const JubeMemberBind radiant_dom_node_members[] = {
 };
 
 static const JubeMemberBind radiant_dom_html_element_members[] = {
+    // collection methods belong to their collection interface, or they mask author fields here.
     // both namespace variants use the same DOM attachment algorithm.
 #define ATTR_ROW(name, js, row, count) \
     {name, js, NULL, NULL, NULL, NULL, JUBE_MEMBER_REQUIRED_ARGS(count - 1), JUBE_DOM_ROW_##row, count}
@@ -1298,9 +1294,6 @@ static const JubeMemberBind radiant_dom_html_element_members[] = {
     BIND_CALL_JS("request_submit", "requestSubmit", radiant_dom_m4d_request_submit),
     BIND_CALL_JS("check_validity", "checkValidity", radiant_dom_m4d_check_validity),
     BIND_CALL("select", radiant_dom_m4d_select),
-    BIND_CALL("item", radiant_dom_m4d_item),
-    BIND_CALL("toggle", radiant_dom_m4d_toggle),
-    BIND_CALL("replace", radiant_dom_m4d_replace),
     BIND_CALL_JS("to_string", "toString", radiant_dom_m4d_to_string),
     BIND_CALL_JS("__lambda_boundary_from_point", "__lambdaBoundaryFromPoint", radiant_dom_m4d___lambda_boundary_from_point),
     BIND_CALL_JS("__lambda_text_control_boundary_from_point", "__lambdaTextControlBoundaryFromPoint", radiant_dom_m4d___lambda_text_control_boundary_from_point),
@@ -1419,6 +1412,7 @@ static const JubeMemberBind radiant_dom_select_element_members[] = {
     BIND_FIELD_SET_JS("selected_index", "selectedIndex", radiant_dom_m4c_get_selectedIndex, radiant_dom_m4c_selected_index_set),
     BIND_FIELD_SET("length", radiant_dom_m4c_get_length, radiant_dom_m4c_length_set),
     BIND_FIELD("options", radiant_dom_m4c_get_options),
+    BIND_CALL("item", radiant_select_item),
     BIND_FIELD_JS("selected_options", "selectedOptions", radiant_dom_m4c_get_selectedOptions),
     BIND_FIELD("type", radiant_dom_m4c_get_type),
     BIND_CALL("remove", radiant_dom_m4d_remove),
@@ -1475,15 +1469,6 @@ RADIANT_DOC_GET_FN(radiant_doc_get_cookie, "cookie")
 RADIANT_DOC_SET_FN(radiant_doc_set_cookie, "cookie")
 RADIANT_DOC_GET_FN(radiant_doc_get_url, "URL")
 RADIANT_DOC_GET_FN(radiant_doc_get_current_script, "currentScript")
-RADIANT_DOC_GET_FN(radiant_doc_get_href, "href")
-RADIANT_DOC_GET_FN(radiant_doc_get_protocol, "protocol")
-RADIANT_DOC_GET_FN(radiant_doc_get_hostname, "hostname")
-RADIANT_DOC_GET_FN(radiant_doc_get_port, "port")
-RADIANT_DOC_GET_FN(radiant_doc_get_pathname, "pathname")
-RADIANT_DOC_GET_FN(radiant_doc_get_search, "search")
-RADIANT_DOC_GET_FN(radiant_doc_get_hash, "hash")
-RADIANT_DOC_GET_FN(radiant_doc_get_host, "host")
-RADIANT_DOC_GET_FN(radiant_doc_get_origin, "origin")
 RADIANT_DOC_GET_FN(radiant_doc_get_location, "location")
 RADIANT_DOC_GET_FN(radiant_doc_get_document, "document")
 RADIANT_DOC_GET_FN(radiant_doc_get_ready_state, "readyState")
@@ -1508,8 +1493,7 @@ RADIANT_DOC_SET_FN(radiant_doc_set_design_mode, "designMode")
 static int radiant_doc_call_to_string(Item receiver, Item* args, int argc, Item* out) {
     (void)args;
     (void)argc;
-    // Location is this document wrapper, so its string form is the URL.
-    return radiant_dom_document_host_get_property(receiver, radiant_dom_doc_key("href"), out);
+    return radiant_dom_document_host_get_property(receiver, radiant_dom_doc_key("URL"), out);
 }
 
 RADIANT_DOC_CALL_FN(radiant_doc_call_assign, RADIANT_DOCUMENT_ASSIGN)
@@ -1584,15 +1568,6 @@ static const JubeMemberBind radiant_document_members[] = {
     DOC_FIELD_SET("title", NULL, radiant_doc_get_title, radiant_doc_set_title),
     {"cookie", NULL, radiant_doc_get_cookie, radiant_doc_set_cookie, NULL, NULL, 0},
     DOC_FIELD("url", "URL", radiant_doc_get_url),
-    DOC_FIELD("href", NULL, radiant_doc_get_href),
-    DOC_FIELD("protocol", NULL, radiant_doc_get_protocol),
-    DOC_FIELD("hostname", NULL, radiant_doc_get_hostname),
-    DOC_FIELD("port", NULL, radiant_doc_get_port),
-    DOC_FIELD("pathname", NULL, radiant_doc_get_pathname),
-    DOC_FIELD("search", NULL, radiant_doc_get_search),
-    DOC_FIELD("hash", NULL, radiant_doc_get_hash),
-    DOC_FIELD("host", NULL, radiant_doc_get_host),
-    DOC_FIELD("origin", NULL, radiant_doc_get_origin),
     DOC_FIELD("location", NULL, radiant_doc_get_location),
     DOC_FIELD("document", NULL, radiant_doc_get_document),
     DOC_METHOD("to_string", "toString", radiant_doc_call_to_string),
@@ -1742,6 +1717,15 @@ static int radiant_collection_item(Item receiver, Item* args, int argc, Item* ou
     int64_t index = argc > 0 ? fn_int64_index(args[0]) : INT64_MIN;
     *out = index == INT64_MIN ? ItemNull : item_at(receiver, index);
     return 1;
+}
+
+static int radiant_select_item(Item receiver, Item* args, int argc, Item* out) {
+    RootFrame roots(1);
+    Item value = ItemNull;
+    // select.item indexes the same live collection as select.options.item.
+    if (!radiant_dom_m4c_get_options(receiver, &value)) return 0;
+    Rooted<Item> options(roots, value);
+    return radiant_collection_item(options.get(), args, argc, out);
 }
 
 static int radiant_collection_named_item(Item receiver, Item* args, int argc, Item* out) {

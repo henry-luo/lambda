@@ -803,15 +803,16 @@ it; neither establishes a native paint/sizing bug.
 
 <a id="online-dynamic-script-preparation"></a>
 
-**Status:** PARTIAL, 2026-11-18. DOM-created inline classic scripts now use the
+**Status:** PARTIAL, 2026-11-22. DOM-created inline classic scripts now use the
 document's evaluator at post-connection. Atomic insertion snapshots candidates
 and checks that each is still in the preparation document when its turn comes.
 Fragment markup stays inert, started script clones retain the started bit,
 and nested classics defer their jobs until the enclosing script checkpoint.
 The standalone probe and same-origin XHR reduction now turn green. Tests cover
-AST and MIR execution. Dynamic classic external scripts and their async/ordered
-scheduling are now implemented; dynamic modules and body parser-arrival replay
-remain open. See the round153 qualification below.
+AST and MIR execution. Dynamic classic and module external scripts and their
+async/ordered scheduling are implemented. Dynamic inline modules and body
+parser-arrival replay remain open. See the round153 and round157 qualifications
+below.
 **Task blocker:** no for independent layout repairs. Host/DOM ownership follows
 **D9.1.3v2**, shared tier contracts **D8.4.4**, and capture timing **D10.1.7**.
 No formal ruling or capture budget changes.
@@ -956,6 +957,28 @@ startup; no limit is raised or whole-page clearance claimed. Evidence:
 Kotlin's remaining transparent sidebar is separately reduced to the
 [network/virtual-clock timing gap](jube/JS_Issue_Ledger.md#js13-l43), rather than
 missing TOC data or geometry (**D8.4.4 / D6.4.4 / D10.1.7**).
+
+**2026-11-22 dynamic external module qualification:** the existing connected
+script preparation path now admits external modules and reuses the module
+evaluator, strict lexical scope, relative imports, import.meta URL and module
+evaluation cache. Dynamic inline modules remain outside this increment.
+Thirteen native module controls cover ordering, removal, connected src,
+failed fetch, runtime throw, imports, repeated URL evaluation, the existing
+source cap and callback timer/chain ordering. Together with 25 classic controls
+they pass 38/38. Three new callback cases also pass on MIR and Chromium; twenty
+related request-timing and parser-preparation controls pass. The JavaScript
+layout baseline passes 630/630 once at this milestone. The nested source
+drain crash exposed during qualification is fixed in
+[JS13-L45](jube/JS_Issue_Ledger.md#js13-l45).
+
+Wine Investment now completes its small modules and captures without the
+previous double free. Its regional dialog is still absent; no visual clearance
+is claimed. NVD's current 2,691,323-byte module and Wine's 548,012-byte tag-manager
+source still exceed the unchanged 128KiB scheduled-source limit. The latter
+observation alone does not establish the dialog's complete dependency graph.
+Evidence: `temp/online-visual-round156/{nvd-main.js,wine-core.js}` and
+`temp/online-visual-round157/`. Ownership and host contracts remain
+**D8.4.4 / D9.5.6v2 / D6.3.3 / D10.1.7**.
 
 **2026-11-20 Aircall follow-up:** its 27,863-byte OneTrust stub executes, receives
 the domain configuration (HTTP 200, 7,140 bytes) and geolocation (HTTP 200,

@@ -72,6 +72,7 @@ Item dom_engine_viewport_size(Item n);
 Item dom_engine_cancel_frame(Item n, Item token);
 Item dom_engine_watch_window(Item n, Item event_name, Item enabled);
 Item dom_engine_history_traverse(Item n, Item delta);
+Item dom_core_location_hash(Item n);
 Item dom_engine_media_info(Item n);
 Item dom_engine_media_command(Item n, Item command, Item value);
 
@@ -441,6 +442,7 @@ Item dom_cssom_stylesheet_rule_at(Item, Item);
 // expanded by the publication trampolines and the arity check, so it must be
 // visible wherever dom_api.def is.
 Item js_range_clone_contents(Item);
+Item dom_range_create_contextual_fragment(Item, Item);
 Item js_range_clone_range(Item);
 Item js_range_compare_boundary_points(Item, Item, Item);
 Item js_range_compare_point(Item, Item, Item);

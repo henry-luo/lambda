@@ -120,7 +120,7 @@ pub pn handle(model, clock, evt) {
         dom.watch_window(host,"popstate",spec.story.bookmarks==true)^
     }
     let initial=reducer.reconcile(spec,if (clock.interaction==null) reducer.initial(spec) else clock.interaction);
-    let fragment=if (spec.story.bookmarks==true) dom.owner_document(evt.target).hash else null;
+    let fragment=if (spec.story.bookmarks==true) dom.location_hash(evt.target) else null;
     let addressed=if (fragment!=null and fragment!=clock.bookmark_fragment)
         reducer.update(initial,{type:"bookmark",fragment:fragment,origin:"bookmark",focus:spec.interaction.focus_on_load==true},
             {normalized_spec:spec,revision:spec.source.revision,now:evt.time_stamp}) else reducer.result(initial);
@@ -177,7 +177,7 @@ pub pn deliver(clock, evt = null) {
     for (effect in c.items(clock.effects)^) {
         if (effect.name=="timeline_bookmark" and evt!=null) {
             let host=events.closest(evt.target,"[data-timeline-host]");
-            if ((host!=null and dom.owner_document(host).hash!=effect.detail.fragment)^) {
+            if ((host!=null and dom.location_hash(host)!=effect.detail.fragment)^) {
                 dom.request_navigation({source:host,url:effect.detail.fragment,target:dom.document_element(host),target_kind:"existing"})
             }
         }

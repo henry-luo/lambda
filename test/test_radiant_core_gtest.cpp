@@ -1139,14 +1139,18 @@ protected:
 
     void TearDown() override {
         // snapshots own cloned expressions, but never own their applied view props.
-        radiant::css_resolved_style_release(target->layout_cache, tree.prop_pool);
-        radiant::intrinsic_height_cache_release(target->layout_cache, tree.prop_pool);
+        release_queries(target);
         scratch_release(&context.scratch);
         arena_destroy(scratch);
         document.view_tree = nullptr;
         document.document_pool = nullptr;
         css_property_system_cleanup();
         RadiantCoreTest::TearDown();
+    }
+
+    void release_queries(DomElement* node) {
+        radiant::intrinsic_height_cache_release(node->layout_cache, tree.prop_pool);
+        radiant::css_resolved_style_release(node->layout_cache, tree.prop_pool);
     }
 
     void set_property(DomElement* element, const char* name, const char* value) {
@@ -1687,6 +1691,55 @@ TEST_F(IncrementalCssTest, HeightQueriesInvalidateEnvironmentAndGenerationButNor
     document.advance_mutation_epoch();
     expect_height_refresh(100.0f, 30.0f);
     context.ui_context = nullptr;
+}
+
+TEST_F(IncrementalCssTest, HeightQueriesRetainUnchangedSubtreesAcrossIncrementalPasses) {
+    document.incremental_layout = true;
+    set_property("display", "block");
+    DomElement* subject = append_intrinsic_child();
+    DomElement* unrelated = append_intrinsic_child();
+    set_property(subject, "display", "block");
+    set_property(subject, "height", "30px");
+    set_property(unrelated, "display", "block");
+    EXPECT_FLOAT_EQ(calculate_max_content_height(&context, subject, 100.0f), 30.0f);
+    uint64_t computations = context.profiler.height_computations;
+    for (const char* size : {"40px", "50px", "60px"}) {
+        set_property(unrelated, "height", size);
+        document.advance_mutation_epoch();
+        advance_measurement_cache_generation(&tree);
+        EXPECT_FLOAT_EQ(calculate_max_content_height(&context, subject, 100.0f), 30.0f);
+        EXPECT_EQ(context.profiler.height_computations, computations);
+    }
+
+    // a source edit and inherited font change must retire the old scalar query.
+    set_property(subject, "height", "45px");
+    advance_measurement_cache_generation(&tree);
+    EXPECT_FLOAT_EQ(calculate_max_content_height(&context, subject, 100.0f), 45.0f);
+    EXPECT_GT(context.profiler.height_computations, computations);
+    set_property(subject, "height", "2em");
+    set_property("font-size", "10px");
+    resolve();
+    EXPECT_FLOAT_EQ(calculate_max_content_height(&context, subject, 100.0f), 20.0f);
+    computations = context.profiler.height_computations;
+    set_property("font-size", "15px");
+    resolve();
+    advance_measurement_cache_generation(&tree);
+    EXPECT_FLOAT_EQ(calculate_max_content_height(&context, subject, 100.0f), 30.0f);
+    EXPECT_GT(context.profiler.height_computations, computations);
+
+    // provisional queries cannot publish a retained result for the next pass.
+    context.css_query_probe = true;
+    set_property(subject, "height", "4em");
+    advance_measurement_cache_generation(&tree);
+    computations = context.profiler.height_computations;
+    EXPECT_FLOAT_EQ(calculate_max_content_height(&context, subject, 100.0f), 60.0f);
+    EXPECT_GT(context.profiler.height_computations, computations);
+    context.css_query_probe = false;
+    advance_measurement_cache_generation(&tree);
+    computations = context.profiler.height_computations;
+    EXPECT_FLOAT_EQ(calculate_max_content_height(&context, subject, 100.0f), 60.0f);
+    EXPECT_GT(context.profiler.height_computations, computations);
+    for (DomElement* node : {subject, unrelated}) release_queries(node);
 }
 
 TEST_F(IncrementalCssTest, HeightQueriesReuseOnlyGeometryIndependentSubtrees) {

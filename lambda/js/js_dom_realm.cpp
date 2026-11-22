@@ -231,7 +231,8 @@ static Item location_component_get(Item callee, Item receiver, Item*, int, uint6
     size_t index = location_member_index(callee);
     JS_ROOTS(roots, document, location_document(receiver));
     if (item_is_error(document.get())) return document.get();
-    return js_get_key_cstr(document.get(), dom_location_component_name(index));
+    // URL components belong to Location, not to public Document properties.
+    return dom_location_get_component(document.get(), index);
 }
 
 static Item location_component_set(Item callee, Item receiver, Item* args, int argc, uint64_t*) {
@@ -248,6 +249,7 @@ static Item location_method_call(Item callee, Item receiver, Item* args, int arg
     size_t index = location_member_index(callee);
     JS_ROOTS(roots, document, location_document(receiver), method, ItemNull);
     if (item_is_error(document.get())) return document.get();
+    if (index == 3) return dom_location_get_component(document.get(), 0);
     method.set(js_get_key_cstr(document.get(), location_methods[index]));
     return item_is_error(method.get()) ? method.get() : js_call_function(method.get(), document.get(), args, argc);
 }
@@ -433,10 +435,17 @@ static void _install_nodelist_for_each(Item global) {
 }
 
 static void _link_iface_proto(Item global, const char* name, const char* base_name) {
-    Item proto = _iface_proto(global, name);
-    Item base_proto = _iface_proto(global, base_name);
-    if (get_type_id(proto) == LMD_TYPE_MAP && get_type_id(base_proto) == LMD_TYPE_MAP) {
-        js_set_prototype(proto, base_proto);
+    RootFrame roots(5);
+    Rooted<Item> owner(roots, global);
+    Rooted<Item> constructor(roots, js_get_key_cstr(owner.get(), name));
+    Rooted<Item> base(roots, js_get_key_cstr(owner.get(), base_name));
+    if (!js_is_callable(constructor.get()) || !js_is_callable(base.get())) return;
+    Rooted<Item> proto(roots, js_get_key_cstr(constructor.get(), "prototype"));
+    Rooted<Item> base_proto(roots, js_get_key_cstr(base.get(), "prototype"));
+    if (get_type_id(proto.get()) == LMD_TYPE_MAP && get_type_id(base_proto.get()) == LMD_TYPE_MAP) {
+        // link interface objects too, so subclasses inherit their parent's static members.
+        js_set_prototype(proto.get(), base_proto.get());
+        js_set_prototype(constructor.get(), base.get());
     }
 }
 
@@ -840,7 +849,6 @@ static void _install_node_iface(Item global) {
         _define_iface_int_constant(proto_root.get(), node_constants[i].name,
             node_constants[i].value);
     }
-    js_set_prototype(ctor_root.get(), js_get_key_cstr(global_root.get(), "EventTarget"));
     js_set_key_cstr(global_root.get(), "Node", ctor_root.get());
 }
 
@@ -1600,6 +1608,8 @@ extern "C" void dom_install_collection_globals(void) {
     // Document wrappers are module-owned, but bare WebIDL constructor lookup
     // must still succeed before libraries inspect static Document features.
     static const char* iface_links[][2] = {
+        // nonconstructible character-data interfaces still participate in prototype traversal.
+        {"CDATASection", "Text"}, {"ProcessingInstruction", "CharacterData"},
         {"Attr", "Node"},
         {"DocumentType", "Node"},
         {"Document", "Node"}, {"HTMLDocument", "Document"},
