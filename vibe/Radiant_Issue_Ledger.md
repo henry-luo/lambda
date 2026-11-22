@@ -20,6 +20,10 @@ observations still require re-verification. Add new Radiant issues here.
 
 ## Open issues
 
+<a id="ri-213"></a>
+
+- [RI-213 — Release build used a removed DOM validation cache API](<Radiant_Issue_Ledger (fixed).md#ri-213>).
+
 <a id="ri-212"></a>
 
 - [RI-212 — Unsubstituted CSS environment values poison layout coordinates](<Radiant_Issue_Ledger (fixed).md#ri-212>).

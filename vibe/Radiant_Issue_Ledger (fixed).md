@@ -14,6 +14,24 @@ are unchanged. Full evidence is under `../../lambda/temp/kianhup-style/`.
 
 ## Fixed issues
 
+<a id="ri-213"></a>
+
+### RI-213 — Release build used a removed DOM validation cache API
+
+**Fixed 2026-11-22.** Radiant's state validation added five
+`DomNodeValidationScope` guards and called `dom_node_ref_refresh`, but
+lambda-input's `2178858` removed those APIs. The release build failed to
+compile `state_machine.cpp` with an unknown type. Under **D5.5.1 / D9.1.3v2**,
+the Radiant adapter now uses `dom_node_ref_validate` directly. It still checks
+the document's current ownership and node identity when the cached lifetime
+stamp is stale; the removed scope and stamp refresh only optimized repeated
+checks. The split host also referenced a pending-load query absent from the
+Radiant API, so it uses the existing resource-manager and document-pending-work
+checks (**D10.1.7**) for the same completion condition.
+
+Reproduction: `make release` on macOS. Verification: `make release` succeeds;
+the Lambda runtime, adapters, Radiant archive and final executable all build.
+
 <a id="ri-212"></a>
 
 ### RI-212 — Unsubstituted CSS environment values poison layout coordinates

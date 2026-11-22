@@ -2105,11 +2105,11 @@ static JsInterpCompletion js_interp_property_key(JsInterpFrame* frame,
     if (!member) return js_interp_throw(ItemError);
     if (!js_interp_hosted_bindings() && !member->computed && member->property &&
             member->property->node_type == AST_NODE_IDENT &&
-            ((JsIdentifierNode*)member->property)->js_property_key_slot) {
+            member->js_property_key_slot) {
         // A static name's canonical key is computed once per realm; the
         // property kernels then skip their by-bytes name-pool lookup.
         JsIdentifierNode* name = (JsIdentifierNode*)member->property;
-        uint32_t slot = name->js_property_key_slot - 1;
+        uint32_t slot = member->js_property_key_slot - 1;
         JsAstLiteralCacheEntry* cache = js_interp_frame_literal_cache(frame);
         Item key = ItemNull;
         if (js_ast_literal_cache_read(cache, slot, &key)) return js_interp_normal(key);

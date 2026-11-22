@@ -248,7 +248,7 @@ void mark_island_refs(Loader* L, AstNode* node) {
     for (; node; node = node->next) {
         switch (node->node_type) {
         case AST_NODE_IDENT: {
-            NameEntry* entry = ((AstIdentNode*)node)->entry;
+            NameEntry* entry = ((LambdaAstIdentNode*)node)->entry;
             if (entry && entry->scope == L->token_scope) {
                 for (uint32_t i = 0; i < rule_count(L); i++) {
                     if (rule_at(L, i)->name == entry->name) rule_at(L, i)->used = true;
@@ -260,8 +260,8 @@ void mark_island_refs(Loader* L, AstNode* node) {
             mark_island_refs(L, ((AstPatternSeqNode*)node)->first);
             break;
         case AST_NODE_BINARY_TYPE:
-            mark_island_refs(L, ((AstBinaryNode*)node)->left);
-            mark_island_refs(L, ((AstBinaryNode*)node)->right);
+            mark_island_refs(L, ((LambdaAstBinaryNode*)node)->left);
+            mark_island_refs(L, ((LambdaAstBinaryNode*)node)->right);
             break;
         case AST_NODE_UNARY_TYPE:
             mark_island_refs(L, ((AstUnaryNode*)node)->operand);
@@ -324,15 +324,12 @@ void publish_token_rule(Loader* L, GrammarRule* rule, AstNode* island_body) {
     def->type = (Type*)rule->pattern;
     def->is_symbol = rule->pattern->is_symbol;
     def->source_span = rule->span;
-    NameEntry* entry = (NameEntry*)pool_calloc(L->tp->pool, sizeof(NameEntry));
+    NameEntry* entry = lambda_name_entry_alloc(L->tp->pool);
     entry->name = rule->name;
     entry->node = (AstNode*)def;
     entry->scope = L->token_scope;
     NameScope* scope = L->token_scope;
-    if (!scope->first) scope->first = entry;
-    else scope->last->next = entry;
-    scope->last = entry;
-    (void)name_scope_index_add(L->tp->pool, scope, entry);
+    (void)name_scope_append(L->tp->pool, scope, entry);
 }
 
 // The literal's text, with the escapes of a quoted Lambda string. A class

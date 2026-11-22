@@ -38,7 +38,7 @@ static inline void em_scan_index_last(AstNode* child, AstNode* parent, void* con
     if (*found || !child) return;
     if (child->node_type == AST_NODE_LAST_INDEX) { *found = true; return; }
     if (child->node_type == AST_NODE_INDEX_EXPR) {
-        em_scan_index_last(((AstFieldNode*)child)->object, child, context);
+        em_scan_index_last(((LambdaAstFieldNode*)child)->object, child, context);
         em_scan_index_last(child->next, child, context);
         return;
     }

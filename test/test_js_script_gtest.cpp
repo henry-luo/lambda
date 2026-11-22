@@ -22,6 +22,7 @@
 #include "lambda/input/input.hpp"
 #include "lambda/io/mark_builder.hpp"
 #include "lib/mem_factory.h"
+#include "lib/mempool.h"
 #include "../lambda/js/js_runtime.h"
 #include "../lambda/js/js_runtime_internal.hpp"
 #include "../lambda/js/js_runtime_state.hpp"
@@ -896,6 +897,33 @@ TEST(JsIteratorClose, RecordAsyncClosePreservesAbsentAndUndefined) {
     }
 
     runtime_cleanup(&runtime);
+}
+
+TEST(JsAstStructure, ParserReductionsDoNotAccumulateInRetainedPool) {
+    size_t live_bytes[2] = {};
+    for (int grouped = 0; grouped < 2; grouped++) {
+        StrBuf* source = strbuf_new();
+        ASSERT_NE(source, nullptr);
+        strbuf_append_str(source, "{");
+        // Grow both reduction buffers. Parentheses produce extra reductions
+        // around the same literal nodes and leave the retained allocation equal.
+        for (int i = 0; i < 48; i++) {
+            strbuf_append_str(source, grouped ? "((((1))));" : "1;");
+        }
+        strbuf_append_str(source, "}");
+        JsTranspiler* builder = js_transpiler_create(NULL);
+        ASSERT_NE(builder, nullptr);
+        bool parsed = js_transpiler_parse_c(builder, source->str, source->length,
+            JS_PARSE_SCRIPT);
+        pool_get_mem_stats(builder->pool, NULL, &live_bytes[grouped], NULL);
+        EXPECT_EQ(builder->reduction_values, nullptr);
+        EXPECT_EQ(builder->reduction_children, nullptr);
+        js_transpiler_destroy(builder);
+        strbuf_free(source);
+        ASSERT_TRUE(parsed);
+    }
+    EXPECT_GT(live_bytes[0], 0u);
+    EXPECT_EQ(live_bytes[0], live_bytes[1]);
 }
 
 TEST(JsAstStructure, ExtensionChildCatalogIsComplete) {
@@ -5110,12 +5138,9 @@ TEST(JsInterpreter, WideScopeIndexPreservesIdentityAndCrossScriptSpelling) {
         snprintf(name, sizeof(name), "__wide_scope_binding_%u", i);
         entries[i].name = i == 0 ? original : i == 1 ? distinct
             : name_pool_create_name(first, name);
-        if (scope.last) scope.last->next = &entries[i];
-        else scope.first = &entries[i];
-        scope.last = &entries[i];
-        ASSERT_TRUE(name_scope_index_add(pool, &scope, &entries[i]));
+        ASSERT_TRUE(name_scope_append(pool, &scope, &entries[i]));
     }
-    ASSERT_NE(scope.name_index, nullptr);
+    ASSERT_NE(scope.declarations->name_index, nullptr);
     EXPECT_EQ(name_scope_lookup_name(&scope, original), &entries[0]);
     EXPECT_EQ(name_scope_lookup_name(&scope, distinct), &entries[1]);
     EXPECT_EQ(name_scope_lookup_name(&scope, foreign), nullptr);

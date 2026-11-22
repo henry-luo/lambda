@@ -24,12 +24,14 @@ static bool js_ast_prebuild_append_specifier(ArrayList* specifiers,
 static ArrayList* js_ast_prebuild_discover_imports(void* opaque,
         const char* source, size_t source_length) {
     (void)opaque;
-    if (!source || source_length > INT_MAX) return NULL;
+    // Use the same mode selection as the executable JS frontend. Classic
+    // scripts cannot produce static module requests, and execution validates them.
+    if (!source || source_length > INT_MAX || !js_c_source_is_module(source, source_length))
+        return NULL;
     ArrayList* specifiers = arraylist_new(4);
     if (!specifiers) return NULL;
     JsTranspiler* transpiler = js_transpiler_create(NULL);
-    if (!transpiler || !js_transpiler_parse_c(transpiler, source, source_length,
-            JS_PARSE_AUTO) || !transpiler->ast_root) {
+    if (!transpiler || !js_transpiler_parse_c_module_requests(transpiler, source, source_length) || !transpiler->ast_root) {
         js_transpiler_destroy(transpiler);
         arraylist_free(specifiers);
         return NULL;

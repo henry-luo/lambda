@@ -3,27 +3,25 @@
 #include "../ts/ts_ast.hpp"
 #include "../ts/ts_type_parser.hpp"
 
-#include "lib/mempool.h"
+#include "lib/mem_grow.hpp"
 #include "lib/mem.h"
 #include "lib/log.h"
 #include "lib/str.h"
 #include <stdlib.h>
 #include <string.h>
 
-// This sink is intentionally small until every reduction carries the child
-// facts required by its retained AST constructor. It proves direct ownership
-// for expression statements without creating a replacement syntax tree.
-typedef struct JsCParseValue {
+struct JsCParseValue {
     JsAstNode* node;
     SourceSpan span;
-    struct JsCParseValue* below;
-} JsCParseValue;
+};
 
-typedef struct JsCAstSink {
+struct JsCAstSink {
     JsTranspiler* transpiler;
     const char* source;
     size_t source_length;
-    JsCParseValue* values;
+    size_t value_count;
+    size_t value_capacity;
+    size_t child_capacity;
     JsAstNode* small_values[2];
     JsAstNode* root;
     bool unsupported;
@@ -31,7 +29,7 @@ typedef struct JsCAstSink {
     JsReductionForm rejected_form;
     uint32_t rejected_start;
     uint32_t rejected_end;
-} JsCAstSink;
+};
 
 static bool js_c_span_contains(SourceSpan outer, SourceSpan inner) {
     return outer.start_byte <= inner.start_byte &&
@@ -670,13 +668,13 @@ static const char* js_c_reduction_form_name(JsReductionForm form) {
 
 static bool js_c_push(JsCAstSink* sink, JsAstNode* node, SourceSpan span) {
     if (!sink || !node) return js_c_unsupported(sink);
-    JsCParseValue* value = (JsCParseValue*)pool_alloc(sink->transpiler->pool,
-        sizeof(JsCParseValue));
-    if (!value) return js_c_unsupported(sink);
-    value->node = node;
-    value->span = span;
-    value->below = sink->values;
-    sink->values = value;
+    JsCParseValue* values = sink->transpiler->reduction_values;
+    if (sink->value_count == sink->value_capacity) {
+        if (!lam::mem_grow_array(&values, &sink->value_capacity, sink->value_count + 1,
+                32, MEM_CAT_TEMP)) return js_c_unsupported(sink);
+        sink->transpiler->reduction_values = values;
+    }
+    values[sink->value_count++] = {node, span};
     return true;
 }
 
@@ -685,42 +683,30 @@ static bool js_c_take_values(JsCAstSink* sink, uint32_t count,
     if (!sink || !out_nodes) return js_c_unsupported(sink);
     *out_nodes = NULL;
     if (count == 0) return true;
-    if ((size_t)count > SIZE_MAX / sizeof(JsAstNode*)) {
-        return js_c_unsupported(sink);
+    if (count > sink->value_count) return js_c_unsupported(sink);
+
+    JsCParseValue* values = sink->transpiler->reduction_values;
+    size_t first = sink->value_count - count;
+    JsAstNode** nodes = sink->small_values;
+    // Wider reductions borrow this buffer until the next reduction.
+    if (count > sizeof(sink->small_values) / sizeof(*sink->small_values)) {
+        nodes = sink->transpiler->reduction_children;
+        if (count > sink->child_capacity) {
+            if (!lam::mem_grow_array(&nodes, &sink->child_capacity, (size_t)count,
+                    8, MEM_CAT_TEMP)) return js_c_unsupported(sink);
+            sink->transpiler->reduction_children = nodes;
+        }
     }
-    JsCParseValue* value = sink->values;
-    size_t previous_start = SIZE_MAX;
+    uint32_t previous_start = span.start_byte;
     for (uint32_t i = 0; i < count; i++) {
-        if (!value || !js_c_span_contains(span, value->span)) {
+        const JsCParseValue& value = values[first + i];
+        if (!js_c_span_contains(span, value.span) || value.span.start_byte < previous_start) {
             return js_c_unsupported(sink);
         }
-        if (i > 0 && value->span.start_byte > previous_start) {
-            return js_c_unsupported(sink);
-        }
-        previous_start = value->span.start_byte;
-        value = value->below;
+        previous_start = value.span.start_byte;
+        nodes[i] = value.node;
     }
-    // Unary and binary reductions are the common case; reuse sink-owned slots
-    // so direct AST construction does not allocate a pointer array per node.
-    if (count <= 2) {
-        value = sink->values;
-        for (uint32_t i = count; i > 0; i--) {
-            sink->small_values[i - 1] = value->node;
-            value = value->below;
-        }
-        sink->values = value;
-        *out_nodes = sink->small_values;
-        return true;
-    }
-    JsAstNode** nodes = (JsAstNode**)pool_alloc(sink->transpiler->pool,
-        sizeof(JsAstNode*) * count);
-    if (!nodes) return js_c_unsupported(sink);
-    value = sink->values;
-    for (uint32_t i = count; i > 0; i--) {
-        nodes[i - 1] = value->node;
-        value = value->below;
-    }
-    sink->values = value;
+    sink->value_count = first;
     *out_nodes = nodes;
     return true;
 }
@@ -1906,17 +1892,16 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
             sizeof(JsProgramNode));
         if (!program) return js_c_unsupported(sink);
         JsAstNode* body = NULL;
-        while (sink->values) {
-            JsCParseValue* value = sink->values;
-            sink->values = value->below;
-            if (!value->node) return js_c_unsupported(sink);
+        JsCParseValue* values = sink->transpiler->reduction_values;
+        while (sink->value_count) {
+            JsAstNode* node = values[--sink->value_count].node;
             // Decorated declarations are represented as a decorator chain
             // ending in the declaration; append the preceding program body
             // after that chain so the class/function is not lost.
-            JsAstNode* tail = value->node;
+            JsAstNode* tail = node;
             while (tail->next) tail = tail->next;
             tail->next = body;
-            body = value->node;
+            body = node;
         }
         program->body = body;
         if (body) program->source_span.start_byte = (uint32_t)
@@ -1989,13 +1974,18 @@ static int js_parse_build_compiler_pass(void* opaque) {
         ts_type_registry_init(tp);
     }
 
-    JsCAstSink sink_context = {tp, source, length, NULL, {NULL, NULL}, NULL,
-        false, JS_REDUCE_PROGRAM, JS_REDUCTION_NONE, 0, 0};
+    JsCAstSink sink_context = {};
+    sink_context.transpiler = tp;
+    sink_context.source = source;
+    sink_context.source_length = length;
+    sink_context.rejected_kind = JS_REDUCE_PROGRAM;
+    sink_context.rejected_form = JS_REDUCTION_NONE;
     JsParseSink sink = {js_c_reduce};
     JsParseError error = {};
     JsParseMetrics metrics = {};
     JsParseStatus status = js_parser_parse_source(source, length, mode, &sink,
         &sink_context, &metrics, &error);
+    js_transpiler_release_reduction_scratch(tp);
     if (status != JS_PARSE_OK || sink_context.unsupported || !sink_context.root) {
         tp->has_errors = true;
         if (sink_context.unsupported) {
@@ -2098,8 +2088,8 @@ static void js_compiler_pass_timing_observer(const char* name,
     else if (strcmp(name, "runtime-link") == 0) tp->pass_timing.link_us += elapsed_us;
 }
 
-bool js_transpiler_parse_c(JsTranspiler* tp, const char* source, size_t length,
-        JsParseMode mode) {
+static bool js_transpiler_parse_c_impl(JsTranspiler* tp, const char* source,
+        size_t length, JsParseMode mode, bool build_index) {
     if (!tp || !source || length > UINT32_MAX) return false;
     if (mode == JS_PARSE_AUTO) {
         mode = tp->strict_js ? JS_PARSE_SCRIPT : JS_PARSE_TYPESCRIPT;
@@ -2121,10 +2111,13 @@ bool js_transpiler_parse_c(JsTranspiler* tp, const char* source, size_t length,
         {"validate", COMPILER_FACT_AST | COMPILER_FACT_BOUND, COMPILER_FACT_VALIDATED, js_validate_compiler_pass, &pass_context},
         {"index", COMPILER_FACT_FRONTEND, COMPILER_FACT_INDEXED, js_index_compiler_pass, &pass_context},
     };
-    for (uint32_t i = 0; i < 4; i++) {
-        if (!compiler_pass_manager_add(pass_manager, &passes[i])) break;
+    uint32_t pass_count = sizeof(passes) / sizeof(passes[0]);
+    // Static dependency discovery consumes the validated declaration list.
+    if (!build_index) pass_count--;
+    for (uint32_t i = 0; i < pass_count; i++) {
+        if (!compiler_pass_manager_add(pass_manager, &passes[i])) return false;
     }
-    if (pass_manager->pass_count == 4 && compiler_pass_manager_run(pass_manager, NULL)) return true;
+    if (compiler_pass_manager_run(pass_manager, NULL)) return true;
     if (pass_context.validation_errors > 0) return true;
     if (!tp->has_errors) {
         tp->parse_error_valid = tp->has_errors = true;
@@ -2134,4 +2127,14 @@ bool js_transpiler_parse_c(JsTranspiler* tp, const char* source, size_t length,
     }
     tp->ast_root = NULL;
     return false;
+}
+
+bool js_transpiler_parse_c(JsTranspiler* tp, const char* source, size_t length,
+        JsParseMode mode) {
+    return js_transpiler_parse_c_impl(tp, source, length, mode, true);
+}
+
+bool js_transpiler_parse_c_module_requests(JsTranspiler* tp, const char* source,
+        size_t length) {
+    return js_transpiler_parse_c_impl(tp, source, length, JS_PARSE_MODULE, false);
 }

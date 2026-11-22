@@ -6,7 +6,7 @@
 // Forward declare AstNode to avoid pulling in all AST headers
 struct AstNode;
 struct AstFuncNode;
-struct AstCallNode;
+struct LambdaAstCallNode;
 
 /**
  * Tail Call Optimization (TCO) Analysis
@@ -36,7 +36,7 @@ bool has_tail_call(AstNode* expr, AstFuncNode* func_node);
  * @param func_node Function to check for recursion to
  * @return true if call_node is a direct call to func_node
  */
-bool is_recursive_call(AstCallNode* call_node, AstFuncNode* func_node);
+bool is_recursive_call(LambdaAstCallNode* call_node, AstFuncNode* func_node);
 
 /**
  * Check if a function is tail-recursive and should use TCO.

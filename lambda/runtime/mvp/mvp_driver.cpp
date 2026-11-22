@@ -186,7 +186,7 @@ static void mir_satellite_cluster_visit(AstNode* node, void* opaque) {
     case AST_NODE_ARROW_FUNC:
         return;   // a nested definition's calls are its own
     case AST_NODE_CALL_EXPR: {
-        AstFuncNode* direct = ast_direct_call_function((AstCallNode*)node);
+        AstFuncNode* direct = ast_direct_call_function((LambdaAstCallNode*)node);
         if (direct && mir_satellite_module_definition(scan->root, direct)) {
             bool seen = false;
             for (int i = 0; i < scan->count && !seen; i++) seen = scan->members[i] == direct;
@@ -639,7 +639,7 @@ static void register_module_pub_fns(AstImportNode* imp, Script* dependency) {
             // name two dependencies both export stays two symbols.
             AstNode* declare = ((AstLetNode*)mod_child)->declare;
             while (declare) {
-                AstDeclaratorNode* named = (AstDeclaratorNode*)declare;
+                LambdaAstDeclaratorNode* named = (LambdaAstDeclaratorNode*)declare;
                 if (named->name) {
                     // dependency-local name, for the lookup in its own context
                     StrBuf* local_key = strbuf_new_cap(64);

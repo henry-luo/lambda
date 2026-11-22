@@ -2619,7 +2619,8 @@ static bool script_runner_wait_for_load_blockers(Runtime* runtime,
     };
     if (!flush_resource_completions()) return false;
     auto resources_loaded = [&]() -> bool {
-        return !radiant_document_has_pending_load_resources(doc) && !scripts_pending();
+        return (!mgr || resource_manager_is_fully_loaded(mgr)) &&
+            !dom_document_has_pending_work(doc) && !scripts_pending();
     };
     if (resources_loaded()) {
         doc->fully_loaded = true;

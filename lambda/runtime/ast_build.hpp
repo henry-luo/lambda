@@ -11,8 +11,26 @@
 #include "ast.hpp"
 #include "parser/lambda_rd_parser.h"
 
-// Span allocation is the only AST allocation primitive the direct parser may
-// use.
+// Lambda builder facts precede the node inside the same owner allocation.
+// Access this prefix only for nodes created by the Lambda builder.
+struct LambdaAstBuildState {
+    uint32_t last_bind_epoch;
+    uint8_t syntax_form;
+    uint8_t syntax_flags;
+    uint16_t syntax_aux;
+};
+static_assert(sizeof(LambdaAstBuildState) == 8, "the prefix preserves AST alignment");
+
+static inline LambdaAstBuildState& lambda_ast_build_state(AstNode* node) {
+    return *reinterpret_cast<LambdaAstBuildState*>(
+        reinterpret_cast<char*>(node) - sizeof(LambdaAstBuildState));
+}
+
+static inline const LambdaAstBuildState& lambda_ast_build_state(const AstNode* node) {
+    return lambda_ast_build_state(const_cast<AstNode*>(node));
+}
+
+// The direct parser creates nodes through this span-based allocator.
 AstNode* alloc_ast_node_from_span(Transpiler* tp, AstNodeType node_type,
         SourceSpan span, size_t size);
 
@@ -206,13 +224,13 @@ void lambda_ast_resolve_type_early(Transpiler* tp, AstNode* definition);
 
 // Call-boundary validation belongs to semantic construction. The parser only
 // supplies a committed source span and already-built callee/argument nodes.
-bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
+bool lambda_ast_validate_call_arguments(Transpiler* tp, LambdaAstCallNode* call,
     SourceSpan diagnostic_span, int arg_count, AstNode* injected = NULL);
 
 // Collects the invocation-local contracts selected by a statically typed call
 // to a binder-carrying function.  MIR uses this semantic result to form an
 // exact raw-variant key; validation remains responsible for diagnostics.
-bool lambda_ast_collect_static_binder_env(AstCallNode* call,
+bool lambda_ast_collect_static_binder_env(LambdaAstCallNode* call,
         Type** env_out, uint16_t env_count);
 // Resolve an outer binder site/reference against an invocation's type selection.
 Type* lambda_ast_resolve_binder_contract(Type* type, Type** env, int depth = 0);

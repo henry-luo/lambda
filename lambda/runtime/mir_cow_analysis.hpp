@@ -14,14 +14,14 @@ static inline bool mir_place_copy_snapshot_required(const NameEntry* binding) {
 static inline bool mir_is_direct_binding(AstNode* node, const NameEntry* binding) {
     AstNode* value = ast_unwrap_primary(node);
     return value && value->node_type == AST_NODE_IDENT &&
-        ((AstIdentNode*)value)->entry == binding;
+        ((LambdaAstIdentNode*)value)->entry == binding;
 }
 
 struct MirBindingUseCount { const NameEntry* binding; int count; };
 
 static inline bool mir_count_binding_uses(AstNode* node, void* data) {
     MirBindingUseCount* uses = (MirBindingUseCount*)data;
-    if (node->node_type == AST_NODE_IDENT && ((AstIdentNode*)node)->entry == uses->binding)
+    if (node->node_type == AST_NODE_IDENT && ((LambdaAstIdentNode*)node)->entry == uses->binding)
         uses->count++;
     return true;
 }
@@ -51,14 +51,12 @@ static inline bool mir_body_has_nested_function(AstNode* body) {
 }
 
 static inline AstNode* mir_index_use_parent(const AstIndex* index, AstNode** use) {
-    AstNodeId id = ast_index_find(index, *use);
-    AstNode* parent = id == AST_NODE_ID_INVALID ? NULL : index->parents[id];
-    while (parent && parent->node_type == AST_NODE_PRIMARY) {
-        *use = parent;
-        id = ast_index_find(index, parent);
-        if (id == AST_NODE_ID_INVALID) return NULL;
-        parent = index->parents[id];
+    AstNodeId id = ast_index_parent_id(index, ast_index_find(index, *use));
+    while (id != AST_NODE_ID_INVALID && index->nodes[id]->node_type == AST_NODE_PRIMARY) {
+        *use = index->nodes[id];
+        id = index->parent_ids[id];
     }
+    AstNode* parent = id != AST_NODE_ID_INVALID ? index->nodes[id] : NULL;
     return parent;
 }
 
@@ -74,7 +72,7 @@ static inline bool mir_confined_scalar_snapshot(const AstIndex* index, AstFuncNo
     if (!index || !function || function->captures || function->is_async ||
             function->is_generator || function->is_loop_continuation ||
             !binding || !binding->cow_param_mutated || binding->is_var_param ||
-            binding->view_base || (contract && (contract->is_var_param || contract->default_value)) ||
+            lambda_binding_fields(binding).view_base || (contract && (contract->is_var_param || contract->default_value)) ||
             mir_body_has_nested_function(function->body)) return false;
     AstBindingId id = ast_index_find_binding_entry(index, binding);
     uint32_t count = 0;
@@ -89,8 +87,8 @@ static inline bool mir_confined_scalar_snapshot(const AstIndex* index, AstFuncNo
         if (parent == binding->node) continue;
         AstNode* key = NULL;
         if (parent && parent->node_type == AST_NODE_INDEX_EXPR &&
-                ast_unwrap_primary(((AstFieldNode*)parent)->object) == original) {
-            key = ((AstFieldNode*)parent)->field;
+                ast_unwrap_primary(((LambdaAstFieldNode*)parent)->object) == original) {
+            key = ((LambdaAstFieldNode*)parent)->field;
         } else if (parent && parent->node_type == AST_NODE_INDEX_ASSIGN_STAM &&
                 ast_unwrap_primary(((AstCompoundAssignNode*)parent)->object) == original) {
             key = ((AstCompoundAssignNode*)parent)->key;
@@ -99,7 +97,7 @@ static inline bool mir_confined_scalar_snapshot(const AstIndex* index, AstFuncNo
             if (scalar_key(key, context)) continue;
         }
         if (!parent || parent->node_type != AST_NODE_CALL_EXPR) return false;
-        AstCallNode* call = (AstCallNode*)parent;
+        LambdaAstCallNode* call = (LambdaAstCallNode*)parent;
         AstNode* callee = ast_unwrap_primary(call->function);
         if (callee && callee->node_type == AST_NODE_SYS_FUNC &&
                 ((AstSysFuncNode*)callee)->fn_info &&

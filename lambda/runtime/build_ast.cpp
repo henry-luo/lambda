@@ -90,7 +90,7 @@ static int source_span_start_line(Transpiler* tp, SourceSpan span) {
 }
 
 static StaticBoundaryResult static_boundary_relation(Type* source, Type* target);
-static bool mark_call_borrow_outcomes(Transpiler* tp, AstCallNode* call);
+static bool mark_call_borrow_outcomes(Transpiler* tp, LambdaAstCallNode* call);
 static bool ordinary_outcome_has_error(Transpiler* tp, AstNode* node, int depth = 0);
 static StaticBoundaryResult ast_value_boundary_relation(AstNode* source, Type* target,
     Type* proof_type, int depth, bool inspect_expression);
@@ -1520,13 +1520,13 @@ static SizedConstStatus ast_sized_constant(Transpiler* tp, AstNode* node,
                     ((AstPrimaryNode*)operand)->expr) {
                 operand = ((AstPrimaryNode*)operand)->expr;
             }
-            if (operand && (operand->syntax_flags & LSF_LITERAL_NEGATED)) *value = -*value;
+            if (operand && (lambda_ast_build_state(operand).syntax_flags & LSF_LITERAL_NEGATED)) *value = -*value;
         }
         *value = -*value;
         return sized_lane_holds(*kind, *value) ? SIZED_CONST_OK : SIZED_CONST_OVERFLOW;
     }
     if (node->node_type == AST_NODE_BINARY) {
-        AstBinaryNode* binary = (AstBinaryNode*)node;
+        LambdaAstBinaryNode* binary = (LambdaAstBinaryNode*)node;
         if (binary->op != OPERATOR_ADD && binary->op != OPERATOR_SUB &&
                 binary->op != OPERATOR_MUL) return SIZED_CONST_NONE;
         __int128 left = 0, right = 0;
@@ -1571,8 +1571,8 @@ static bool reject_sized_constant_overflow(Transpiler* tp, AstNode* node) {
     if (node->node_type == AST_NODE_UNARY) {
         operands[0] = ((AstUnaryNode*)node)->operand;
     } else if (node->node_type == AST_NODE_BINARY) {
-        operands[0] = ((AstBinaryNode*)node)->left;
-        operands[1] = ((AstBinaryNode*)node)->right;
+        operands[0] = ((LambdaAstBinaryNode*)node)->left;
+        operands[1] = ((LambdaAstBinaryNode*)node)->right;
     }
     for (AstNode* operand : operands) {
         __int128 ignored = 0;
@@ -1603,7 +1603,7 @@ Type* ast_called_type_target(AstNode* function) {
 static bool ast_called_function_signature_ready(AstNode* function) {
     function = ast_unwrap_primary_to_leaf(function);
     if (!function || function->node_type != AST_NODE_IDENT) return true;
-    AstIdentNode* ident = (AstIdentNode*)function;
+    LambdaAstIdentNode* ident = (LambdaAstIdentNode*)function;
     AstNode* declaration = ident->entry ? ident->entry->node : NULL;
     if (!declaration || (declaration->node_type != AST_NODE_FUNC &&
             declaration->node_type != AST_NODE_PROC)) return true;
@@ -2211,7 +2211,7 @@ static StaticBoundaryResult ast_return_boundary_relation(AstFuncNode* function,
     Type* expected = boundary_unwrap_type(target);
     if (function && value && value->node_type == AST_NODE_IDENT &&
             boundary_type_is_extended(expected, TYPE_KIND_BOUND_REF)) {
-        NameEntry* entry = ((AstIdentNode*)value)->entry;
+        NameEntry* entry = ((LambdaAstIdentNode*)value)->entry;
         for (AstNamedNode* param = function->param; entry && param;
                 param = (AstNamedNode*)param->next) {
             if (entry->node != (AstNode*)param || entry->is_var_param ||
@@ -2232,10 +2232,10 @@ static StaticBoundaryResult ast_return_boundary_relation(AstFuncNode* function,
     return ast_value_boundary_relation(source, target, proof_type, 0, true);
 }
 
-static bool ast_call_may_defect(AstCallNode* call, AstFuncNode* self);
+static bool ast_call_may_defect(LambdaAstCallNode* call, AstFuncNode* self);
 bool ast_expr_may_defect(AstNode* node, int depth);
 
-static bool ast_call_defect_pred(AstCallNode* call, void* ctx) {
+static bool ast_call_defect_pred(LambdaAstCallNode* call, void* ctx) {
     (void)ctx;
     return ast_call_may_defect(call, NULL);
 }
@@ -2247,7 +2247,7 @@ bool ast_expr_may_defect(AstNode* node, int depth) {
 // a call's value may be a defect: its admission can fail (S7.7.3), it returns
 // through an unverified contract, or its callee may defect -- a callee still
 // incomplete here (a forward or mutual call) is defect-capable
-static bool ast_call_may_defect(AstCallNode* call, AstFuncNode* self) {
+static bool ast_call_may_defect(LambdaAstCallNode* call, AstFuncNode* self) {
     if (!call || call->propagate) return false;
     if (call->fn_colour_guard & LAMBDA_COLOUR_GUARD_ARGS) return true;
     AstNode* callee = ast_unwrap_primary_to_leaf(call->function);
@@ -2312,7 +2312,7 @@ static bool ast_find_defect_origin(AstNode* node, void* data) {
     case AST_NODE_PUB_STAM:
         for (AstNode* d = ((AstLetNode*)node)->declare; d; d = d->next) {
             if (d->node_type != AST_NODE_VARIABLE_DECLARATOR) continue;
-            AstDeclaratorNode* declarator = (AstDeclaratorNode*)d;
+            LambdaAstDeclaratorNode* declarator = (LambdaAstDeclaratorNode*)d;
             if (!declarator->declared_type || declarator->is_type_definition) continue;
             if (!declarator->init || !ast_boundary_cannot_fail(declarator->init,
                     declarator->declared_type)) scan->found = true;
@@ -2333,7 +2333,7 @@ static bool ast_find_defect_origin(AstNode* node, void* data) {
         break;
     }
     case AST_NODE_CALL_EXPR:
-        scan->found = ast_call_may_defect((AstCallNode*)node, scan->self);
+        scan->found = ast_call_may_defect((LambdaAstCallNode*)node, scan->self);
         break;
     default:
         scan->found = ast_node_originates_defect(node);
@@ -2393,7 +2393,7 @@ static bool empty_array_contract_admits(Type* target) {
 
 static bool propagated_fill_contract_admits(AstNode* value, Type* target) {
     if (!value || value->node_type != AST_NODE_CALL_EXPR) return false;
-    AstCallNode* call = (AstCallNode*)value;
+    LambdaAstCallNode* call = (LambdaAstCallNode*)value;
     if (!call->propagate || call->pipe_inject) return false;
     AstNode* callee = ast_unwrap_primary_to_leaf(call->function);
     SysFuncInfo* builtin = callee && callee->node_type == AST_NODE_SYS_FUNC
@@ -2566,7 +2566,7 @@ StaticBoundaryResult lambda_ast_boundary_relation(AstNode* source, Type* target,
     return ast_value_boundary_relation(source, target, proof_type, 0, false);
 }
 
-static void check_declared_map_literal(Transpiler* tp, AstDeclaratorNode* declaration,
+static void check_declared_map_literal(Transpiler* tp, LambdaAstDeclaratorNode* declaration,
         TypeMap* expected, int line) {
     AstNode* rhs = ast_unwrap_primary_to_leaf(declaration->init);
     if (!rhs || rhs->node_type != AST_NODE_MAP || !expected ||
@@ -2616,7 +2616,7 @@ static void check_declared_map_literal(Transpiler* tp, AstDeclaratorNode* declar
 // binding keeps its inferred type instead of lying about its representation
 // (SI14: emitting the declared carrier against a rejected value reinterprets
 // bits — the observed symptom was a string pointer printed as an int).
-static bool check_declaration_static_boundary(Transpiler* tp, AstDeclaratorNode* declaration,
+static bool check_declaration_static_boundary(Transpiler* tp, LambdaAstDeclaratorNode* declaration,
         Type* expected, int line) {
     if (!declaration || !declaration->init || !expected) return false;
     Type* actual = declaration->init->type;
@@ -2712,7 +2712,7 @@ static bool ast_index_keys_select(AstNode* field) {
     if (field->next) return true;
     AstNode* key = ast_unwrap_primary_to_leaf(field);
     if (!key) return false;
-    if (key->node_type == AST_NODE_BINARY && ((AstBinaryNode*)key)->op == OPERATOR_TO) {
+    if (key->node_type == AST_NODE_BINARY && ((LambdaAstBinaryNode*)key)->op == OPERATOR_TO) {
         return true;
     }
     TypeId key_type = key->type ? key->type->type_id : LMD_TYPE_ANY;
@@ -2735,11 +2735,11 @@ Type* declared_compound_destination_type(Transpiler* tp, AstNode* node,
     node = ast_unwrap_primary(node);
     if (!node) return NULL;
     if (node->node_type == AST_NODE_IDENT) {
-        AstIdentNode* ident = (AstIdentNode*)node;
+        LambdaAstIdentNode* ident = (LambdaAstIdentNode*)node;
         return ident->entry ? ident->entry->declared_type : NULL;
     }
     if (node->node_type == AST_NODE_MEMBER_EXPR) {
-        AstFieldNode* member = (AstFieldNode*)node;
+        LambdaAstFieldNode* member = (LambdaAstFieldNode*)node;
         Type* owner_type = declared_compound_destination_type(tp, member->object, NULL);
         owner_type = lambda_type_nonnull_map_contract(owner_type);
         if (!owner_type || owner_type->type_id != LMD_TYPE_MAP ||
@@ -2747,7 +2747,7 @@ Type* declared_compound_destination_type(Transpiler* tp, AstNode* node,
                 !member->field || member->field->node_type != AST_NODE_IDENT) {
             return NULL;
         }
-        AstIdentNode* field_name = (AstIdentNode*)member->field;
+        LambdaAstIdentNode* field_name = (LambdaAstIdentNode*)member->field;
         ShapeEntry* field = find_shape_field_by_name((TypeMap*)owner_type,
             field_name->name->chars, field_name->name->len);
         if (field && destination_label) *destination_label = "map member";
@@ -2755,7 +2755,7 @@ Type* declared_compound_destination_type(Transpiler* tp, AstNode* node,
         return field ? boundary_unwrap_type(field->type) : NULL;
     }
     if (node->node_type == AST_NODE_INDEX_EXPR) {
-        AstFieldNode* index = (AstFieldNode*)node;
+        LambdaAstFieldNode* index = (LambdaAstFieldNode*)node;
         Type* owner_type = boundary_unwrap_type(
             declared_compound_destination_type(tp, index->object, NULL));
         if (owner_type && owner_type->type_id == LMD_TYPE_MAP &&
@@ -3023,6 +3023,8 @@ struct LambdaClosureFlow {
     uint32_t* returned;
     uint32_t* retained;
     uint8_t* terminates;
+    AstNodeId* first_children;
+    AstNodeId* next_siblings;
     uint32_t binding_base;
     uint32_t result_base;
     uint32_t rest_base;
@@ -3095,9 +3097,9 @@ static AstFuncNode* lambda_capture_region(AstFuncNode* function) {
 
 static void lambda_flow_children(LambdaClosureFlow* flow, uint32_t id,
         uint32_t destination) {
-    for (AstNodeId child = flow->index->first_children[id];
+    for (AstNodeId child = flow->first_children[id];
             child != AST_NODE_ID_INVALID;
-            child = flow->index->next_siblings[child]) {
+            child = flow->next_siblings[child]) {
         lambda_flow_edge(flow, child, destination);
     }
 }
@@ -3144,7 +3146,7 @@ static void lambda_flow_build_node(LambdaClosureFlow* flow, uint32_t id) {
     }
     case AST_NODE_IDENT:
         lambda_flow_edge(flow, lambda_flow_binding(flow,
-            ((AstIdentNode*)node)->entry), id);
+            ((LambdaAstIdentNode*)node)->entry), id);
         break;
     case AST_NODE_OBJECT_TYPE:
         // a retained type/instance retains its methods, including pn captures;
@@ -3159,7 +3161,7 @@ static void lambda_flow_build_node(LambdaClosureFlow* flow, uint32_t id) {
         lambda_flow_children(flow, id, id);
         break;
     case AST_NODE_VARIABLE_DECLARATOR: {
-        AstDeclaratorNode* decl = (AstDeclaratorNode*)node;
+        LambdaAstDeclaratorNode* decl = (LambdaAstDeclaratorNode*)node;
         lambda_flow_value(flow, decl->init, id);
         lambda_flow_edge(flow, id, lambda_flow_binding(flow, decl->entry));
         break;
@@ -3183,7 +3185,7 @@ static void lambda_flow_build_node(LambdaClosureFlow* flow, uint32_t id) {
         break;
     case AST_NODE_ASSIGN_STAM: case AST_NODE_MEMBER_ASSIGN_STAM:
     case AST_NODE_INDEX_ASSIGN_STAM: {
-        AstAssignNode* assign = (AstAssignNode*)node;
+        LambdaAstAssignNode* assign = (LambdaAstAssignNode*)node;
         NameEntry* target = assign->target_entry;
         if (!target && assign->object) {
             AstIdentNode* root = ast_compound_root_ident(assign->object);
@@ -3222,7 +3224,7 @@ static void lambda_flow_build_node(LambdaClosureFlow* flow, uint32_t id) {
         }
         break;
     case AST_NODE_BINARY:
-        if (!ast_binary_only_reads_operands(((AstBinaryNode*)node)->op) &&
+        if (!ast_binary_only_reads_operands(((LambdaAstBinaryNode*)node)->op) &&
                 !result_type_is_scalar(node->type))
             lambda_flow_children(flow, id, id);
         break;
@@ -3253,7 +3255,7 @@ static bool lambda_flow_calls(LambdaClosureFlow* flow) {
     for (AstNodeId id = 0; id < index->count; id++) {
         AstNode* node = index->nodes[id];
         if (node->node_type != AST_NODE_CALL_EXPR) continue;
-        AstCallNode* call = (AstCallNode*)node;
+        LambdaAstCallNode* call = (LambdaAstCallNode*)node;
         AstFuncNode* target = ast_direct_call_function(call);
         AstNodeId target_id = lambda_flow_node(flow, (AstNode*)target);
         if (target_id != AST_NODE_ID_INVALID) {
@@ -3350,6 +3352,12 @@ static bool lambda_analyze_capture_permissions(Transpiler* tp) {
     flow.rest_base = flow.result_base + index->function_count;
     flow.sink = flow.rest_base + index->function_count;
     if (needs_flow) {
+        // Build the reverse insertion order used by the closure-flow pass
+        // from the canonical parent edges. This adjacency dies with the pass.
+        flow.first_children = (AstNodeId*)mem_calloc(index->count,
+            sizeof(AstNodeId), MEM_CAT_TEMP);
+        flow.next_siblings = (AstNodeId*)mem_calloc(index->count,
+            sizeof(AstNodeId), MEM_CAT_TEMP);
         flow.edges = (ArrayList**)mem_calloc(flow.sink + 1, sizeof(ArrayList*), MEM_CAT_TEMP);
         flow.seen = (uint32_t*)mem_calloc(flow.sink + 1, sizeof(uint32_t), MEM_CAT_TEMP);
         flow.queue = (uint32_t*)mem_calloc(flow.sink + 1, sizeof(uint32_t), MEM_CAT_TEMP);
@@ -3357,8 +3365,16 @@ static bool lambda_analyze_capture_permissions(Transpiler* tp) {
         flow.retained = (uint32_t*)mem_calloc(index->function_count, sizeof(uint32_t), MEM_CAT_TEMP);
         flow.terminates = (uint8_t*)mem_calloc(index->count, sizeof(uint8_t), MEM_CAT_TEMP);
         flow.failed = !flow.edges || !flow.seen || !flow.queue || !flow.terminates ||
+            !flow.first_children || !flow.next_siblings ||
             (index->function_count && (!flow.returned || !flow.retained));
         if (!flow.failed) {
+            memset(flow.first_children, 0xff, sizeof(AstNodeId) * index->count);
+            for (AstNodeId child = 0; child < index->count; child++) {
+                AstNodeId parent = index->parent_ids[child];
+                if (parent == AST_NODE_ID_INVALID) continue;
+                flow.next_siblings[child] = flow.first_children[parent];
+                flow.first_children[parent] = child;
+            }
             for (uint32_t id = index->count; id-- > 0;) lambda_flow_build_node(&flow, id);
             bool changed;
             do {
@@ -3452,6 +3468,8 @@ static bool lambda_analyze_capture_permissions(Transpiler* tp) {
     mem_free(flow.returned);
     mem_free(flow.retained);
     mem_free(flow.terminates);
+    mem_free(flow.first_children);
+    mem_free(flow.next_siblings);
     if (flow.failed) record_semantic_error_span(tp, tp->ast_root->source_span,
         ERR_OUT_OF_MEMORY, "out of memory analyzing closure confinement");
     return !flow.failed && tp->error_count == 0;
@@ -3459,9 +3477,13 @@ static bool lambda_analyze_capture_permissions(Transpiler* tp) {
 
 static void* alloc_ast_storage(Transpiler* tp, size_t size) {
     // Retained nodes are retired together with the Input's pool and arena.
+    size += sizeof(LambdaAstBuildState);
     void* bytes = tp->arena ? arena_calloc(tp->arena, size) : pool_calloc(tp->pool, size);
-    if (!bytes) tp->build_allocation_failed = true;
-    return bytes;
+    if (!bytes) {
+        tp->build_allocation_failed = true;
+        return NULL;
+    }
+    return (char*)bytes + sizeof(LambdaAstBuildState);
 }
 
 static void init_ast_node(AstNode* node, AstNodeType kind, SourceSpan span) {
@@ -3483,7 +3505,7 @@ static AstNode* alloc_syntax_node(Transpiler* tp, AstNodeType type,
         SourceSpan span, size_t size, LambdaSyntaxForm form, int tail_slots) {
     AstNode* node = alloc_ast_node_from_span(tp, type, span,
         size + (size_t)tail_slots * sizeof(void*));
-    if (node) node->syntax_form = form;
+    if (node) lambda_ast_build_state(node).syntax_form = form;
     return node;
 }
 
@@ -3538,10 +3560,10 @@ static NameEntry* lookup_declaration_in_current_scope(Transpiler* tp,
 static void binding_node_set_entry(AstNode* node, NameEntry* entry) {
     if (!node || !entry) return;
     if (node->node_type == AST_NODE_VARIABLE_DECLARATOR) {
-        AstDeclaratorNode* declarator = (AstDeclaratorNode*)node;
+        LambdaAstDeclaratorNode* declarator = (LambdaAstDeclaratorNode*)node;
         declarator->entry = entry;
         if (declarator->id && declarator->id->node_type == AST_NODE_IDENT)
-            ((AstIdentNode*)declarator->id)->entry = entry;
+            ((LambdaAstIdentNode*)declarator->id)->entry = entry;
     } else if (node->node_type == AST_NODE_PARAM ||
             node->node_type == AST_NODE_KEY_EXPR ||
             node->node_type == AST_NODE_OBJECT_TYPE ||
@@ -3575,17 +3597,17 @@ static void function_binding_set_entry(Transpiler* tp, AstNode* node,
 
 static String* binding_node_name(AstNode* node) {
     return node->node_type == AST_NODE_VARIABLE_DECLARATOR
-        ? ((AstDeclaratorNode*)node)->name : ((AstNamedNode*)node)->name;
+        ? ((LambdaAstDeclaratorNode*)node)->name : ((AstNamedNode*)node)->name;
 }
 
 static void invalidate_lexical_lookup(Transpiler* tp);
 
 static void append_scope_binding(Transpiler* tp, NameEntry* entry) {
-    NameScope* scope = tp->current_scope;
-    if (scope->last) scope->last->next = entry;
-    else scope->first = entry;
-    scope->last = entry;
-    (void)name_scope_index_add(tp->pool, scope, entry);
+    if (!name_scope_append(tp->pool, tp->current_scope, entry)) {
+        record_semantic_error_span(tp, entry->node->source_span, ERR_OUT_OF_MEMORY,
+            "out of memory adding a lexical binding");
+        return;
+    }
     invalidate_lexical_lookup(tp);
 }
 
@@ -3629,13 +3651,13 @@ static void push_name_with_spelling(Transpiler* tp, AstNode* node,
         // continue anyway to allow further error checking
     }
 
-    NameEntry* entry = (NameEntry*)pool_calloc(tp->pool, sizeof(NameEntry));
+    NameEntry* entry = lambda_name_entry_alloc(tp->pool);
     entry->name = name;
     entry->node = node;  entry->import = import;
     entry->scope = tp->current_scope;  // track which scope this variable belongs to
     if (node->node_type == AST_NODE_VARIABLE_DECLARATOR || node->node_type == AST_NODE_PARAM) {
         entry->declared_type = node->node_type == AST_NODE_VARIABLE_DECLARATOR
-            ? ((AstDeclaratorNode*)node)->declared_type : ((AstNamedNode*)node)->declared_type;
+            ? ((LambdaAstDeclaratorNode*)node)->declared_type : ((AstNamedNode*)node)->declared_type;
         entry->has_type_annotation = entry->declared_type != NULL;
     }
     // The builder publishes the canonical declaration binding before any
@@ -3884,12 +3906,12 @@ static bool resolve_qualified_member_key(Transpiler* tp, AstNode** object,
     AstNode* field = ast_unwrap_primary(*key);
     if (!receiver || receiver->node_type != AST_NODE_MEMBER_EXPR ||
             !field || field->node_type != AST_NODE_IDENT) return false;
-    AstFieldNode* qualifier = (AstFieldNode*)receiver;
+    LambdaAstFieldNode* qualifier = (LambdaAstFieldNode*)receiver;
     AstNode* prefix = ast_unwrap_primary(qualifier->field);
     if (!prefix || prefix->node_type != AST_NODE_IDENT) return false;
-    NamespaceEntry* entry = lookup_namespace(tp, ((AstIdentNode*)prefix)->name);
+    NamespaceEntry* entry = lookup_namespace(tp, ((LambdaAstIdentNode*)prefix)->name);
     if (!entry) return false;
-    String* name = ((AstIdentNode*)field)->name;
+    String* name = ((LambdaAstIdentNode*)field)->name;
     *object = qualifier->object;
     *key = namespace_key_expr(tp, entry->target, {name->chars, name->len}, span);
     return true;
@@ -4228,7 +4250,7 @@ static bool start_has_named_arguments(AstNode* target) {
 
 static void validate_start_parts(Transpiler* tp, AstStartNode* start,
         SourceSpan span, AstNode* target, AstNode* args, AstNode* options,
-        AstCallNode* target_call) {
+        LambdaAstCallNode* target_call) {
     TypeFunc* fn_type = target ? lambda_type_func_signature(target->type) : NULL;
     if (!fn_type || !fn_type->is_proc) {
         record_semantic_error_span(tp, span, ERR_INVALID_CALL,
@@ -4254,7 +4276,7 @@ static void validate_start_parts(Transpiler* tp, AstStartNode* start,
                 return;
             }
         }
-        AstCallNode validation_call = *target_call;
+        LambdaAstCallNode validation_call = *target_call;
         validation_call.argument = literal_args->item;
         if (!lambda_ast_validate_call_arguments(tp, &validation_call, span,
                 (int)((TypeArray*)literal_args->type)->length)) {
@@ -4370,7 +4392,7 @@ static bool static_bind_argument(Type** env, bool* written, TypeBinder* binder,
     return true;
 }
 
-bool lambda_ast_collect_static_binder_env(AstCallNode* call,
+bool lambda_ast_collect_static_binder_env(LambdaAstCallNode* call,
         Type** env_out, uint16_t env_count) {
     TypeFunc* func_type = call && call->function
         ? lambda_type_func_signature(call->function->type) : NULL;
@@ -4397,7 +4419,7 @@ bool lambda_ast_collect_static_binder_env(AstCallNode* call,
 
 // A call whose named arguments leave out a required parameter (LR07-19).
 // False when compilation stops here.
-static bool report_missing_named_parameter(Transpiler* tp, AstCallNode* call,
+static bool report_missing_named_parameter(Transpiler* tp, LambdaAstCallNode* call,
         SourceSpan span, AstNamedNode* param) {
     record_semantic_error_span(tp, span, ERR_ARGUMENT_COUNT_MISMATCH,
         "the named arguments leave out required parameter '%.*s'",
@@ -4407,7 +4429,7 @@ static bool report_missing_named_parameter(Transpiler* tp, AstCallNode* call,
     return false;
 }
 
-static bool validate_duplicate_call_arguments(Transpiler* tp, AstCallNode* call,
+static bool validate_duplicate_call_arguments(Transpiler* tp, LambdaAstCallNode* call,
         AstFuncNode* definition) {
     if (!definition || !definition->body) return true;
     bool supplied[LAMBDA_MAX_FUNCTION_ARGS] = {};
@@ -4445,11 +4467,11 @@ static bool validate_duplicate_call_arguments(Transpiler* tp, AstCallNode* call,
     return true;
 }
 
-static AstFuncNode* named_call_definition(AstCallNode* call) {
+static AstFuncNode* named_call_definition(LambdaAstCallNode* call) {
     return ast_call_has_named_args(call) ? ast_direct_call_function(call) : NULL;
 }
 
-static int resolve_call_boundary_arguments(AstCallNode* call, AstNode* injected,
+static int resolve_call_boundary_arguments(LambdaAstCallNode* call, AstNode* injected,
         AstNode** by_param, AstFuncNode* named_callee) {
     // Each parameter's argument, in parameter order. Named arguments bind by
     // name: walked by position, a direct call naming typed parameters out of
@@ -4471,7 +4493,7 @@ static int resolve_call_boundary_arguments(AstCallNode* call, AstNode* injected,
     return slot_count;
 }
 
-static int resolve_call_boundary_arguments(AstCallNode* call, AstNode* injected,
+static int resolve_call_boundary_arguments(LambdaAstCallNode* call, AstNode* injected,
         AstNode** by_param) {
     return resolve_call_boundary_arguments(call, injected, by_param, named_call_definition(call));
 }
@@ -4499,8 +4521,8 @@ static bool validate_var_argument_root(Transpiler* tp, SourceSpan diagnostic_spa
     // two subviews of one array (or a view and its base) reject at
     // the sanctioned whole-base granularity. Distinct bases stay
     // independent; region-precise checking is the ladder's later rung.
-    NameEntry* effective_root = root->entry->view_base
-        ? root->entry->view_base : root->entry;
+    NameEntry* effective_root = lambda_binding_fields(root->entry).view_base
+        ? lambda_binding_fields(root->entry).view_base : root->entry;
     for (int i = 0; i < *root_count; i++) {
         if (roots[i] == effective_root) {
             record_semantic_error_span(tp, diagnostic_span, ERR_IMMUTABLE_ASSIGNMENT,
@@ -4534,11 +4556,11 @@ static void var_alias_scan_cb(AstNode* child, void* opaque) {
     if (scan->found || !child) return;
     if (child->node_type == AST_NODE_IDENT) {
         for (int i = 0; i < scan->root_count; i++)
-            if (((AstIdentNode*)child)->entry == scan->roots[i]) scan->found = true;
+            if (((LambdaAstIdentNode*)child)->entry == scan->roots[i]) scan->found = true;
         return;
     }
     if (child->node_type == AST_NODE_CALL_EXPR) {
-        AstNode* callee = ast_unwrap_primary(((AstCallNode*)child)->function);
+        AstNode* callee = ast_unwrap_primary(((LambdaAstCallNode*)child)->function);
         if (!callee || callee->node_type != AST_NODE_SYS_FUNC) {
             scan->found = true;
             return;
@@ -4580,7 +4602,7 @@ static uint16_t var_alias_capture_mask(AstNode* const* args, const bool* is_var,
 // the registered bound, and the native keeps the value in that type. Only
 // places the borrow walker can name travel through a home.
 static void validate_native_var_arguments(Transpiler* tp, SourceSpan span,
-        AstCallNode* call, SysFuncInfo* info) {
+        LambdaAstCallNode* call, SysFuncInfo* info) {
     NameEntry* roots[64];
     int root_count = 0;
     int index = call->pipe_inject ? 1 : 0;
@@ -4634,7 +4656,7 @@ static void validate_native_var_arguments(Transpiler* tp, SourceSpan span,
     call->var_alias_proven = true;
 }
 
-bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
+bool lambda_ast_validate_call_arguments(Transpiler* tp, LambdaAstCallNode* call,
         SourceSpan diagnostic_span, int arg_count, AstNode* injected) {
     // Duplicate, ordering, and required-slot checks use the same definition.
     AstFuncNode* named_callee = named_call_definition(call);
@@ -4869,13 +4891,13 @@ static void morph_ast_node(AstNode* node, AstNodeType type, size_t allocated) {
     node->node_type = type;
 }
 
-static_assert(sizeof(AstFieldNode) <= sizeof(AstIdentNode),
+static_assert(sizeof(LambdaAstFieldNode) <= sizeof(LambdaAstIdentNode),
     "an identifier must be able to become a `~.name` member read");
-static_assert(sizeof(AstPrimaryNode) <= sizeof(AstIdentNode),
+static_assert(sizeof(AstPrimaryNode) <= sizeof(LambdaAstIdentNode),
     "an identifier must be able to become a named constant");
-static_assert(sizeof(AstSysFuncNode) <= sizeof(AstIdentNode),
+static_assert(sizeof(AstSysFuncNode) <= sizeof(LambdaAstIdentNode),
     "an identifier must be able to become a system function value");
-static_assert(sizeof(AstTypeNode) <= sizeof(AstIdentNode),
+static_assert(sizeof(AstTypeNode) <= sizeof(LambdaAstIdentNode),
     "a base-type word must be able to hold its type node");
 
 // qualified and bare builtin values must publish the same callable contract;
@@ -4908,22 +4930,22 @@ static void resolve_sys_func_value(Transpiler* tp, AstNode* node, size_t allocat
     else set_sys_func_value_type(tp, sys);
 }
 
-static void init_identifier_syntax(AstIdentNode* node, SourceSpan span, String* name) {
+static void init_identifier_syntax(LambdaAstIdentNode* node, SourceSpan span, String* name) {
     init_ast_node(node, AST_NODE_IDENT, span);
     node->name = name;
     node->type = &TYPE_ANY;  // placeholder until the source-order lookup
-    node->syntax_form = LSF_IDENT;
+    lambda_ast_build_state(node).syntax_form = LSF_IDENT;
 }
 
-static AstIdentNode* build_identifier_syntax(Transpiler* tp, SourceSpan span, String* name) {
+static LambdaAstIdentNode* build_identifier_syntax(Transpiler* tp, SourceSpan span, String* name) {
     // The name already carries the atom's full span and effective type. Only
     // an explicit group needs a wrapper for its different span and scope.
-    AstIdentNode* node = (AstIdentNode*)alloc_ast_storage(tp, sizeof(AstIdentNode));
+    LambdaAstIdentNode* node = (LambdaAstIdentNode*)alloc_ast_storage(tp, sizeof(LambdaAstIdentNode));
     if (node) init_identifier_syntax(node, span, name);
     return node;
 }
 
-static void resolve_identifier(Transpiler* tp, AstIdentNode* ast_node, NameEntry* entry,
+static void resolve_identifier(Transpiler* tp, LambdaAstIdentNode* ast_node, NameEntry* entry,
         bool direct_callee = false) {
     SourceSpan span = ast_node->source_span;
     StrView var_name = {ast_node->name->chars, (size_t)ast_node->name->len};
@@ -4951,7 +4973,7 @@ static void resolve_identifier(Transpiler* tp, AstIdentNode* ast_node, NameEntry
                 ft->const_index = tp->const_list->length - 1;
                 ft->is_const = 1;  ft->is_literal = 1;
                 morph_ast_node((AstNode*)ast_node, AST_NODE_PRIMARY,
-                    sizeof(AstIdentNode));
+                    sizeof(LambdaAstIdentNode));
                 ast_node->type = (Type*)ft;
                 return;
             }
@@ -4964,13 +4986,13 @@ static void resolve_identifier(Transpiler* tp, AstIdentNode* ast_node, NameEntry
                 AST_NODE_CURRENT_ITEM, span, sizeof(AstNode));
             current_item->type = alloc_type(tp->pool, LMD_TYPE_ANY, sizeof(Type));
             // use the identifier as the field name (without scope lookup)
-            AstIdentNode* field = (AstIdentNode*)alloc_ast_node_from_span(tp,
-                AST_NODE_IDENT, span, sizeof(AstIdentNode));
+            LambdaAstIdentNode* field = (LambdaAstIdentNode*)alloc_ast_node_from_span(tp,
+                AST_NODE_IDENT, span, sizeof(LambdaAstIdentNode));
             field->name = ast_node->name;
             field->type = set_type_any(tp, ANY_DYNAMIC_NAME);
-            AstFieldNode* field_node = (AstFieldNode*)ast_node;
+            LambdaAstFieldNode* field_node = (LambdaAstFieldNode*)ast_node;
             morph_ast_node((AstNode*)field_node, AST_NODE_MEMBER_EXPR,
-                sizeof(AstIdentNode));
+                sizeof(LambdaAstIdentNode));
             field_node->object = current_item;
             field_node->field = (AstNode*)field;
             field_node->type = set_type_any(tp, ANY_DYNAMIC_NAME);
@@ -4978,7 +5000,7 @@ static void resolve_identifier(Transpiler* tp, AstIdentNode* ast_node, NameEntry
         }
         SysFuncInfo* sys_value = get_unambiguous_sys_func_value(&var_name);
         if (sys_value) {
-            resolve_sys_func_value(tp, ast_node, sizeof(AstIdentNode), sys_value, direct_callee);
+            resolve_sys_func_value(tp, ast_node, sizeof(LambdaAstIdentNode), sys_value, direct_callee);
             return;
         }
         // ident is used for member access, thus we return TYPE_ANY
@@ -4987,12 +5009,12 @@ static void resolve_identifier(Transpiler* tp, AstIdentNode* ast_node, NameEntry
     else {
         // a later top-level alias resolves here, so this reference sees it complete
         if (entry->node && entry->node->node_type == AST_NODE_VARIABLE_DECLARATOR &&
-                ((AstDeclaratorNode*)entry->node)->is_type_definition) {
+                ((LambdaAstDeclaratorNode*)entry->node)->is_type_definition) {
             lambda_ast_resolve_type_early(tp, entry->node);
             lambda_ast_note_type_reference(entry->node);
         }
         ast_node->entry = entry;
-        if (entry->is_binder && entry->binder) {
+        if (entry->is_binder && lambda_binding_fields(entry).binder) {
             // A binder read is a first-class runtime type value. Its contained
             // type remains the written bound in type position (TG2/TG9), while
             // expression position exposes the `type` carrier from the frame.
@@ -5001,8 +5023,8 @@ static void resolve_identifier(Transpiler* tp, AstIdentNode* ast_node, NameEntry
         }
         // CW24v2 phase 2: every resolved use of a place-copy binding counts as
         // a read; mutation notes compensate their own target-root read below.
-        if (entry->is_place_copy && entry->place_copy_reads < UINT16_MAX) {
-            entry->place_copy_reads++;
+        if (entry->is_place_copy && lambda_binding_fields(entry).place_copy_reads < UINT16_MAX) {
+            static_cast<LambdaNameEntry*>(entry)->place_copy_reads++;
         }
         if (entry->import && entry->node->type->type_id != LMD_TYPE_FUNC) {
             // clone and remove is_const flag
@@ -5067,10 +5089,10 @@ static void resolve_identifier(Transpiler* tp, AstIdentNode* ast_node, NameEntry
 // Resolve-time construction (a callee spelled as a type word, a base-type
 // word that names a builtin) binds a new name immediately.
 AstNode* build_identifier_from_span(Transpiler* tp, SourceSpan span) {
-    AstIdentNode* node = build_identifier_syntax(tp, span,
+    LambdaAstIdentNode* node = build_identifier_syntax(tp, span,
         name_pool_create_strview(tp->name_pool, source_span_text(tp, span)));
     if (!node) return NULL;
-    node->syntax_form = LSF_NONE;
+    lambda_ast_build_state(node).syntax_form = LSF_NONE;
     resolve_identifier(tp, node, lookup_interned_name(tp, node->name));
     return node;
 }
@@ -5821,7 +5843,7 @@ static Type* build_literal_type_from_span(Transpiler* tp,
         return build_lit_decimal_from_span(tp, span);
     case LAMBDA_AST_LITERAL_SIZED_INTEGER:
         return build_lit_sized_integer_from_span(tp, span,
-            literal && (literal->syntax_flags & LSF_LITERAL_NEGATED));
+            literal && (lambda_ast_build_state(literal).syntax_flags & LSF_LITERAL_NEGATED));
     case LAMBDA_AST_LITERAL_SIZED_FLOAT:
         return build_lit_sized_float_from_span(tp, span);
     case LAMBDA_AST_LITERAL_IMAGINARY:
@@ -5834,15 +5856,15 @@ AstNode* build_literal_syntax(Transpiler* tp, SourceSpan span,
         LambdaAstLiteralKind kind) {
     AstPrimaryNode* ast_node = (AstPrimaryNode*)alloc_ast_node_from_span(tp,
         AST_NODE_PRIMARY, span, sizeof(AstPrimaryNode));
-    ast_node->syntax_form = LSF_LITERAL;
-    ast_node->syntax_aux = (uint16_t)kind;
+    lambda_ast_build_state(ast_node).syntax_form = LSF_LITERAL;
+    lambda_ast_build_state(ast_node).syntax_aux = (uint16_t)kind;
     return (AstNode*)ast_node;
 }
 
 // the payload, its const-pool slot and any literal diagnostic
 static void resolve_literal(Transpiler* tp, AstPrimaryNode* literal) {
     literal->type = build_literal_type_from_span(tp, literal->source_span,
-        (LambdaAstLiteralKind)literal->syntax_aux, literal);
+        (LambdaAstLiteralKind)lambda_ast_build_state(literal).syntax_aux, literal);
 }
 
 Type* build_type_literal_from_span(Transpiler* tp, SourceSpan span,
@@ -6011,7 +6033,7 @@ static inline bool is_elementwise_comparison_op(Operator op) {
 static bool is_direct_elementwise_comparison(AstNode* node) {
     node = ast_unwrap_primary(node);
     return node && node->node_type == AST_NODE_BINARY &&
-        is_elementwise_comparison_op(((AstBinaryNode*)node)->op);
+        is_elementwise_comparison_op(((LambdaAstBinaryNode*)node)->op);
 }
 
 static void lint_condition_span(Transpiler* tp, SourceSpan span, AstNode* cond,
@@ -6072,7 +6094,7 @@ static Type* known_array_element_type(Type* type) {
     return lambda_array_contract_info(type, &info) ? info.immediate_element : type;
 }
 
-static Type* binary_array_result_element_type(AstBinaryNode* ast_node) {
+static Type* binary_array_result_element_type(LambdaAstBinaryNode* ast_node) {
     if (!ast_node) return &TYPE_ANY;
     if (is_elementwise_comparison_op(ast_node->op)) return &TYPE_BOOL;
 
@@ -6094,7 +6116,7 @@ static Type* binary_array_result_element_type(AstBinaryNode* ast_node) {
     return decision.valid ? lambda_numeric_type_from_kind(decision.result) : &TYPE_ANY;
 }
 
-static Type* alloc_array_num_result_type(Transpiler* tp, AstBinaryNode* ast_node) {
+static Type* alloc_array_num_result_type(Transpiler* tp, LambdaAstBinaryNode* ast_node) {
     TypeArray* type = (TypeArray*)alloc_type(tp->pool, LMD_TYPE_ARRAY_NUM,
         sizeof(TypeArray));
     // ArrayNum carries its runtime element lane; preserving that witness keeps
@@ -6128,7 +6150,7 @@ static bool ast_binary_is_type_set_op(Operator op) {
         op == OPERATOR_EXCLUDE;
 }
 
-static bool promote_type_union_expr(Transpiler* tp, AstBinaryNode* ast_node) {
+static bool promote_type_union_expr(Transpiler* tp, LambdaAstBinaryNode* ast_node) {
     if (!ast_node || !ast_binary_is_type_set_op(ast_node->op) ||
         !ast_is_explicit_type_value(ast_node->left) ||
         !ast_is_explicit_type_value(ast_node->right)) {
@@ -6184,12 +6206,12 @@ bool has_current_item_ref(AstNode* node) {
     case AST_NODE_SPREAD:
         return has_current_item_ref(((AstUnaryNode*)node)->operand);
     case AST_NODE_BINARY:
-        return has_current_item_ref(((AstBinaryNode*)node)->left) ||
-               has_current_item_ref(((AstBinaryNode*)node)->right);
+        return has_current_item_ref(((LambdaAstBinaryNode*)node)->left) ||
+               has_current_item_ref(((LambdaAstBinaryNode*)node)->right);
     case AST_NODE_PIPE:
         // a nested `|>`, `|:` or `that` binds its own `~` for its right side
         // (S10.1.3), so only its operand can read the enclosing current item
-        return has_current_item_ref(((AstBinaryNode*)node)->left);
+        return has_current_item_ref(((LambdaAstBinaryNode*)node)->left);
     case AST_NODE_IF_EXPR: {
         AstIfNode* if_node = (AstIfNode*)node;
         return has_current_item_ref(if_node->cond) ||
@@ -6204,7 +6226,7 @@ bool has_current_item_ref(AstNode* node) {
         // S10.1.7v2 reads as `~.name` -- turn an enclosing `|>` into a mapping.
         return has_current_item_ref(((AstMatchNode*)node)->scrutinee);
     case AST_NODE_CALL_EXPR: {
-        AstCallNode* call = (AstCallNode*)node;
+        LambdaAstCallNode* call = (LambdaAstCallNode*)node;
         if (has_current_item_ref(call->function)) return true;
         AstNode* arg = call->argument;
         while (arg) {
@@ -6215,8 +6237,8 @@ bool has_current_item_ref(AstNode* node) {
     }
     case AST_NODE_MEMBER_EXPR:
     case AST_NODE_INDEX_EXPR:
-        return has_current_item_ref(((AstFieldNode*)node)->object) ||
-               has_current_item_ref(((AstFieldNode*)node)->field);
+        return has_current_item_ref(((LambdaAstFieldNode*)node)->object) ||
+               has_current_item_ref(((LambdaAstFieldNode*)node)->field);
     case AST_NODE_NAVIGATION_EXPR:
         return has_current_item_ref(((AstNavigationNode*)node)->object);
     case AST_NODE_PATH_INDEX_EXPR:
@@ -6240,7 +6262,7 @@ bool has_current_item_ref(AstNode* node) {
     case AST_NODE_PUB_STAM:
         return chain_has_current_item_ref(((AstLetNode*)node)->declare);
     case AST_NODE_VARIABLE_DECLARATOR:
-        return has_current_item_ref(((AstDeclaratorNode*)node)->init);
+        return has_current_item_ref(((LambdaAstDeclaratorNode*)node)->init);
     case AST_NODE_KEY_EXPR:
         return has_current_item_ref(((AstNamedNode*)node)->key) ||
             has_current_item_ref(((AstNamedNode*)node)->as);
@@ -6255,7 +6277,7 @@ AstNode* build_current_item_syntax(Transpiler* tp, SourceSpan span,
     AstNode* ast_node = alloc_ast_node_from_span(tp,
         is_index ? AST_NODE_CURRENT_INDEX : AST_NODE_CURRENT_ITEM,
         span, sizeof(AstNode));
-    ast_node->syntax_form = LSF_CURRENT_ITEM;
+    lambda_ast_build_state(ast_node).syntax_form = LSF_CURRENT_ITEM;
     return ast_node;
 }
 
@@ -6265,7 +6287,7 @@ static AstNavigationNode* build_navigation_syntax(Transpiler* tp,
         AST_NODE_NAVIGATION_EXPR, span, sizeof(AstNavigationNode));
     nav->object = object;
     nav->root = root;
-    nav->syntax_form = LSF_NAVIGATION;
+    lambda_ast_build_state(nav).syntax_form = LSF_NAVIGATION;
     return nav;
 }
 
@@ -6281,7 +6303,7 @@ AstNode* build_primary_wrapper_syntax(Transpiler* tp, SourceSpan span,
     AstPrimaryNode* primary = (AstPrimaryNode*)alloc_ast_node_from_span(tp,
         AST_NODE_PRIMARY, span, sizeof(AstPrimaryNode));
     primary->expr = expr;
-    primary->syntax_form = form;
+    lambda_ast_build_state(primary).syntax_form = form;
     return (AstNode*)primary;
 }
 
@@ -6297,7 +6319,7 @@ static void resolve_primary_wrapper(AstPrimaryNode* primary) {
 AstNode* build_current_error_syntax(Transpiler* tp, SourceSpan span) {
     AstNode* ast_node = alloc_ast_node_from_span(tp, AST_NODE_CURRENT_ERROR,
         span, sizeof(AstNode));
-    ast_node->syntax_form = LSF_CURRENT_ERROR;
+    lambda_ast_build_state(ast_node).syntax_form = LSF_CURRENT_ERROR;
     return ast_node;
 }
 
@@ -6419,7 +6441,7 @@ static void resolve_match(Transpiler* tp, AstMatchNode* node) {
     validate_match_branch_homogeneity(tp, node, span);
     AstNode* value = ast_unwrap_primary_to_leaf(scrutinee);
     if (value && value->node_type == AST_NODE_IDENT) {
-        AstIdentNode* ident = (AstIdentNode*)value;
+        LambdaAstIdentNode* ident = (LambdaAstIdentNode*)value;
         AstNode* binding = ident->entry ? ident->entry->node : NULL;
         TypeParam* parameter = binding && binding->node_type == AST_NODE_PARAM
             ? lambda_type_param(binding->type) : NULL;
@@ -6438,20 +6460,20 @@ static void resolve_match(Transpiler* tp, AstMatchNode* node) {
     }
 }
 
-static AstDeclaratorNode* build_declarator_syntax(Transpiler* tp,
+static LambdaAstDeclaratorNode* build_declarator_syntax(Transpiler* tp,
         SourceSpan span, String* name, LambdaSyntaxForm form, int tail_slots) {
-    AstDeclaratorNode* declarator = (AstDeclaratorNode*)alloc_syntax_node(tp,
-        AST_NODE_VARIABLE_DECLARATOR, span, sizeof(AstDeclaratorNode), form,
+    LambdaAstDeclaratorNode* declarator = (LambdaAstDeclaratorNode*)alloc_syntax_node(tp,
+        AST_NODE_VARIABLE_DECLARATOR, span, sizeof(LambdaAstDeclaratorNode), form,
         tail_slots);
     declarator->name = name;
-    AstIdentNode* id = (AstIdentNode*)alloc_ast_node_from_span(tp,
-        AST_NODE_IDENT, span, sizeof(AstIdentNode));
+    LambdaAstIdentNode* id = (LambdaAstIdentNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_IDENT, span, sizeof(LambdaAstIdentNode));
     id->name = name;
     declarator->id = (AstNode*)id;
     return declarator;
 }
 
-static AstDeclaratorNode* build_declarator_from_name(Transpiler* tp,
+static LambdaAstDeclaratorNode* build_declarator_from_name(Transpiler* tp,
         SourceSpan span, String* name) {
     return build_declarator_syntax(tp, span, name, LSF_NONE, 0);
 }
@@ -6504,7 +6526,7 @@ static void resolve_decompose(Transpiler* tp, AstDecomposeNode* ast_node) {
     // Push all names to the name stack
     for (int i = 0; i < name_count; i++) {
         // Create a temporary named node for each variable
-        AstDeclaratorNode* var_node = build_declarator_from_name(tp, span,
+        LambdaAstDeclaratorNode* var_node = build_declarator_from_name(tp, span,
             ast_node->names[i]);
         Type* projected = NULL;
         if (is_named && source_map && source_map->shape) {
@@ -6530,7 +6552,8 @@ static void resolve_decompose(Transpiler* tp, AstDecomposeNode* ast_node) {
         // target entry. Retain the entry created by the canonical name pass so
         // every consumer uses its planned storage rather than re-looking up a
         // shadowable source spelling at evaluation time.
-        ast_node->entries[i] = tp->current_scope->last;
+        ast_node->entries[i] = tp->current_scope->declarations
+            ? tp->current_scope->declarations->last : NULL;
         // each projection owns a value snapshot, including borrowed inputs.
         ast_node->entries[i]->cow_owned = true;
     }
@@ -6549,7 +6572,7 @@ AstNode* normalize_pattern_literal_set(AstNode* node) {
         return normalize_pattern_literal_set(((AstListNode*)node)->item);
     }
     if (node->node_type == AST_NODE_BINARY_TYPE || node->node_type == AST_NODE_BINARY) {
-        AstBinaryNode* binary = (AstBinaryNode*)node;
+        LambdaAstBinaryNode* binary = (LambdaAstBinaryNode*)node;
         if (binary->op != OPERATOR_UNION) return NULL;
         AstNode* left = normalize_pattern_literal_set(binary->left);
         AstNode* right = normalize_pattern_literal_set(binary->right);
@@ -6735,7 +6758,7 @@ ShapeEntry* append_shape_entry_typed(Transpiler* tp, String* pooled_name, Type* 
     return shape_entry;
 }
 
-void register_binary_type(Transpiler* tp, AstBinaryNode* binary) {
+void register_binary_type(Transpiler* tp, LambdaAstBinaryNode* binary) {
     Type* left = unwrap_simple_type_type(binary->left->type);
     Type* right = unwrap_simple_type_type(binary->right->type);
     if (reduce_binary_type_node(tp, binary, left, right)) return;
@@ -7033,18 +7056,18 @@ static bool join_expr_mentions_name(AstNode* node, String* name) {
 
     switch (node->node_type) {
     case AST_NODE_IDENT: {
-        AstIdentNode* ident = (AstIdentNode*)node;
+        LambdaAstIdentNode* ident = (LambdaAstIdentNode*)node;
         return ident->name == name || (ident->name && ident->name->len == name->len &&
             memcmp(ident->name->chars, name->chars, name->len) == 0);
     }
     case AST_NODE_MEMBER_EXPR: {
-        AstFieldNode* field = (AstFieldNode*)node;
+        LambdaAstFieldNode* field = (LambdaAstFieldNode*)node;
         // A field-name identifier is not a value binding; only the receiver can mention the loop var.
         return join_expr_mentions_name(field->object, name);
     }
     case AST_NODE_INDEX_EXPR:
     {
-        AstFieldNode* field = (AstFieldNode*)node;
+        LambdaAstFieldNode* field = (LambdaAstFieldNode*)node;
         return join_expr_mentions_name(field->object, name) ||
                join_expr_mentions_name(field->field, name);
     }
@@ -7054,7 +7077,7 @@ static bool join_expr_mentions_name(AstNode* node, String* name) {
                join_expr_mentions_name(path_idx->segment_expr, name);
     }
     case AST_NODE_BINARY: {
-        AstBinaryNode* bin = (AstBinaryNode*)node;
+        LambdaAstBinaryNode* bin = (LambdaAstBinaryNode*)node;
         return join_expr_mentions_name(bin->left, name) ||
                join_expr_mentions_name(bin->right, name);
     }
@@ -7064,7 +7087,7 @@ static bool join_expr_mentions_name(AstNode* node, String* name) {
         return join_expr_mentions_name(un->operand, name);
     }
     case AST_NODE_CALL_EXPR: {
-        AstCallNode* call = (AstCallNode*)node;
+        LambdaAstCallNode* call = (LambdaAstCallNode*)node;
         if (join_expr_mentions_name(call->function, name)) return true;
         for (AstNode* arg = call->argument; arg; arg = arg->next) {
             if (join_expr_mentions_name(arg, name)) return true;
@@ -7113,7 +7136,7 @@ static void build_join_key_specs(Transpiler* tp, AstLoopNode* loop, AstNode* on_
         return;
     }
 
-    AstBinaryNode* bin = (AstBinaryNode*)expr;
+    LambdaAstBinaryNode* bin = (LambdaAstBinaryNode*)expr;
     if (bin->op == OPERATOR_AND) {
         build_join_key_specs(tp, loop, bin->left);
         build_join_key_specs(tp, loop, bin->right);
@@ -7145,14 +7168,14 @@ static String* infer_group_key_alias(Transpiler* tp, AstNode* key_expr) {
     if (!scan || scan->node_type != AST_NODE_MEMBER_EXPR) {
         return NULL;
     }
-    AstNode* field = ((AstFieldNode*)scan)->field;
+    AstNode* field = ((LambdaAstFieldNode*)scan)->field;
     while (field && field->node_type == AST_NODE_PRIMARY) {
         field = ((AstPrimaryNode*)field)->expr;
     }
     if (!field || field->node_type != AST_NODE_IDENT) {
         return NULL;
     }
-    return ((AstIdentNode*)field)->name;
+    return ((LambdaAstIdentNode*)field)->name;
 }
 
 static void enter_for_group_scope(Transpiler* tp, AstForNode* for_node) {
@@ -7312,7 +7335,7 @@ typedef struct ReturnBoundaryScan {
 
 typedef struct ReturnErrorOriginScan {
     Transpiler* tp;
-    AstCallNode* call;
+    LambdaAstCallNode* call;
 } ReturnErrorOriginScan;
 
 static bool find_first_return_error_call(AstNode* node, void* data) {
@@ -7322,7 +7345,7 @@ static bool find_first_return_error_call(AstNode* node, void* data) {
     if (scan->call || !node || (!ordinary_outcome_has_error(scan->tp, node) &&
             !lambda_type_comparison_may_error(node->type, true, false))) return false;
     if (node->node_type == AST_NODE_CALL_EXPR) {
-        scan->call = (AstCallNode*)node;
+        scan->call = (LambdaAstCallNode*)node;
         return false;
     }
     if (node->node_type == AST_NODE_HANDLER_EXPR) {
@@ -7334,7 +7357,7 @@ static bool find_first_return_error_call(AstNode* node, void* data) {
     return true;
 }
 
-static bool error_call_name(Transpiler* tp, AstCallNode* call, const char** name, int* length) {
+static bool error_call_name(Transpiler* tp, LambdaAstCallNode* call, const char** name, int* length) {
     if (!call || !name || !length) return false;
     AstNode* callee = call->function;
     while (callee && callee->node_type == AST_NODE_PRIMARY) {
@@ -7349,7 +7372,7 @@ static bool error_call_name(Transpiler* tp, AstCallNode* call, const char** name
         }
     }
     if (callee && callee->node_type == AST_NODE_IDENT) {
-        String* ident_name = ((AstIdentNode*)callee)->name;
+        String* ident_name = ((LambdaAstIdentNode*)callee)->name;
         if (ident_name) {
             *name = ident_name->chars;
             *length = (int)ident_name->len;
@@ -7365,12 +7388,12 @@ static bool error_call_name(Transpiler* tp, AstCallNode* call, const char** name
     return false;
 }
 
-static TypeFunc* call_function_signature(AstCallNode* call) {
+static TypeFunc* call_function_signature(LambdaAstCallNode* call) {
     AstNode* function = call ? ast_unwrap_primary_to_leaf(call->function) : NULL;
     return function ? lambda_type_func_signature(function->type) : NULL;
 }
 
-static AstNode* describe_return_error_call(Transpiler* tp, AstCallNode* call, char* reason,
+static AstNode* describe_return_error_call(Transpiler* tp, LambdaAstCallNode* call, char* reason,
         size_t capacity, bool* argument_error) {
     TypeFunc* signature = call_function_signature(call);
     if (signature && signature->may_return_error &&
@@ -7471,7 +7494,7 @@ static void record_return_contract_error(Transpiler* tp, AstFuncNode* fn,
         actual_name, expected_name);
 }
 
-static void retain_call_propagation_errors(Transpiler* tp, AstCallNode* call) {
+static void retain_call_propagation_errors(Transpiler* tp, LambdaAstCallNode* call) {
     if (!call->propagate) return;
     call->propagated_error_type = lambda_type_union_normalized(tp->pool,
         call->propagated_error_type, lambda_type_error_outcomes(tp->pool, call->type));
@@ -7480,7 +7503,7 @@ static void retain_call_propagation_errors(Transpiler* tp, AstCallNode* call) {
 static Type* propagated_error_outcomes(Transpiler* tp, AstNode* node) {
     if (!node) return NULL;
     if (node->node_type == AST_NODE_CALL_EXPR) {
-        AstCallNode* call = (AstCallNode*)node;
+        LambdaAstCallNode* call = (LambdaAstCallNode*)node;
         return call->propagate ? call->propagated_error_type : NULL;
     }
     if (node->node_type == AST_NODE_UNARY &&
@@ -7609,7 +7632,7 @@ static void validate_function_return_contract(Transpiler* tp, AstFuncNode* fn,
 // E228 is a property of the enclosing expression, not of an AST build order.
 // Validate after the body exists so only an immediate documented handler can
 // consume an enforcing call; arbitrary wrappers must not hide the obligation.
-static void record_unhandled_error_call(Transpiler* tp, AstCallNode* call) {
+static void record_unhandled_error_call(Transpiler* tp, LambdaAstCallNode* call) {
     if (!tp || !call) return;
     const char* name = "function";
     int name_length = 8;
@@ -7701,9 +7724,9 @@ static bool outcome_requires_acknowledgment(Transpiler* tp, AstNode* node) {
     bool may_error = ordinary_outcome_has_error(tp, node);
     switch (node->node_type) {
     case AST_NODE_CALL_EXPR:
-        return !((AstCallNode*)node)->propagate &&
-            (((AstCallNode*)node)->can_raise ||
-             ((AstCallNode*)node)->parameter_admission_may_fail || may_error);
+        return !((LambdaAstCallNode*)node)->propagate &&
+            (((LambdaAstCallNode*)node)->can_raise ||
+             ((LambdaAstCallNode*)node)->parameter_admission_may_fail || may_error);
     // Bindings and caught subjects already retain an acknowledged outcome.
     // Their consumers still enforce their own admission contracts.
     case AST_NODE_MEMBER_EXPR:
@@ -7717,7 +7740,7 @@ static bool outcome_requires_acknowledgment(Transpiler* tp, AstNode* node) {
         // the full outcome normalizes to any (S7.6.1v9/S7.6.9).
         return may_error;
     case AST_NODE_BINARY: {
-        Operator op = ((AstBinaryNode*)node)->op;
+        Operator op = ((LambdaAstBinaryNode*)node)->op;
         return op != OPERATOR_UNION && op != OPERATOR_INTERSECT &&
             op != OPERATOR_EXCLUDE && may_error;
     }
@@ -7733,7 +7756,7 @@ static void validate_enforcing_calls_in_expression(Transpiler* tp, AstNode* node
 
     if (!immediate_acknowledgment && outcome_requires_acknowledgment(tp, node)) {
         if (node->node_type == AST_NODE_CALL_EXPR) {
-            record_unhandled_error_call(tp, (AstCallNode*)node);
+            record_unhandled_error_call(tp, (LambdaAstCallNode*)node);
         } else {
             ReturnErrorOriginScan origin = {tp, NULL};
             walk_lambda_ast(node, find_first_return_error_call, &origin, false);
@@ -7751,7 +7774,7 @@ static void validate_enforcing_calls_in_expression(Transpiler* tp, AstNode* node
 
     switch (node->node_type) {
     case AST_NODE_CALL_EXPR: {
-        AstCallNode* call = (AstCallNode*)node;
+        LambdaAstCallNode* call = (LambdaAstCallNode*)node;
         if (call->propagate) {
             if (!return_acknowledgment) {
                 record_semantic_error_span(tp, call->source_span, ERR_UNHANDLED_ERROR,
@@ -7801,7 +7824,7 @@ static void validate_enforcing_calls_in_expression(Transpiler* tp, AstNode* node
         return;
     case AST_NODE_MEMBER_EXPR:
     case AST_NODE_INDEX_EXPR: {
-        AstFieldNode* access = (AstFieldNode*)node;
+        LambdaAstFieldNode* access = (LambdaAstFieldNode*)node;
         validate_enforcing_calls_in_expression(tp, access->object,
             immediate_acknowledgment, return_acknowledgment);
         for (AstNode* key = access->field; key; key = key->next)
@@ -7826,7 +7849,7 @@ static void validate_enforcing_calls_in_expression(Transpiler* tp, AstNode* node
     }
     case AST_NODE_BINARY:
     case AST_NODE_PIPE: {
-        AstBinaryNode* binary = (AstBinaryNode*)node;
+        LambdaAstBinaryNode* binary = (LambdaAstBinaryNode*)node;
         bool classification = binary->op == OPERATOR_IS &&
             lambda_type_has_proven_error(binary->right ? binary->right->type : NULL);
         // S10.1.2v4/S7.8.2: sequence mapping retains each body outcome in
@@ -7870,7 +7893,7 @@ static void validate_enforcing_calls_in_expression(Transpiler* tp, AstNode* node
             return_acknowledgment);
         return;
     case AST_NODE_VARIABLE_DECLARATOR: {
-        AstDeclaratorNode* declarator = (AstDeclaratorNode*)node;
+        LambdaAstDeclaratorNode* declarator = (LambdaAstDeclaratorNode*)node;
         validate_enforcing_calls_in_expression(tp, declarator->init,
             (declarator->entry && declarator->entry->admission_may_fail) ||
                 binding_acknowledges_error(declarator->declared_type), return_acknowledgment);
@@ -8130,18 +8153,18 @@ static bool ast_reads_binding(AstNode* node, String* name) {
     }
     switch (node->node_type) {
     case AST_NODE_IDENT:
-        return same_name_string(((AstIdentNode*)node)->name, name);
+        return same_name_string(((LambdaAstIdentNode*)node)->name, name);
     case AST_NODE_UNARY:
     case AST_NODE_SPREAD:
         return ast_reads_binding(((AstUnaryNode*)node)->operand, name);
     case AST_NODE_BINARY:
     case AST_NODE_PIPE: {
-        AstBinaryNode* binary = (AstBinaryNode*)node;
+        LambdaAstBinaryNode* binary = (LambdaAstBinaryNode*)node;
         return ast_reads_binding(binary->left, name) ||
             ast_reads_binding(binary->right, name);
     }
     case AST_NODE_CALL_EXPR: {
-        AstCallNode* call = (AstCallNode*)node;
+        LambdaAstCallNode* call = (LambdaAstCallNode*)node;
         // A direct callee name is a declaration reference, not a value read.
         AstNode* callee = ast_unwrap_primary_to_leaf(call->function);
         if (!callee || callee->node_type != AST_NODE_IDENT) {
@@ -8160,11 +8183,11 @@ static bool ast_reads_binding(AstNode* node, String* name) {
             ast_reads_binding(handler->filter, name);
     }
     case AST_NODE_MEMBER_EXPR: {
-        AstFieldNode* field = (AstFieldNode*)node;
+        LambdaAstFieldNode* field = (LambdaAstFieldNode*)node;
         return ast_reads_binding(field->object, name);
     }
     case AST_NODE_INDEX_EXPR: {
-        AstFieldNode* field = (AstFieldNode*)node;
+        LambdaAstFieldNode* field = (LambdaAstFieldNode*)node;
         return ast_reads_binding(field->object, name) ||
             ast_reads_binding(field->field, name);
     }
@@ -8198,7 +8221,7 @@ static bool ast_reads_binding(AstNode* node, String* name) {
         return false;
     }
     case AST_NODE_VARIABLE_DECLARATOR:
-        return ast_reads_binding(((AstDeclaratorNode*)node)->init, name);
+        return ast_reads_binding(((LambdaAstDeclaratorNode*)node)->init, name);
     case AST_NODE_KEY_EXPR: {
         AstNamedNode* named = (AstNamedNode*)node;
         return ast_reads_binding(named->key, name) ||
@@ -8231,13 +8254,13 @@ static bool ast_reads_binding(AstNode* node, String* name) {
     }
 }
 
-static AstFuncNode* direct_user_callable(AstCallNode* call) {
+static AstFuncNode* direct_user_callable(LambdaAstCallNode* call) {
     AstNode* callee = call ? ast_unwrap_primary_to_leaf(call->function) : NULL;
     if (!callee || callee->node_type != AST_NODE_IDENT) return NULL;
-    AstIdentNode* ident = (AstIdentNode*)callee;
+    LambdaAstIdentNode* ident = (LambdaAstIdentNode*)callee;
     AstNode* target = ident->entry ? ident->entry->node : NULL;
     if (target && target->node_type == AST_NODE_VARIABLE_DECLARATOR) {
-        target = ast_unwrap_primary_to_leaf(((AstDeclaratorNode*)target)->init);
+        target = ast_unwrap_primary_to_leaf(((LambdaAstDeclaratorNode*)target)->init);
     }
     return target && (target->node_type == AST_NODE_FUNC ||
         target->node_type == AST_NODE_FUNC_EXPR || target->node_type == AST_NODE_PROC)
@@ -8256,7 +8279,7 @@ static void report_invalidated_read(InvalidatedBindingState* state,
 static void scan_invalidated_bindings(InvalidatedBindingState* state, AstNode* node);
 
 static void scan_invalidated_call(InvalidatedBindingState* state,
-        AstCallNode* call) {
+        LambdaAstCallNode* call) {
     if (!state || !call) return;
     AstFuncNode* callee = direct_user_callable(call);
     // Evaluate arguments before applying the callee's captured writes.
@@ -8293,7 +8316,7 @@ static void scan_invalidated_bindings(InvalidatedBindingState* state, AstNode* n
             scan_invalidated_bindings(state, ((AstPrimaryNode*)node)->expr);
             break;
         case AST_NODE_CALL_EXPR:
-            scan_invalidated_call(state, (AstCallNode*)node);
+            scan_invalidated_call(state, (LambdaAstCallNode*)node);
             break;
         case AST_NODE_ASSIGN_STAM: {
             AstAssignStamNode* assign = (AstAssignStamNode*)node;
@@ -8320,7 +8343,7 @@ static void scan_invalidated_bindings(InvalidatedBindingState* state, AstNode* n
         }
         case AST_NODE_BINARY:
         case AST_NODE_PIPE: {
-            AstBinaryNode* binary = (AstBinaryNode*)node;
+            LambdaAstBinaryNode* binary = (LambdaAstBinaryNode*)node;
             scan_invalidated_bindings(state, binary->left);
             scan_invalidated_bindings(state, binary->right);
             break;
@@ -8398,7 +8421,7 @@ static void scan_invalidated_bindings(InvalidatedBindingState* state, AstNode* n
         }
         case AST_NODE_MEMBER_EXPR:
         case AST_NODE_INDEX_EXPR: {
-            AstFieldNode* field = (AstFieldNode*)node;
+            LambdaAstFieldNode* field = (LambdaAstFieldNode*)node;
             scan_invalidated_bindings(state, field->object);
             scan_invalidated_bindings(state, field->field);
             break;
@@ -8408,7 +8431,7 @@ static void scan_invalidated_bindings(InvalidatedBindingState* state, AstNode* n
             scan_invalidated_bindings(state, ((AstPathIndexNode*)node)->segment_expr);
             break;
         case AST_NODE_VARIABLE_DECLARATOR:
-            scan_invalidated_bindings(state, ((AstDeclaratorNode*)node)->init);
+            scan_invalidated_bindings(state, ((LambdaAstDeclaratorNode*)node)->init);
             break;
         case AST_NODE_KEY_EXPR: {
             AstNamedNode* named = (AstNamedNode*)node;
@@ -8539,7 +8562,7 @@ static bool handler_operand_is_proc(AstNode* operand) {
     // classify the effective call so statement handlers keep their context.
     AstNode* effective_operand = ast_unwrap_primary_to_leaf(operand);
     if (!effective_operand || effective_operand->node_type != AST_NODE_CALL_EXPR) return false;
-    AstCallNode* call = (AstCallNode*)effective_operand;
+    LambdaAstCallNode* call = (LambdaAstCallNode*)effective_operand;
     AstNode* callee = ast_unwrap_primary_to_leaf(call->function);
     if (!callee) return false;
     if (callee->node_type == AST_NODE_SYS_FUNC) {
@@ -8593,23 +8616,23 @@ static bool ordinary_outcome_has_error(Transpiler* tp, AstNode* node, int depth)
     if (node->node_type == AST_NODE_RETURN_STAM ||
             node->node_type == AST_NODE_RAISE_EXPR || node->node_type == AST_NODE_RAISE_STAM)
         return false; // early outcomes are checked at their own return boundary
-    if (node->node_type == AST_NODE_CALL_EXPR && ((AstCallNode*)node)->propagate)
+    if (node->node_type == AST_NODE_CALL_EXPR && ((LambdaAstCallNode*)node)->propagate)
         return false;
     if (node->node_type == AST_NODE_UNARY && ((AstUnaryNode*)node)->op == OPERATOR_PROPAGATE)
         return false;
-    if (node->node_type == AST_NODE_BINARY && ast_binary_is_type_set_op(((AstBinaryNode*)node)->op))
+    if (node->node_type == AST_NODE_BINARY && ast_binary_is_type_set_op(((LambdaAstBinaryNode*)node)->op))
         return false;
     if (lambda_type_has_proven_error(node->type)) return true;
     switch (node->node_type) {
     case AST_NODE_CALL_EXPR: {
-        AstCallNode* call = (AstCallNode*)node;
+        LambdaAstCallNode* call = (LambdaAstCallNode*)node;
         return call->can_raise || call->parameter_admission_may_fail ||
             call->rejected_error_flows || call->fn_colour_guard;
     }
     case AST_NODE_CURRENT_ERROR:
         return lambda_type_accepts_error(node->type);
     case AST_NODE_IDENT: {
-        NameEntry* entry = ((AstIdentNode*)node)->entry;
+        NameEntry* entry = ((LambdaAstIdentNode*)node)->entry;
         if (!entry) return false;
         // a later borrow/write can widen the binding, but cannot change an
         // earlier clean read; loop refresh updates the read's own outcome.
@@ -8621,8 +8644,8 @@ static bool ordinary_outcome_has_error(Transpiler* tp, AstNode* node, int depth)
                 lambda_type_accepts_error(parameter->contract_type);
         }
         return binding && binding->node_type == AST_NODE_VARIABLE_DECLARATOR &&
-            !((AstDeclaratorNode*)binding)->is_type_definition &&
-            ordinary_outcome_has_error(tp, ((AstDeclaratorNode*)binding)->init, depth + 1);
+            !((LambdaAstDeclaratorNode*)binding)->is_type_definition &&
+            ordinary_outcome_has_error(tp, ((LambdaAstDeclaratorNode*)binding)->init, depth + 1);
     }
     case AST_NODE_CONTENT:
     case AST_NODE_LIST: {
@@ -8647,13 +8670,13 @@ static bool ordinary_outcome_has_error(Transpiler* tp, AstNode* node, int depth)
              ordinary_outcome_has_error(tp, handler->body, depth + 1));
     }
     case AST_NODE_BINARY: {
-        AstBinaryNode* binary = (AstBinaryNode*)node;
+        LambdaAstBinaryNode* binary = (LambdaAstBinaryNode*)node;
         return binary->op != OPERATOR_IS &&
             (ordinary_outcome_has_error(tp, binary->left, depth + 1) ||
              ordinary_outcome_has_error(tp, binary->right, depth + 1));
     }
     case AST_NODE_PIPE: {
-        AstBinaryNode* pipe = (AstBinaryNode*)node;
+        LambdaAstBinaryNode* pipe = (LambdaAstBinaryNode*)node;
         if (pipe->op != OPERATOR_PIPE) return false;
         bool collects_body = has_current_item_ref(pipe->right) && pipe->left &&
             pipe_source_is_sequence(pipe->left->type ? pipe->left->type->type_id : LMD_TYPE_ANY);
@@ -8669,7 +8692,7 @@ static bool ordinary_outcome_has_error(Transpiler* tp, AstNode* node, int depth)
     case AST_NODE_MEMBER_EXPR:
     case AST_NODE_INDEX_EXPR: {
         Type* contract = declared_compound_destination_type(tp, node, NULL);
-        AstFieldNode* access = (AstFieldNode*)node;
+        LambdaAstFieldNode* access = (LambdaAstFieldNode*)node;
         return (contract && lambda_type_accepts_error(contract)) ||
             (ordinary_outcome_has_error(tp, access->object, depth + 1) &&
              lambda_type_accepts_error(error_field_result_type(tp, access->field, node->node_type)));
@@ -8696,7 +8719,7 @@ static void push_qualified_name(Transpiler* tp, AstNode* node, AstImportNode* im
     if (buf != local) mem_free(buf);
     if (!qualified_name) { tp->build_allocation_failed = true; return; }
 
-    NameEntry* entry = (NameEntry*)pool_calloc(tp->pool, sizeof(NameEntry));
+    NameEntry* entry = lambda_name_entry_alloc(tp->pool);
     entry->name = qualified_name;
     entry->node = node;  entry->import = import;
     entry->scope = tp->current_scope;
@@ -8807,13 +8830,13 @@ void walk_lambda_ast(AstNode* node, LambdaAstVisitor visitor, void* data,
         break;
     case AST_NODE_BINARY:
     case AST_NODE_PIPE: {
-        AstBinaryNode* binary = (AstBinaryNode*)node;
+        LambdaAstBinaryNode* binary = (LambdaAstBinaryNode*)node;
         walk_lambda_ast(binary->left, visitor, data, descend_functions);
         walk_lambda_ast(binary->right, visitor, data, descend_functions);
         break;
     }
     case AST_NODE_CALL_EXPR: {
-        AstCallNode* call = (AstCallNode*)node;
+        LambdaAstCallNode* call = (LambdaAstCallNode*)node;
         walk_lambda_ast(call->function, visitor, data, descend_functions);
         for (AstNode* arg = call->argument; arg; arg = arg->next) {
             walk_lambda_ast(arg, visitor, data, descend_functions);
@@ -8867,7 +8890,7 @@ void walk_lambda_ast(AstNode* node, LambdaAstVisitor visitor, void* data,
         break;
     }
     case AST_NODE_VARIABLE_DECLARATOR:
-        walk_lambda_ast(((AstDeclaratorNode*)node)->init, visitor, data, descend_functions);
+        walk_lambda_ast(((LambdaAstDeclaratorNode*)node)->init, visitor, data, descend_functions);
         break;
     case AST_NODE_KEY_EXPR: {
         AstNamedNode* named = (AstNamedNode*)node;
@@ -8892,7 +8915,7 @@ void walk_lambda_ast(AstNode* node, LambdaAstVisitor visitor, void* data,
     }
     case AST_NODE_MEMBER_EXPR:
     case AST_NODE_INDEX_EXPR: {
-        AstFieldNode* field = (AstFieldNode*)node;
+        LambdaAstFieldNode* field = (LambdaAstFieldNode*)node;
         walk_lambda_ast(field->object, visitor, data, descend_functions);
         walk_lambda_ast(field->field, visitor, data, descend_functions);
         break;
@@ -9005,8 +9028,8 @@ static uint32_t direct_bind_next_epoch(void) {
 
 static bool direct_bind_mark_visited(DirectBindContext* bind, AstNode* node) {
     if (!bind || !node) return false;
-    if (node->last_bind_epoch == bind->tp->bind_epoch) return false;
-    node->last_bind_epoch = bind->tp->bind_epoch;
+    if (lambda_ast_build_state(node).last_bind_epoch == bind->tp->bind_epoch) return false;
+    lambda_ast_build_state(node).last_bind_epoch = bind->tp->bind_epoch;
     return true;
 }
 
@@ -9141,11 +9164,11 @@ static void direct_bind_visit_extension_children(DirectBindContext* bind,
 static void direct_bind_visit_node(DirectBindContext* bind, AstNode* node,
         AstNode* parent) {
     if (!node || !bind || bind->failed || !direct_bind_mark_visited(bind, node)) return;
-    if (node->syntax_form != LSF_NONE) {
+    if (lambda_ast_build_state(node).syntax_form != LSF_NONE) {
         // The resolve pass clears every form it reaches; a node it missed is
         // still an unbound `any` and must not be published (D8.2.5).
         log_error("lambda bind: unresolved syntax form %d on node type %d at %u",
-            (int)node->syntax_form, (int)node->node_type,
+            (int)lambda_ast_build_state(node).syntax_form, (int)node->node_type,
             node->source_span.start_byte);
         bind->failed = true;
         return;
@@ -9223,7 +9246,7 @@ void lambda_ast_shift_source_spans(AstNode* root, uint32_t byte_offset) {
     walk_lambda_ast(root, shift_source_span, &byte_offset, true);
 }
 
-static AstFuncNode* direct_pn_callee(AstCallNode* call) {
+static AstFuncNode* direct_pn_callee(LambdaAstCallNode* call) {
     AstFuncNode* definition = ast_direct_call_function(call);
     return definition && definition->node_type == AST_NODE_PROC ? definition : NULL;
 }
@@ -9233,7 +9256,7 @@ typedef struct MayAwaitScan {
     const char* cause;
 } MayAwaitScan;
 
-static bool call_may_await(AstCallNode* call, const char** cause) {
+static bool call_may_await(LambdaAstCallNode* call, const char** cause) {
     AstNode* function = call ? ast_unwrap_primary(call->function) : NULL;
     if (function && function->node_type == AST_NODE_SYS_FUNC) {
         SysFuncInfo* info = ((AstSysFuncNode*)function)->fn_info;
@@ -9275,7 +9298,7 @@ static bool scan_may_await_node(AstNode* node, void* data) {
     if (node->node_type != AST_NODE_CALL_EXPR) return true;
 
     const char* cause = NULL;
-    if (call_may_await((AstCallNode*)node, &cause)) {
+    if (call_may_await((LambdaAstCallNode*)node, &cause)) {
         scan->found = true;
         scan->cause = cause;
     }
@@ -9320,7 +9343,7 @@ static bool scan_concurrency_body_node(AstNode* node, void* data) {
         return false;
     }
     if (node->node_type == AST_NODE_CALL_EXPR) {
-        AstCallNode* call = (AstCallNode*)node;
+        LambdaAstCallNode* call = (LambdaAstCallNode*)node;
         if (!concurrency_record_node(&facts->calls, node)) {
             facts->failed = true;
             return false;
@@ -9338,7 +9361,7 @@ static bool concurrency_fact_calls_may_await(ConcurrencyBodyFacts* facts,
         const char** cause) {
     if (!facts || !facts->calls) return false;
     for (int i = 0; i < facts->calls->length; i++) {
-        AstCallNode* call = (AstCallNode*)facts->calls->data[i];
+        LambdaAstCallNode* call = (LambdaAstCallNode*)facts->calls->data[i];
         AstFuncNode* callee = direct_pn_callee(call);
         if (callee && callee->analysis && callee->analysis->may_await) {
             if (cause) *cause = callee->name ? callee->name->chars : "anonymous pn";
@@ -9378,9 +9401,9 @@ static AstStartNode* returned_start_node(AstNode* value) {
     if (!value) return NULL;
     if (value->node_type == AST_NODE_START) return (AstStartNode*)value;
     if (value->node_type != AST_NODE_IDENT) return NULL;
-    NameEntry* entry = ((AstIdentNode*)value)->entry;
+    NameEntry* entry = ((LambdaAstIdentNode*)value)->entry;
     if (!entry || !entry->node || entry->node->node_type != AST_NODE_VARIABLE_DECLARATOR) return NULL;
-    AstNode* assigned = ast_unwrap_primary(((AstDeclaratorNode*)entry->node)->init);
+    AstNode* assigned = ast_unwrap_primary(((LambdaAstDeclaratorNode*)entry->node)->init);
     return assigned && assigned->node_type == AST_NODE_START ? (AstStartNode*)assigned : NULL;
 }
 
@@ -9504,10 +9527,10 @@ static void analyze_lambda_concurrency(Transpiler* tp, AstScript* script,
 
 static bool reject_proc_method_value(AstNode* node, void* data) {
     if (!node || node->node_type != AST_NODE_MEMBER_EXPR) return true;
-    AstFieldNode* member = (AstFieldNode*)node;
+    LambdaAstFieldNode* member = (LambdaAstFieldNode*)node;
     if (!member->is_proc_method_reference) return true;
     Transpiler* tp = (Transpiler*)data;
-    AstIdentNode* field = (AstIdentNode*)ast_unwrap_primary(member->field);
+    LambdaAstIdentNode* field = (LambdaAstIdentNode*)ast_unwrap_primary(member->field);
     record_semantic_error_span(tp, member->source_span, ERR_PROC_IN_FN,
         "procedure method '%.*s' cannot be used as a value; call it directly",
         field && field->name ? (int)field->name->len : 0,
@@ -9572,7 +9595,7 @@ static bool fixed_array_init_length(Transpiler* tp, AstNode* init, int64_t* out)
     AstNode* value = ast_unwrap_primary(init);
     if (!value) return false;
     if (value->node_type == AST_NODE_CALL_EXPR) {
-        AstCallNode* call = (AstCallNode*)value;
+        LambdaAstCallNode* call = (LambdaAstCallNode*)value;
         AstNode* callee = ast_unwrap_primary(call->function);
         SysFuncInfo* info = callee && callee->node_type == AST_NODE_SYS_FUNC
             ? ((AstSysFuncNode*)callee)->fn_info : NULL;
@@ -9605,13 +9628,13 @@ static void fixed_array_drop(FixedArrayScan* scan, NameEntry* entry) {
 static bool fixed_array_collect_cb(AstNode* node, void* data) {
     FixedArrayScan* scan = (FixedArrayScan*)data;
     if (node->node_type != AST_NODE_VARIABLE_DECLARATOR) return true;
-    AstDeclaratorNode* named = (AstDeclaratorNode*)node;
+    LambdaAstDeclaratorNode* named = (LambdaAstDeclaratorNode*)node;
     NameEntry* entry = named->entry;
     int64_t length = 0;
     if (!entry || entry->is_parameter || scan->count >= 32 ||
             !fixed_array_init_length(scan->tp, named->init, &length)) return true;
     entry->has_fixed_array_length = true;
-    entry->fixed_array_length = length;
+    static_cast<LambdaNameEntry*>(entry)->fixed_array_length = length;
     scan->candidates[scan->count++] = entry;
     return true;
 }
@@ -9624,12 +9647,12 @@ static bool fixed_array_invalidate_cb(AstNode* node, void* data) {
     }
     if (node->node_type == AST_NODE_PIPE) {
         // `a |> push(x)`-style injection hides the receiver from the call
-        AstIdentNode* root = ast_compound_root_ident(((AstBinaryNode*)node)->left);
+        AstIdentNode* root = ast_compound_root_ident(((LambdaAstBinaryNode*)node)->left);
         if (root) fixed_array_drop(scan, root->entry);
         return true;
     }
     if (node->node_type != AST_NODE_CALL_EXPR) return true;
-    AstCallNode* call = (AstCallNode*)node;
+    LambdaAstCallNode* call = (LambdaAstCallNode*)node;
     AstNode* callee = ast_unwrap_primary(call->function);
     if (callee && (callee->node_type == AST_NODE_MEMBER_EXPR ||
             callee->node_type == AST_NODE_INDEX_EXPR)) {
@@ -9640,7 +9663,7 @@ static bool fixed_array_invalidate_cb(AstNode* node, void* data) {
         ? ((AstSysFuncNode*)callee)->fn_info : NULL;
     AstFuncNode* target = NULL;
     if (callee && callee->node_type == AST_NODE_IDENT) {
-        NameEntry* callee_entry = ((AstIdentNode*)callee)->entry;
+        NameEntry* callee_entry = ((LambdaAstIdentNode*)callee)->entry;
         AstNode* declaration = callee_entry ? callee_entry->node : NULL;
         if (declaration && (declaration->node_type == AST_NODE_FUNC ||
                 declaration->node_type == AST_NODE_PROC ||
@@ -9715,7 +9738,7 @@ static uint32_t colour_walk_guard_scope(const CallColourWalk* walk) {
 static NameEntry* polymorphic_callback_binding(AstNode* node) {
     node = ast_unwrap_primary(node);
     if (!node || node->node_type != AST_NODE_IDENT) return NULL;
-    NameEntry* entry = ((AstIdentNode*)node)->entry;
+    NameEntry* entry = ((LambdaAstIdentNode*)node)->entry;
     if (!entry || !entry->node || entry->node->node_type != AST_NODE_PARAM ||
             !lambda_type_param_is_colour_poly(lambda_type_param(entry->node->type))) return NULL;
     AstFuncNode* owner = ast_scope_function(entry->scope);
@@ -9771,7 +9794,7 @@ static CallColour colour_walk_value(CallColourWalk* walk, AstNode* value) {
 }
 
 // a direct call to a `function` declaration: each polymorphic slot votes (C20-2)
-static void colour_walk_poly_call(CallColourWalk* walk, AstCallNode* call,
+static void colour_walk_poly_call(CallColourWalk* walk, LambdaAstCallNode* call,
         AstFuncNode* callee) {
     AstNode* resolved[LAMBDA_MAX_FUNCTION_ARGS] = {0};
     int argc = 0;
@@ -9812,7 +9835,7 @@ static void colour_walk_poly_call(CallColourWalk* walk, AstCallNode* call,
     call->fn_colour_guard = guard ? guard | colour_walk_guard_scope(walk) : 0;
 }
 
-static void colour_walk_call(CallColourWalk* walk, AstCallNode* call) {
+static void colour_walk_call(CallColourWalk* walk, LambdaAstCallNode* call) {
     AstNode* callee = ast_unwrap_primary(call->function);
     if (!callee) return;
     bool scoped_effects = colour_walk_scoped_effects(walk);
@@ -9927,7 +9950,7 @@ static AstNode* non_injected_pipe_target(AstNode* node) {
     return target && target->node_type != AST_NODE_CALL_EXPR ? target : NULL;
 }
 
-static LambdaEffectMask named_call_effects(AstCallNode* call) {
+static LambdaEffectMask named_call_effects(LambdaAstCallNode* call) {
     AstNode* callee = ast_unwrap_primary(call->function);
     if (!callee) return 0;
     if (callee->node_type == AST_NODE_SYS_FUNC) {
@@ -9966,7 +9989,7 @@ static bool collect_generative_effects(AstNode* node, void* data) {
     case AST_NODE_ELEMENT: case AST_NODE_OBJECT_LITERAL:
         return false;
     case AST_NODE_CALL_EXPR: {
-        LambdaEffectMask effects = named_call_effects((AstCallNode*)node);
+        LambdaEffectMask effects = named_call_effects((LambdaAstCallNode*)node);
         if (effects != LAMBDA_EFFECT_UNRESTRICTED)
             *(LambdaEffectMask*)data |= effects;
         break;
@@ -9988,7 +10011,7 @@ static bool collect_resource_calls(AstNode* node, void* data) {
     if (*(bool*)data) return false;
     if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR ||
             node->node_type == AST_NODE_PROC) return false;
-    AstCallNode* call = node->node_type == AST_NODE_CALL_EXPR ? (AstCallNode*)node : NULL;
+    LambdaAstCallNode* call = node->node_type == AST_NODE_CALL_EXPR ? (LambdaAstCallNode*)node : NULL;
     AstNode* callee = call ? ast_unwrap_primary(call->function) : non_injected_pipe_target(node);
     if (!callee) return true;
     if (callee->node_type == AST_NODE_SYS_FUNC) {
@@ -10041,7 +10064,7 @@ static bool collect_callback_captures(AstNode* node, void* data) {
     CallbackCaptureWalk* walk = (CallbackCaptureWalk*)data;
     if (node->node_type == AST_NODE_PIPE) note_callback_capture(walk, non_injected_pipe_target(node));
     if (node->node_type != AST_NODE_CALL_EXPR) return true;
-    AstCallNode* call = (AstCallNode*)node;
+    LambdaAstCallNode* call = (LambdaAstCallNode*)node;
     note_callback_capture(walk, call->function);
     AstNode* callee = ast_unwrap_primary(call->function);
     if (callee && callee->node_type == AST_NODE_SYS_FUNC) {
@@ -10170,11 +10193,11 @@ static bool colour_walk_visit(AstNode* node, void* data) {
         return false;
     }
     if (node->node_type == AST_NODE_CONTENT && !walk->render_entry &&
-            (node->syntax_flags & (LSF_CONTENT_GENERATIVE | LSF_CONTENT_GENERATIVE_VIEW))) {
+            (lambda_ast_build_state(node).syntax_flags & (LSF_CONTENT_GENERATIVE | LSF_CONTENT_GENERATIVE_VIEW))) {
         // S16.7.7 grants effects to the block, not to its lexical neighbours.
         CallColourWalk block = *walk;
         block.module_is_proc = false;
-        block.allowed_effects = (node->syntax_flags & LSF_CONTENT_GENERATIVE_VIEW)
+        block.allowed_effects = (lambda_ast_build_state(node).syntax_flags & LSF_CONTENT_GENERATIVE_VIEW)
             ? LAMBDA_EFFECT_RENDER : LAMBDA_EFFECT_GENERATIVE;
         block.render_entry = true;
         walk_lambda_ast(node, colour_walk_visit, &block, true);
@@ -10233,7 +10256,7 @@ static bool colour_walk_visit(AstNode* node, void* data) {
         }
     }
     if (node->node_type == AST_NODE_CALL_EXPR) {
-        AstCallNode* call = (AstCallNode*)node;
+        LambdaAstCallNode* call = (LambdaAstCallNode*)node;
         AstNode* callee = ast_unwrap_primary(call->function);
         if (callee && callee->node_type == AST_NODE_SYS_FUNC) {
             SysFuncInfo* info = ((AstSysFuncNode*)callee)->fn_info;
@@ -10425,14 +10448,14 @@ struct LambdaSyntaxSink {
     uint32_t event_handler_depth;
     // `open v = target { … }` (PTH68v3). PTH-O15 defers nesting, so the depth
     // never exceeds one in valid programs; the array keeps the checks uniform.
-    AstDeclaratorNode* open_aliases[8];
+    LambdaAstDeclaratorNode* open_aliases[8];
     uint32_t open_depth;
     // object types being declared; members record into the innermost
     AstObjectTypeNode* object_nodes[64];
     uint16_t object_function_depth[64];
     uint32_t type_object_depth;
     AstObjectTypeNode* completed_object;
-    AstDeclaratorNode* pending_type_alias;
+    LambdaAstDeclaratorNode* pending_type_alias;
     // the last CONTENT reduced: an `if` branch scope that closes right after
     // it marks it as that branch's body
     AstListNode* last_content;
@@ -10512,13 +10535,13 @@ struct LambdaResolver {
 };
 
 struct UnresolvedName {
-    AstIdentNode* ident;
+    LambdaAstIdentNode* ident;
     bool called;
 };
 
 // Join predicates bind their new loop variable after resolving the predicate;
 // defer diagnostics until those identities and call dispatch are complete.
-static void resolver_note_unresolved(LambdaResolver* r, AstIdentNode* ident, bool called) {
+static void resolver_note_unresolved(LambdaResolver* r, LambdaAstIdentNode* ident, bool called) {
     if (!ident || ident->node_type != AST_NODE_IDENT || ident->entry) return;
     UnresolvedName* name = (UnresolvedName*)syntax_scratch_alloc(r->unit, sizeof(UnresolvedName));
     if (!name || !arraylist_append(r->unresolved_names, name)) {
@@ -10536,7 +10559,7 @@ static void resolver_reject_unresolved(LambdaResolver* r) {
             r->tp->cache_cross_lang_tainted) return;
     for (int i = 0; r->unresolved_names && i < r->unresolved_names->length; i++) {
         UnresolvedName* pending = (UnresolvedName*)r->unresolved_names->data[i];
-        AstIdentNode* ident = pending->ident;
+        LambdaAstIdentNode* ident = pending->ident;
         if (ident->node_type != AST_NODE_IDENT || ident->entry) continue;
         bool failed_import = false;
         for (int j = 0; r->failed_import_names && j < r->failed_import_names->length; j++) {
@@ -10681,20 +10704,20 @@ static bool syntax_attach(LambdaSyntaxSink* sink, AstNode* host,
         return false;
     }
     *attachment = (LambdaSyntaxAttachment){host, node, kind, false, code, span, message};
-    host->syntax_flags |= LSF_FLAG_ATTACHED;
+    lambda_ast_build_state(host).syntax_flags |= LSF_FLAG_ATTACHED;
     return true;
 }
 
 // A production that supersedes a node carries the node's attachments along.
 static void syntax_move_attachments(LambdaSyntaxSink* sink, AstNode* from,
         AstNode* to) {
-    if (!from || !to || !(from->syntax_flags & LSF_FLAG_ATTACHED)) return;
+    if (!from || !to || !(lambda_ast_build_state(from).syntax_flags & LSF_FLAG_ATTACHED)) return;
     ArrayList* list = sink->unit->attachments;
     for (int i = 0; i < list->length; i++) {
         LambdaSyntaxAttachment* attachment = (LambdaSyntaxAttachment*)list->data[i];
         if (attachment->host == from && !attachment->consumed) attachment->host = to;
     }
-    to->syntax_flags |= LSF_FLAG_ATTACHED;
+    lambda_ast_build_state(to).syntax_flags |= LSF_FLAG_ATTACHED;
 }
 
 // Declared records are immutable after their shape closes. Build their name
@@ -10772,7 +10795,7 @@ static void direct_refresh_recursive_type_layout(Type* type, ArrayList* visited)
 // and self-references cannot split into placeholder and final maps.
 // `shared_definition` is set when the body is exactly another alias: its
 // wrapper and type-list slot belong to that alias and are left as they are.
-static void direct_adopt_pending_alias_map(Transpiler* tp, AstDeclaratorNode* alias,
+static void direct_adopt_pending_alias_map(Transpiler* tp, LambdaAstDeclaratorNode* alias,
         TypeType* pre_type, bool shared_definition) {
     TypeMap* pre_map = (TypeMap*)pre_type->type;
     Type* definition = alias->type;
@@ -10810,7 +10833,7 @@ static void direct_adopt_pending_alias_map(Transpiler* tp, AstDeclaratorNode* al
     alias->type = (Type*)pre_type;
 }
 
-static void direct_finalize_type_alias(Transpiler* tp, AstDeclaratorNode* alias) {
+static void direct_finalize_type_alias(Transpiler* tp, LambdaAstDeclaratorNode* alias) {
     if (!tp || !alias || !alias->type) return;
     Type* definition = alias->type;
     Type* actual = unwrap_simple_type_type(definition);
@@ -10860,7 +10883,7 @@ static void direct_find_forward_binder_ref(AstNode* node, AstNode* parent,
     DirectBinderForwardRef* search = (DirectBinderForwardRef*)opaque;
     if (!node || !search || search->found || search->depth++ > 64) return;
     if (node->node_type == AST_NODE_IDENT) {
-        AstIdentNode* ident = (AstIdentNode*)node;
+        LambdaAstIdentNode* ident = (LambdaAstIdentNode*)node;
         if (!ident->entry && ident->name && search->name &&
                 ident->name->len == search->name->len &&
                 memcmp(ident->name->chars, search->name->chars,
@@ -10890,7 +10913,7 @@ AstNode* build_binder_type_syntax(Transpiler* tp, SourceSpan span,
         AstNode* base, StrView name) {
     AstNamedNode* site = (AstNamedNode*)alloc_ast_node_from_span(tp,
         AST_NODE_TYPE, span, sizeof(AstNamedNode));
-    site->syntax_form = LSF_BINDER;
+    lambda_ast_build_state(site).syntax_form = LSF_BINDER;
     site->as = base;
     site->name = name.length ? name_pool_create_strview(tp->name_pool, name) : NULL;
     return (AstNode*)site;
@@ -10920,13 +10943,13 @@ void resolve_binder_type(Transpiler* tp, AstNode* node) {
     NameEntry* prior = lookup_name_in_current_scope(tp, pooled);
     TypeBinder* canonical = NULL;
     if (prior) {
-        if (!prior->is_binder || !prior->binder) {
+        if (!prior->is_binder || !lambda_binding_fields(prior).binder) {
             record_semantic_error_span(tp, span, ERR_BINDER_COLLISION,
                 "binder '%.*s' conflicts with an existing name", (int)name.length,
                 name.str);
             return;
         }
-        canonical = prior->binder;
+        canonical = lambda_binding_fields(prior).binder;
         if (!lambda_type_contract_semantically_compatible(canonical->bound, bound) ||
                 !lambda_type_contract_semantically_compatible(bound, canonical->bound)) {
             record_semantic_error_span(tp, span, ERR_BINDER_BOUND_MISMATCH,
@@ -10950,12 +10973,12 @@ void resolve_binder_type(Transpiler* tp, AstNode* node) {
     binder->name->name = pooled;
 
     if (!canonical) {
-        NameEntry* entry = (NameEntry*)pool_calloc(tp->pool, sizeof(NameEntry));
+        NameEntry* entry = lambda_name_entry_alloc(tp->pool);
         entry->name = pooled;
         entry->scope = tp->current_scope;
         entry->is_binder = true;
-        entry->binder_slot = binder->slot;
-        entry->binder = binder;
+        static_cast<LambdaNameEntry*>(entry)->binder_slot = binder->slot;
+        static_cast<LambdaNameEntry*>(entry)->binder = binder;
         direct_append_binder_name(tp, entry);
     }
     node->type = (Type*)binder;
@@ -11115,7 +11138,7 @@ static bool direct_validate_relational_operands(Transpiler* tp,
     if (!is_relational_op(op)) return true;
     AstNode* left_value = ast_unwrap_primary(left);
     if (left_value && left_value->node_type == AST_NODE_BINARY &&
-            is_relational_op(((AstBinaryNode*)left_value)->op)) {
+            is_relational_op(((LambdaAstBinaryNode*)left_value)->op)) {
         // A left-associated chain is normalized to two scalar predicates
         // below. Its temporary bool node is not an operand of the final
         // comparison, so validate after that normalization instead.
@@ -11151,7 +11174,7 @@ static AstNode* direct_promote_bare_pipe_callable(Transpiler* tp,
         if (!current) return NULL;
         name = strview_from_cstr(current->name);
     } else if (target->node_type == AST_NODE_IDENT) {
-        AstIdentNode* ident = (AstIdentNode*)target;
+        LambdaAstIdentNode* ident = (LambdaAstIdentNode*)target;
         if (!ident->entry) name = strview_init(ident->name->chars, ident->name->len);
     }
     if (!callable && (!name.length || (!get_sys_func_info(&name, 1) &&
@@ -11170,7 +11193,7 @@ static Type* direct_pipe_call_result_type(Transpiler* tp, AstNode* source,
         AstNode* right) {
     AstNode* target = ast_unwrap_primary(right);
     if (!target || target->node_type != AST_NODE_CALL_EXPR) return NULL;
-    AstCallNode* call = (AstCallNode*)target;
+    LambdaAstCallNode* call = (LambdaAstCallNode*)target;
     if (!call->pipe_inject) return NULL;
     call->pipe_receiver = source;
     AstNode* callee = ast_unwrap_primary(call->function);
@@ -11199,7 +11222,7 @@ static Type* direct_pipe_call_result_type(Transpiler* tp, AstNode* source,
 }
 
 // A binary node holds its operands and operator spelling from the syntax phase.
-static void resolve_binary(Transpiler* tp, AstBinaryNode* node) {
+static void resolve_binary(Transpiler* tp, LambdaAstBinaryNode* node) {
     SourceSpan span = node->source_span;
     StrView op_spelling = node->op_str;
     AstNode* left = node->left;
@@ -11320,12 +11343,12 @@ static void resolve_binary(Transpiler* tp, AstBinaryNode* node) {
     AstNode* left_value = ast_unwrap_primary(left);
     if (is_relational_op(node->op) && left_value &&
             left_value->node_type == AST_NODE_BINARY &&
-            is_relational_op(((AstBinaryNode*)left_value)->op)) {
-        AstBinaryNode* left_cmp = (AstBinaryNode*)left_value;
-        AstBinaryNode* right_cmp = (AstBinaryNode*)alloc_ast_node_from_span(tp,
+            is_relational_op(((LambdaAstBinaryNode*)left_value)->op)) {
+        LambdaAstBinaryNode* left_cmp = (LambdaAstBinaryNode*)left_value;
+        LambdaAstBinaryNode* right_cmp = (LambdaAstBinaryNode*)alloc_ast_node_from_span(tp,
             AST_NODE_BINARY,
             (SourceSpan){left_cmp->right->source_span.start_byte,
-                span.end_byte}, sizeof(AstBinaryNode));
+                span.end_byte}, sizeof(LambdaAstBinaryNode));
         right_cmp->left = left_cmp->right;
         right_cmp->right = right;
         right_cmp->op = node->op;
@@ -11377,7 +11400,7 @@ static Type* error_field_result_type(Transpiler* tp, AstNode* field, AstNodeType
     // wrapped error, while an unknown member preserves the error itself.
     AstNode* key = ast_unwrap_primary(field);
     if (node_type == AST_NODE_MEMBER_EXPR && key && key->node_type == AST_NODE_IDENT) {
-        String* name = ((AstIdentNode*)key)->name;
+        String* name = ((LambdaAstIdentNode*)key)->name;
         StrView member = strview_init(name->chars, name->len);
         if (strview_equal(&member, "message")) return &TYPE_STRING;
         if (strview_equal(&member, "code")) return &TYPE_INT;
@@ -11410,9 +11433,9 @@ static Type* direct_field_result_type(Transpiler* tp, AstNode* object,
             AstNode* object_base = ast_unwrap_primary(object);
             bool mutable_binding = object_base &&
                 object_base->node_type == AST_NODE_IDENT &&
-                ((AstIdentNode*)object_base)->entry &&
-                (((AstIdentNode*)object_base)->entry->is_mutable ||
-                 ((AstIdentNode*)object_base)->entry->type_widened);
+                ((LambdaAstIdentNode*)object_base)->entry &&
+                (((LambdaAstIdentNode*)object_base)->entry->is_mutable ||
+                 ((LambdaAstIdentNode*)object_base)->entry->type_widened);
             if (mutable_binding) return set_type_any(tp, ANY_INDEX_ELEM);
             // S8.2.4v3: only a key naming a position reads an element; a range,
             // mask, index array, type, or a key whose kind is known only at run
@@ -11448,7 +11471,7 @@ static Type* direct_field_result_type(Transpiler* tp, AstNode* object,
             // map write is read back through the literal's stale slot type.
             return set_type_any(tp, ANY_MEMBER_SHAPE);
         }
-        AstIdentNode* ident = (AstIdentNode*)field;
+        LambdaAstIdentNode* ident = (LambdaAstIdentNode*)field;
         Type* matched = NULL;
         bool optional_field = false;
         FOR_EACH_MAP_FIELD(map, entry) {
@@ -11517,19 +11540,19 @@ static Type* direct_math_constant(Transpiler* tp, StrView name) {
     return (Type*)constant;
 }
 
-static_assert(sizeof(AstPrimaryNode) <= sizeof(AstFieldNode),
+static_assert(sizeof(AstPrimaryNode) <= sizeof(LambdaAstFieldNode),
     "a member read must be able to become a constant or an import read");
 
 // A member read that names a constant or a namespace symbol becomes a literal.
-static void morph_member_to_primary(AstFieldNode* node, Type* type) {
-    morph_ast_node((AstNode*)node, AST_NODE_PRIMARY, sizeof(AstFieldNode));
+static void morph_member_to_primary(LambdaAstFieldNode* node, Type* type) {
+    morph_ast_node((AstNode*)node, AST_NODE_PRIMARY, sizeof(LambdaAstFieldNode));
     node->type = type;
 }
 
-static AstFieldNode* build_field_syntax(Transpiler* tp, SourceSpan span,
+static LambdaAstFieldNode* build_field_syntax(Transpiler* tp, SourceSpan span,
         AstNodeType node_type, AstNode* object, AstNode* field) {
-    AstFieldNode* node = (AstFieldNode*)alloc_syntax_node(tp, node_type, span,
-        sizeof(AstFieldNode),
+    LambdaAstFieldNode* node = (LambdaAstFieldNode*)alloc_syntax_node(tp, node_type, span,
+        sizeof(LambdaAstFieldNode),
         node_type == AST_NODE_MEMBER_EXPR ? LSF_MEMBER : LSF_INDEX, 0);
     node->object = object;
     node->field = field;
@@ -11550,7 +11573,7 @@ static NameEntry* lookup_qualified_member(Transpiler* tp, StrView object, String
     return lookup_name(tp, {qualified, length});
 }
 
-static void resolve_field(Transpiler* tp, AstFieldNode* node) {
+static void resolve_field(Transpiler* tp, LambdaAstFieldNode* node) {
     SourceSpan span = node->source_span;
     if (node->node_type == AST_NODE_MEMBER_EXPR &&
             resolve_qualified_member_key(tp, &node->object, &node->field, span)) {
@@ -11577,24 +11600,24 @@ static void resolve_field(Transpiler* tp, AstFieldNode* node) {
                 lookup_name(tp, source_span_text(tp, object_value->source_span));
             SysFuncInfo* value = shadowed ? NULL : lookup_builtin_module_member(qualified_module, &qualified_member, -1);
             if (value) {
-                static_assert(sizeof(AstSysFuncNode) <= sizeof(AstFieldNode), "a field can become a builtin value");
-                resolve_sys_func_value(tp, (AstNode*)node, sizeof(AstFieldNode), value);
+                static_assert(sizeof(AstSysFuncNode) <= sizeof(LambdaAstFieldNode), "a field can become a builtin value");
+                resolve_sys_func_value(tp, (AstNode*)node, sizeof(LambdaAstFieldNode), value);
                 return;
             }
         }
         if (object_value && field_value &&
                 field_value->node_type == AST_NODE_IDENT) {
-            AstIdentNode* field_ident = (AstIdentNode*)field_value;
+            LambdaAstIdentNode* field_ident = (LambdaAstIdentNode*)field_value;
             StrView object_name = source_span_text(tp, object_value->source_span);
             NameEntry* imported = lookup_qualified_member(tp, object_name, field_ident->name);
             if (imported && imported->import && imported->node) {
                 // An import alias may share a system-function spelling (for
                 // example `stack`). Resolve its qualified export before the
                 // bare spelling can become a callable value (D5.6.1).
-                static_assert(sizeof(AstIdentNode) <= sizeof(AstFieldNode),
+                static_assert(sizeof(LambdaAstIdentNode) <= sizeof(LambdaAstFieldNode),
                     "a qualified read must fit its resolved binding in place");
-                morph_ast_node(node, AST_NODE_IDENT, sizeof(AstFieldNode));
-                AstIdentNode* resolved = (AstIdentNode*)(AstNode*)node;
+                morph_ast_node(node, AST_NODE_IDENT, sizeof(LambdaAstFieldNode));
+                LambdaAstIdentNode* resolved = (LambdaAstIdentNode*)(AstNode*)node;
                 resolved->name = imported->name;
                 resolved->entry = imported;
                 resolved->type = imported->node->type ? imported->node->type : &TYPE_ANY;
@@ -11603,8 +11626,8 @@ static void resolve_field(Transpiler* tp, AstFieldNode* node) {
         }
         if (object_value && object_value->node_type == AST_NODE_IDENT &&
                 field_value && field_value->node_type == AST_NODE_IDENT) {
-            AstIdentNode* object_ident = (AstIdentNode*)object_value;
-            AstIdentNode* field_ident = (AstIdentNode*)field_value;
+            LambdaAstIdentNode* object_ident = (LambdaAstIdentNode*)object_value;
+            LambdaAstIdentNode* field_ident = (LambdaAstIdentNode*)field_value;
             StrView module_name = strview_init(object_ident->name->chars,
                 object_ident->name->len);
             NamespaceEntry* ns_entry = lookup_namespace(tp, object_ident->name);
@@ -11629,7 +11652,7 @@ static void resolve_field(Transpiler* tp, AstFieldNode* node) {
                 StrView member_name = {field_ident->name->chars, field_ident->name->len};
                 SysFuncInfo* value = lookup_builtin_module_member(module, &member_name, -1);
                 if (value) {
-                    resolve_sys_func_value(tp, (AstNode*)node, sizeof(AstFieldNode), value);
+                    resolve_sys_func_value(tp, (AstNode*)node, sizeof(LambdaAstFieldNode), value);
                     return;
                 }
             }
@@ -11642,7 +11665,7 @@ static void resolve_field(Transpiler* tp, AstFieldNode* node) {
         AstNode* method_name = ast_unwrap_primary(field);
         if (receiver && receiver->type && method_name &&
                 method_name->node_type == AST_NODE_IDENT) {
-            AstIdentNode* ident = (AstIdentNode*)method_name;
+            LambdaAstIdentNode* ident = (LambdaAstIdentNode*)method_name;
             StrView name = strview_init(ident->name->chars, ident->name->len);
             Type* receiver_type = unwrap_simple_type_type(
                 lambda_type_remove_error(tp->pool, receiver->type));
@@ -11708,7 +11731,7 @@ static SysFuncInfo* resolve_effect_polymorphic_row(Transpiler* tp,
 static AstNode* direct_sys_function(Transpiler* tp, SourceSpan span,
         SysFuncInfo* info, AstNode* callee_storage = NULL) {
     info = resolve_effect_polymorphic_row(tp, info);
-    if (callee_storage) morph_ast_node(callee_storage, AST_NODE_SYS_FUNC, sizeof(AstIdentNode));
+    if (callee_storage) morph_ast_node(callee_storage, AST_NODE_SYS_FUNC, sizeof(LambdaAstIdentNode));
     AstSysFuncNode* node = (AstSysFuncNode*)(callee_storage ? callee_storage
         : alloc_ast_node_from_span(tp, AST_NODE_SYS_FUNC, span, sizeof(AstSysFuncNode)));
     node->fn_info = info;
@@ -11729,16 +11752,16 @@ static AstNode* direct_sys_function(Transpiler* tp, SourceSpan span,
 static void direct_validate_mutable_compound(Transpiler* tp,
         SourceSpan span, AstNode* object);
 
-static_assert(sizeof(AstStartNode) <= sizeof(AstCallNode),
+static_assert(sizeof(AstStartNode) <= sizeof(LambdaAstCallNode),
     "a call must be able to become the `start` launch it resolves to");
 
 // `start(...)` resolves to the task launch: the call node becomes it in place,
 // and a fresh inner call carries the launched procedure and its arguments.
-static void direct_start_node(Transpiler* tp, AstCallNode* source_call,
+static void direct_start_node(Transpiler* tp, LambdaAstCallNode* source_call,
         int arg_count) {
     SourceSpan span = source_call->source_span;
     AstNode* target = source_call->argument;
-    morph_ast_node((AstNode*)source_call, AST_NODE_START, sizeof(AstCallNode));
+    morph_ast_node((AstNode*)source_call, AST_NODE_START, sizeof(LambdaAstCallNode));
     AstStartNode* start = (AstStartNode*)source_call;
     start->owner_scope = tp->current_scope;
     start->mode = START_MODE_TASK;
@@ -11768,8 +11791,8 @@ static void direct_start_node(Transpiler* tp, AstCallNode* source_call,
     if (args) args->next = NULL;
     if (options) options->next = NULL;
     TypeFunc* fn_type = target ? lambda_type_func_signature(target->type) : NULL;
-    AstCallNode* target_call = (AstCallNode*)alloc_ast_node_from_span(tp,
-        AST_NODE_CALL_EXPR, span, sizeof(AstCallNode));
+    LambdaAstCallNode* target_call = (LambdaAstCallNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_CALL_EXPR, span, sizeof(LambdaAstCallNode));
     target_call->function = target;
     for (AstNode* a = args; a; a = a->next) {
         reject_procedural_block_operand(tp, a, "a call argument");
@@ -11829,14 +11852,14 @@ enum { LSF_CALL_PIPE_INJECT = 1u << 0 };
 
 // LSF_CALL: aux holds the written argument count; a pipe right-hand side
 // that receives the piped value as its first argument sets PIPE_INJECT.
-static AstCallNode* build_call_syntax(Transpiler* tp, SourceSpan span,
+static LambdaAstCallNode* build_call_syntax(Transpiler* tp, SourceSpan span,
         AstNode* function, AstNode* arguments, int arg_count, bool pipe_inject) {
-    AstCallNode* call = (AstCallNode*)alloc_syntax_node(tp, AST_NODE_CALL_EXPR,
-        span, sizeof(AstCallNode), LSF_CALL, 0);
+    LambdaAstCallNode* call = (LambdaAstCallNode*)alloc_syntax_node(tp, AST_NODE_CALL_EXPR,
+        span, sizeof(LambdaAstCallNode), LSF_CALL, 0);
     call->function = function;
     call->argument = arguments;
-    call->syntax_aux = (uint16_t)arg_count;
-    if (pipe_inject) call->syntax_flags |= LSF_CALL_PIPE_INJECT;
+    lambda_ast_build_state(call).syntax_aux = (uint16_t)arg_count;
+    if (pipe_inject) lambda_ast_build_state(call).syntax_flags |= LSF_CALL_PIPE_INJECT;
     return call;
 }
 
@@ -11846,7 +11869,7 @@ static AstCallNode* build_call_syntax(Transpiler* tp, SourceSpan span,
 // order -- `unique(a, b, c, d, e)` is `unique(unique(a, b, c, d), e)`, and so
 // for `intersect` -- so a longer call nests its first four operands into one
 // call until four remain. Returns the call's operand count after the fold.
-static int fold_set_function_operands(Transpiler* tp, AstCallNode* call,
+static int fold_set_function_operands(Transpiler* tp, LambdaAstCallNode* call,
         StrView* name, int arg_count) {
     if (arg_count <= 4 || tp->pipe_inject_args > 0 ||
             !(strview_equal(name, "unique") || strview_equal(name, "intersect"))) {
@@ -11865,7 +11888,7 @@ static int fold_set_function_operands(Transpiler* tp, AstCallNode* call,
         call->argument = inner;
         arg_count -= 3;
     }
-    call->syntax_aux = arg_count;
+    lambda_ast_build_state(call).syntax_aux = arg_count;
     return arg_count;
 }
 
@@ -11878,7 +11901,7 @@ static int fold_set_function_operands(Transpiler* tp, AstCallNode* call,
 // tiers pass as the absent-argument marker. A skipped required parameter is a
 // compile error, as on a direct call; an unknown or repeated name leaves the
 // call as written.
-static int order_method_named_arguments(Transpiler* tp, AstCallNode* call,
+static int order_method_named_arguments(Transpiler* tp, LambdaAstCallNode* call,
         TypeMethod* method, int arg_count) {
     AstFuncNode* definition = method ? (AstFuncNode*)method->ast_def : NULL;
     if (!definition || !ast_call_has_named_args(call) ||
@@ -11915,7 +11938,7 @@ static int order_method_named_arguments(Transpiler* tp, AstCallNode* call,
         resolved[i]->next = i < last ? resolved[i + 1] : NULL;
     }
     call->argument = resolved[0];
-    call->syntax_aux = (uint16_t)(last + 1);
+    lambda_ast_build_state(call).syntax_aux = (uint16_t)(last + 1);
     return last + 1;
 }
 
@@ -11930,11 +11953,11 @@ static void reject_system_arity(Transpiler* tp, SourceSpan span,
     }
 }
 
-static void resolve_call_dispatch(Transpiler* tp, AstCallNode* call, bool bare_name_storage) {
+static void resolve_call_dispatch(Transpiler* tp, LambdaAstCallNode* call, bool bare_name_storage) {
     SourceSpan span = call->source_span;
     AstNode* function = call->function;
     AstNode* arguments = call->argument;
-    int arg_count = call->syntax_aux;
+    int arg_count = lambda_ast_build_state(call).syntax_aux;
     for (AstNode* a = arguments; a; a = a->next) {
         reject_procedural_block_operand(tp, a, "a call argument");
     }
@@ -11950,7 +11973,7 @@ static void resolve_call_dispatch(Transpiler* tp, AstCallNode* call, bool bare_n
     int lookup_arg_count = arg_count + tp->pipe_inject_args;
     AstNode* effective = ast_unwrap_primary(function);
     if (effective && effective->node_type == AST_NODE_MEMBER_EXPR) {
-        AstFieldNode* member = (AstFieldNode*)effective;
+        LambdaAstFieldNode* member = (LambdaAstFieldNode*)effective;
         AstNode* object = ast_unwrap_primary(member->object);
         AstNode* field = ast_unwrap_primary(member->field);
         StrView qualified_path = source_span_text(tp, effective->source_span);
@@ -11982,11 +12005,11 @@ static void resolve_call_dispatch(Transpiler* tp, AstCallNode* call, bool bare_n
         if (object && object->node_type == AST_NODE_IDENT &&
                 field && field->node_type == AST_NODE_IDENT) {
             StrView module_name = strview_init(
-                ((AstIdentNode*)object)->name->chars,
-                ((AstIdentNode*)object)->name->len);
+                ((LambdaAstIdentNode*)object)->name->chars,
+                ((LambdaAstIdentNode*)object)->name->len);
             StrView field_name = strview_init(
-                ((AstIdentNode*)field)->name->chars,
-                ((AstIdentNode*)field)->name->len);
+                ((LambdaAstIdentNode*)field)->name->chars,
+                ((LambdaAstIdentNode*)field)->name->len);
             const char* module = resolve_imported_module(tp, &module_name);
             if (!info && module) {
                 char qualified[128];
@@ -11999,7 +12022,7 @@ static void resolve_call_dispatch(Transpiler* tp, AstCallNode* call, bool bare_n
                     effective->source_span, info);
             } else {
                 NameEntry* entry = lookup_qualified_member(tp, module_name,
-                    ((AstIdentNode*)field)->name);
+                    ((LambdaAstIdentNode*)field)->name);
                 if (entry && entry->node) {
                     call->function = entry->node;
                     effective = entry->node;
@@ -12015,8 +12038,8 @@ static void resolve_call_dispatch(Transpiler* tp, AstCallNode* call, bool bare_n
             // arrays, and chained calls must use the same receiver-aware
             // registry lookup as `x.method()`.
             AstNode* receiver = object ? object : member->object;
-            StrView field_name = strview_init(((AstIdentNode*)field)->name->chars,
-                ((AstIdentNode*)field)->name->len);
+            StrView field_name = strview_init(((LambdaAstIdentNode*)field)->name->chars,
+                ((LambdaAstIdentNode*)field)->name->len);
             // S7.5.4/S12.3.3v2: resolve against the successful receiver
             // domain while passing its complete outcome to the selected call.
             Type* receiver_type = receiver && receiver->type
@@ -12065,7 +12088,7 @@ static void resolve_call_dispatch(Transpiler* tp, AstCallNode* call, bool bare_n
             }
         }
     } else if (effective && effective->node_type == AST_NODE_IDENT) {
-        AstIdentNode* ident = (AstIdentNode*)effective;
+        LambdaAstIdentNode* ident = (LambdaAstIdentNode*)effective;
         name = (StrView){ident->name->chars, ident->name->len};
         // S12.3.7: ANY module binding shadows the sys func, not just a
         // callable one. Testing for FUNC/PROC alone let `let sum = 5` fall
@@ -12216,8 +12239,8 @@ static void resolve_call_dispatch(Transpiler* tp, AstCallNode* call, bool bare_n
     arg_count = ordered_count;
     if (user_method_found && user_method_is_proc) {
         if (!tp->current_scope || !tp->current_scope->is_proc) {
-            AstIdentNode* field = effective && effective->node_type == AST_NODE_MEMBER_EXPR
-                ? (AstIdentNode*)ast_unwrap_primary(((AstFieldNode*)effective)->field) : NULL;
+            LambdaAstIdentNode* field = effective && effective->node_type == AST_NODE_MEMBER_EXPR
+                ? (LambdaAstIdentNode*)ast_unwrap_primary(((LambdaAstFieldNode*)effective)->field) : NULL;
             record_semantic_error_span(tp, span, ERR_PROC_IN_FN,
                 "procedure method '%.*s' cannot be called in a function",
                 field && field->name ? (int)field->name->len : 0,
@@ -12262,7 +12285,7 @@ static void resolve_call_dispatch(Transpiler* tp, AstCallNode* call, bool bare_n
     (void)mark_call_borrow_outcomes(tp, call);
 }
 
-static bool call_may_write_through(AstCallNode* call) {
+static bool call_may_write_through(LambdaAstCallNode* call) {
     if (call->node_type == AST_NODE_START || call->is_proc_method) return true;
     if (!call->argument && !call->pipe_inject) return false;
     AstNode* callee = ast_unwrap_primary(call->function);
@@ -12276,15 +12299,15 @@ static bool call_may_write_through(AstCallNode* call) {
     return !definition || definition->node_type == AST_NODE_PROC;
 }
 
-static void resolve_call_body(Transpiler* tp, AstCallNode* call, bool bare_name_storage = false) {
+static void resolve_call_body(Transpiler* tp, LambdaAstCallNode* call, bool bare_name_storage = false) {
     resolve_call_dispatch(tp, call, bare_name_storage);
     LambdaResolver* r = active_resolver;
     if (r && r->tp == tp && call_may_write_through(call)) r->write_candidates_seen++;
 }
 
-static void resolve_call(Transpiler* tp, AstCallNode* call, bool bare_name_storage) {
+static void resolve_call(Transpiler* tp, LambdaAstCallNode* call, bool bare_name_storage) {
     int prior_pipe_inject = tp->pipe_inject_args;
-    tp->pipe_inject_args = (call->syntax_flags & LSF_CALL_PIPE_INJECT) ? 1 : 0;
+    tp->pipe_inject_args = (lambda_ast_build_state(call).syntax_flags & LSF_CALL_PIPE_INJECT) ? 1 : 0;
     resolve_call_body(tp, call, bare_name_storage);
     tp->pipe_inject_args = prior_pipe_inject;
 }
@@ -12293,9 +12316,9 @@ static void resolve_call(Transpiler* tp, AstCallNode* call, bool bare_name_stora
 // resolves under the pipe state its caller set.
 AstNode* build_call_node_from_parts(Transpiler* tp, SourceSpan span,
         AstNode* function, AstNode* arguments, int arg_count) {
-    AstCallNode* call = build_call_syntax(tp, span, function, arguments,
+    LambdaAstCallNode* call = build_call_syntax(tp, span, function, arguments,
         arg_count, false);
-    call->syntax_form = LSF_NONE;
+    lambda_ast_build_state(call).syntax_form = LSF_NONE;
     resolve_call_body(tp, call);
     return (AstNode*)call;
 }
@@ -12305,7 +12328,7 @@ static AstNode* build_operand_syntax(Transpiler* tp, SourceSpan span,
         AstNodeType type, size_t size, LambdaSyntaxForm form, AstNode* operand) {
     AstNode* node = alloc_syntax_node(tp, type, span, size, form, 0);
     if (form == LSF_RAISE) ((AstRaiseNode*)node)->value = operand;
-    else if (form == LSF_TYPE_NEGATION) ((AstBinaryNode*)node)->right = operand;
+    else if (form == LSF_TYPE_NEGATION) ((LambdaAstBinaryNode*)node)->right = operand;
     else ((AstUnaryNode*)node)->operand = operand;
     return node;
 }
@@ -12317,7 +12340,7 @@ static void resolve_spread(AstUnaryNode* node) {
     node->type = operand && operand->type ? operand->type : &TYPE_ERROR;
 }
 
-static void resolve_type_negation(Transpiler* tp, AstBinaryNode* node) {
+static void resolve_type_negation(Transpiler* tp, LambdaAstBinaryNode* node) {
     SourceSpan span = node->source_span;
     AstNode* operand = node->right;
     AstPrimaryNode* any = (AstPrimaryNode*)alloc_ast_node_from_span(tp,
@@ -12527,7 +12550,7 @@ static AstNamedNode* build_param_syntax(Transpiler* tp, SourceSpan span,
     param->name = name_pool_create_strview(tp->name_pool, name);
     param->as = default_value;
     syntax_tail((AstNode*)param, sizeof(AstNamedNode))[0] = type_expr;
-    param->syntax_flags = (optional ? LSF_PARAM_OPTIONAL : 0) |
+    lambda_ast_build_state(param).syntax_flags = (optional ? LSF_PARAM_OPTIONAL : 0) |
         (is_var ? LSF_PARAM_VAR : 0);
     return param;
 }
@@ -12536,8 +12559,8 @@ static void resolve_param(Transpiler* tp, AstNamedNode* param) {
     AstNode* type_expr = (AstNode*)syntax_tail((AstNode*)param,
         sizeof(AstNamedNode))[0];
     AstNode* default_value = param->as;
-    bool optional = (param->syntax_flags & LSF_PARAM_OPTIONAL) != 0;
-    bool is_var = (param->syntax_flags & LSF_PARAM_VAR) != 0;
+    bool optional = (lambda_ast_build_state(param).syntax_flags & LSF_PARAM_OPTIONAL) != 0;
+    bool is_var = (lambda_ast_build_state(param).syntax_flags & LSF_PARAM_VAR) != 0;
     Type* declared = type_expr ? type_expr->type : NULL;
     declared = unwrap_simple_type_type(declared);
     // an undeclared parameter takes its default's prefix, else `any`
@@ -12571,20 +12594,20 @@ static void resolve_param(Transpiler* tp, AstNamedNode* param) {
         binder->parameter_name = param->name;
         param_type->binder = binder;
         parameter_entry->is_binder = true;
-        parameter_entry->binder_slot = binder->slot;
-        parameter_entry->binder = binder;
+        static_cast<LambdaNameEntry*>(parameter_entry)->binder_slot = binder->slot;
+        static_cast<LambdaNameEntry*>(parameter_entry)->binder = binder;
     }
     if (declared && declared->type_id == LMD_TYPE_TYPE &&
             declared->kind == TYPE_KIND_BINDER) {
         TypeBinder* binder = (TypeBinder*)declared;
         binder->parameter_name = param->name;
         NameEntry* entry = lookup_name_in_current_scope(tp, binder->name->name);
-        if (entry && entry->is_binder && entry->binder &&
-                entry->binder->slot == binder->slot) {
+        if (entry && entry->is_binder && lambda_binding_fields(entry).binder &&
+                lambda_binding_fields(entry).binder->slot == binder->slot) {
             // The first site owns diagnostics; later same-name sites retain
             // their independent contract node but share the environment slot.
             if (!entry->node) entry->node = (AstNode*)param;
-            if (!entry->binder->parameter_name) entry->binder->parameter_name = param->name;
+            if (!lambda_binding_fields(entry).binder->parameter_name) lambda_binding_fields(entry).binder->parameter_name = param->name;
         }
     }
     param->entry = parameter_entry;
@@ -12652,12 +12675,12 @@ static void resolve_control_statement(LambdaResolver* resolver, AstNode* node) {
 }
 
 // LSF_DECLARATOR tail: the annotation pattern, if written.
-static AstDeclaratorNode* build_declarator_binding_syntax(Transpiler* tp,
+static LambdaAstDeclaratorNode* build_declarator_binding_syntax(Transpiler* tp,
         SourceSpan span, StrView name, AstNode* type_expr, AstNode* value) {
-    AstDeclaratorNode* assignment = build_declarator_syntax(tp, span,
+    LambdaAstDeclaratorNode* assignment = build_declarator_syntax(tp, span,
         name_pool_create_strview(tp->name_pool, name), LSF_DECLARATOR, 1);
     assignment->init = value;
-    syntax_tail((AstNode*)assignment, sizeof(AstDeclaratorNode))[0] = type_expr;
+    syntax_tail((AstNode*)assignment, sizeof(LambdaAstDeclaratorNode))[0] = type_expr;
     return assignment;
 }
 
@@ -12684,7 +12707,7 @@ static void mark_binding_admission_outcome(Transpiler* tp, NameEntry* entry) {
     entry->node->type = lambda_type_union_normalized(tp->pool, entry->node->type, &TYPE_ERROR);
 }
 
-static bool mark_call_borrow_outcomes(Transpiler* tp, AstCallNode* call) {
+static bool mark_call_borrow_outcomes(Transpiler* tp, LambdaAstCallNode* call) {
     TypeFunc* signature = call_function_signature(call);
     // Only var parameters can publish a borrow outcome into the caller.
     if (!ast_type_func_has_var_parameter(signature)) return false;
@@ -12700,7 +12723,7 @@ static bool mark_call_borrow_outcomes(Transpiler* tp, AstCallNode* call) {
         AstNode* argument = ast_unwrap_primary(by_parameter[i]);
         if (parameter->is_var_param && may_fail && argument &&
                 argument->node_type == AST_NODE_IDENT) {
-            NameEntry* entry = ((AstIdentNode*)argument)->entry;
+            NameEntry* entry = ((LambdaAstIdentNode*)argument)->entry;
             if (entry && !entry->admission_may_fail) {
                 // A whole-binding borrow can publish its validation outcome.
                 // Compound places retain their separate store contract.
@@ -12713,11 +12736,11 @@ static bool mark_call_borrow_outcomes(Transpiler* tp, AstCallNode* call) {
     return changed;
 }
 
-static void resolve_declarator(Transpiler* tp, AstDeclaratorNode* assignment) {
+static void resolve_declarator(Transpiler* tp, LambdaAstDeclaratorNode* assignment) {
     SourceSpan span = assignment->source_span;
     AstNode* value = assignment->init;
     AstNode* type_expr = (AstNode*)syntax_tail((AstNode*)assignment,
-        sizeof(AstDeclaratorNode))[0];
+        sizeof(LambdaAstDeclaratorNode))[0];
     assignment->type = value && value->type ? value->type : &TYPE_ANY;
 
     Type* declared = type_expr ? direct_function_contract(type_expr) : NULL;
@@ -12725,7 +12748,7 @@ static void resolve_declarator(Transpiler* tp, AstDeclaratorNode* assignment) {
     // resolved `error` annotation is a valid admission contract (S7.4.2v3).
     bool invalid_annotation = type_expr && (type_expr->type == &TYPE_ERROR ||
         (type_expr->node_type == AST_NODE_IDENT &&
-         !((AstIdentNode*)type_expr)->entry && type_expr->type == (Type*)&LIT_TYPE_ERROR));
+         !((LambdaAstIdentNode*)type_expr)->entry && type_expr->type == (Type*)&LIT_TYPE_ERROR));
     bool admission_may_fail = false;
     if (declared && !invalid_annotation) {
         assignment->declared_type = declared;
@@ -12792,7 +12815,7 @@ static void direct_validate_mutable_compound(Transpiler* tp,
 // Gated on the same switch as capture itself: with the flag off the aliasing
 // behavior is still in force and the write does reach the container, so the
 // error would be false.
-void lambda_ast_mark_place_copy(AstDeclaratorNode* named) {
+void lambda_ast_mark_place_copy(LambdaAstDeclaratorNode* named) {
     if (!named || !named->entry || !named->init) return;
     AstNode* init = ast_unwrap_primary(named->init);
     if (!init || (init->node_type != AST_NODE_MEMBER_EXPR &&
@@ -12803,7 +12826,7 @@ void lambda_ast_mark_place_copy(AstDeclaratorNode* named) {
     AstIdentNode* root = ast_compound_root_ident(init);
     if (!root || !root->entry || !root->entry->is_mutable) return;
     named->entry->is_place_copy = true;
-    named->entry->place_copy_root = root->name;
+    static_cast<LambdaNameEntry*>(named->entry)->place_copy_root = root->name;
 }
 
 enum CowRetention : unsigned {
@@ -12832,7 +12855,7 @@ enum CowRetentionSiteKind {
     COW_SITE_CALL, COW_SITE_ITEMS, COW_SITE_KEY, COW_SITE_RETURN, COW_SITE_CLOSURE
 };
 
-static bool cow_call_may_retain_arguments(AstCallNode* call) {
+static bool cow_call_may_retain_arguments(LambdaAstCallNode* call) {
     // CW24v3: a system function that is not a procedure and returns a
     // scalar cannot retain an argument -- `len(keys)` hands the array to
     // nothing that outlives the call. Counting it as an escape marked every
@@ -12881,7 +12904,7 @@ static bool collect_cow_retention_site(AstNode* node, void* data) {
     if (sites->failed) return false;
     CowRetentionSiteKind kind = cow_retention_site_kind(node->node_type);
     if (kind == COW_SITE_NONE ||
-            (kind == COW_SITE_CALL && !cow_call_may_retain_arguments((AstCallNode*)node))) return true;
+            (kind == COW_SITE_CALL && !cow_call_may_retain_arguments((LambdaAstCallNode*)node))) return true;
     if (sites->count < (int)(sizeof(sites->local) / sizeof(sites->local[0]))) {
         sites->local[sites->count++] = node;
     } else {
@@ -12905,7 +12928,7 @@ static unsigned cow_param_scan_matches(const CowParamEffectScan* scan, AstNode* 
     AstNode* bare = ast_unwrap_primary(expr);
     if (!bare) return 0;
     if (bare->node_type == AST_NODE_IDENT) {
-        return ((AstIdentNode*)bare)->entry == scan->entry
+        return ((LambdaAstIdentNode*)bare)->entry == scan->entry
             ? COW_RETAINS_PART | COW_RETAINS_ROOT : 0;
     }
     if (!(scan->required & COW_RETAINS_PART)) return 0;
@@ -12917,13 +12940,13 @@ static bool cow_param_nested_function_uses_entry(AstNode* node, void* data) {
     CowParamEffectScan* scan = (CowParamEffectScan*)data;
     if (scan->done()) return false;
     if (node->node_type != AST_NODE_IDENT) return true;
-    if (((AstIdentNode*)node)->entry == scan->entry)
+    if (((LambdaAstIdentNode*)node)->entry == scan->entry)
         cow_param_note_alias(scan, COW_RETAINS_PART | COW_RETAINS_ROOT);
     return true;
 }
 
 // S9.1.2: a callee whose module finished building has final parameter facts.
-static AstFuncNode* cow_param_final_callee(AstCallNode* call) {
+static AstFuncNode* cow_param_final_callee(LambdaAstCallNode* call) {
     AstFuncNode* target = ast_direct_call_function(call);
     TypeFunc* signature = target && ((AstNode*)target)->type &&
             ((AstNode*)target)->type->type_id == LMD_TYPE_FUNC
@@ -12937,7 +12960,7 @@ static AstFuncNode* cow_param_final_callee(AstCallNode* call) {
 // is not kept: the callee marks what it returns of its parameters (LR12-11).
 // The bare-name question asks whether the parameter itself is retained; a
 // callee that keeps only a part of it does not keep the bare argument.
-static unsigned cow_param_callee_retention(AstCallNode* call, AstFuncNode* callee, AstNode* arg) {
+static unsigned cow_param_callee_retention(LambdaAstCallNode* call, AstFuncNode* callee, AstNode* arg) {
     constexpr unsigned unknown = COW_RETAINS_PART | COW_RETAINS_ROOT;
     int source_count = ast_linked_node_count(call->argument);
     if (source_count + (call->pipe_inject ? 1 : 0) > LAMBDA_MAX_FUNCTION_ARGS) return unknown;
@@ -12962,7 +12985,7 @@ static bool cow_param_retention_scan_node(AstNode* node, void* data) {
     if (scan->done()) return false;
     switch (cow_retention_site_kind(node->node_type)) {
     case COW_SITE_DECLARATOR: {
-        AstDeclaratorNode* declarator = (AstDeclaratorNode*)node;
+        LambdaAstDeclaratorNode* declarator = (LambdaAstDeclaratorNode*)node;
         unsigned matches = cow_param_scan_matches(scan, declarator->init);
         if (matches == COW_RETAINS_PART && declarator->entry && scan->depth < 4) {
             // Tune29 §19.1: a local bound to a PART of the parameter
@@ -12997,7 +13020,7 @@ static bool cow_param_retention_scan_node(AstNode* node, void* data) {
         break;
     }
     case COW_SITE_CALL: {
-        AstCallNode* call = (AstCallNode*)node;
+        LambdaAstCallNode* call = (LambdaAstCallNode*)node;
         if ((!scan->sites || scan->sites->failed) && !cow_call_may_retain_arguments(call)) break;
         // a callee from a finished module keeps an argument only where its own
         // final facts say so, so a forwarding wrapper (a package facade) does
@@ -13066,7 +13089,7 @@ static CowParamEffectScan ast_body_cow_param_effects(AstNode* body, NameEntry* e
 extern "C" bool ast_call_returns_retained_container(AstNode* expression) {
     AstNode* node = ast_cow_value_source(expression);
     if (!node || node->node_type != AST_NODE_CALL_EXPR) return false;
-    AstCallNode* call = (AstCallNode*)node;
+    LambdaAstCallNode* call = (LambdaAstCallNode*)node;
     AstNode* target = ast_unwrap_primary_to_leaf(call->function);
     if ((target && target->node_type == AST_NODE_SYS_FUNC) || ast_called_type_target(call->function)) return false;
     AstFuncNode* function = ast_direct_call_function(call);
@@ -13127,7 +13150,7 @@ static bool ast_result_may_alias_entry(AstNode* expr, NameEntry* entry,
     if (depth > 16) return true;
     switch (node->node_type) {
     case AST_NODE_IDENT: {
-        NameEntry* source = ((AstIdentNode*)node)->entry;
+        NameEntry* source = ((LambdaAstIdentNode*)node)->entry;
         if (!source) return false;
         if (retained_locals && !is_local_to_scope(source, retained_locals) && source->node &&
                 !ast_index_node_is_function(source->node) && !ast_definition_denotes_type(source->node)) return true;
@@ -13141,7 +13164,7 @@ static bool ast_result_may_alias_entry(AstNode* expr, NameEntry* entry,
             return false;
         }
         if (decl->node_type != AST_NODE_VARIABLE_DECLARATOR) return true;
-        if (ast_result_may_alias_entry(((AstDeclaratorNode*)decl)->init, entry,
+        if (ast_result_may_alias_entry(((LambdaAstDeclaratorNode*)decl)->init, entry,
                 body, depth + 1, whole, retained_locals)) {
             return true;
         }
@@ -13154,11 +13177,11 @@ static bool ast_result_may_alias_entry(AstNode* expr, NameEntry* entry,
     case AST_NODE_INDEX_EXPR: {
         // a part is never its own container's root (values have no cycles)
         if (whole) return false;
-        AstNode* object = ast_unwrap_primary(((AstFieldNode*)node)->object);
+        AstNode* object = ast_unwrap_primary(((LambdaAstFieldNode*)node)->object);
         if (node->node_type == AST_NODE_INDEX_EXPR && object) {
             // an element of a scalar array (`return a[i]` on float[]) is a scalar
             NameEntry* object_entry = object->node_type == AST_NODE_IDENT
-                ? ((AstIdentNode*)object)->entry : NULL;
+                ? ((LambdaAstIdentNode*)object)->entry : NULL;
             Type* object_type = object_entry && object_entry->declared_type
                 ? object_entry->declared_type : object->type;
             LambdaArrayContractInfo info = {};
@@ -13188,7 +13211,7 @@ static bool ast_result_may_alias_entry(AstNode* expr, NameEntry* entry,
         // a callee that may return an argument passes the alias through; its
         // own flag may be decided later (lambda_ast_note_returned_params)
         if (!ast_call_may_return_argument(node)) return false;
-        AstCallNode* call = (AstCallNode*)node;
+        LambdaAstCallNode* call = (LambdaAstCallNode*)node;
         AstFuncNode* callee = ast_direct_call_function(call);
         bool positional = callee && !ast_call_has_named_args(call);
         AstNamedNode* param = callee ? callee->param : NULL;
@@ -13349,8 +13372,8 @@ static void param_alias_scan_cb(AstNode* child, AstNode* parent, void* opaque) {
     NameEntry* alias = NULL;
     AstNode* source = NULL;
     if (child->node_type == AST_NODE_VARIABLE_DECLARATOR) {
-        alias = ((AstDeclaratorNode*)child)->entry;
-        source = ((AstDeclaratorNode*)child)->init;
+        alias = ((LambdaAstDeclaratorNode*)child)->entry;
+        source = ((LambdaAstDeclaratorNode*)child)->init;
     } else if (child->node_type == AST_NODE_ASSIGN_STAM) {
         alias = ((AstAssignStamNode*)child)->target_entry;
         source = ((AstAssignStamNode*)child)->value;
@@ -13358,7 +13381,7 @@ static void param_alias_scan_cb(AstNode* child, AstNode* parent, void* opaque) {
     AstNode* root = source ? ast_unwrap_primary(source) : NULL;
     if (alias && !alias->param_alias_written && root &&
             root->node_type == AST_NODE_IDENT) {
-        NameEntry* origin = ((AstIdentNode*)root)->entry;
+        NameEntry* origin = ((LambdaAstIdentNode*)root)->entry;
         if (origin && origin->node && origin->node->node_type == AST_NODE_PARAM) {
             alias->param_alias_written = writes->writes_through(alias);
         }
@@ -13464,7 +13487,7 @@ typedef struct RmwBorrowCtx {
     const AstCowPath* path;
     NameEntry* key_idents[RMW_MAX_KEY_IDENTS];
     int key_ident_count;
-    AstAssignNode* storebacks[RMW_MAX_STOREBACKS];
+    LambdaAstAssignNode* storebacks[RMW_MAX_STOREBACKS];
     int storeback_count;
     int loop_depth;
     // the handle has been named by an earlier statement of the region
@@ -13486,7 +13509,7 @@ static bool rmw_key_is_stable(AstNode* key, RmwBorrowCtx* c) {
     key = ast_unwrap_primary(key);
     if (!key) return false;
     if (key->node_type == AST_NODE_IDENT) {
-        NameEntry* entry = ((AstIdentNode*)key)->entry;
+        NameEntry* entry = ((LambdaAstIdentNode*)key)->entry;
         if (!entry || c->key_ident_count >= RMW_MAX_KEY_IDENTS) return false;
         if (!rmw_is_key_ident(c, entry)) c->key_idents[c->key_ident_count++] = entry;
         return true;
@@ -13506,17 +13529,17 @@ static bool rmw_is_storeback(AstNode* stmt, const RmwBorrowCtx* c) {
             stmt->node_type != AST_NODE_MEMBER_ASSIGN_STAM)) {
         return false;
     }
-    AstAssignNode* as = (AstAssignNode*)stmt;
+    LambdaAstAssignNode* as = (LambdaAstAssignNode*)stmt;
     AstNode* value = ast_unwrap_primary(as->value);
     if (!value || value->node_type != AST_NODE_IDENT ||
-            ((AstIdentNode*)value)->entry != c->handle) {
+            ((LambdaAstIdentNode*)value)->entry != c->handle) {
         return false;
     }
     if (!as->key || as->key->next) return false;
     AstCowPath target = {};
     if (!ast_collect_cow_path(&target, as->object)) return false;
-    AstIdentNode* root = target.root && target.root->node_type == AST_NODE_IDENT
-        ? (AstIdentNode*)target.root : NULL;
+    LambdaAstIdentNode* root = target.root && target.root->node_type == AST_NODE_IDENT
+        ? (LambdaAstIdentNode*)target.root : NULL;
     if (!root || root->entry != c->root) return false;
     if (target.count != c->path->count - 1) return false;
     for (int i = 0; i < target.count; i++) {
@@ -13540,7 +13563,7 @@ static void rmw_ident_scan_cb(AstNode* child, void* opaque) {
     RmwIdentScan* scan = (RmwIdentScan*)opaque;
     if (scan->found || !child) return;
     if (child->node_type == AST_NODE_IDENT) {
-        if (((AstIdentNode*)child)->entry == scan->entry) scan->found = true;
+        if (((LambdaAstIdentNode*)child)->entry == scan->entry) scan->found = true;
         return;
     }
     ast_visit_lambda_children(child, rmw_ident_scan_cb, opaque);
@@ -13549,7 +13572,7 @@ static void rmw_ident_scan_cb(AstNode* child, void* opaque) {
 static bool rmw_subtree_uses_entry(AstNode* top, const NameEntry* entry) {
     if (!top) return false;
     if (top->node_type == AST_NODE_IDENT) {
-        return ((AstIdentNode*)top)->entry == entry;
+        return ((LambdaAstIdentNode*)top)->entry == entry;
     }
     RmwIdentScan scan = {entry, false};
     ast_visit_lambda_children(top, rmw_ident_scan_cb, &scan);
@@ -13575,8 +13598,8 @@ static bool rmw_sibling_place(AstNode* object, AstNode* key, bool key_member,
         place.is_member[place.count] = key_member;
         place.count++;
     }
-    AstIdentNode* root = place.root && place.root->node_type == AST_NODE_IDENT
-        ? (AstIdentNode*)place.root : NULL;
+    LambdaAstIdentNode* root = place.root && place.root->node_type == AST_NODE_IDENT
+        ? (LambdaAstIdentNode*)place.root : NULL;
     if (!root || root->entry != c->root || place.count < 1 || !place.is_member[0]) {
         return false;
     }
@@ -13601,7 +13624,7 @@ static void rmw_expr_cb(AstNode* child, void* opaque) {
     }
     switch (child->node_type) {
     case AST_NODE_IDENT:
-        if (((AstIdentNode*)child)->entry == c->root && !c->root_free) c->bad = true;
+        if (((LambdaAstIdentNode*)child)->entry == c->root && !c->root_free) c->bad = true;
         return;
     case AST_NODE_FUNC: case AST_NODE_PROC: case AST_NODE_FUNC_EXPR:
     case AST_NODE_ARROW_FUNC: case AST_NODE_HANDLER_EXPR:
@@ -13631,11 +13654,11 @@ static void rmw_expr_cb(AstNode* child, void* opaque) {
     }
     case AST_NODE_CALL_EXPR: {
         // a key identifier handed to a call may be written through `var`
-        AstCallNode* call = (AstCallNode*)child;
+        LambdaAstCallNode* call = (LambdaAstCallNode*)child;
         for (AstNode* arg = call->argument; arg; arg = arg->next) {
             AstNode* bare = ast_unwrap_primary(arg);
             if (bare && bare->node_type == AST_NODE_IDENT &&
-                    rmw_is_key_ident(c, ((AstIdentNode*)bare)->entry)) {
+                    rmw_is_key_ident(c, ((LambdaAstIdentNode*)bare)->entry)) {
                 c->bad = true;
                 return;
             }
@@ -13686,7 +13709,7 @@ static void rmw_check_stmt(AstNode* node, AstNode* prev, RmwBorrowCtx* c) {
                 c->bad = true;
                 return;
             }
-            c->storebacks[c->storeback_count++] = (AstAssignNode*)stmt;
+            c->storebacks[c->storeback_count++] = (LambdaAstAssignNode*)stmt;
             // the handle is dead after a store-back: nothing later in this
             // list may name it (a `return l` would alias the place out)
             for (AstNode* later = node->next; later; later = later->next) {
@@ -13698,7 +13721,7 @@ static void rmw_check_stmt(AstNode* node, AstNode* prev, RmwBorrowCtx* c) {
             return;
         }
         {
-            AstAssignNode* as = (AstAssignNode*)stmt;
+            LambdaAstAssignNode* as = (LambdaAstAssignNode*)stmt;
             if (as->key && !as->key->next && rmw_sibling_place(as->object, as->key,
                     stmt->node_type == AST_NODE_MEMBER_ASSIGN_STAM, c)) {
                 // a sibling slot write; storing the handle there would alias it
@@ -13769,10 +13792,10 @@ static void rmw_move_handle_cb(AstNode* child, void* opaque) {
     if (scan->bad || !child) return;
     if (child->node_type == AST_NODE_MEMBER_EXPR || child->node_type == AST_NODE_INDEX_EXPR) {
         // a read through the handle: only its key may still name h
-        AstFieldNode* field = (AstFieldNode*)child;
+        LambdaAstFieldNode* field = (LambdaAstFieldNode*)child;
         AstNode* object = ast_unwrap_primary(field->object);
         if (object && object->node_type == AST_NODE_IDENT &&
-                ((AstIdentNode*)object)->entry == scan->handle) {
+                ((LambdaAstIdentNode*)object)->entry == scan->handle) {
             if (child->node_type == AST_NODE_INDEX_EXPR &&
                     rmw_subtree_uses_entry(field->field, scan->handle)) {
                 scan->bad = true;
@@ -13782,7 +13805,7 @@ static void rmw_move_handle_cb(AstNode* child, void* opaque) {
     }
     if (child->node_type == AST_NODE_IDENT) {
         // any other mention can escape or rebind the handle
-        if (((AstIdentNode*)child)->entry == scan->handle) scan->bad = true;
+        if (((LambdaAstIdentNode*)child)->entry == scan->handle) scan->bad = true;
         return;
     }
     ast_visit_lambda_children(child, rmw_move_handle_cb, opaque);
@@ -13794,12 +13817,12 @@ static bool rmw_moves_out(AstNode* stmt_node, RmwBorrowCtx* c) {
         if (!stmt) return false;
         if (stmt->node_type == AST_NODE_INDEX_ASSIGN_STAM ||
                 stmt->node_type == AST_NODE_MEMBER_ASSIGN_STAM) {
-            AstAssignNode* as = (AstAssignNode*)stmt;
+            LambdaAstAssignNode* as = (LambdaAstAssignNode*)stmt;
             AstCowPath target = {};
             if (!ast_collect_cow_path(&target, as->object)) return false;
-            AstIdentNode* target_root = target.root &&
+            LambdaAstIdentNode* target_root = target.root &&
                     target.root->node_type == AST_NODE_IDENT
-                ? (AstIdentNode*)target.root : NULL;
+                ? (LambdaAstIdentNode*)target.root : NULL;
             if (!target_root) return false;
             if (target_root->entry == c->handle) return false;   // write through h
             bool same_place = target_root->entry == c->root && as->key &&
@@ -13880,7 +13903,7 @@ static void rmw_nested_handle_cb(AstNode* child, void* opaque) {
     RmwNestedScan* scan = (RmwNestedScan*)opaque;
     if (scan->found || !child) return;
     if (child->node_type == AST_NODE_VARIABLE_DECLARATOR) {
-        AstDeclaratorNode* named = (AstDeclaratorNode*)child;
+        LambdaAstDeclaratorNode* named = (LambdaAstDeclaratorNode*)child;
         AstIdentNode* root = ast_compound_root_ident(named->init);
         if (root && root->entry == scan->handle && named->entry &&
                 named->entry->is_place_copy && named->entry->place_copy_mutated) {
@@ -13919,7 +13942,7 @@ static bool rmw_cont_writes_handle(const RmwCont* k, RmwBorrowCtx* c) {
 
 // the `var` parameter flags of a statically known procedure callee, walked in
 // step with the call's arguments
-static AstNamedNode* rmw_callee_params(AstCallNode* call) {
+static AstNamedNode* rmw_callee_params(LambdaAstCallNode* call) {
     AstFuncNode* callee = direct_pn_callee(call);
     return callee ? callee->param : NULL;
 }
@@ -13940,24 +13963,24 @@ static void rmw_use_cb(AstNode* child, void* opaque) {
     const NameEntry* handle = scan->c->handle;
     switch (child->node_type) {
     case AST_NODE_IDENT:
-        if (((AstIdentNode*)child)->entry == handle) scan->bad = true;
+        if (((LambdaAstIdentNode*)child)->entry == handle) scan->bad = true;
         return;
     case AST_NODE_MEMBER_EXPR: case AST_NODE_INDEX_EXPR: {
-        AstFieldNode* field = (AstFieldNode*)child;
+        LambdaAstFieldNode* field = (LambdaAstFieldNode*)child;
         AstNode* object = ast_unwrap_primary(field->object);
         if (object && object->node_type == AST_NODE_IDENT &&
-                ((AstIdentNode*)object)->entry == handle) {
+                ((LambdaAstIdentNode*)object)->entry == handle) {
             if (child->node_type == AST_NODE_INDEX_EXPR) rmw_use_scan(field->field, scan);
             return;
         }
         break;
     }
     case AST_NODE_INDEX_ASSIGN_STAM: case AST_NODE_MEMBER_ASSIGN_STAM: {
-        AstAssignNode* as = (AstAssignNode*)child;
+        LambdaAstAssignNode* as = (LambdaAstAssignNode*)child;
         AstCowPath target = {};
         if (ast_collect_cow_path(&target, as->object) && target.root &&
                 target.root->node_type == AST_NODE_IDENT &&
-                ((AstIdentNode*)target.root)->entry == handle) {
+                ((LambdaAstIdentNode*)target.root)->entry == handle) {
             // a write through the handle: only its keys and value remain
             for (int i = 0; i < target.count; i++) {
                 if (!target.is_member[i]) rmw_use_scan(target.segment[i], scan);
@@ -13969,13 +13992,13 @@ static void rmw_use_cb(AstNode* child, void* opaque) {
         break;
     }
     case AST_NODE_CALL_EXPR: {
-        AstCallNode* call = (AstCallNode*)child;
+        LambdaAstCallNode* call = (LambdaAstCallNode*)child;
         AstNamedNode* param = rmw_callee_params(call);
         for (AstNode* arg = call->argument; arg; arg = arg->next) {
             AstNode* bare = ast_unwrap_primary(arg);
             TypeParam* pt = param ? (TypeParam*)((AstNode*)param)->type : NULL;
             bool bare_handle = bare && bare->node_type == AST_NODE_IDENT &&
-                ((AstIdentNode*)bare)->entry == handle;
+                ((LambdaAstIdentNode*)bare)->entry == handle;
             bool var_handle = bare_handle && pt && pt->is_var_param;
             // Tune29 §19.1 (D5.4.4): a plain argument the procedure only
             // reads, or keeps a part of, never observes an in-place write.
@@ -13999,8 +14022,8 @@ static void rmw_use_cb(AstNode* child, void* opaque) {
         // only `h = p(..., h, ...)` with h at a `var` position: the callee
         // wrote through the handle's home and the result is what it holds
         AstNode* value = ast_unwrap_primary(as->value);
-        AstCallNode* call = value && value->node_type == AST_NODE_CALL_EXPR
-            ? (AstCallNode*)value : NULL;
+        LambdaAstCallNode* call = value && value->node_type == AST_NODE_CALL_EXPR
+            ? (LambdaAstCallNode*)value : NULL;
         AstNamedNode* param = call ? rmw_callee_params(call) : NULL;
         bool passes_home = false;
         for (AstNode* arg = call ? call->argument : NULL; arg && param;
@@ -14008,7 +14031,7 @@ static void rmw_use_cb(AstNode* child, void* opaque) {
             AstNode* bare = ast_unwrap_primary(arg);
             TypeParam* pt = (TypeParam*)((AstNode*)param)->type;
             if (bare && bare->node_type == AST_NODE_IDENT &&
-                    ((AstIdentNode*)bare)->entry == handle && pt && pt->is_var_param) {
+                    ((LambdaAstIdentNode*)bare)->entry == handle && pt && pt->is_var_param) {
                 passes_home = true;
             }
         }
@@ -14065,7 +14088,7 @@ static int rmw_walk_stmt(AstNode* node, int state, const RmwCont* k, RmwBorrowCt
             return state;
         }
         if (!rmw_cont_names_handle(k, c)) {
-            c->storebacks[c->storeback_count++] = (AstAssignNode*)stmt;
+            c->storebacks[c->storeback_count++] = (LambdaAstAssignNode*)stmt;
         }
         return 0;
     }
@@ -14156,7 +14179,7 @@ static void rmw_try_candidate(AstNode* stmt_node) {
     if (!decl || decl->node_type != AST_NODE_VAR_STAM) return;
     AstNode* d = decl->declarations;
     if (!d || d->next || d->node_type != AST_NODE_VARIABLE_DECLARATOR) return;
-    AstDeclaratorNode* named = (AstDeclaratorNode*)d;
+    LambdaAstDeclaratorNode* named = (LambdaAstDeclaratorNode*)d;
     NameEntry* handle = named->entry;
     if (!handle || !handle->is_place_copy || !handle->place_copy_mutated ||
             !named->init) {
@@ -14182,10 +14205,10 @@ static void rmw_try_candidate(AstNode* stmt_node) {
             path.root->node_type != AST_NODE_IDENT) {
         return;
     }
-    NameEntry* root = ((AstIdentNode*)path.root)->entry;
+    NameEntry* root = ((LambdaAstIdentNode*)path.root)->entry;
     if (!root || root == handle || !root->is_mutable) return;
     if (root->is_parameter && !root->is_var_param) return;
-    if (root->view_base) return;
+    if (lambda_binding_fields(root).view_base) return;
     RmwBorrowCtx c = {};
     c.root = root;
     c.handle = handle;
@@ -14220,7 +14243,7 @@ static void rmw_try_candidate(AstNode* stmt_node) {
     }
     bool straight = !c.bad && c.storeback_count < RMW_MAX_STOREBACKS;
     if (straight) {
-        c.storebacks[c.storeback_count++] = (AstAssignNode*)ast_unwrap_primary(last);
+        c.storebacks[c.storeback_count++] = (LambdaAstAssignNode*)ast_unwrap_primary(last);
         for (AstNode* n = last->next; n && straight; n = n->next) {
             if (rmw_subtree_uses_entry(n, handle)) straight = false;
         }
@@ -14297,7 +14320,7 @@ static void lambda_ast_lower_rmw_borrows(AstFuncNode* fn) {
 enum { PH_MAX_LIVE = 16, PH_MAX_USES = 64, PH_MAX_EXCLUDED = 16, PH_MAX_LINKS = 2 };
 
 typedef struct PlaceHandle {
-    AstFieldNode* bind;
+    LambdaAstFieldNode* bind;
     AstCowPath path;
     NameEntry* root;
     RmwBorrowCtx keys;          // only key_idents/key_ident_count are used
@@ -14325,7 +14348,7 @@ typedef struct PlaceHandleCtx {
 
 // one spelling found by a statement scan
 typedef struct PlaceHandleUse {
-    AstFieldNode* node;
+    LambdaAstFieldNode* node;
     bool write;
     bool conditional;
 } PlaceHandleUse;
@@ -14351,23 +14374,23 @@ static bool ph_path_prefix(const AstCowPath* path, const AstCowPath* prefix) {
 
 static NameEntry* ph_path_root(const AstCowPath* path) {
     AstNode* root = path->root;
-    return root && root->node_type == AST_NODE_IDENT ? ((AstIdentNode*)root)->entry : NULL;
+    return root && root->node_type == AST_NODE_IDENT ? ((LambdaAstIdentNode*)root)->entry : NULL;
 }
 
 // the node spelling the first `count` segments of the chain ending at `node`
-static AstFieldNode* ph_chain_node(AstNode* node, int total, int count) {
+static LambdaAstFieldNode* ph_chain_node(AstNode* node, int total, int count) {
     AstNode* current = ast_unwrap_primary(node);
     for (int i = total; i > count && current; i--) {
         if (current->node_type != AST_NODE_MEMBER_EXPR &&
                 current->node_type != AST_NODE_INDEX_EXPR) return NULL;
-        current = ast_unwrap_primary(((AstFieldNode*)current)->object);
+        current = ast_unwrap_primary(((LambdaAstFieldNode*)current)->object);
     }
     return current && (current->node_type == AST_NODE_MEMBER_EXPR ||
-        current->node_type == AST_NODE_INDEX_EXPR) ? (AstFieldNode*)current : NULL;
+        current->node_type == AST_NODE_INDEX_EXPR) ? (LambdaAstFieldNode*)current : NULL;
 }
 
 static bool ph_root_eligible(PlaceHandleCtx* ctx, NameEntry* root) {
-    if (!root || !root->is_mutable || root->view_base || root->type_widened) return false;
+    if (!root || !root->is_mutable || lambda_binding_fields(root).view_base || root->type_widened) return false;
     if (root->is_parameter && !root->is_var_param) return false;
     if (!root->has_type_annotation || !root->declared_type) return false;
     Type* declared = root->declared_type;
@@ -14414,7 +14437,7 @@ static bool ph_path_eligible(PlaceHandleCtx* ctx, AstNode* node, PlaceHandle* ou
     return true;
 }
 
-static void ph_record_use(PlaceHandleScan* scan, AstFieldNode* node, bool write) {
+static void ph_record_use(PlaceHandleScan* scan, LambdaAstFieldNode* node, bool write) {
     if (!node || (write && scan->h->read_call_crossed)) {
         scan->kill = true;
         return;
@@ -14444,10 +14467,10 @@ static void ph_scan_children(AstNode* node, PlaceHandleScan* scan) {
 // A direct pure callee with a plain, unwritten parameter cannot replace its
 // caller's root or key. Retention may share the value, so only reads survive
 // this edge (D5.4.4, S9.1.2).
-static bool ph_call_preserves_read(PlaceHandleScan* scan, AstCallNode* call) {
+static bool ph_call_preserves_read(PlaceHandleScan* scan, LambdaAstCallNode* call) {
     AstNode* function = ast_unwrap_primary(call->function);
     NameEntry* function_entry = function && function->node_type == AST_NODE_IDENT
-        ? ((AstIdentNode*)function)->entry : NULL;
+        ? ((LambdaAstIdentNode*)function)->entry : NULL;
     AstFuncNode* callee = function && function->node_type == AST_NODE_IDENT
         ? ast_direct_call_function(call) : NULL;
     if (!function_entry || function_entry->is_mutable ||
@@ -14462,7 +14485,7 @@ static bool ph_call_preserves_read(PlaceHandleScan* scan, AstCallNode* call) {
         if (!param || !bare || bare->node_type == AST_NODE_NAMED_ARG ||
                 bare->node_type == AST_NODE_SPREAD) return false;
         NameEntry* binding = bare->node_type == AST_NODE_IDENT
-            ? ((AstIdentNode*)bare)->entry : NULL;
+            ? ((LambdaAstIdentNode*)bare)->entry : NULL;
         bool names_key = binding && rmw_is_key_ident(&scan->h->keys, binding);
         if (binding == scan->h->root || names_key) {
             TypeParam* type = lambda_type_param(param->type);
@@ -14526,7 +14549,7 @@ static void ph_scan_node(AstNode* node, PlaceHandleScan* scan) {
     PlaceHandle* h = scan->h;
     switch (node->node_type) {
     case AST_NODE_IDENT: {
-        NameEntry* entry = ((AstIdentNode*)node)->entry;
+        NameEntry* entry = ((LambdaAstIdentNode*)node)->entry;
         if (entry == h->root) scan->kill = true;   // the bare root
         return;
     }
@@ -14539,7 +14562,7 @@ static void ph_scan_node(AstNode* node, PlaceHandleScan* scan) {
         break;
     }
     case AST_NODE_MEMBER_ASSIGN_STAM: case AST_NODE_INDEX_ASSIGN_STAM: {
-        AstAssignNode* as = (AstAssignNode*)node;
+        LambdaAstAssignNode* as = (LambdaAstAssignNode*)node;
         AstCowPath path = {};
         if (as->key && !as->key->next && ast_collect_cow_path(&path, as->object) &&
                 ph_path_root(&path) == h->root) {
@@ -14591,14 +14614,14 @@ static void ph_scan_node(AstNode* node, PlaceHandleScan* scan) {
         break;
     }
     case AST_NODE_CALL_EXPR: {
-        if (ph_call_preserves_read(scan, (AstCallNode*)node)) return;
+        if (ph_call_preserves_read(scan, (LambdaAstCallNode*)node)) return;
         // a key may be written through `var`; a place under the root may be
         // borrowed by the callee (CW25) -- both end the handle
-        for (AstNode* arg = ((AstCallNode*)node)->argument; arg; arg = arg->next) {
+        for (AstNode* arg = ((LambdaAstCallNode*)node)->argument; arg; arg = arg->next) {
             AstNode* bare = ast_unwrap_primary(arg);
             if (!bare) continue;
             if (bare->node_type == AST_NODE_IDENT &&
-                    rmw_is_key_ident(&h->keys, ((AstIdentNode*)bare)->entry)) {
+                    rmw_is_key_ident(&h->keys, ((LambdaAstIdentNode*)bare)->entry)) {
                 scan->kill = true;
                 return;
             }
@@ -14624,7 +14647,7 @@ static void ph_scan_node(AstNode* node, PlaceHandleScan* scan) {
         }
         break;
     case AST_NODE_BINARY: {
-        AstBinaryNode* binary = (AstBinaryNode*)node;
+        LambdaAstBinaryNode* binary = (LambdaAstBinaryNode*)node;
         if (binary->op == OPERATOR_AND || binary->op == OPERATOR_OR) {
             ph_scan_node(binary->left, scan);
             scan->conditional++;
@@ -14661,20 +14684,20 @@ static void ph_state_remove(PlaceHandleState* state, int index) {
 }
 
 // the bind must not sit inside a node another handle already answers for
-static bool ph_node_shadowed(AstFieldNode* node, AstFieldNode** annotated, int count) {
+static bool ph_node_shadowed(LambdaAstFieldNode* node, LambdaAstFieldNode** annotated, int count) {
     for (int i = 0; i < count; i++) {
         AstNode* current = (AstNode*)annotated[i];
         while (current && (current->node_type == AST_NODE_MEMBER_EXPR ||
                 current->node_type == AST_NODE_INDEX_EXPR)) {
             if (current != (AstNode*)annotated[i] && current == (AstNode*)node) return true;
-            current = ast_unwrap_primary(((AstFieldNode*)current)->object);
+            current = ast_unwrap_primary(((LambdaAstFieldNode*)current)->object);
         }
     }
     return false;
 }
 
 typedef struct PhCandidateScan {
-    AstFieldNode* found[PH_MAX_USES];
+    LambdaAstFieldNode* found[PH_MAX_USES];
     int count;
 } PhCandidateScan;
 
@@ -14687,11 +14710,11 @@ static void ph_candidate_cb(AstNode* child, void* opaque) {
         return;
     case AST_NODE_MEMBER_EXPR: {
         // `P.f`: its object is a candidate place
-        AstFieldNode* member = (AstFieldNode*)child;
+        LambdaAstFieldNode* member = (LambdaAstFieldNode*)child;
         AstNode* object = ast_unwrap_primary(member->object);
         if (!member->computed && object && (object->node_type == AST_NODE_MEMBER_EXPR ||
                 object->node_type == AST_NODE_INDEX_EXPR) && scan->count < PH_MAX_USES) {
-            scan->found[scan->count++] = (AstFieldNode*)object;
+            scan->found[scan->count++] = (LambdaAstFieldNode*)object;
         }
         break;
     }
@@ -14706,7 +14729,7 @@ static void ph_process_list(PlaceHandleCtx* ctx, AstNode* head, PlaceHandleState
 static void ph_process_plain(PlaceHandleCtx* ctx, AstNode* node, PlaceHandleState* state) {
     AstNode* stmt = ast_unwrap_primary(node);
     if (!stmt) return;
-    AstFieldNode* annotated[PH_MAX_USES];
+    LambdaAstFieldNode* annotated[PH_MAX_USES];
     int annotated_count = 0;
     // live handles: a kill ends the handle and annotates nothing here
     for (int i = 0; i < state->count;) {
@@ -14718,7 +14741,7 @@ static void ph_process_plain(PlaceHandleCtx* ctx, AstNode* node, PlaceHandleStat
             continue;
         }
         for (int u = 0; u < scan.use_count; u++) {
-            AstFieldNode* use = scan.uses[u].node;
+            LambdaAstFieldNode* use = scan.uses[u].node;
             use->handle_role = AST_PLACE_HANDLE_USE;
             use->handle_slot = h->slot;
             h->uses++;
@@ -14731,7 +14754,7 @@ static void ph_process_plain(PlaceHandleCtx* ctx, AstNode* node, PlaceHandleStat
     PhCandidateScan found = {{}, 0};
     ph_candidate_cb(stmt, &found);
     for (int c = 0; c < found.count && state->count < PH_MAX_LIVE; c++) {
-        AstFieldNode* place = found.found[c];
+        LambdaAstFieldNode* place = found.found[c];
         PlaceHandle probe = {};
         if (!ph_path_eligible(ctx, (AstNode*)place, &probe)) continue;
         bool known = false;
@@ -14869,7 +14892,7 @@ static void ph_exclude_borrow_roots_cb(AstNode* child, AstNode* parent, void* op
     PlaceHandleCtx* ctx = (PlaceHandleCtx*)opaque;
     if (!child) return;
     if (child->node_type == AST_NODE_VARIABLE_DECLARATOR) {
-        AstDeclaratorNode* named = (AstDeclaratorNode*)child;
+        LambdaAstDeclaratorNode* named = (LambdaAstDeclaratorNode*)child;
         if (named->entry && named->entry->cow_borrow_lowered && named->init) {
             AstCowPath path = {};
             NameEntry* root = ast_collect_cow_path(&path, named->init)
@@ -14903,7 +14926,7 @@ static void var_share_scan_cb(AstNode* child, void* opaque) {
 static bool var_share_is_bare(AstNode* node, NameEntry* entry) {
     AstNode* bare = ast_unwrap_primary(node);
     return bare && bare->node_type == AST_NODE_IDENT &&
-        ((AstIdentNode*)bare)->entry == entry;
+        ((LambdaAstIdentNode*)bare)->entry == entry;
 }
 
 // index keys of a place path are ordinary expressions
@@ -14917,7 +14940,7 @@ static void var_share_scan_node(AstNode* node, VarShareScan* scan) {
     if (!node || scan->shared) return;
     switch (node->node_type) {
     case AST_NODE_IDENT:
-        if (((AstIdentNode*)node)->entry == scan->entry) scan->shared = true;
+        if (((LambdaAstIdentNode*)node)->entry == scan->entry) scan->shared = true;
         return;
     case AST_NODE_MEMBER_EXPR: case AST_NODE_INDEX_EXPR: {
         AstCowPath path = {};
@@ -14930,7 +14953,7 @@ static void var_share_scan_node(AstNode* node, VarShareScan* scan) {
         break;
     }
     case AST_NODE_MEMBER_ASSIGN_STAM: case AST_NODE_INDEX_ASSIGN_STAM: {
-        AstAssignNode* as = (AstAssignNode*)node;
+        LambdaAstAssignNode* as = (LambdaAstAssignNode*)node;
         AstCowPath path = {};
         if (ast_collect_cow_path(&path, as->object) &&
                 ph_path_root(&path) == scan->entry) {
@@ -14953,7 +14976,7 @@ static void var_share_scan_node(AstNode* node, VarShareScan* scan) {
         break;
     case AST_NODE_BINARY: {
         // a comparison or type test only reads its operands
-        AstBinaryNode* binary = (AstBinaryNode*)node;
+        LambdaAstBinaryNode* binary = (LambdaAstBinaryNode*)node;
         if (ast_binary_only_reads_operands(binary->op)) {
             if (!var_share_is_bare(binary->left, scan->entry)) {
                 var_share_scan_node(binary->left, scan);
@@ -14976,7 +14999,7 @@ static void var_share_scan_node(AstNode* node, VarShareScan* scan) {
         // a plain parameter it retains (CW29), or a `var` parameter whose own
         // body may share (the fixpoint in lambda_ast_note_var_root_sharing).
         // Unknown callees and named or surplus arguments stay conservative.
-        AstCallNode* call = (AstCallNode*)node;
+        LambdaAstCallNode* call = (LambdaAstCallNode*)node;
         AstFuncNode* callee = direct_pn_callee(call);
         if (!callee) break;
         AstNamedNode* param = callee->param;
@@ -15027,7 +15050,7 @@ static void var_share_flag_stores_cb(AstNode* child, AstNode* parent, void* opaq
     if (child->node_type == AST_NODE_MEMBER_ASSIGN_STAM ||
             child->node_type == AST_NODE_INDEX_ASSIGN_STAM) {
         AstCowPath path = {};
-        AstAssignNode* as = (AstAssignNode*)child;
+        LambdaAstAssignNode* as = (LambdaAstAssignNode*)child;
         if (ast_collect_cow_path(&path, as->object) && ph_path_root(&path) == entry) {
             as->var_root_unshare = true;
         }
@@ -15188,9 +15211,9 @@ static void ph_clear_annotations_cb(AstNode* child, AstNode* parent, void* opaqu
     (void)parent;
     if (!child) return;
     if (child->node_type == AST_NODE_MEMBER_EXPR || child->node_type == AST_NODE_INDEX_EXPR) {
-        ((AstFieldNode*)child)->handle_role = AST_PLACE_HANDLE_NONE;
-        ((AstFieldNode*)child)->handle_slot = 0;
-        ((AstFieldNode*)child)->handle_rooted = false;
+        ((LambdaAstFieldNode*)child)->handle_role = AST_PLACE_HANDLE_NONE;
+        ((LambdaAstFieldNode*)child)->handle_slot = 0;
+        ((LambdaAstFieldNode*)child)->handle_rooted = false;
     }
     ast_visit_core_children(child, ph_clear_annotations_cb, opaque);
 }
@@ -15235,7 +15258,7 @@ static void lambda_ast_plan_place_handles(Transpiler* tp, AstFuncNode* fn) {
 // hit is one share-mark (D5.4.1), so every unknown shape falls to "written".
 static void place_copy_decide_list(AstNode* head, AstNode* fn_body);
 
-static void place_copy_decide_declaration(AstNode* stmt_node, AstDeclaratorNode* named,
+static void place_copy_decide_declaration(AstNode* stmt_node, LambdaAstDeclaratorNode* named,
         AstNode* fn_body) {
     NameEntry* entry = named->entry;
     if (!entry || !entry->is_place_copy || entry->place_copy_range_decided) return;
@@ -15262,7 +15285,7 @@ static void place_copy_decide_list(AstNode* head, AstNode* fn_body) {
         case AST_NODE_VAR_STAM: case AST_NODE_LET_STAM: {
             for (AstNode* d = ((AstVarDeclNode*)stmt)->declarations; d; d = d->next) {
                 if (d->node_type == AST_NODE_VARIABLE_DECLARATOR) {
-                    place_copy_decide_declaration(node, (AstDeclaratorNode*)d, fn_body);
+                    place_copy_decide_declaration(node, (LambdaAstDeclaratorNode*)d, fn_body);
                 }
             }
             break;
@@ -15307,7 +15330,7 @@ static bool insertion_move_count_cb(AstNode* node, void* data) {
     InsertionMoveScan* scan = (InsertionMoveScan*)data;
     if (scan->uses > 1) return false;
     if (node->node_type == AST_NODE_IDENT && node != scan->allowed &&
-            ((AstIdentNode*)node)->entry == scan->entry) {
+            ((LambdaAstIdentNode*)node)->entry == scan->entry) {
         scan->uses++;
     }
     if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR ||
@@ -15327,7 +15350,7 @@ static AstNode* insertion_statement_value(AstNode* stmt) {
         return ((AstCompoundAssignNode*)stmt)->value;
     }
     if (stmt->node_type != AST_NODE_CALL_EXPR) return NULL;
-    AstCallNode* call = (AstCallNode*)stmt;
+    LambdaAstCallNode* call = (LambdaAstCallNode*)stmt;
     AstNode* callee = ast_unwrap_primary(call->function);
     SysFuncInfo* info = callee && callee->node_type == AST_NODE_SYS_FUNC
         ? ((AstSysFuncNode*)callee)->fn_info : NULL;
@@ -15339,7 +15362,7 @@ static AstNode* insertion_statement_value(AstNode* stmt) {
 }
 
 static void insertion_move_decide_declaration(AstNode* stmt_node,
-        AstDeclaratorNode* named, AstNode* fn_body) {
+        LambdaAstDeclaratorNode* named, AstNode* fn_body) {
     NameEntry* entry = named->entry;
     AstNode* init = ast_unwrap_primary(named->init);
     if (!entry || entry->is_parameter || entry->is_place_copy ||
@@ -15351,7 +15374,7 @@ static void insertion_move_decide_declaration(AstNode* stmt_node,
     for (AstNode* later = stmt_node->next; later; later = later->next) {
         AstNode* value = ast_unwrap_primary(insertion_statement_value(later));
         if (!value || value->node_type != AST_NODE_IDENT ||
-                ((AstIdentNode*)value)->entry != entry) {
+                ((LambdaAstIdentNode*)value)->entry != entry) {
             continue;
         }
         InsertionMoveScan scan = {entry, value, 0};
@@ -15369,7 +15392,7 @@ static void insertion_move_decide_list(AstNode* head, AstNode* fn_body) {
         case AST_NODE_VAR_STAM: case AST_NODE_LET_STAM: {
             for (AstNode* d = ((AstVarDeclNode*)stmt)->declarations; d; d = d->next) {
                 if (d->node_type == AST_NODE_VARIABLE_DECLARATOR) {
-                    insertion_move_decide_declaration(node, (AstDeclaratorNode*)d, fn_body);
+                    insertion_move_decide_declaration(node, (LambdaAstDeclaratorNode*)d, fn_body);
                 }
             }
             break;
@@ -15407,7 +15430,7 @@ static void lambda_ast_note_insertion_moves(AstFuncNode* fn) {
 static bool place_copy_decide_fallback_cb(AstNode* node, void* data) {
     AstNode* fn_body = (AstNode*)data;
     if (node->node_type != AST_NODE_VARIABLE_DECLARATOR) return true;
-    AstDeclaratorNode* named = (AstDeclaratorNode*)node;
+    LambdaAstDeclaratorNode* named = (LambdaAstDeclaratorNode*)node;
     NameEntry* entry = named->entry;
     if (!entry || !entry->is_place_copy || entry->place_copy_range_decided) return true;
     entry->place_copy_range_decided = true;
@@ -15428,7 +15451,7 @@ static bool place_copy_decide_fallback_cb(AstNode* node, void* data) {
 static bool place_copy_var_call_cb(AstNode* node, void* data) {
     (void)data;
     if (node->node_type != AST_NODE_CALL_EXPR) return true;
-    AstCallNode* call = (AstCallNode*)node;
+    LambdaAstCallNode* call = (LambdaAstCallNode*)node;
     AstNamedNode* param = rmw_callee_params(call);
     for (AstNode* arg = call->argument; arg && param;
             arg = arg->next, param = (AstNamedNode*)((AstNode*)param)->next) {
@@ -15454,10 +15477,10 @@ static void direct_note_place_copy_mutated(Transpiler* tp, NameEntry* entry, Sou
     entry->place_copy_mutated = true;  // durable; gates the bind-time mark
     if (entry->place_copy_mutation_pending) return;
     entry->place_copy_mutation_pending = true;
-    entry->place_copy_mutation_span = span;
+    static_cast<LambdaNameEntry*>(entry)->place_copy_mutation_span = span;
     // D8.2.2: late call validation can enqueue after FUNCTION_END; a global
     // queue would outlive the script pool and poison the next batch compile.
-    entry->place_copy_next = tp->place_copy_pending;
+    static_cast<LambdaNameEntry*>(entry)->place_copy_next = tp->place_copy_pending;
     tp->place_copy_pending = entry;
 }
 
@@ -15467,7 +15490,7 @@ static void direct_note_place_copy_mutation(Transpiler* tp, SourceSpan span, Ast
     if (!entry || !entry->is_place_copy) return;
     // the target's own root ident was already counted as a read when the
     // object expression resolved; it is not an OBSERVATION of the copy
-    if (entry->place_copy_target_reads < UINT16_MAX) entry->place_copy_target_reads++;
+    if (lambda_binding_fields(entry).place_copy_target_reads < UINT16_MAX) static_cast<LambdaNameEntry*>(entry)->place_copy_target_reads++;
     direct_note_place_copy_mutated(tp, entry, span);
 }
 
@@ -15483,7 +15506,7 @@ static void direct_note_place_copy_var_borrow(Transpiler* tp, SourceSpan span, A
 static void direct_note_place_copy_writeback(AstNode* value) {
     AstNode* source = ast_unwrap_primary(value);
     if (!source || source->node_type != AST_NODE_IDENT) return;
-    AstIdentNode* ident = (AstIdentNode*)source;
+    LambdaAstIdentNode* ident = (LambdaAstIdentNode*)source;
     if (ident->entry && ident->entry->is_place_copy) {
         ident->entry->place_copy_written_back = true;
     }
@@ -15493,8 +15516,8 @@ static void lambda_ast_flush_place_copy_diagnostics(Transpiler* tp) {
     NameEntry* entry = tp->place_copy_pending;
     tp->place_copy_pending = NULL;
     while (entry) {
-        NameEntry* next = entry->place_copy_next;
-        entry->place_copy_next = NULL;
+        NameEntry* next = lambda_binding_fields(entry).place_copy_next;
+        static_cast<LambdaNameEntry*>(entry)->place_copy_next = NULL;
         entry->place_copy_mutation_pending = false;
         // CW24v2 (Swift/R endpoint, ratified 2026-08-29): a mutated place copy
         // the program OBSERVES -- reads, returns, stores, passes on, or writes
@@ -15502,9 +15525,9 @@ static void lambda_ast_flush_place_copy_diagnostics(Transpiler* tp) {
         // dead-store shape (mutated, then never observed at all) survives, as
         // a warning: it is provably useless work under either semantics.
         bool observed = entry->place_copy_written_back ||
-            entry->place_copy_reads > entry->place_copy_target_reads;
+            lambda_binding_fields(entry).place_copy_reads > lambda_binding_fields(entry).place_copy_target_reads;
         if (!observed) {
-            String* origin = entry->place_copy_root;
+            String* origin = lambda_binding_fields(entry).place_copy_root;
             int olen = origin ? (int)origin->len : 1;
             const char* ochars = origin ? origin->chars : "?";
             log_warn("cow-dead-snapshot: %s: '%.*s' is a copy of '%.*s...' "
@@ -15520,21 +15543,21 @@ static void lambda_ast_flush_place_copy_diagnostics(Transpiler* tp) {
 
 // An assignment's statement kind follows its resolved target; a rejected one
 // leaves a null statement, which its content list then drops.
-static AstAssignNode* build_assignment_syntax(Transpiler* tp, SourceSpan span,
+static LambdaAstAssignNode* build_assignment_syntax(Transpiler* tp, SourceSpan span,
         AstNode* target, AstNode* value) {
-    AstAssignNode* assignment = (AstAssignNode*)alloc_syntax_node(tp,
-        AST_NODE_ASSIGN_STAM, span, sizeof(AstAssignNode), LSF_ASSIGN, 0);
+    LambdaAstAssignNode* assignment = (LambdaAstAssignNode*)alloc_syntax_node(tp,
+        AST_NODE_ASSIGN_STAM, span, sizeof(LambdaAstAssignNode), LSF_ASSIGN, 0);
     assignment->left = target;
     assignment->right = value;
     return assignment;
 }
 
-static void reject_assignment(AstAssignNode* assignment) {
-    morph_ast_node((AstNode*)assignment, AST_NODE_NULL, sizeof(AstAssignNode));
+static void reject_assignment(LambdaAstAssignNode* assignment) {
+    morph_ast_node((AstNode*)assignment, AST_NODE_NULL, sizeof(LambdaAstAssignNode));
     assignment->type = &TYPE_NULL;
 }
 
-static void resolve_assignment(Transpiler* tp, AstAssignNode* node) {
+static void resolve_assignment(Transpiler* tp, LambdaAstAssignNode* node) {
     SourceSpan span = node->source_span;
     AstNode* target = node->left;
     AstNode* value = node->right;
@@ -15547,7 +15570,7 @@ static void resolve_assignment(Transpiler* tp, AstAssignNode* node) {
     target = ast_unwrap_primary(target);
     if (target && (target->node_type == AST_NODE_INDEX_EXPR ||
             target->node_type == AST_NODE_MEMBER_EXPR)) {
-        AstFieldNode* field = (AstFieldNode*)target;
+        LambdaAstFieldNode* field = (LambdaAstFieldNode*)target;
         AstCompoundAssignNode* assignment = node;
         assignment->node_type = target->node_type == AST_NODE_INDEX_EXPR
             ? AST_NODE_INDEX_ASSIGN_STAM : AST_NODE_MEMBER_ASSIGN_STAM;
@@ -15575,7 +15598,7 @@ static void resolve_assignment(Transpiler* tp, AstAssignNode* node) {
         return;
     }
 
-    AstIdentNode* ident = (AstIdentNode*)target;
+    LambdaAstIdentNode* ident = (LambdaAstIdentNode*)target;
     NameEntry* entry = ident->entry ? ident->entry : lookup_name(tp,
         strview_init(ident->name->chars, ident->name->len));
     AstAssignStamNode* assignment = node;
@@ -16057,7 +16080,7 @@ static Type* direct_range_bound_member_type(AstNode* bound) {
     // S11.1.3: an arithmetic bound can form an integer range or fail, but
     // cannot produce a character range even when its operand types are open.
     if (bound->node_type == AST_NODE_BINARY) {
-        switch (((AstBinaryNode*)bound)->op) {
+        switch (((LambdaAstBinaryNode*)bound)->op) {
         case OPERATOR_ADD: case OPERATOR_SUB: case OPERATOR_MUL:
         case OPERATOR_DIV: case OPERATOR_IDIV: case OPERATOR_MOD:
         case OPERATOR_POW:
@@ -16078,15 +16101,15 @@ static Type* direct_range_element_type(Transpiler* tp, AstNode* source) {
             ((AstUnaryNode*)value)->op == OPERATOR_PROPAGATE)
         value = ast_unwrap_primary(((AstUnaryNode*)value)->operand);
     if (value && value->node_type == AST_NODE_IDENT) {
-        AstIdentNode* ident = (AstIdentNode*)value;
+        LambdaAstIdentNode* ident = (LambdaAstIdentNode*)value;
         if (ident->entry && !ident->entry->is_mutable && ident->entry->node &&
                 ident->entry->node->node_type == AST_NODE_VARIABLE_DECLARATOR) {
-            value = ast_unwrap_primary(((AstDeclaratorNode*)ident->entry->node)->init);
+            value = ast_unwrap_primary(((LambdaAstDeclaratorNode*)ident->entry->node)->init);
         }
     }
     if (value && value->node_type == AST_NODE_BINARY &&
-            ((AstBinaryNode*)value)->op == OPERATOR_TO) {
-        AstBinaryNode* range = (AstBinaryNode*)value;
+            ((LambdaAstBinaryNode*)value)->op == OPERATOR_TO) {
+        LambdaAstBinaryNode* range = (LambdaAstBinaryNode*)value;
         // S11.1.3: successful bounds share a domain, so either known bound
         // determines the member type even when the other bound is dynamic.
         Type* member = direct_range_bound_member_type(range->left);
@@ -16130,7 +16153,7 @@ static void direct_rebind_join_ident(AstNode* node, String* name,
     if (!node || !name || !entry) return;
     switch (node->node_type) {
     case AST_NODE_IDENT: {
-        AstIdentNode* ident = (AstIdentNode*)node;
+        LambdaAstIdentNode* ident = (LambdaAstIdentNode*)node;
         if (!ident->entry && ident->name && ident->name->len == name->len &&
                 memcmp(ident->name->chars, name->chars, name->len) == 0) {
             ident->entry = entry;
@@ -16143,7 +16166,7 @@ static void direct_rebind_join_ident(AstNode* node, String* name,
         return;
     case AST_NODE_BINARY:
     case AST_NODE_PIPE: {
-        AstBinaryNode* binary = (AstBinaryNode*)node;
+        LambdaAstBinaryNode* binary = (LambdaAstBinaryNode*)node;
         direct_rebind_join_ident(binary->left, name, entry);
         direct_rebind_join_ident(binary->right, name, entry);
         return;
@@ -16155,11 +16178,11 @@ static void direct_rebind_join_ident(AstNode* node, String* name,
     case AST_NODE_MEMBER_EXPR: {
         // Dotted field names are keys, not bindings; only the object side can
         // refer to the just-installed loop variable.
-        direct_rebind_join_ident(((AstFieldNode*)node)->object, name, entry);
+        direct_rebind_join_ident(((LambdaAstFieldNode*)node)->object, name, entry);
         return;
     }
     case AST_NODE_INDEX_EXPR: {
-        AstFieldNode* field = (AstFieldNode*)node;
+        LambdaAstFieldNode* field = (LambdaAstFieldNode*)node;
         direct_rebind_join_ident(field->object, name, entry);
         if (!field->field || field->field->node_type != AST_NODE_IDENT)
             direct_rebind_join_ident(field->field, name, entry);
@@ -16170,7 +16193,7 @@ static void direct_rebind_join_ident(AstNode* node, String* name,
         direct_rebind_join_ident(((AstPathIndexNode*)node)->segment_expr, name, entry);
         return;
     case AST_NODE_CALL_EXPR: {
-        AstCallNode* call = (AstCallNode*)node;
+        LambdaAstCallNode* call = (LambdaAstCallNode*)node;
         direct_rebind_join_ident(call->function, name, entry);
         for (AstNode* arg = call->argument; arg; arg = arg->next)
             direct_rebind_join_ident(arg, name, entry);
@@ -16309,7 +16332,7 @@ static void refresh_loop_outcome_child(AstNode* node, void* data) {
     LoopOutcomeRefresh children = {owner->tp, owner->loop_start, false, owner->once_head,
         owner->first_read, owner->refresh_calls, owner->global_changed};
     if (node->node_type == AST_NODE_START) {
-        AstCallNode* target = ((AstStartNode*)node)->call;
+        LambdaAstCallNode* target = ((AstStartNode*)node)->call;
         // S13.1.1v3: a launch carries a packed argument array, validated by
         // validate_start_parts, rather than an ordinary argument list.
         ast_visit_lambda_children((AstNode*)target, refresh_loop_outcome_child, &children);
@@ -16323,7 +16346,7 @@ static void refresh_loop_outcome_child(AstNode* node, void* data) {
     ast_visit_lambda_children(node, refresh_loop_outcome_child, &children);
     Transpiler* tp = owner->tp;
     if (owner->refresh_calls && node->node_type == AST_NODE_CALL_EXPR) {
-        AstCallNode* call = (AstCallNode*)node;
+        LambdaAstCallNode* call = (LambdaAstCallNode*)node;
         TypeFunc* signature = call_function_signature(call);
         int argument_count = ast_linked_node_count(call->argument) + (call->pipe_inject ? 1 : 0);
         bool newly_known_error = signature && !signature->has_explicit_return_contract &&
@@ -16358,10 +16381,10 @@ static void refresh_loop_outcome_child(AstNode* node, void* data) {
         }
     }
     if (node->node_type == AST_NODE_IDENT) {
-        NameEntry* entry = ((AstIdentNode*)node)->entry;
+        NameEntry* entry = ((LambdaAstIdentNode*)node)->entry;
         if (entry && !entry->is_mutable && entry->node &&
                 entry->node->node_type == AST_NODE_VARIABLE_DECLARATOR &&
-                !((AstDeclaratorNode*)entry->node)->is_type_definition &&
+                !((LambdaAstDeclaratorNode*)entry->node)->is_type_definition &&
                 type_field_unwrap_simple_decl(entry->node->type) == entry->node->type &&
                 lambda_type_has_proven_error(entry->node->type) &&
                 !lambda_type_has_proven_error(node->type)) {
@@ -16389,7 +16412,7 @@ static void refresh_loop_outcome_child(AstNode* node, void* data) {
         node->type = ((AstPrimaryNode*)node)->expr->type;
         break;
     case AST_NODE_VARIABLE_DECLARATOR: {
-        AstDeclaratorNode* declaration = (AstDeclaratorNode*)node;
+        LambdaAstDeclaratorNode* declaration = (LambdaAstDeclaratorNode*)node;
         if (declaration->declared_type) {
             int line = (int)ast_node_start_point(tp, node).row + 1;
             bool rejected = check_declaration_static_boundary(tp, declaration, declaration->declared_type, line);
@@ -16449,14 +16472,14 @@ static void refresh_loop_outcome_child(AstNode* node, void* data) {
         resolve_unary(tp, (AstUnaryNode*)node);
         break;
     case AST_NODE_BINARY:
-        resolve_binary(tp, (AstBinaryNode*)node);
+        resolve_binary(tp, (LambdaAstBinaryNode*)node);
         break;
     case AST_NODE_HANDLER_EXPR:
     case AST_NODE_HANDLER_STAM:
         resolve_handler(tp, (AstHandlerNode*)node);
         break;
     case AST_NODE_CALL_EXPR: {
-        AstCallNode* call = (AstCallNode*)node;
+        LambdaAstCallNode* call = (LambdaAstCallNode*)node;
         if (call->propagate) break;
         AstNode* callee = ast_unwrap_primary(call->function);
         if (callee && callee->node_type == AST_NODE_SYS_FUNC &&
@@ -16482,7 +16505,7 @@ static void refresh_loop_outcome_child(AstNode* node, void* data) {
     case AST_NODE_INDEX_EXPR:
         // receiver errors change metadata reads differently from ordinary
         // fields; reuse the read oracle instead of adding a blanket error.
-        resolve_field(tp, (AstFieldNode*)node);
+        resolve_field(tp, (LambdaAstFieldNode*)node);
         break;
     case AST_NODE_IF_EXPR:
         // a changed child can contain an error as data (for example in a map
@@ -16514,7 +16537,7 @@ static bool complete_outcome_facts(Transpiler* tp, AstScript* script) {
         for (uint32_t i = 0; i < tp->ast_index.count; i++) {
             AstNode* node = tp->ast_index.nodes[i];
             if (node->node_type == AST_NODE_CALL_EXPR &&
-                    mark_call_borrow_outcomes(tp, (AstCallNode*)node)) {
+                    mark_call_borrow_outcomes(tp, (LambdaAstCallNode*)node)) {
                 arraylist_append(changed_calls, node);
                 changed = true;
             }
@@ -16587,9 +16610,9 @@ static bool crud_reject_var_root(Transpiler* tp, SourceSpan span, AstNode* targe
         switch (root->node_type) {
         case AST_NODE_PRIMARY: root = ((AstPrimaryNode*)root)->expr; continue;
         case AST_NODE_MEMBER_EXPR: case AST_NODE_INDEX_EXPR:
-            root = ((AstFieldNode*)root)->object; continue;
+            root = ((LambdaAstFieldNode*)root)->object; continue;
         case AST_NODE_IDENT: {
-            NameEntry* entry = ((AstIdentNode*)root)->entry;
+            NameEntry* entry = ((LambdaAstIdentNode*)root)->entry;
             if (entry && entry->is_mutable) {
                 record_semantic_error_span(tp, span, ERR_SEMANTIC_ERROR,
                     "a 'var' is Tier 2 and never a CRUD root; its writes are "
@@ -16636,7 +16659,7 @@ static void resolve_crud(Transpiler* tp, AstCrudNode* node) {
     if (!positional && effective &&
             (effective->node_type == AST_NODE_MEMBER_EXPR ||
              effective->node_type == AST_NODE_INDEX_EXPR)) {
-        AstFieldNode* field = (AstFieldNode*)effective;
+        LambdaAstFieldNode* field = (LambdaAstFieldNode*)effective;
         node->object = field->object;
         node->key = field->field;
     } else {
@@ -16671,8 +16694,8 @@ static void resolve_address_of(Transpiler* tp, AstUnaryNode* node) {
 }
 
 // a postfix propagate node can become a call with its immutable call plan
-static constexpr size_t propagate_node_size = sizeof(AstCallNode) > sizeof(AstUnaryNode)
-    ? sizeof(AstCallNode) : sizeof(AstUnaryNode);
+static constexpr size_t propagate_node_size = sizeof(LambdaAstCallNode) > sizeof(AstUnaryNode)
+    ? sizeof(LambdaAstCallNode) : sizeof(AstUnaryNode);
 
 // `expr^`. On a call the `^` is a flag of that call, so the call takes the
 // propagate node's place: its fields move into this node (the sibling link
@@ -16689,14 +16712,14 @@ static void resolve_propagate(Transpiler* tp, AstUnaryNode* node) {
     may_error |= ordinary_outcome_has_error(tp, operand);
     Type* explicit_contract = NULL;
     if (effective && effective->node_type == AST_NODE_IDENT) {
-        NameEntry* entry = ((AstIdentNode*)effective)->entry;
+        NameEntry* entry = ((LambdaAstIdentNode*)effective)->entry;
         if (entry) explicit_contract = entry->declared_type;
     } else if (effective && (effective->node_type == AST_NODE_MEMBER_EXPR ||
             effective->node_type == AST_NODE_INDEX_EXPR)) {
         explicit_contract = declared_compound_destination_type(tp, effective, NULL);
     }
     if (effective && effective->node_type == AST_NODE_CALL_EXPR) {
-        AstCallNode* call = (AstCallNode*)effective;
+        LambdaAstCallNode* call = (LambdaAstCallNode*)effective;
         call->propagate = true;
         retain_call_propagation_errors(tp, call);
         may_error = may_error || call->can_raise;
@@ -16726,7 +16749,7 @@ static void resolve_propagate(Transpiler* tp, AstUnaryNode* node) {
         operand->type = success;
         effective->type = success;
         AstNode* next = node->next;
-        memcpy(node, effective, sizeof(AstCallNode));
+        memcpy(node, effective, sizeof(LambdaAstCallNode));
         node->next = next;
         return;
     }
@@ -16879,8 +16902,8 @@ static int direct_append_tail_compare(const void* a, const void* b,
 static AstNode* syntax_append_reduction_list(LambdaSyntaxSink* sink,
         AstNode* first, AstNode* item) {
     if (!item) return first;
-    if (first && !first->next && first->syntax_form == LSF_TYPE_STAM &&
-            item->syntax_form == LSF_TYPE_STAM && first->node_type == item->node_type) {
+    if (first && !first->next && lambda_ast_build_state(first).syntax_form == LSF_TYPE_STAM &&
+            lambda_ast_build_state(item).syntax_form == LSF_TYPE_STAM && first->node_type == item->node_type) {
         // keep every comma-separated alias in the semantic tree; detached
         // clauses resolve names but cannot publish patterns or local types.
         AstNode** declaration = &((AstLetNode*)first)->declare;
@@ -16958,8 +16981,8 @@ static AstNode* syntax_member_field(LambdaSyntaxSink* sink, LambdaToken token) {
     if (lambda_literal_kind_from_token(token.kind, &literal_kind)) {
         return build_literal_syntax(tp, token.span, literal_kind);
     }
-    AstIdentNode* field = (AstIdentNode*)alloc_syntax_node(tp, AST_NODE_IDENT,
-        token.span, sizeof(AstIdentNode), LSF_MEMBER_NAME, 0);
+    LambdaAstIdentNode* field = (LambdaAstIdentNode*)alloc_syntax_node(tp, AST_NODE_IDENT,
+        token.span, sizeof(LambdaAstIdentNode), LSF_MEMBER_NAME, 0);
     field->name = syntax_intern_name(sink, direct_token_text(tp, token));
     return (AstNode*)field;
 }
@@ -16977,8 +17000,8 @@ static AstNode* direct_type_from_value(Transpiler* tp, SourceSpan span,
 // resolve to either. aux holds the base-type index plus one.
 static AstNode* syntax_base_type(Transpiler* tp, SourceSpan span) {
     AstNode* node = alloc_syntax_node(tp, AST_NODE_TYPE, span,
-        sizeof(AstIdentNode), LSF_BASE_TYPE, 0);
-    node->syntax_aux = (uint16_t)(lambda_base_type_index(
+        sizeof(LambdaAstIdentNode), LSF_BASE_TYPE, 0);
+    lambda_ast_build_state(node).syntax_aux = (uint16_t)(lambda_base_type_index(
         source_span_text(tp, span)) + 1);
     return node;
 }
@@ -17397,11 +17420,11 @@ static AstNode* syntax_view_finish(LambdaSyntaxSink* sink,
     view->param = (AstNamedNode*)syntax_child(reduction, 0);
     view->body = syntax_child(reduction, 1);
     view->is_generative = (reduction->flags & LAMBDA_REDUCTION_FLAG_GENERATIVE_VIEW) != 0;
-    if (view->is_generative) view->body->syntax_flags |= LSF_CONTENT_GENERATIVE_VIEW;
+    if (view->is_generative) lambda_ast_build_state(view->body).syntax_flags |= LSF_CONTENT_GENERATIVE_VIEW;
     void** tail = syntax_tail((AstNode*)view, sizeof(AstViewNode));
     tail[LSF_VIEW_RETURN] = syntax_child(reduction, 2);
     tail[LSF_VIEW_ERROR] = syntax_child(reduction, 3);
-    if (reduction->flags & LAMBDA_REDUCTION_FLAG_RAISED) view->syntax_aux |= LSF_FN_RAISED;
+    if (reduction->flags & LAMBDA_REDUCTION_FLAG_RAISED) lambda_ast_build_state(view).syntax_aux |= LSF_FN_RAISED;
     return (AstNode*)view;
 }
 
@@ -17474,7 +17497,7 @@ static void syntax_function_begin(LambdaSyntaxSink* sink,
     if (!(flags & LAMBDA_REDUCTION_FLAG_FUNCTION_HEADER)) facts |= LSF_FN_ARROW;
     if (flags & LAMBDA_REDUCTION_FLAG_PUBLIC) facts |= LSF_FN_PUBLIC;
     if (flags & LAMBDA_REDUCTION_FLAG_COLOUR_POLY) facts |= LSF_FN_COLOUR_POLY;
-    fn->syntax_aux = facts;
+    lambda_ast_build_state(fn).syntax_aux = facts;
     bool top_level_header = syntax_at_top_level(sink) &&
         (flags & LAMBDA_REDUCTION_FLAG_FUNCTION_HEADER) != 0;
     sink->header_function_depth++;
@@ -17512,11 +17535,11 @@ static AstNode* syntax_function(LambdaSyntaxSink* sink,
     tail[LSF_FUNCTION_BODY] = body;
     syntax_tail_set_span(&tail[LSF_FUNCTION_SPAN], reduction->span);
     uint32_t flags = reduction->flags;
-    if (flags & LAMBDA_REDUCTION_FLAG_VARIADIC) fn->syntax_aux |= LSF_FN_VARIADIC;
-    if (flags & LAMBDA_REDUCTION_FLAG_RAISED) fn->syntax_aux |= LSF_FN_RAISED;
+    if (flags & LAMBDA_REDUCTION_FLAG_VARIADIC) lambda_ast_build_state(fn).syntax_aux |= LSF_FN_VARIADIC;
+    if (flags & LAMBDA_REDUCTION_FLAG_RAISED) lambda_ast_build_state(fn).syntax_aux |= LSF_FN_RAISED;
     if (sink->type_object_depth && sink->function_depth ==
             sink->object_function_depth[sink->type_object_depth - 1] + 1) {
-        fn->syntax_aux |= LSF_FN_METHOD;
+        lambda_ast_build_state(fn).syntax_aux |= LSF_FN_METHOD;
         syntax_object_member(sink, OBJECT_PART_METHOD, (AstNode*)fn);
     }
     return (AstNode*)fn;
@@ -17527,10 +17550,10 @@ static AstNode* syntax_function(LambdaSyntaxSink* sink,
 // ANY. The declarator exists from here; the resolve pass binds it there.
 static void syntax_type_alias_begin(LambdaSyntaxSink* sink,
         const LambdaParseReduction* reduction) {
-    AstDeclaratorNode* alias = build_declarator_syntax(sink->tp, reduction->span,
+    LambdaAstDeclaratorNode* alias = build_declarator_syntax(sink->tp, reduction->span,
         direct_token_name(sink->tp, reduction->detail_token), LSF_TYPE_ALIAS,
         LSF_ALIAS_TAIL);
-    alias->syntax_flags |= LSF_ALIAS_PREBOUND;
+    lambda_ast_build_state(alias).syntax_flags |= LSF_ALIAS_PREBOUND;
     sink->pending_type_alias = alias;
     // S11.4.12: a top-level type name binds for the whole module
     if (syntax_at_top_level(sink) && !arraylist_append(sink->unit->predeclared, alias)) {
@@ -17553,7 +17576,7 @@ static AstNode* syntax_type_alias(LambdaSyntaxSink* sink,
     AstNode* type_node = syntax_child(reduction, 0);
     StrView alias_name = direct_token_text(tp, reduction->detail_token);
     bool is_public = (reduction->flags & LAMBDA_REDUCTION_FLAG_PUBLIC) != 0;
-    AstDeclaratorNode* pending = sink->pending_type_alias;
+    LambdaAstDeclaratorNode* pending = sink->pending_type_alias;
     sink->pending_type_alias = NULL;
     if (pending && !(pending->name->len == alias_name.length &&
             memcmp(pending->name->chars, alias_name.str, alias_name.length) == 0)) {
@@ -17574,7 +17597,7 @@ static AstNode* syntax_type_alias(LambdaSyntaxSink* sink,
         if (!pending && syntax_at_top_level(sink)) {
             pending = build_declarator_syntax(tp, reduction->span, pattern->name,
                 LSF_TYPE_ALIAS, LSF_ALIAS_TAIL);
-            pending->syntax_flags |= LSF_ALIAS_PREBOUND;
+            lambda_ast_build_state(pending).syntax_flags |= LSF_ALIAS_PREBOUND;
             if (!arraylist_append(sink->unit->predeclared, pending)) sink->failed = true;
         }
         void** tail = syntax_tail((AstNode*)pattern, sizeof(AstPatternDefNode));
@@ -17582,15 +17605,15 @@ static AstNode* syntax_type_alias(LambdaSyntaxSink* sink,
         tail[LSF_PATTERN_PREBOUND] = pending;
         // the binding leads back to its definition, which an earlier reference
         // may resolve first (S11.4.12)
-        if (pending) syntax_tail((AstNode*)pending, sizeof(AstDeclaratorNode))[LSF_ALIAS_TYPE] = pattern;
+        if (pending) syntax_tail((AstNode*)pending, sizeof(LambdaAstDeclaratorNode))[LSF_ALIAS_TYPE] = pattern;
         return syntax_type_stam(tp, reduction->span, (AstNode*)pattern, is_public);
     }
     // reuse the pre-bound declaration node so every self-reference captured
     // during body parsing keeps the same binding identity
-    AstDeclaratorNode* alias = pending ? pending : build_declarator_syntax(tp,
+    LambdaAstDeclaratorNode* alias = pending ? pending : build_declarator_syntax(tp,
         reduction->span, name_pool_create_strview(tp->name_pool, alias_name),
         LSF_TYPE_ALIAS, LSF_ALIAS_TAIL);
-    void** tail = syntax_tail((AstNode*)alias, sizeof(AstDeclaratorNode));
+    void** tail = syntax_tail((AstNode*)alias, sizeof(LambdaAstDeclaratorNode));
     tail[LSF_ALIAS_TYPE] = type_node;
     syntax_tail_set_span(&tail[LSF_ALIAS_SPAN], reduction->span);
     return syntax_type_stam(tp, reduction->span, (AstNode*)alias, is_public);
@@ -17602,11 +17625,11 @@ static AstNode* syntax_type_alias(LambdaSyntaxSink* sink,
 static AstNode* syntax_grammar(LambdaSyntaxSink* sink,
         const LambdaParseReduction* reduction) {
     Transpiler* tp = sink->tp;
-    AstDeclaratorNode* grammar = build_declarator_syntax(tp, reduction->span,
+    LambdaAstDeclaratorNode* grammar = build_declarator_syntax(tp, reduction->span,
         direct_token_name(tp, reduction->detail_token), LSF_GRAMMAR,
         LSF_GRAMMAR_TAIL);
     syntax_tail_set_span(&syntax_tail((AstNode*)grammar,
-        sizeof(AstDeclaratorNode))[LSF_GRAMMAR_BODY], reduction->secondary_token.span);
+        sizeof(LambdaAstDeclaratorNode))[LSF_GRAMMAR_BODY], reduction->secondary_token.span);
     return syntax_type_stam(tp, reduction->span, (AstNode*)grammar,
         (reduction->flags & LAMBDA_REDUCTION_FLAG_PUBLIC) != 0);
 }
@@ -17649,7 +17672,7 @@ static AstNode* syntax_object_field(LambdaSyntaxSink* sink,
         LSF_OBJECT_FIELD, LSF_OBJECT_FIELD_TAIL);
     field->name = direct_token_name(sink->tp, reduction->detail_token);
     field->as = syntax_child(reduction, 0);
-    field->syntax_flags = (reduction->flags & LAMBDA_REDUCTION_FLAG_OPTIONAL) ? 1 : 0;
+    lambda_ast_build_state(field).syntax_flags = (reduction->flags & LAMBDA_REDUCTION_FLAG_OPTIONAL) ? 1 : 0;
     void** tail = syntax_tail((AstNode*)field, sizeof(AstNamedNode));
     tail[LSF_OBJECT_FIELD_DEFAULT] = syntax_child(reduction, 1);
     tail[LSF_OBJECT_FIELD_LAYOUT] = syntax_child(reduction, 2);
@@ -17755,7 +17778,7 @@ static void syntax_context(LambdaSyntaxSink* sink,
     case LAMBDA_REDUCTION_FORM_IF_BRANCH_END:
         // a braced branch closes right after its body reduces; the branch
         // scope belongs to that body
-        if (sink->last_content) sink->last_content->syntax_flags |= LSF_CONTENT_BRANCH;
+        if (sink->last_content) lambda_ast_build_state(sink->last_content).syntax_flags |= LSF_CONTENT_BRANCH;
         break;
     default:
         // handler, `that`, group, branch-open, match-arm and constraint
@@ -17827,7 +17850,7 @@ static AstNode* syntax_prefix(LambdaSyntaxSink* sink,
             sizeof(AstRaiseNode), LSF_RAISE, operand);
     case LAMBDA_TOK_BANG:
         return build_operand_syntax(tp, span, AST_NODE_BINARY_TYPE,
-            sizeof(AstBinaryNode), LSF_TYPE_NEGATION, operand);
+            sizeof(LambdaAstBinaryNode), LSF_TYPE_NEGATION, operand);
     // PTH40: prefix `&` is address-of. The same glyph is infix set
     // intersection, so the two readings are told apart by POSITION here, as
     // `*` spread and `!` type negation already are.
@@ -17845,12 +17868,12 @@ static AstNode* syntax_prefix(LambdaSyntaxSink* sink,
         // the literal under a prefix `-` may spell a signed 2^(b-1) (`-128i8`)
         AstNode* negated = operand;
         while (negated && negated->node_type == AST_NODE_PRIMARY &&
-                negated->syntax_form != LSF_LITERAL && ((AstPrimaryNode*)negated)->expr) {
+                lambda_ast_build_state(negated).syntax_form != LSF_LITERAL && ((AstPrimaryNode*)negated)->expr) {
             negated = ((AstPrimaryNode*)negated)->expr;
         }
-        if (negated && negated->syntax_form == LSF_LITERAL &&
+        if (negated && lambda_ast_build_state(negated).syntax_form == LSF_LITERAL &&
                 unary->op == OPERATOR_NEG) {
-            negated->syntax_flags |= LSF_LITERAL_NEGATED;
+            lambda_ast_build_state(negated).syntax_flags |= LSF_LITERAL_NEGATED;
         }
         return (AstNode*)unary;
     }
@@ -18055,7 +18078,7 @@ static AstNode* syntax_for_clause(LambdaSyntaxSink* sink,
     }
     case LAMBDA_REDUCTION_FORM_FOR_LET: {
         if (!active) return NULL;
-        AstDeclaratorNode* let = build_declarator_syntax(tp, span,
+        LambdaAstDeclaratorNode* let = build_declarator_syntax(tp, span,
             direct_token_name(tp, reduction->detail_token), LSF_FOR_LET, 0);
         let->init = child0;
         clause = (AstNode*)let;
@@ -18114,7 +18137,7 @@ static AstNode* syntax_statement(LambdaSyntaxSink* sink,
     uint32_t flags = reduction->flags;
     switch (reduction->form) {
     case LAMBDA_REDUCTION_FORM_GENERATIVE_BLOCK:
-        child0->syntax_flags |= LSF_CONTENT_GENERATIVE;
+        lambda_ast_build_state(child0).syntax_flags |= LSF_CONTENT_GENERATIVE;
         return child0;
     case LAMBDA_REDUCTION_FORM_RETURN:
     case LAMBDA_REDUCTION_FORM_BREAK:
@@ -18161,7 +18184,7 @@ static AstNode* syntax_statement(LambdaSyntaxSink* sink,
         if (reduction->child_count != 2) return NULL;
         // OPEN_END has already closed the block, so the alias declarator
         // recorded by OPEN_BEGIN is how the statement reaches its binding.
-        AstDeclaratorNode* alias = sink->open_aliases[sink->open_depth];
+        LambdaAstDeclaratorNode* alias = sink->open_aliases[sink->open_depth];
         sink->open_aliases[sink->open_depth] = NULL;
         return (AstNode*)build_open_syntax(tp, span, child0,
             syntax_child(reduction, 1), alias ? alias->name : NULL,
@@ -18381,14 +18404,14 @@ static AstNode* syntax_reduce(LambdaSyntaxSink* sink,
         syntax_tail((AstNode*)active, sizeof(AstForNode))[LSF_FOR_BODY] =
             syntax_child(reduction, 1);
         if (reduction->flags & LAMBDA_REDUCTION_FLAG_BODY_BLOCK) {
-            active->syntax_flags |= LSF_FOR_STATEMENT;
+            lambda_ast_build_state(active).syntax_flags |= LSF_FOR_STATEMENT;
         }
         return (AstNode*)active;
     }
     case LAMBDA_REDUCE_BINARY: {
         if (reduction->child_count != 2) return NULL;
-        AstBinaryNode* node = (AstBinaryNode*)alloc_syntax_node(tp,
-            AST_NODE_BINARY, span, sizeof(AstBinaryNode), LSF_BINARY, 0);
+        LambdaAstBinaryNode* node = (LambdaAstBinaryNode*)alloc_syntax_node(tp,
+            AST_NODE_BINARY, span, sizeof(LambdaAstBinaryNode), LSF_BINARY, 0);
         node->left = child0;
         node->right = syntax_child(reduction, 1);
         node->op_str = direct_token_text(tp, reduction->detail_token);
@@ -18478,7 +18501,7 @@ static void resolve_attachments(LambdaResolver* r, AstNode* host,
 // A node's syntax diagnostics come after its children and before its own
 // construction, which is when the parser used to report them.
 static void resolve_diagnostics(LambdaResolver* r, AstNode* node) {
-    if (node->syntax_flags & LSF_FLAG_ATTACHED) {
+    if (lambda_ast_build_state(node).syntax_flags & LSF_FLAG_ATTACHED) {
         resolve_attachments(r, node, LSA_DIAGNOSTIC);
     }
 }
@@ -18532,12 +18555,12 @@ static bool unbound_member_object_names_module(Transpiler* tp, String* name,
     if (lookup_namespace(tp, name) || resolve_imported_module(tp, &view)) return true;
     AstNode* member = ast_unwrap_primary(field);
     if (!member || member->node_type != AST_NODE_IDENT) return false;
-    String* member_name = ((AstIdentNode*)member)->name;
+    String* member_name = ((LambdaAstIdentNode*)member)->name;
     NameEntry* imported = lookup_qualified_member(tp, view, member_name);
     return imported && imported->import;
 }
 
-static void resolve_name(LambdaResolver* r, AstIdentNode* name, AstNode* member_key,
+static void resolve_name(LambdaResolver* r, LambdaAstIdentNode* name, AstNode* member_key,
         bool direct_callee = false) {
     Transpiler* tp = r->tp;
     resolve_diagnostics(r, name);
@@ -18559,7 +18582,7 @@ static bool resolver_in_proc(Transpiler* tp) {
 
 // `open v = target { … }` (PTH68v3). One scope per block, holding the alias
 // binding.
-static void resolver_open_begin(LambdaResolver* r, AstDeclaratorNode* alias) {
+static void resolver_open_begin(LambdaResolver* r, LambdaAstDeclaratorNode* alias) {
     if (r->open_scope_depth >= 8) return resolver_fail(r, "open scope overflow");
     Transpiler* tp = r->tp;
     r->open_scopes[r->open_scope_depth++] = lambda_ast_enter_scope(tp,
@@ -18626,8 +18649,8 @@ static void resolver_branch_end(LambdaResolver* r) {
 
 // A braced branch body resolves inside its branch scope.
 static void resolve_branch(LambdaResolver* r, AstNode* body) {
-    bool scoped = body && body->syntax_form == LSF_CONTENT &&
-        (body->syntax_flags & LSF_CONTENT_BRANCH);
+    bool scoped = body && lambda_ast_build_state(body).syntax_form == LSF_CONTENT &&
+        (lambda_ast_build_state(body).syntax_flags & LSF_CONTENT_BRANCH);
     if (scoped) resolver_branch_begin(r);
     resolve_walk(r, body);
     if (scoped) resolver_branch_end(r);
@@ -18643,7 +18666,7 @@ static AstFuncNode* resolver_function_begin(LambdaResolver* r, AstFuncNode* fn) 
         return fn;
     }
     Transpiler* tp = r->tp;
-    uint16_t facts = fn->syntax_aux;
+    uint16_t facts = lambda_ast_build_state(fn).syntax_aux;
     bool is_proc = fn->node_type == AST_NODE_PROC;
     bool declares_name = fn->name && !r->type_object_depth;
     AstFuncNode* target = NULL;
@@ -18664,7 +18687,7 @@ static AstFuncNode* resolver_function_begin(LambdaResolver* r, AstFuncNode* fn) 
             // the declaration completes a placeholder of its own
             target = build_function_syntax(tp, fn->source_span,
                 (StrView){fn->name->chars, (size_t)fn->name->len}, is_proc);
-            target->syntax_form = LSF_NONE;
+            lambda_ast_build_state(target).syntax_form = LSF_NONE;
         }
         init_function_placeholder(tp, target);
         if (declares_name) lambda_ast_register_name(tp, (AstNode*)target);
@@ -18718,7 +18741,7 @@ static AstFuncNode* resolver_predicate_begin(LambdaResolver* r,
     // function; the kind is a function expression's, as nothing binds it
     AstFuncNode* fn = build_function_syntax(tp, span, strview_from_cstr("that"), false);
     fn->node_type = AST_NODE_FUNC_EXPR;
-    fn->syntax_form = LSF_NONE;
+    lambda_ast_build_state(fn).syntax_form = LSF_NONE;
     init_function_placeholder(tp, fn);
     // an error answer fails the test (S11.4.11), so the body may produce one;
     // the implicit `fn` contract would reject that as an escape (E208)
@@ -18729,7 +18752,7 @@ static AstFuncNode* resolver_predicate_begin(LambdaResolver* r,
     // `err is T` tests one
     AstNamedNode* subject = build_param_syntax(tp, span, strview_from_cstr("~"),
         NULL, NULL, false, false);
-    subject->syntax_form = LSF_NONE;
+    lambda_ast_build_state(subject).syntax_form = LSF_NONE;
     resolve_param(tp, subject);
     set_param_contract((TypeParam*)subject->type, &TYPE_ANY, false);
     fn->param = subject;
@@ -18745,9 +18768,9 @@ static void resolver_predicate_end(LambdaResolver* r, AstFuncNode* fn,
     lambda_ast_leave_scope(tp, scope);
 }
 
-static void resolver_type_alias_begin(LambdaResolver* r, AstDeclaratorNode* alias) {
+static void resolver_type_alias_begin(LambdaResolver* r, LambdaAstDeclaratorNode* alias) {
     // a top-level alias was already bound before the walk (S11.4.12)
-    if (alias->syntax_flags & LSF_ALIAS_PREDECLARED) return;
+    if (lambda_ast_build_state(alias).syntax_flags & LSF_ALIAS_PREDECLARED) return;
     Transpiler* tp = r->tp;
     alias->is_type_definition = true;
     TypeType* pre_type = (TypeType*)alloc_type(tp->pool, LMD_TYPE_TYPE,
@@ -18768,15 +18791,15 @@ static void resolver_type_alias_begin(LambdaResolver* r, AstDeclaratorNode* alia
 
 bool lambda_ast_type_is_pending(const AstNode* definition) {
     if (!definition || definition->node_type != AST_NODE_VARIABLE_DECLARATOR) return false;
-    const AstDeclaratorNode* alias = (const AstDeclaratorNode*)definition;
+    const LambdaAstDeclaratorNode* alias = (const LambdaAstDeclaratorNode*)definition;
     // an alias's `init` is set as its body completes
     return alias->is_type_definition && !alias->init &&
-        (alias->syntax_flags & LSF_ALIAS_PREBOUND);
+        (lambda_ast_build_state(alias).syntax_flags & LSF_ALIAS_PREBOUND);
 }
 
 void lambda_ast_note_type_reference(AstNode* definition) {
     if (lambda_ast_type_is_pending(definition)) {
-        ((AstDeclaratorNode*)definition)->syntax_flags |= LSF_ALIAS_EARLY_REFERENCE;
+        lambda_ast_build_state(definition).syntax_flags |= LSF_ALIAS_EARLY_REFERENCE;
     }
 }
 
@@ -18798,15 +18821,15 @@ void lambda_ast_resolve_type_early(Transpiler* tp, AstNode* definition) {
     LambdaResolver* r = active_resolver;
     if (!r || r->tp != tp || r->failed || !r->module_scope || !definition ||
             definition->node_type != AST_NODE_VARIABLE_DECLARATOR) return;
-    AstDeclaratorNode* alias = (AstDeclaratorNode*)definition;
-    if (!(alias->syntax_flags & LSF_ALIAS_PREDECLARED) || alias->init) return;
-    AstNode* body = (AstNode*)syntax_tail(definition, sizeof(AstDeclaratorNode))[LSF_ALIAS_TYPE];
+    LambdaAstDeclaratorNode* alias = (LambdaAstDeclaratorNode*)definition;
+    if (!(lambda_ast_build_state(alias).syntax_flags & LSF_ALIAS_PREDECLARED) || alias->init) return;
+    AstNode* body = (AstNode*)syntax_tail(definition, sizeof(LambdaAstDeclaratorNode))[LSF_ALIAS_TYPE];
     if (!body) return;
-    bool pattern = body->syntax_form == LSF_PATTERN_DEF;
+    bool pattern = lambda_ast_build_state(body).syntax_form == LSF_PATTERN_DEF;
     AstNode* target = pattern ? body : definition;
     // the walk clears a node's form as it begins, so a cleared form is a
     // declaration already resolving: a recursive reference keeps the wrapper
-    if (!pattern && target->syntax_form != LSF_TYPE_ALIAS) return;
+    if (!pattern && lambda_ast_build_state(target).syntax_form != LSF_TYPE_ALIAS) return;
     // a `that` body reads values, which bind in source order (S11.4.11)
     if (!pattern && source_span_has_word(tp, body->source_span, "that")) return;
     NameScope* scope = tp->current_scope;
@@ -18831,7 +18854,7 @@ static int resolver_prebound_index(const LambdaResolver* r, const Type* type) {
 static bool resolver_is_pending_alias(const LambdaResolver* r, const Type* type) {
     int index = resolver_prebound_index(r, type);
     return index >= 0 &&
-        !((AstDeclaratorNode*)r->prebound_aliases->data[index])->init;
+        !((LambdaAstDeclaratorNode*)r->prebound_aliases->data[index])->init;
 }
 
 static void resolver_view_begin(LambdaResolver* r, AstViewNode* view) {
@@ -18862,8 +18885,8 @@ static void resolver_object_copy_base(LambdaResolver* r, StrView base_name) {
             (int)base_name.length, base_name.str);
         return;
     }
-    AstIdentNode* reference = (AstIdentNode*)alloc_ast_node_from_span(tp,
-        AST_NODE_IDENT, r->object.node->source_span, sizeof(AstIdentNode));
+    LambdaAstIdentNode* reference = (LambdaAstIdentNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_IDENT, r->object.node->source_span, sizeof(LambdaAstIdentNode));
     reference->entry = r->object.node->base_entry;
     reference->name = reference->entry->name;
     reference->type = reference->entry->node->type;
@@ -19303,7 +19326,7 @@ static void resolve_object_field(LambdaResolver* r, AstNamedNode* field) {
     ShapeEntry* shape = alloc_compiler_shape_entry(tp->pool, field->name);
     shape_entry_set_type(shape, field_type);
     shape->default_value = default_value;
-    shape->is_optional = field->syntax_flags != 0;
+    shape->is_optional = lambda_ast_build_state(field).syntax_flags != 0;
     shape->byte_offset = r->object.byte_offset;
     if (!r->object.type->shape) r->object.type->shape = shape;
     else r->object.shape_tail->chain_next = shape;
@@ -19394,7 +19417,7 @@ static void resolve_object_method(LambdaResolver* r, AstFuncNode* fn) {
 // ---- resolve: one node --------------------------------------------------------
 
 static void resolve_base_type(Transpiler* tp, AstNode* node) {
-    int index = (int)node->syntax_aux - 1;
+    int index = (int)lambda_ast_build_state(node).syntax_aux - 1;
     Type* type = index >= 0 ? lambda_base_type_from_index(tp, index) : NULL;
     if (!type) {
         // Some conversion builtins (notably `int64`) share the lexer token
@@ -19402,7 +19425,7 @@ static void resolve_base_type(Transpiler* tp, AstNode* node) {
         // reporting an unknown type so expression-position aliases retain the
         // same semantic meaning.
         StrView name = source_span_text(tp, node->source_span);
-        AstIdentNode* ident = (AstIdentNode*)node;
+        LambdaAstIdentNode* ident = (LambdaAstIdentNode*)node;
         node->node_type = AST_NODE_IDENT;
         ident->name = name_pool_create_strview(tp->name_pool, name);
         resolve_identifier(tp, ident, lookup_interned_name(tp, ident->name));
@@ -19410,7 +19433,7 @@ static void resolve_base_type(Transpiler* tp, AstNode* node) {
         record_unknown_base_type_span(tp, node->source_span, name);
         type = (Type*)&LIT_TYPE_ERROR;
     }
-    morph_ast_node(node, AST_NODE_TYPE, sizeof(AstIdentNode));
+    morph_ast_node(node, AST_NODE_TYPE, sizeof(LambdaAstIdentNode));
     node->type = type;
 }
 
@@ -19448,7 +19471,7 @@ static void resolve_constrained(Transpiler* tp, AstConstrainedTypeNode* node,
 static void resolve_pattern_def(Transpiler* tp, AstPatternDefNode* pattern) {
     void** tail = syntax_tail((AstNode*)pattern, sizeof(AstPatternDefNode));
     AstPatternIslandNode* source = (AstPatternIslandNode*)tail[LSF_PATTERN_ISLAND];
-    AstDeclaratorNode* pre_bound = (AstDeclaratorNode*)tail[LSF_PATTERN_PREBOUND];
+    LambdaAstDeclaratorNode* pre_bound = (LambdaAstDeclaratorNode*)tail[LSF_PATTERN_PREBOUND];
     // domain inference completes after named references resolve.
     pattern->is_symbol = source->is_symbol;
     pattern->node_type = source->is_symbol ? AST_NODE_SYMBOL_PATTERN : AST_NODE_STRING_PATTERN;
@@ -19477,7 +19500,7 @@ static void resolve_pattern_def(Transpiler* tp, AstPatternDefNode* pattern) {
     }
     // S11.4.12: a reference made before this definition holds the pre-bound
     // wrapper, which now carries the pattern
-    if (pre_bound && (pre_bound->syntax_flags & LSF_ALIAS_EARLY_REFERENCE) &&
+    if (pre_bound && (lambda_ast_build_state(pre_bound).syntax_flags & LSF_ALIAS_EARLY_REFERENCE) &&
             pre_bound->type && pre_bound->type->type_id == LMD_TYPE_TYPE) {
         ((TypeType*)pre_bound->type)->type = pattern->type;
     }
@@ -19499,11 +19522,11 @@ static Type* alias_wrapper_payload(Type* type) {
 // body): A then stands for B's pre-bound wrapper, and nothing is adopted from
 // B's placeholder now; the completed type reaches A's own wrapper once the walk
 // ends (S11.4.12).
-static void resolve_type_alias(Transpiler* tp, AstDeclaratorNode* alias,
+static void resolve_type_alias(Transpiler* tp, LambdaAstDeclaratorNode* alias,
         bool shared, bool forward) {
-    void** tail = syntax_tail((AstNode*)alias, sizeof(AstDeclaratorNode));
+    void** tail = syntax_tail((AstNode*)alias, sizeof(LambdaAstDeclaratorNode));
     AstNode* type_node = (AstNode*)tail[LSF_ALIAS_TYPE];
-    bool prebound = (alias->syntax_flags & LSF_ALIAS_PREBOUND) != 0;
+    bool prebound = (lambda_ast_build_state(alias).syntax_flags & LSF_ALIAS_PREBOUND) != 0;
     TypeType* pre_type = prebound && alias->type &&
         alias->type->type_id == LMD_TYPE_TYPE ? (TypeType*)alias->type : NULL;
     if (prebound) alias->source_span = syntax_tail_span(&tail[LSF_ALIAS_SPAN]);
@@ -19516,7 +19539,7 @@ static void resolve_type_alias(Transpiler* tp, AstDeclaratorNode* alias,
         // S11.4.12: an earlier reference holds the pre-bound wrapper; publish
         // the completed type through it now, so the code after this
         // declaration sees it complete (maps, unions and elements adopted it)
-        if (pre_type && (alias->syntax_flags & LSF_ALIAS_EARLY_REFERENCE) &&
+        if (pre_type && (lambda_ast_build_state(alias).syntax_flags & LSF_ALIAS_EARLY_REFERENCE) &&
                 alias->type != (Type*)pre_type) {
             Type* payload = alias_wrapper_payload(alias->type);
             if (payload && payload != (Type*)pre_type) pre_type->type = payload;
@@ -19527,9 +19550,9 @@ static void resolve_type_alias(Transpiler* tp, AstDeclaratorNode* alias,
 
 // GM5v2: the grammar is built from its body here, in source order with the
 // other declarations, and bound like a type alias.
-static void resolve_grammar(Transpiler* tp, AstDeclaratorNode* declaration) {
+static void resolve_grammar(Transpiler* tp, LambdaAstDeclaratorNode* declaration) {
     SourceSpan body = syntax_tail_span(&syntax_tail((AstNode*)declaration,
-        sizeof(AstDeclaratorNode))[LSF_GRAMMAR_BODY]);
+        sizeof(LambdaAstDeclaratorNode))[LSF_GRAMMAR_BODY]);
     TypeGrammar* grammar = grammar_compile(tp, declaration->name, body);
     declaration->type = grammar ? (Type*)grammar : &TYPE_ANY;
     declaration->is_type_definition = true;
@@ -19704,7 +19727,7 @@ static void resolve_script(LambdaResolver* r, AstScript* root) {
     r->root = root;
 }
 
-static void resolve_var_binding(Transpiler* tp, AstDeclaratorNode* named) {
+static void resolve_var_binding(Transpiler* tp, LambdaAstDeclaratorNode* named) {
     NameEntry* entry = named->entry ? named->entry :
         lookup_name_in_current_scope(tp, named->name);
     if (!entry) return;
@@ -19722,12 +19745,12 @@ static void resolve_var_stam(Transpiler* tp, AstLetNode* var) {
     for (AstNode* declaration = var->declare; declaration;
             declaration = declaration->next) {
         if (declaration->node_type == AST_NODE_VARIABLE_DECLARATOR) {
-            resolve_var_binding(tp, (AstDeclaratorNode*)declaration);
+            resolve_var_binding(tp, (LambdaAstDeclaratorNode*)declaration);
         } else if (declaration->node_type == AST_NODE_DECOMPOSE) {
             AstDecomposeNode* dec = (AstDecomposeNode*)declaration;
             // decomposition retains canonical declarators through its entries.
             for (int i = 0; dec->entries && i < dec->name_count; i++)
-                resolve_var_binding(tp, (AstDeclaratorNode*)dec->entries[i]->node);
+                resolve_var_binding(tp, (LambdaAstDeclaratorNode*)dec->entries[i]->node);
         }
     }
 }
@@ -19743,7 +19766,7 @@ static void resolve_let_stam(Transpiler* tp, AstLetNode* let) {
     for (AstNode* declaration = let->declare; declaration;
             declaration = declaration->next) {
         if (declaration->node_type != AST_NODE_VARIABLE_DECLARATOR) continue;
-        AstDeclaratorNode* named = (AstDeclaratorNode*)declaration;
+        LambdaAstDeclaratorNode* named = (LambdaAstDeclaratorNode*)declaration;
         if (!named->entry) named->entry = lookup_name_in_current_scope(tp, named->name);
         if (named->entry) lambda_ast_mark_place_copy(named);
     }
@@ -19775,7 +19798,7 @@ static void resolve_function(LambdaResolver* r, AstFuncNode* fn,
         AstFuncNode* target, FunctionExitFacts* exits) {
     if (!r->function_depth) return resolver_fail(r, "function completed outside its scope");
     Transpiler* tp = r->tp;
-    uint16_t facts = fn->syntax_aux;
+    uint16_t facts = lambda_ast_build_state(fn).syntax_aux;
     void** tail = syntax_tail((AstNode*)fn, sizeof(AstFuncNode));
     AstNode* body = (AstNode*)tail[LSF_FUNCTION_BODY];
     // S16.6.8v3: a callable's block body owns local control in either colour.
@@ -19790,7 +19813,7 @@ static void resolve_function(LambdaResolver* r, AstFuncNode* fn,
 
 static void resolve_for(Transpiler* tp, AstForNode* loop) {
     loop->then = (AstNode*)syntax_tail((AstNode*)loop, sizeof(AstForNode))[LSF_FOR_BODY];
-    bool statement_form = (loop->syntax_flags & LSF_FOR_STATEMENT) != 0;
+    bool statement_form = (lambda_ast_build_state(loop).syntax_flags & LSF_FOR_STATEMENT) != 0;
     loop->discard_result = statement_form;
     if (loop->then && loop->then->node_type == AST_NODE_CONTENT &&
             !((AstListNode*)loop->then)->vars) {
@@ -19849,12 +19872,12 @@ static void register_for_group_bindings(Transpiler* tp, AstGroupClause* group) {
                 (int)key->alias->len, key->alias->chars);
             continue;
         }
-        AstDeclaratorNode* bound = build_declarator_from_name(tp, key->source_span, key->alias);
+        LambdaAstDeclaratorNode* bound = build_declarator_from_name(tp, key->source_span, key->alias);
         bound->type = &TYPE_ANY;
         lambda_ast_register_name(tp, (AstNode*)bound);
         key->entry = lookup_name_in_current_scope(tp, key->alias);
     }
-    AstDeclaratorNode* grouped = build_declarator_from_name(tp, group->source_span, group->name);
+    LambdaAstDeclaratorNode* grouped = build_declarator_from_name(tp, group->source_span, group->name);
     grouped->type = (Type*)&TYPE_ARRAY;
     lambda_ast_register_name(tp, (AstNode*)grouped);
     // The aggregate scope is entered before `into` is registered; retain its
@@ -19920,7 +19943,7 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         resolve_base_type(tp, node);
         break;
     case LSF_IDENT:
-        resolve_name(r, (AstIdentNode*)node, NULL);
+        resolve_name(r, (LambdaAstIdentNode*)node, NULL);
         break;
     case LSF_MEMBER_NAME:
         resolve_diagnostics(r, node);
@@ -19981,9 +20004,9 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         break;
     }
     case LSF_TYPE_NEGATION:
-        resolve_walk(r, ((AstBinaryNode*)node)->right);
+        resolve_walk(r, ((LambdaAstBinaryNode*)node)->right);
         resolve_diagnostics(r, node);
-        resolve_type_negation(tp, (AstBinaryNode*)node);
+        resolve_type_negation(tp, (LambdaAstBinaryNode*)node);
         break;
     case LSF_ADDRESS_OF:
     case LSF_UNARY:
@@ -20037,10 +20060,10 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         resolve_decompose(tp, (AstDecomposeNode*)node);
         break;
     case LSF_DECLARATOR:
-        resolve_walk(r, (AstNode*)syntax_tail(node, sizeof(AstDeclaratorNode))[0]);
-        resolve_walk(r, ((AstDeclaratorNode*)node)->init);
+        resolve_walk(r, (AstNode*)syntax_tail(node, sizeof(LambdaAstDeclaratorNode))[0]);
+        resolve_walk(r, ((LambdaAstDeclaratorNode*)node)->init);
         resolve_diagnostics(r, node);
-        resolve_declarator(tp, (AstDeclaratorNode*)node);
+        resolve_declarator(tp, (LambdaAstDeclaratorNode*)node);
         break;
     case LSF_PARAM:
         resolve_walk(r, (AstNode*)syntax_tail(node, sizeof(AstNamedNode))[0]);
@@ -20050,7 +20073,7 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         break;
     case LSF_FUNCTION: {
         AstFuncNode* fn = (AstFuncNode*)node;
-        bool arrow = (fn->syntax_aux & LSF_FN_ARROW) != 0;
+        bool arrow = (lambda_ast_build_state(fn).syntax_aux & LSF_FN_ARROW) != 0;
         // an arrow head is parsed inside its parenthesized group
         if (arrow) resolver_group_begin(r);
         AstFuncNode* target = resolver_function_begin(r, fn);
@@ -20062,7 +20085,7 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         // infers its return; an open placeholder is not a validation failure.
         direct_publish_function_return(tp, (TypeFunc*)target->type,
             (AstNode*)tail[LSF_FUNCTION_RETURN], (AstNode*)tail[LSF_FUNCTION_ERROR],
-            (fn->syntax_aux & LSF_FN_RAISED) != 0);
+            (lambda_ast_build_state(fn).syntax_aux & LSF_FN_RAISED) != 0);
         size_t returns_before = r->returns_seen;
         size_t raises_before = r->raises_seen;
         size_t propagations_before = r->propagations_seen;
@@ -20151,7 +20174,7 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         break;
     }
     case LSF_FOR_LET: {
-        AstDeclaratorNode* let = (AstDeclaratorNode*)node;
+        LambdaAstDeclaratorNode* let = (LambdaAstDeclaratorNode*)node;
         resolve_walk(r, let->init);
         resolve_diagnostics(r, node);
         let->type = let->init && let->init->type ? let->init->type : &TYPE_ANY;
@@ -20180,7 +20203,7 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         resolve_diagnostics(r, node);
         break;
     case LSF_BINARY: {
-        AstBinaryNode* binary = (AstBinaryNode*)node;
+        LambdaAstBinaryNode* binary = (LambdaAstBinaryNode*)node;
         bool that = binary->op == OPERATOR_THAT;
         bool scoped = that || binary->op == OPERATOR_PIPE || binary->op == OPERATOR_FILTER;
         AstNode* pipe_target = ast_unwrap_primary(binary->right);
@@ -20197,8 +20220,8 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         if (bare_pipe_target && pipe_target->node_type == AST_NODE_IDENT) {
             AstNode* resolved = ast_unwrap_primary(binary->right);
             AstNode* callee = resolved && resolved->node_type == AST_NODE_CALL_EXPR
-                ? ast_unwrap_primary(((AstCallNode*)resolved)->function) : resolved;
-            AstIdentNode* ident = (AstIdentNode*)pipe_target;
+                ? ast_unwrap_primary(((LambdaAstCallNode*)resolved)->function) : resolved;
+            LambdaAstIdentNode* ident = (LambdaAstIdentNode*)pipe_target;
             // Pipe application selects an overloaded builtin only after its
             // receiver is known; diagnose the name only if it remains unbound.
             if (callee == pipe_target && !ident->entry &&
@@ -20209,17 +20232,17 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
     }
     case LSF_MEMBER:
     case LSF_INDEX: {
-        AstFieldNode* member = (AstFieldNode*)node;
+        LambdaAstFieldNode* member = (LambdaAstFieldNode*)node;
         AstNode* object = member->object;
-        if (form == LSF_MEMBER && object && object->syntax_form == LSF_IDENT &&
-                !(object->syntax_flags & LSF_FLAG_ATTACHED)) {
-            object->syntax_form = LSF_NONE;
-            resolve_name(r, (AstIdentNode*)object, member->field);
+        if (form == LSF_MEMBER && object && lambda_ast_build_state(object).syntax_form == LSF_IDENT &&
+                !(lambda_ast_build_state(object).syntax_flags & LSF_FLAG_ATTACHED)) {
+            lambda_ast_build_state(object).syntax_form = LSF_NONE;
+            resolve_name(r, (LambdaAstIdentNode*)object, member->field);
         } else {
             // Explicit groups still enter their lexical scope in resolve_walk.
             AstNode* bare = form == LSF_MEMBER ? ast_unwrap_primary(object) : NULL;
             String* name = bare && bare->node_type == AST_NODE_IDENT
-                ? ((AstIdentNode*)bare)->name : NULL;
+                ? ((LambdaAstIdentNode*)bare)->name : NULL;
             bool module = name && !lookup_interned_name(tp, name) &&
                 unbound_member_object_names_module(tp, name, member->field);
             if (module) {
@@ -20264,7 +20287,7 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         break;
     }
     case LSF_CALL: {
-        AstCallNode* call = (AstCallNode*)node;
+        LambdaAstCallNode* call = (LambdaAstCallNode*)node;
         // A bare callee names a function, never an implicit field of `~`: that
         // rule reads values only. Rewriting it made `len(~)` in a `that` body
         // call the absent field `~.len` (S10.1.5v3's `xs that len(~) > 2`).
@@ -20272,7 +20295,7 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         bool in_that = tp->in_that_clause;
         bool bare_callee = callee && callee->node_type == AST_NODE_IDENT;
         bool bare_name_storage = bare_callee && callee == call->function &&
-            callee->syntax_form == LSF_IDENT && !(callee->syntax_flags & LSF_FLAG_ATTACHED);
+            lambda_ast_build_state(callee).syntax_form == LSF_IDENT && !(lambda_ast_build_state(callee).syntax_flags & LSF_FLAG_ATTACHED);
         if (bare_callee) {
             tp->in_that_clause = false;
             r->suppress_unresolved++;
@@ -20280,8 +20303,8 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         if (bare_name_storage) {
             // A selected call row carries a result type. The standalone
             // callable type is only needed if arity resolution rejects it.
-            callee->syntax_form = LSF_NONE;
-            resolve_name(r, (AstIdentNode*)callee, NULL, true);
+            lambda_ast_build_state(callee).syntax_form = LSF_NONE;
+            resolve_name(r, (LambdaAstIdentNode*)callee, NULL, true);
         } else {
             resolve_walk(r, call->function);
         }
@@ -20297,7 +20320,7 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         }
         if (bare_callee && ast_unwrap_primary(call->function) == callee &&
                 callee->node_type == AST_NODE_IDENT) {
-            AstIdentNode* ident = (AstIdentNode*)callee;
+            LambdaAstIdentNode* ident = (LambdaAstIdentNode*)callee;
             // A known builtin with the wrong arity already has its own error.
             if (!ident->entry && !is_sys_func_name(ident->name->chars, (int)ident->name->len))
                 resolver_note_unresolved(r, ident, true);
@@ -20337,9 +20360,9 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         break;
     case LSF_PATTERN_DEF: {
         void** tail = syntax_tail(node, sizeof(AstPatternDefNode));
-        AstDeclaratorNode* pre_bound = (AstDeclaratorNode*)tail[LSF_PATTERN_PREBOUND];
+        LambdaAstDeclaratorNode* pre_bound = (LambdaAstDeclaratorNode*)tail[LSF_PATTERN_PREBOUND];
         if (pre_bound) {
-            pre_bound->syntax_form = LSF_NONE;
+            lambda_ast_build_state(pre_bound).syntax_form = LSF_NONE;
             resolver_type_alias_begin(r, pre_bound);
         }
         resolve_walk(r, (AstNode*)tail[LSF_PATTERN_ISLAND]);
@@ -20349,12 +20372,12 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
     }
     case LSF_GRAMMAR:
         resolve_diagnostics(r, node);
-        resolve_grammar(tp, (AstDeclaratorNode*)node);
+        resolve_grammar(tp, (LambdaAstDeclaratorNode*)node);
         break;
     case LSF_TYPE_ALIAS: {
-        AstDeclaratorNode* alias = (AstDeclaratorNode*)node;
-        if (alias->syntax_flags & LSF_ALIAS_PREBOUND) resolver_type_alias_begin(r, alias);
-        AstNode* body = (AstNode*)syntax_tail(node, sizeof(AstDeclaratorNode))[LSF_ALIAS_TYPE];
+        LambdaAstDeclaratorNode* alias = (LambdaAstDeclaratorNode*)node;
+        if (lambda_ast_build_state(alias).syntax_flags & LSF_ALIAS_PREBOUND) resolver_type_alias_begin(r, alias);
+        AstNode* body = (AstNode*)syntax_tail(node, sizeof(LambdaAstDeclaratorNode))[LSF_ALIAS_TYPE];
         resolve_walk(r, body);
         resolve_diagnostics(r, node);
         int target = body ? resolver_prebound_index(r, body->type) : -1;
@@ -20427,11 +20450,11 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         // stays an ordinary name, or `x = 1` in a match arm would store into
         // the matched value instead of reporting that `x` has no binding
         resolver_that_begin(r, false);
-        resolve_walk(r, ((AstAssignNode*)node)->left);
+        resolve_walk(r, ((LambdaAstAssignNode*)node)->left);
         resolver_that_end(r);
-        resolve_walk(r, ((AstAssignNode*)node)->right);
+        resolve_walk(r, ((LambdaAstAssignNode*)node)->right);
         resolve_diagnostics(r, node);
-        resolve_assignment(tp, (AstAssignNode*)node);
+        resolve_assignment(tp, (LambdaAstAssignNode*)node);
         if (node->node_type == AST_NODE_INDEX_ASSIGN_STAM ||
                 node->node_type == AST_NODE_MEMBER_ASSIGN_STAM) r->write_candidates_seen++;
         break;
@@ -20461,7 +20484,7 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
     case LSF_OPEN: {
         AstOpenNode* open = (AstOpenNode*)node;
         resolve_walk(r, open->target);
-        resolver_open_begin(r, (AstDeclaratorNode*)open->alias_decl);
+        resolver_open_begin(r, (LambdaAstDeclaratorNode*)open->alias_decl);
         resolve_walk(r, open->body);
         resolver_open_end(r);
         resolve_diagnostics(r, node);
@@ -20473,7 +20496,7 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         // The script result contains the block value. Its local bindings
         // belong to the block's own functional scope.
         NameScope* generative_scope =
-            (node->syntax_flags & (LSF_CONTENT_GENERATIVE | LSF_CONTENT_GENERATIVE_VIEW))
+            (lambda_ast_build_state(node).syntax_flags & (LSF_CONTENT_GENERATIVE | LSF_CONTENT_GENERATIVE_VIEW))
             ? lambda_ast_enter_scope(tp, false) : NULL;
         for (AstNode** link = &content->item; *link && !r->failed;
                 link = &(*link)->next) {
@@ -20503,7 +20526,7 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         resolve_walk(r, (AstNode*)tail[LSF_VIEW_ERROR]);
         Type* returned = direct_function_contract((AstNode*)tail[LSF_VIEW_RETURN]);
         Type* error = direct_function_contract((AstNode*)tail[LSF_VIEW_ERROR]);
-        bool raised = (view->syntax_aux & LSF_FN_RAISED) != 0;
+        bool raised = (lambda_ast_build_state(view).syntax_aux & LSF_FN_RAISED) != 0;
         Type* outcome = returned ? returned : &TYPE_ANY_NO_ERROR;
         if (raised) outcome = lambda_type_union_normalized(tp->pool, outcome,
             error ? error : &TYPE_ERROR);
@@ -20561,8 +20584,8 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
 
 static AstNode* resolve_walk(LambdaResolver* r, AstNode* node) {
     if (!node || r->failed) return node;
-    uint8_t form = node->syntax_form;
-    bool attached = (node->syntax_flags & LSF_FLAG_ATTACHED) != 0;
+    uint8_t form = lambda_ast_build_state(node).syntax_form;
+    bool attached = (lambda_ast_build_state(node).syntax_flags & LSF_FLAG_ATTACHED) != 0;
     if (form == LSF_NONE && !attached) return node;
     if (attached) resolve_attachments(r, node, LSA_BEFORE);
     AstNode* result = node;
@@ -20573,14 +20596,14 @@ static AstNode* resolve_walk(LambdaResolver* r, AstNode* node) {
         resolve_diagnostics(r, node);
         resolve_type_pattern(r->tp, node);
     } else if (form != LSF_NONE) {
-        node->syntax_form = LSF_NONE;
+        lambda_ast_build_state(node).syntax_form = LSF_NONE;
         result = resolve_form(r, node, form);
     } else {
         resolve_diagnostics(r, node);
     }
     if (attached) {
         resolve_attachments(r, node, LSA_AFTER);
-        node->syntax_flags &= (uint8_t)~LSF_FLAG_ATTACHED;
+        lambda_ast_build_state(node).syntax_flags &= (uint8_t)~LSF_FLAG_ATTACHED;
     }
     return result;
 }
@@ -20590,12 +20613,12 @@ static AstNode* resolve_walk(LambdaResolver* r, AstNode* node) {
 static bool resolver_return_is_closed(LambdaResolver* r, AstFuncNode* fn,
         AstNode* node) {
     if (!node) return true;
-    switch (node->syntax_form) {
+    switch (lambda_ast_build_state(node).syntax_form) {
     case LSF_NONE: return node->type != NULL;
     case LSF_TP_BASE:
     case LSF_TP_ANY: return true;
     case LSF_TP_NAME: {
-        String* name = ((AstIdentNode*)node)->name;
+        String* name = ((LambdaAstIdentNode*)node)->name;
         void** tail = syntax_tail((AstNode*)fn, sizeof(AstFuncNode));
         for (AstNamedNode* param = (AstNamedNode*)tail[LSF_FUNCTION_PARAMS]; param;
                 param = (AstNamedNode*)param->next) {
@@ -20608,15 +20631,15 @@ static bool resolver_return_is_closed(LambdaResolver* r, AstFuncNode* fn,
         NameEntry* entry = lookup_interned_name(r->tp, name);
         AstNode* definition = entry ? entry->node : NULL;
         if (!definition || definition->node_type != AST_NODE_VARIABLE_DECLARATOR ||
-                !((AstDeclaratorNode*)definition)->is_type_definition) return false;
+                !((LambdaAstDeclaratorNode*)definition)->is_type_definition) return false;
         // The existing alias resolver leaves value-dependent `that` bodies
         // pending until their declaration's source-order environment exists.
         lambda_ast_resolve_type_early(r->tp, definition);
-        return ((AstDeclaratorNode*)definition)->init != NULL;
+        return ((LambdaAstDeclaratorNode*)definition)->init != NULL;
     }
     case LSF_TP_BINARY:
     case LSF_TP_REGISTERED_BINARY: {
-        AstBinaryNode* binary = (AstBinaryNode*)node;
+        LambdaAstBinaryNode* binary = (LambdaAstBinaryNode*)node;
         return resolver_return_is_closed(r, fn, binary->left) &&
             resolver_return_is_closed(r, fn, binary->right);
     }
@@ -20638,10 +20661,10 @@ static void resolver_predeclare(LambdaResolver* r) {
     for (int i = 0; i < list->length; i++) {
         AstNode* node = (AstNode*)list->data[i];
         if (node->node_type == AST_NODE_VARIABLE_DECLARATOR) {
-            AstDeclaratorNode* alias = (AstDeclaratorNode*)node;
+            LambdaAstDeclaratorNode* alias = (LambdaAstDeclaratorNode*)node;
             if (!lookup_declaration_in_current_scope(tp, alias->name, node)) {
                 resolver_type_alias_begin(r, alias);
-                alias->syntax_flags |= LSF_ALIAS_PREDECLARED;
+                lambda_ast_build_state(alias).syntax_flags |= LSF_ALIAS_PREDECLARED;
             }
             continue;
         }
@@ -20653,7 +20676,7 @@ static void resolver_predeclare(LambdaResolver* r) {
             continue;
         }
         AstFuncNode* fn = (AstFuncNode*)node;
-        uint16_t facts = fn->syntax_aux;
+        uint16_t facts = lambda_ast_build_state(fn).syntax_aux;
         NameEntry* existing = lookup_declaration_in_current_scope(tp, fn->name,
             (AstNode*)fn);
         if (!existing) {
@@ -20681,7 +20704,7 @@ static void resolver_predeclare(LambdaResolver* r) {
         resolve_walk(r, returned);
         resolve_walk(r, error);
         direct_publish_function_return(tp, (TypeFunc*)fn->type, returned, error,
-            (fn->syntax_aux & LSF_FN_RAISED) != 0);
+            (lambda_ast_build_state(fn).syntax_aux & LSF_FN_RAISED) != 0);
     }
 }
 
@@ -20713,8 +20736,8 @@ static void resolver_type_cycle_walk(TypeCycleWalk* walk, Type* type, int depth)
         if (walk->state[target] == 0) {
             resolver_type_cycle_visit(walk, target);
         } else if (walk->state[target] == 1) {
-            AstDeclaratorNode* alias =
-                (AstDeclaratorNode*)walk->r->prebound_aliases->data[target];
+            LambdaAstDeclaratorNode* alias =
+                (LambdaAstDeclaratorNode*)walk->r->prebound_aliases->data[target];
             record_semantic_error_span(walk->r->tp, alias->source_span, ERR_TYPE_CYCLE,
                 "type '%.*s' refers to itself through no structural position: "
                 "recursion must pass through a field, an attribute, element "
@@ -20758,7 +20781,7 @@ static void resolver_type_cycle_walk(TypeCycleWalk* walk, Type* type, int depth)
 }
 
 static void resolver_type_cycle_visit(TypeCycleWalk* walk, int index) {
-    AstDeclaratorNode* alias = (AstDeclaratorNode*)walk->r->prebound_aliases->data[index];
+    LambdaAstDeclaratorNode* alias = (LambdaAstDeclaratorNode*)walk->r->prebound_aliases->data[index];
     walk->state[index] = 1;
     resolver_type_cycle_walk(walk, alias->init ? alias->init->type : NULL, 0);
     walk->state[index] = 2;
@@ -20767,7 +20790,7 @@ static void resolver_type_cycle_visit(TypeCycleWalk* walk, int index) {
 // The completed type alias `index` stands for, past any chain of aliases that
 // are exactly another alias.
 static Type* resolver_alias_payload(LambdaResolver* r, int index, int depth) {
-    AstDeclaratorNode* alias = (AstDeclaratorNode*)r->prebound_aliases->data[index];
+    LambdaAstDeclaratorNode* alias = (LambdaAstDeclaratorNode*)r->prebound_aliases->data[index];
     TypeType* pre_type = (TypeType*)r->prebound_types->data[index];
     Type* definition = alias->init ? alias->init->type : NULL;
     int target = resolver_prebound_index(r, definition);
@@ -20793,16 +20816,16 @@ static void resolver_complete_types(LambdaResolver* r) {
     // a cyclic chain has no payload to publish, and the module fails anyway
     if (walk.found) return;
     for (int i = 0; i < aliases->length; i++) {
-        AstDeclaratorNode* alias = (AstDeclaratorNode*)aliases->data[i];
+        LambdaAstDeclaratorNode* alias = (LambdaAstDeclaratorNode*)aliases->data[i];
         // a pattern definition publishes itself as it completes
-        if (!alias->init || !(alias->syntax_flags & LSF_ALIAS_EARLY_REFERENCE)) continue;
+        if (!alias->init || !(lambda_ast_build_state(alias).syntax_flags & LSF_ALIAS_EARLY_REFERENCE)) continue;
         TypeType* pre_type = (TypeType*)r->prebound_types->data[i];
         Type* payload = resolver_alias_payload(r, i, 0);
         if (payload && payload != (Type*)pre_type) pre_type->type = payload;
     }
     ArrayList* visited = arraylist_new(16);
     for (int i = 0; visited && i < aliases->length; i++) {
-        AstDeclaratorNode* alias = (AstDeclaratorNode*)aliases->data[i];
+        LambdaAstDeclaratorNode* alias = (LambdaAstDeclaratorNode*)aliases->data[i];
         if (alias->init) direct_refresh_recursive_type_layout(alias->type, visited);
     }
     if (visited) arraylist_free(visited);

@@ -30,7 +30,7 @@ struct MirShapeCandidateProfile {
     void* owner;
     void* (*direct)(void* owner, AstNode* node);
     void* (*binding)(void* owner, AstNode* definition);
-    void* (*call)(void* owner, AstCallNode* call);
+    void* (*call)(void* owner, LambdaAstCallNode* call);
     void* (*nested)(void* owner, AstNode* node, int depth);
 };
 
@@ -46,7 +46,7 @@ static inline void* mir_shape_candidate(const MirShapeCandidateProfile& profile,
         if (void* nested = profile.nested(profile.owner, node, depth)) return nested;
     }
     if (node->node_type == AST_NODE_IDENT) {
-        NameEntry* entry = ((AstIdentNode*)node)->entry;
+        NameEntry* entry = ((LambdaAstIdentNode*)node)->entry;
         AstNode* definition = entry ? entry->node : NULL;
         if (!definition) return NULL;
         if (definition->node_type == AST_NODE_VARIABLE_DECLARATOR) {
@@ -56,7 +56,7 @@ static inline void* mir_shape_candidate(const MirShapeCandidateProfile& profile,
         return profile.binding(profile.owner, definition);
     }
     if (node->node_type == AST_NODE_CALL_EXPR) {
-        return profile.call(profile.owner, (AstCallNode*)node);
+        return profile.call(profile.owner, (LambdaAstCallNode*)node);
     }
     return NULL;
 }

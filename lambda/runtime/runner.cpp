@@ -1502,7 +1502,7 @@ static InputScriptRequest lambda_script_cache_request(Runtime* runtime,
         : tier == LAMBDA_TIER_INTERP
             ? (is_import ? "interp-module" : "interp-script")
             : (is_import ? "module" : "script");
-    request.ast_abi = 1;
+    request.ast_abi = 3;
     request.compiler_abi = 1;
     request.optimize_level = runtime->optimize_level;
     request.module_mode = is_import;
@@ -2648,24 +2648,6 @@ Script* load_script_mir_direct(Runtime *runtime, const char* script_path,
 
 #endif
 
-static void repl_restore_scope(NameScope* scope, NameEntry* first,
-        NameEntry* last) {
-    if (!scope) return;
-    scope->first = first;
-    scope->last = last;
-    if (last) last->next = NULL;
-    // A rejected fragment may have populated the pointer index with bindings
-    // that are no longer in the retained list.  Drop that derived cache so
-    // the next lookup cannot observe a rolled-back declaration.
-    scope->name_index = NULL;
-    scope->name_index_capacity = 0;
-    scope->name_index_count = 0;
-    scope->entry_count = 0;
-    for (NameEntry* entry = first; entry; entry = entry->next) {
-        scope->entry_count++;
-    }
-}
-
 static void repl_restore_source(Script* script, size_t length) {
     if (!script || !script->repl_source) return;
     script->repl_source->length = length;
@@ -2709,7 +2691,7 @@ static void repl_entry_begin(ReplEntryTxn* txn, Script* script) {
     txn->source_length = script->repl_source->length;
     NameScope* globals = txn->root->global_vars;
     txn->scope_first = globals ? globals->first : NULL;
-    txn->scope_last = globals ? globals->last : NULL;
+    txn->scope_last = globals && globals->declarations ? globals->declarations->last : NULL;
     txn->const_count = script->const_list ? script->const_list->length : 0;
     txn->type_count = script->type_list ? script->type_list->length : 0;
     txn->slab_count = script->interp_slab_count;
@@ -2722,7 +2704,7 @@ static void repl_entry_rollback(ReplEntryTxn* txn) {
         if (txn->prior_last) txn->prior_last->next = NULL;
         else txn->root->child = NULL;
     }
-    repl_restore_scope(txn->root->global_vars, txn->scope_first, txn->scope_last);
+    name_scope_restore(txn->root->global_vars, txn->scope_first, txn->scope_last);
     if (script->const_list) script->const_list->length = txn->const_count;
     if (script->type_list) script->type_list->length = txn->type_count;
     // a plan rejection restores the count; once the slab has grown its
