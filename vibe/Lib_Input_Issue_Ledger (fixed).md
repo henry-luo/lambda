@@ -6,6 +6,23 @@ remain in the [active issue ledger](Lib_Input_Issue_Ledger.md).
 
 ## Fixed issues
 
+<a id="li-098"></a>
+
+### LI-098 — Bulk weak DOM validation repeats the ownership walk
+
+**Fixed 2026-11-22.** With structural DOM ownership, one node retirement can
+expire every outstanding weak lifetime stamp for the document. Pruning many
+retained references then walked the owning forest for each cold address.
+Wrapping a subtree for custom element reactions could repeat the same work.
+
+Input shares a scratch membership snapshot within each bulk operation
+under D5.5.1 and D9.1.3v2. New registrations and lifetime changes expire the
+snapshot. A weak reference checks its expected node ID after ownership is
+established. The native regression retires nodes while a snapshot is live
+and verifies that only the surviving references resolve.
+[Implementation](../lambda-input/lambda/input/css/dom_lifecycle.cpp) ·
+[Native regression](../lambda-input/test/test_input_dom_native_gtest.cpp)
+
 <a id="li-097"></a>
 
 ### LI-097 — Legacy WebKit box declarations need standard equivalents

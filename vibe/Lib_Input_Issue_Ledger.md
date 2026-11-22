@@ -15,6 +15,13 @@ Resolved records are in the [fixed issue ledger](<Lib_Input_Issue_Ledger (fixed)
 
 ## Open issues
 
+<a id="li-098"></a>
+
+### LI-098 — FIXED
+
+Bulk DOM ownership checks share a structural snapshot under D5.5.1.
+See the [ownership validation record](<Lib_Input_Issue_Ledger (fixed).md#li-098>).
+
 <a id="li-097"></a>
 
 ### LI-097 — FIXED

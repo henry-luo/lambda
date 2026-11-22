@@ -92,7 +92,7 @@ fn _resolve_bg(opts) {
     else { "white" }
 }
 
-fn _render_page_parts(pdf, page, page_index, opts) {
+fn _render_page_parts(pdf, page, page_index, opts, image_source = null) {
     let geometry = coords.page_geometry(page, pdf)
     let media = geometry.media
     let viewport = geometry.viewport
@@ -122,7 +122,9 @@ fn _render_page_parts(pdf, page, page_index, opts) {
     }
     let overlay_transform = if (geometry.transformed) util.fmt_css_matrix(geometry.matrix) else null
 
-    { svg: svg.svg_pdf_root(view_box, viewport.w, viewport.h, children, pdf),
+    // Native image resolution retains the parsed source without the render index.
+    let source = if (image_source == null) pdf else image_source
+    { svg: svg.svg_pdf_root(view_box, viewport.w, viewport.h, children, source),
       texts: texts,
       rect: viewport,
       overlay_transform: overlay_transform }
@@ -132,8 +134,8 @@ fn render_page(pdf, page, page_index, opts) {
     _render_page_parts(pdf, page, page_index, opts).svg
 }
 
-fn render_page_div(pdf, page, page_index, opts) any^ {
-    let parts = _render_page_parts(pdf, page, page_index, opts)
+fn render_page_div(pdf, page, page_index, opts, image_source) any^ {
+    let parts = _render_page_parts(pdf, page, page_index, opts, image_source)
     html.page_div_with_text_layer(parts.svg, parts.texts, page_index + 1, parts.overlay_transform)
 }
 
@@ -178,11 +180,13 @@ pub fn pdf_to_html(pdf, opts) any^ {
     }
     else {
         let render_count = _render_page_count(n, opts)
-        let pages = [for (i in ((0 to (render_count - 1)) ^ { [] })) render_page_div(pdf, resolve.page_at(pdf, i), i, opts)];
+        let indexed = resolve.index_render_objects(pdf)^
+        let pages = [for (i in ((0 to (render_count - 1)) ^ { [] }))
+            render_page_div(indexed, resolve.page_at(pdf, i), i, opts, pdf)];
         // Inject @font-face rules for embedded fonts so the browser uses
         // the actual glyphs (not OS fallback). Done here — once per doc —
         // rather than per page so the rule appears once.
-        let faces = _collect_font_face_rules(pdf, render_count)
+        let faces = _collect_font_face_rules(indexed, render_count)
         let base_css = _base_css(opts)
         let css = _build_css(faces, base_css)
         let opts2 = _opts_with_css(opts, css)

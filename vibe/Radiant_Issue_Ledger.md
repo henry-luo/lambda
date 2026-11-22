@@ -20,12 +20,35 @@ observations still require re-verification. Add new Radiant issues here.
 
 ## Open issues
 
+<a id="ri-199"></a>
+
+### RI-199 — FIXED
+
+The native test harness link failures are recorded in the
+[test harness repair](<Radiant_Issue_Ledger (fixed).md#ri-199>).
+
+<a id="ri-198"></a>
+
+### RI-198 — Four named replays exceed five seconds in the full debug baseline
+
+**Open, 2026-11-22.** After RI-197 and LI-098, the six reported cases pass
+together in 2.171–3.880 s each on the macOS debug build. Running
+`make run-radiant-baseline` with the original timing history and ordinary
+worker settings passes the suite. The text-to-PDF replay takes 5.778 s,
+Hamster editor 5.294 s, direct table 6.950 s and slide animations 5.681 s.
+The Type 1 PDF and essay cases meet the five-second budget in that run.
+
+The remaining profiles include live layout, PDF transformation and
+background compilation under load. The event and frame contracts follow
+D8.3.4 and D10.1.7. The underlying Scene3D budget also remains open in
+RI-196. Results are under `temp/radiant-debug-regression/`.
+
 <a id="ri-197"></a>
 
 ### RI-197 — FIXED
 
-The native test harness link failures are recorded in the
-[fixed issue ledger](Radiant_Issue_Ledger%20%28fixed%29.md#ri-197).
+StateStore retains its weak DOM lifetime proofs under D5.5.1. See the
+[retained owner validation repair](<Radiant_Issue_Ledger (fixed).md#ri-197>).
 
 <a id="ri-196"></a>
 
