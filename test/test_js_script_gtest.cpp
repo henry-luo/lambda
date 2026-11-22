@@ -5138,12 +5138,9 @@ TEST(JsInterpreter, WideScopeIndexPreservesIdentityAndCrossScriptSpelling) {
         snprintf(name, sizeof(name), "__wide_scope_binding_%u", i);
         entries[i].name = i == 0 ? original : i == 1 ? distinct
             : name_pool_create_name(first, name);
-        if (scope.last) scope.last->next = &entries[i];
-        else scope.first = &entries[i];
-        scope.last = &entries[i];
-        ASSERT_TRUE(name_scope_index_add(pool, &scope, &entries[i]));
+        ASSERT_TRUE(name_scope_append(pool, &scope, &entries[i]));
     }
-    ASSERT_NE(scope.name_index, nullptr);
+    ASSERT_NE(scope.declarations->name_index, nullptr);
     EXPECT_EQ(name_scope_lookup_name(&scope, original), &entries[0]);
     EXPECT_EQ(name_scope_lookup_name(&scope, distinct), &entries[1]);
     EXPECT_EQ(name_scope_lookup_name(&scope, foreign), nullptr);

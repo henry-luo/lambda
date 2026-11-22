@@ -499,14 +499,14 @@ Type* mvp_handler_pass_contract(LambdaMvpModule* module, AstHandlerNode* handler
 LambdaAstFieldNode* mvp_string_index(LambdaMvpModule* module, AstNode* node, int depth = 0,
     bool dynamic_key = false);
 struct MvpStringAppendPlan {
-    AstDeclaratorNode* declaration;
+    LambdaAstDeclaratorNode* declaration;
     AstAssignStamNode* assignment;
     MvpBinding* temporary;
     MvpBinding* owner;
     bool transfer;
 };
 bool mvp_string_append_plan(LambdaMvpModule* module, AstNode* first, MvpStringAppendPlan* plan);
-bool mvp_sole_declaration_read(LambdaMvpModule* module, AstDeclaratorNode* declaration, AstNode* read);
+bool mvp_sole_declaration_read(LambdaMvpModule* module, LambdaAstDeclaratorNode* declaration, AstNode* read);
 bool mvp_array_index_present(LambdaMvpModule* module, MvpBinding* binding, AstNode* key);
 MvpBinding* mvp_local_binding(LambdaMvpModule* module, AstNode* node);
 bool mvp_local_storage_stable(LambdaMvpModule* module, MvpBinding* binding, bool writes);

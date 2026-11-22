@@ -614,8 +614,8 @@ void* create_module_import_script(const char* resolved_path, Item namespace_obj,
             pub_node->next = NULL;
             pub_node->type = &TYPE_NULL;
 
-            AstDeclaratorNode* named = (AstDeclaratorNode*)pool_calloc(pool,
-                sizeof(AstDeclaratorNode));
+            LambdaAstDeclaratorNode* named = (LambdaAstDeclaratorNode*)pool_calloc(pool,
+                sizeof(LambdaAstDeclaratorNode));
             named->node_type = AST_NODE_VARIABLE_DECLARATOR;
             named->next = NULL;
             named->init = NULL;

@@ -2088,8 +2088,8 @@ static void js_compiler_pass_timing_observer(const char* name,
     else if (strcmp(name, "runtime-link") == 0) tp->pass_timing.link_us += elapsed_us;
 }
 
-bool js_transpiler_parse_c(JsTranspiler* tp, const char* source, size_t length,
-        JsParseMode mode) {
+static bool js_transpiler_parse_c_impl(JsTranspiler* tp, const char* source,
+        size_t length, JsParseMode mode, bool build_index) {
     if (!tp || !source || length > UINT32_MAX) return false;
     if (mode == JS_PARSE_AUTO) {
         mode = tp->strict_js ? JS_PARSE_SCRIPT : JS_PARSE_TYPESCRIPT;
@@ -2111,10 +2111,13 @@ bool js_transpiler_parse_c(JsTranspiler* tp, const char* source, size_t length,
         {"validate", COMPILER_FACT_AST | COMPILER_FACT_BOUND, COMPILER_FACT_VALIDATED, js_validate_compiler_pass, &pass_context},
         {"index", COMPILER_FACT_FRONTEND, COMPILER_FACT_INDEXED, js_index_compiler_pass, &pass_context},
     };
-    for (uint32_t i = 0; i < 4; i++) {
-        if (!compiler_pass_manager_add(pass_manager, &passes[i])) break;
+    uint32_t pass_count = sizeof(passes) / sizeof(passes[0]);
+    // Static dependency discovery consumes the validated declaration list.
+    if (!build_index) pass_count--;
+    for (uint32_t i = 0; i < pass_count; i++) {
+        if (!compiler_pass_manager_add(pass_manager, &passes[i])) return false;
     }
-    if (pass_manager->pass_count == 4 && compiler_pass_manager_run(pass_manager, NULL)) return true;
+    if (compiler_pass_manager_run(pass_manager, NULL)) return true;
     if (pass_context.validation_errors > 0) return true;
     if (!tp->has_errors) {
         tp->parse_error_valid = tp->has_errors = true;
@@ -2124,4 +2127,14 @@ bool js_transpiler_parse_c(JsTranspiler* tp, const char* source, size_t length,
     }
     tp->ast_root = NULL;
     return false;
+}
+
+bool js_transpiler_parse_c(JsTranspiler* tp, const char* source, size_t length,
+        JsParseMode mode) {
+    return js_transpiler_parse_c_impl(tp, source, length, mode, true);
+}
+
+bool js_transpiler_parse_c_module_requests(JsTranspiler* tp, const char* source,
+        size_t length) {
+    return js_transpiler_parse_c_impl(tp, source, length, JS_PARSE_MODULE, false);
 }

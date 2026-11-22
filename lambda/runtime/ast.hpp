@@ -135,7 +135,7 @@ static inline TypeConstrained* ast_constrained_type(AstNode* node) {
         LambdaAstIdentNode* ident = (LambdaAstIdentNode*)node;
         AstNode* declaration = ident->entry ? ident->entry->node : NULL;
         if (!declaration || declaration->node_type != AST_NODE_VARIABLE_DECLARATOR ||
-                !((AstDeclaratorNode*)declaration)->is_type_definition) return NULL;
+                !((LambdaAstDeclaratorNode*)declaration)->is_type_definition) return NULL;
         type = type_field_unwrap_simple_decl(declaration->type);
     }
     return lambda_type_is_constrained(type) ? (TypeConstrained*)type : NULL;
@@ -234,8 +234,8 @@ static inline bool ast_value_may_carry_defect(AstNode* node,
         if (entry && entry->admission_may_fail) return true;
         AstNode* binding = entry ? entry->node : NULL;
         return binding && binding->node_type == AST_NODE_VARIABLE_DECLARATOR &&
-            !((AstDeclaratorNode*)binding)->declared_type &&
-            ast_value_may_carry_defect(((AstDeclaratorNode*)binding)->init,
+            !((LambdaAstDeclaratorNode*)binding)->declared_type &&
+            ast_value_may_carry_defect(((LambdaAstDeclaratorNode*)binding)->init,
                 call_may_defect, ctx, depth + 1);
     }
     case AST_NODE_UNARY:
@@ -362,7 +362,7 @@ static inline Type* ast_call_contract_return(LambdaAstCallNode* call) {
         ? ((LambdaAstIdentNode*)function)->entry->node : NULL;
     Type* declared = NULL;
     if (binding && binding->node_type == AST_NODE_VARIABLE_DECLARATOR) {
-        declared = ((AstDeclaratorNode*)binding)->declared_type;
+        declared = ((LambdaAstDeclaratorNode*)binding)->declared_type;
     } else if (binding && binding->node_type == AST_NODE_PARAM) {
         TypeParam* parameter = lambda_type_param(binding->type);
         declared = parameter && parameter->has_explicit_contract
@@ -878,7 +878,7 @@ static inline bool ast_visit_body_writes(AstNode* node, const VisitWrite& visit,
             if (ast_visit_body_writes(((AstVarDeclNode*)stmt)->declare, visit, include_rebind)) return true;
             break;
         case AST_NODE_VARIABLE_DECLARATOR:
-            if (ast_visit_body_writes(((AstDeclaratorNode*)stmt)->init, visit, include_rebind)) return true;
+            if (ast_visit_body_writes(((LambdaAstDeclaratorNode*)stmt)->init, visit, include_rebind)) return true;
             break;
         case AST_NODE_RETURN_STAM:
             if (ast_visit_body_writes(((AstReturnNode*)stmt)->value, visit, include_rebind)) return true;
@@ -978,7 +978,7 @@ static inline bool ast_block_may_carry_defect(AstNode* node,
             item->node_type == AST_NODE_VAR_STAM || item->node_type == AST_NODE_PUB_STAM
             ? ((AstLetNode*)item)->declare : item;
         for (; decl && decl->node_type == AST_NODE_VARIABLE_DECLARATOR; decl = decl->next) {
-            AstDeclaratorNode* named = (AstDeclaratorNode*)decl;
+            LambdaAstDeclaratorNode* named = (LambdaAstDeclaratorNode*)decl;
             if (named->declared_type && !lambda_type_accepts_error(named->declared_type) &&
                     (lambda_ast_boundary_relation(named->init, named->declared_type) != STATIC_BOUNDARY_PROVEN ||
                      ast_value_may_carry_defect(named->init, call_may_defect, ctx, depth + 1))) {

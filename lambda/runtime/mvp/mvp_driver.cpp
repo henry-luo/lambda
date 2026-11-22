@@ -639,7 +639,7 @@ static void register_module_pub_fns(AstImportNode* imp, Script* dependency) {
             // name two dependencies both export stays two symbols.
             AstNode* declare = ((AstLetNode*)mod_child)->declare;
             while (declare) {
-                AstDeclaratorNode* named = (AstDeclaratorNode*)declare;
+                LambdaAstDeclaratorNode* named = (LambdaAstDeclaratorNode*)declare;
                 if (named->name) {
                     // dependency-local name, for the lookup in its own context
                     StrBuf* local_key = strbuf_new_cap(64);

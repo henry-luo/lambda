@@ -324,15 +324,12 @@ void publish_token_rule(Loader* L, GrammarRule* rule, AstNode* island_body) {
     def->type = (Type*)rule->pattern;
     def->is_symbol = rule->pattern->is_symbol;
     def->source_span = rule->span;
-    NameEntry* entry = (NameEntry*)pool_calloc(L->tp->pool, sizeof(NameEntry));
+    NameEntry* entry = lambda_name_entry_alloc(L->tp->pool);
     entry->name = rule->name;
     entry->node = (AstNode*)def;
     entry->scope = L->token_scope;
     NameScope* scope = L->token_scope;
-    if (!scope->first) scope->first = entry;
-    else scope->last->next = entry;
-    scope->last = entry;
-    (void)name_scope_index_add(L->tp->pool, scope, entry);
+    (void)name_scope_append(L->tp->pool, scope, entry);
 }
 
 // The literal's text, with the escapes of a quoted Lambda string. A class

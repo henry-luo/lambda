@@ -1288,11 +1288,11 @@ static bool record_aliased_bound_type(Type* dependency, void* context) {
 void resolve_type_name(Transpiler* tp, LambdaAstIdentNode* ident) {
     StrView w = {ident->name->chars, ident->name->len};
     NameEntry* entry = lookup_name(tp, w);
-    if (entry && entry->is_binder && entry->binder) {
+    if (entry && entry->is_binder && lambda_binding_fields(entry).binder) {
         TypeBoundRef* ref = (TypeBoundRef*)alloc_type_kind(tp->pool,
             TYPE_KIND_BOUND_REF, sizeof(TypeBoundRef));
-        ref->slot = entry->binder_slot;
-        ref->bound = entry->binder->bound;
+        ref->slot = lambda_binding_fields(entry).binder_slot;
+        ref->bound = lambda_binding_fields(entry).binder->bound;
         record_bound_type_use(tp, ref, entry);
         // a binder reference is a type node, not a name: morph in place so
         // the parent keeps its child pointer
@@ -1317,7 +1317,7 @@ void resolve_type_name(Transpiler* tp, LambdaAstIdentNode* ident) {
         // so a raw TypePattern here reads pattern_index as a pointer — SEGV.
         if (def->node_type == AST_NODE_TYPE_STAM ||
                 (def->node_type == AST_NODE_VARIABLE_DECLARATOR &&
-                 ((AstDeclaratorNode*)def)->is_type_definition) ||
+                 ((LambdaAstDeclaratorNode*)def)->is_type_definition) ||
                 def->node_type == AST_NODE_STRING_PATTERN ||
                 def->node_type == AST_NODE_SYMBOL_PATTERN) {
             // direct aliases for literals/ranges already carry the first-class

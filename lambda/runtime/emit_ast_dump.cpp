@@ -434,7 +434,7 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
             emit_lambda_dump_list(source, "declare", ((AstLetNode*)node)->declare, indent + 1);
             break;
         case AST_NODE_VARIABLE_DECLARATOR: {
-            AstDeclaratorNode* declarator = (AstDeclaratorNode*)node;
+            LambdaAstDeclaratorNode* declarator = (LambdaAstDeclaratorNode*)node;
             emit_dump_string_field("name", declarator->name);
             // the destination contract a `let x: T = e` declares (S7.8.1)
             if (declarator->declared_type) emit_dump_type_field("declared_type", declarator->declared_type);

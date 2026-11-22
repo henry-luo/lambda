@@ -1350,7 +1350,7 @@ static void plan_with_bindings(MvpLmdProgram* p) {
     if (!p->with_bindings) { mvp_lmd_program_diagnostic(p, NULL, "object environment references"); return; }
     for (AstNodeId i = 0; i < index->count; i++) {
         AstNode* node = index->nodes[i];
-        if (node->node_type != AST_NODE_IDENT || js_ast_fact_walk_skips_child(index->parents[i], node)) continue;
+        if (node->node_type != AST_NODE_IDENT || js_ast_fact_walk_skips_child(ast_index_parent_at(index, i), node)) continue;
         AstIdentNode* id = (AstIdentNode*)node;
         if (named(id->name, "this") || named(id->name, "super") || named(id->name, "new.target")) continue;
         LmdBinding* original = identifier_binding(p, id);
@@ -1363,13 +1363,16 @@ static void plan_with_bindings(MvpLmdProgram* p) {
         LmdWithLookup* first = NULL;
         LmdWithLookup** tail = &first;
         AstNode* child = node;
-        for (AstNode* parent = index->parents[i]; parent;
-                child = parent, parent = ast_index_parent(index, parent)) {
-            if (with_scope_boundary(parent, child, id->entry ? id->entry->scope : NULL)) break;
-            if (parent->node_type != JS_AST_NODE_WITH_STATEMENT || ((JsWithStatementNode*)parent)->body != child) continue;
+        for (AstNodeId parent_id = index->parent_ids[i]; parent_id != AST_NODE_ID_INVALID;
+                parent_id = index->parent_ids[parent_id]) {
+            AstNode* parent = index->nodes[parent_id];
+            AstNode* descendant = child;
+            child = parent;
+            if (with_scope_boundary(parent, descendant, id->entry ? id->entry->scope : NULL)) break;
+            if (parent->node_type != JS_AST_NODE_WITH_STATEMENT || ((JsWithStatementNode*)parent)->body != descendant) continue;
             LmdWithLookup* lookup = (LmdWithLookup*)pool_calloc(p->frontend->pool, sizeof(LmdWithLookup));
             if (!lookup) { mvp_lmd_program_diagnostic(p, node, "object environment lookup"); return; }
-            lookup->object = p->with_objects[ast_index_find(index, parent)];
+            lookup->object = p->with_objects[parent_id];
             *tail = lookup; tail = &lookup->outer;
             capture_binding(p, owner, lookup->object, node);
         }
@@ -9908,7 +9911,7 @@ static Item mvp_lmd_prepare_global_vars(MvpLmdProgram* program, NameScope* scope
     // mixed function/Annex B declarations retain their ordered descriptor operations.
     for (NameEntry* entry = scope ? scope->first : NULL; entry; entry = entry->next)
         if (entry->is_annex_b_companion || (entry->node && entry->node->node_type == AST_NODE_FUNC)) return ItemNull;
-    int capacity = scope ? scope->entry_count : 0;
+    int capacity = scope && scope->declarations ? scope->declarations->entry_count : 0;
     if (!capacity) return ItemNull;
     auto** names = (String**)pool_alloc(program->frontend->pool, capacity * sizeof(String*));
     if (!names) return ItemError;

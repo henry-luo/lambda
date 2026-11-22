@@ -57,7 +57,7 @@ void write_fn_name(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* import) 
 
 void write_var_name_for_script(StrBuf *strbuf, AstNode *node, const Script* import_script) {
     String* name = node && node->node_type == AST_NODE_VARIABLE_DECLARATOR
-        ? ((AstDeclaratorNode*)node)->name : ((AstNamedNode*)node)->name;
+        ? ((LambdaAstDeclaratorNode*)node)->name : ((AstNamedNode*)node)->name;
     if (import_script) {
         strbuf_append_format(strbuf, "m%u.",
             script_compilation_unit_id(import_script));
@@ -232,7 +232,7 @@ static bool find_widened_dependency(AstNode* node, void* data) {
     }
     // a let-alias inherits the stale read in its initializer (LR03-36).
     WidenedDependency alias = {entry, scan, false};
-    walk_lambda_ast(((AstDeclaratorNode*)entry->node)->init,
+    walk_lambda_ast(((LambdaAstDeclaratorNode*)entry->node)->init,
         find_widened_dependency, &alias, false);
     scan->found = alias.found;
     return false;

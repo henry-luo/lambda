@@ -450,7 +450,7 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
         // so packed matrices use the ordinary checked COW publication path.
         if (!has_path || !entry || entry->import || !indexed_key ||
                 (entry->node && entry->node->node_type == AST_NODE_VARIABLE_DECLARATOR &&
-                 ((AstDeclaratorNode*)entry->node)->declared_type &&
+                 ((LambdaAstDeclaratorNode*)entry->node)->declared_type &&
                  !open_item_binding && !open_any_array && !typed_map_root &&
                  !direct_typed_array)) {
             // An `any` / `any[]` root has no narrower contract to validate;
@@ -658,7 +658,7 @@ typedef struct PlanCtx {
 static void plan_mark_cow_owned(NameEntry* entry) {
     AstNode* decl = entry ? entry->node : NULL;
     if (!decl || decl->node_type != AST_NODE_VARIABLE_DECLARATOR) return;
-    AstNode* init = ast_cow_value_source(((AstDeclaratorNode*)decl)->init);
+    AstNode* init = ast_cow_value_source(((LambdaAstDeclaratorNode*)decl)->init);
     if (!init) return;
     if (init->node_type == AST_NODE_IDENT) {
         NameEntry* src = ((LambdaAstIdentNode*)init)->entry;
@@ -778,12 +778,15 @@ static void plan_assign_entry(PlanCtx* pc, NameEntry* entry) {
         return;
     }
     plan_mark_cow_owned(entry);
-    entry->interp_boundary = interp_boundary_plan_create(pc->script->pool,
-        entry->declared_type);
-    if (entry->interp_boundary && entry->node && entry->node->node_type == AST_NODE_PARAM) {
-        // a type parameter's binder lives on TypeParam, outside its declared contract
-        TypeParam* parameter = lambda_type_param(entry->node->type);
-        entry->interp_boundary->uses_binder |= parameter && parameter->binder;
+    if (entry->has_lambda_binding_fields) {
+        InterpBoundaryPlan* boundary = interp_boundary_plan_create(pc->script->pool,
+            entry->declared_type);
+        static_cast<LambdaNameEntry*>(entry)->interp_boundary = boundary;
+        if (boundary && entry->node && entry->node->node_type == AST_NODE_PARAM) {
+            // A binder of a type parameter lives outside its declared contract.
+            TypeParam* parameter = lambda_type_param(entry->node->type);
+            boundary->uses_binder |= parameter && parameter->binder;
+        }
     }
     if (pc->next_slot > UINT16_MAX) { pc->failed = true; return; }
     entry->slot = (int32_t)pc->next_slot++;
@@ -842,7 +845,7 @@ static bool plan_resolve_import(const Script* importer, NameEntry* entry) {
     bool exported_value = decl && (decl->node_type == AST_NODE_FUNC ||
         decl->node_type == AST_NODE_FUNC_EXPR || decl->node_type == AST_NODE_PROC ||
         (decl->node_type == AST_NODE_VARIABLE_DECLARATOR &&
-         !((AstDeclaratorNode*)decl)->is_type_definition));
+         !((LambdaAstDeclaratorNode*)decl)->is_type_definition));
     if (!exported_value) return false;
     entry->slot = -1;
     entry->binding_storage = BINDING_STORAGE_MODULE;
@@ -855,7 +858,8 @@ static bool plan_resolve_import(const Script* importer, NameEntry* entry) {
 static void plan_assign_scope(PlanCtx* pc, NameScope* scope) {
     if (!scope) return;
     for (NameEntry* e = scope->first; e; e = e->next) {
-        if (e->is_binder && e->binder && e->binder->parameter_name != e->name) {
+        TypeBinder* binder = lambda_binding_fields(e).binder;
+        if (e->is_binder && binder && binder->parameter_name != e->name) {
             // `as T` has no value binding. The physical parameter owning its
             // site receives its normal slot; T is read from binder_env (TG9).
             continue;
@@ -895,7 +899,7 @@ static void plan_link_capture_identifier(PlanCtx* pc, LambdaAstIdentNode* ident)
         decl->node_type == AST_NODE_STRING_PATTERN ||
         decl->node_type == AST_NODE_SYMBOL_PATTERN ||
         (decl->node_type == AST_NODE_VARIABLE_DECLARATOR &&
-            ((AstDeclaratorNode*)decl)->is_type_definition));
+            ((LambdaAstDeclaratorNode*)decl)->is_type_definition));
     ident->interp_frame_slot_read = entry->storage_assigned &&
         entry->binding_storage == BINDING_STORAGE_REGISTER &&
         !entry->is_binder && !entry->import && !entry->lambda_shared_local &&
@@ -1334,7 +1338,7 @@ static uint32_t plan_need(AstNode* node) {
         return need;
     }
     case AST_NODE_VARIABLE_DECLARATOR: {
-        AstDeclaratorNode* declarator = (AstDeclaratorNode*)node;
+        LambdaAstDeclaratorNode* declarator = (LambdaAstDeclaratorNode*)node;
         uint32_t need = plan_need(declarator->init);
         if (declarator->entry && declarator->entry->cow_borrow_lowered) {
             // CW34: the read-modify-write bind keeps the root, the read value
@@ -1704,7 +1708,7 @@ static void plan_walk(AstNode* node, void* ctx) {
         // The owning view plans handlers after its body bindings.
         return;
     case AST_NODE_VARIABLE_DECLARATOR: {
-        AstDeclaratorNode* declaration = (AstDeclaratorNode*)node;
+        LambdaAstDeclaratorNode* declaration = (LambdaAstDeclaratorNode*)node;
         plan_assign_entry(pc, declaration->entry);
         declaration->interp_boundary_proven =
             plan_scalar_boundary_proven(declaration->init, declaration->declared_type);
@@ -1735,7 +1739,7 @@ static void plan_walk(AstNode* node, void* ctx) {
         AstNode* object = ast_unwrap_primary(access->object);
         NameEntry* entry = object && object->node_type == AST_NODE_IDENT
             ? ((LambdaAstIdentNode*)object)->entry : NULL;
-        InterpBoundaryPlan* boundary = entry ? entry->interp_boundary : NULL;
+        InterpBoundaryPlan* boundary = entry ? lambda_binding_fields(entry).interp_boundary : NULL;
         ArrayNumElemType element;
         if (boundary && boundary->array.rank == 1 && access->field &&
                 !access->field->next && lambda_array_num_elem_type_for_contract(

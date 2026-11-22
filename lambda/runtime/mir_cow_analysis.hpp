@@ -51,14 +51,12 @@ static inline bool mir_body_has_nested_function(AstNode* body) {
 }
 
 static inline AstNode* mir_index_use_parent(const AstIndex* index, AstNode** use) {
-    AstNodeId id = ast_index_find(index, *use);
-    AstNode* parent = id == AST_NODE_ID_INVALID ? NULL : index->parents[id];
-    while (parent && parent->node_type == AST_NODE_PRIMARY) {
-        *use = parent;
-        id = ast_index_find(index, parent);
-        if (id == AST_NODE_ID_INVALID) return NULL;
-        parent = index->parents[id];
+    AstNodeId id = ast_index_parent_id(index, ast_index_find(index, *use));
+    while (id != AST_NODE_ID_INVALID && index->nodes[id]->node_type == AST_NODE_PRIMARY) {
+        *use = index->nodes[id];
+        id = index->parent_ids[id];
     }
+    AstNode* parent = id != AST_NODE_ID_INVALID ? index->nodes[id] : NULL;
     return parent;
 }
 
@@ -74,7 +72,7 @@ static inline bool mir_confined_scalar_snapshot(const AstIndex* index, AstFuncNo
     if (!index || !function || function->captures || function->is_async ||
             function->is_generator || function->is_loop_continuation ||
             !binding || !binding->cow_param_mutated || binding->is_var_param ||
-            binding->view_base || (contract && (contract->is_var_param || contract->default_value)) ||
+            lambda_binding_fields(binding).view_base || (contract && (contract->is_var_param || contract->default_value)) ||
             mir_body_has_nested_function(function->body)) return false;
     AstBindingId id = ast_index_find_binding_entry(index, binding);
     uint32_t count = 0;

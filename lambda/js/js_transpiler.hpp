@@ -198,6 +198,9 @@ bool js_rebuild_direct_scope_graph(JsTranspiler* tp, JsAstNode* ast);
 bool js_c_source_is_module(const char* source, size_t length);
 bool js_transpiler_parse_c(JsTranspiler* tp, const char* source, size_t length,
                            JsParseMode mode);
+// Parse and validate module declarations for dependency discovery (D8.3.5).
+bool js_transpiler_parse_c_module_requests(JsTranspiler* tp, const char* source,
+        size_t length);
 
 // Error handling functions
 void js_error(JsTranspiler* tp, SourceSpan span, const char* format, ...);

@@ -224,41 +224,21 @@ struct NameEntry {
     // A sloppy block function publishes only to this validated Annex-B outer
     // binding; null records a parameter, arguments, or lexical collision.
     NameEntry* annex_b_outer_binding;
-    TypeBinder* binder;
-    // CW31/S9.2.4 face 4: when this binding holds a mutable VIEW, the ultimate
-    // base binding it aliases (chased through view-of-view). The call-site
-    // exclusivity check conflicts two `var` args sharing an effective root, so
-    // overlapping subviews of one base are rejected at the same whole-base
-    // granularity face 3 already uses -- no region math in v1.
-    struct NameEntry* view_base;
     // The explicit source annotation, when present.  `node->type` is the
     // effective compiler type and historically lost this distinction during
     // declaration construction, which let later boundaries guess from TypeId.
     Type* declared_type;
-    InterpBoundaryPlan* interp_boundary;  // immutable full-contract classification
-    // The place's root name, kept only to name it in that diagnostic.
-    String* place_copy_root;
-    NameEntry* place_copy_next;   // intrusive link over pending candidates
     // When this name was hung into the scope by an import, the module that
     // actually declares it. `slot` is then an index into *that* module's slab,
     // not this one's — the two modules' plan passes number their globals
     // independently (§4.1: const/type/slab lookups go against the declaring
     // Script, not the current one).
     Script* import_owner;
-    int64_t fixed_array_length;
-    SourceSpan place_copy_mutation_span;
     // T0 frame-plan facts (AI5). NameEntry is pool-calloc'd, so zero-init must
     // read as "no plan": slot 0 is a legal frame slot, hence the explicit flag
     // rather than a sentinel index.
     int32_t slot;
     BindingStorage binding_storage;
-    uint16_t binder_slot;
-    // CW24v2 phase 2: counts of ident READS of a place-copy binding vs reads
-    // that were merely a mutation target's own root. reads > target_reads
-    // means the mutated copy is OBSERVED somewhere -- a legitimate deliberate
-    // snapshot under the Swift/R endpoint, so the diagnostic downgrades.
-    uint16_t place_copy_reads;
-    uint16_t place_copy_target_reads;
     // This var binding exists only as an Annex-B block-function companion;
     // an ordinary `var` declaration of the same name clears it.
     bool is_annex_b_companion : 1;
@@ -371,7 +351,41 @@ struct NameEntry {
     // resize it, holds an array of exactly `fixed_array_length` elements
     // everywhere it is visible. Decided once at script finalize.
     bool has_fixed_array_length : 1;
+    bool has_lambda_binding_fields : 1;
 };
+
+// Lambda's binder, boundary plan and place analysis facts share the binding's
+// allocation. JS and foreign bindings carry only the common identity.
+struct LambdaNameEntry : NameEntry {
+    TypeBinder* binder;
+    // CW31/S9.2.4 face 4: when this binding holds a mutable VIEW, the ultimate
+    // base binding it aliases (chased through view-of-view). The call-site
+    // exclusivity check conflicts two `var` args sharing an effective root, so
+    // overlapping subviews of one base are rejected at the same whole-base
+    // granularity face 3 already uses -- no region math in v1.
+    struct NameEntry* view_base;
+    InterpBoundaryPlan* interp_boundary;  // immutable full-contract classification
+    // The place's root name, kept only to name it in that diagnostic.
+    String* place_copy_root;
+    NameEntry* place_copy_next;   // intrusive link over pending candidates
+    int64_t fixed_array_length;
+    SourceSpan place_copy_mutation_span;
+    uint16_t binder_slot;
+    // CW24v2 phase 2: counts of ident READS of a place-copy binding vs reads
+    // that were merely a mutation target's own root. reads > target_reads
+    // means the mutated copy is OBSERVED somewhere -- a legitimate deliberate
+    // snapshot under the Swift/R endpoint, so the diagnostic downgrades.
+    uint16_t place_copy_reads;
+    uint16_t place_copy_target_reads;
+};
+
+LambdaNameEntry* lambda_name_entry_alloc(Pool* pool);
+
+static inline const LambdaNameEntry& lambda_binding_fields(const NameEntry* entry) {
+    static constexpr LambdaNameEntry empty = {};
+    return entry && entry->has_lambda_binding_fields
+        ? *static_cast<const LambdaNameEntry*>(entry) : empty;
+}
 
 // Static activation shape for one interpreted function (or module top level).
 // Slot layout: [ params | locals | vargs? | signal | scratch ] — see interp.hpp.
@@ -395,14 +409,19 @@ struct AstBoundTypeUse {
     AstBoundTypeUse* next;
 };
 
-// name_scope
+// Declaration order starts at NameScope::first. Allocate the append and
+// lookup state only when a scope receives its first binding.
+struct NameScopeDeclarations {
+    NameEntry* last;
+    NameEntry** name_index;
+    uint32_t name_index_capacity;
+    uint32_t name_index_count;
+    uint32_t entry_count;
+};
+
 struct NameScope {
     NameEntry* first;
-    NameEntry* last;
-    // Declaration order remains in first/last/next. The optional name index
-    // supports identity and spelling queries without changing
-    // declaration order, including names arriving from a linked script.
-    NameEntry** name_index;
+    NameScopeDeclarations* declarations;
     // local mutation belongs to this callable, independently of effect colour.
     struct AstFuncNode* lambda_function;
     NameScope* parent;
@@ -410,9 +429,6 @@ struct NameScope {
     // sealed JS activation offsets apply only to this nonescaping function's locals.
     NameScope* js_activation_owner;
     AstScopeId scope_id;
-    uint32_t name_index_capacity;
-    uint32_t name_index_count;
-    uint32_t entry_count;
     ScopeKind kind;
     // JavaScript direct-scope construction seals durable lexical-cell slots
     // before an AST is shared by executions (D8.2.4). Lambda frame slots stay
@@ -526,15 +542,13 @@ typedef AstIndexProfileSupport (*AstIndexProfileVisitor)(
 
 typedef struct AstIndex {
     AstNode** nodes;
-    AstNode** parents;
+    AstNodeId* parent_ids;
     AstFunctionId* owner_functions;
     // Exclusive structural subtree boundary for each dense node ID.
     AstNodeId* subtree_end;
     // Each indexed node carries the binding edge resolved by the builder;
     // invalid means the node is not a name use or declaration.
     AstBindingId* node_bindings;
-    AstNodeId* first_children;
-    AstNodeId* next_siblings;
     NameScope** scopes;
     NameEntry** bindings;
     // index-owned declaration identities also survive clones of shared ASTs.
@@ -578,8 +592,7 @@ typedef struct AstIndex {
     uint32_t class_count;
     // The index publishes graph facts once the structural tree is available.
     bool graph_published;
-    AstNode** slots;
-    AstNodeId* slot_ids;
+    AstNodeId* slot_ids;  // pointer hash probes compare through nodes[id]
     uint32_t slot_capacity;
     // Nodes below this id have already been const-folded. A retained unit is
     // recompiled through a fresh pass manager and the REPL appends to it, so
@@ -663,7 +676,8 @@ NameEntry* ast_index_binding(const AstIndex* index, AstBindingId id);
 NameEntry* name_scope_lookup_name(const NameScope* scope, const String* name);
 NameEntry* name_scope_lookup_name_bytes(const NameScope* scope, const String* name);
 NameEntry* name_scope_lookup_chain(const NameScope* scope, const String* name);
-bool name_scope_index_add(Pool* pool, NameScope* scope, NameEntry* entry);
+bool name_scope_append(Pool* pool, NameScope* scope, NameEntry* entry);
+void name_scope_restore(NameScope* scope, NameEntry* first, NameEntry* last);
 bool name_scope_plan_binding_slots(NameScope* scope);
 #ifdef __cplusplus
 }
@@ -675,9 +689,13 @@ static inline AstFunctionId ast_index_function_parent(const AstIndex* index,
         ? index->functions[function_id].parent : AST_FUNCTION_ID_INVALID;
 }
 
-static inline AstNode* ast_index_parent(const AstIndex* index, const AstNode* node) {
-    AstNodeId parent_id = ast_index_parent_id(index, ast_index_find(index, node));
+static inline AstNode* ast_index_parent_at(const AstIndex* index, AstNodeId node_id) {
+    AstNodeId parent_id = ast_index_parent_id(index, node_id);
     return index && parent_id < index->count ? index->nodes[parent_id] : NULL;
+}
+
+static inline AstNode* ast_index_parent(const AstIndex* index, const AstNode* node) {
+    return ast_index_parent_at(index, ast_index_find(index, node));
 }
 
 // T29-1 / CW37 (D5.4.4): a record place spelled repeatedly in a `pn` body is
@@ -1371,13 +1389,15 @@ typedef struct AstExprStmtNode : AstNode {
 typedef struct AstDeclaratorNode : AstNode {
     AstNode* id;
     AstNode* init;
-    // Lambda declarations retain binding metadata through the shared layout.
-    String* name;
     NameEntry* entry;
-    bool is_type_definition;
     Type* declared_type;
-    bool interp_boundary_proven;
 } AstDeclaratorNode;
+
+struct LambdaAstDeclaratorNode : AstDeclaratorNode {
+    String* name;
+    bool is_type_definition;
+    bool interp_boundary_proven;
+};
 
 typedef struct AstSpreadNode : AstNode {
     AstNode* argument;
@@ -1396,7 +1416,7 @@ static inline bool ast_definition_denotes_type(const AstNode* definition) {
     case AST_NODE_SYMBOL_PATTERN:
         return true;
     case AST_NODE_VARIABLE_DECLARATOR:
-        return ((const AstDeclaratorNode*)definition)->is_type_definition;
+        return ((const LambdaAstDeclaratorNode*)definition)->is_type_definition;
     default:
         return false;
     }
@@ -1989,7 +2009,7 @@ Type* ast_map_path_leaf_contract(Type* root_contract, const AstCowPath* path,
     AstNode* terminal, bool terminal_is_member, int64_t* index_mask);
 
 struct AstOwnerPermutationPlan {
-    AstDeclaratorNode* temporary;
+    LambdaAstDeclaratorNode* temporary;
     AstNode* last;
     NameEntry* owners[8];
     int count;
