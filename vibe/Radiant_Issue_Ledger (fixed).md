@@ -14,6 +14,47 @@ are unchanged. Full evidence is under `../../lambda/temp/kianhup-style/`.
 
 ## Fixed issues
 
+<a id="ri-217"></a>
+
+### RI-217 — Grid spans across fractional tracks lose a definite size contribution
+
+**Fixed 2026-11-22.** The track-size input used the item's automatic
+minimum of zero even when a definite preferred size supplied its minimum
+contribution. In the 60px-wide item controls, two `0fr` tracks collapsed
+to 0px and tracks sized `0.2fr 0.3fr` shrank to 6px and 9px.
+The minimum contribution now uses the constrained min-content size for
+an item with a definite, independent preferred size across flexible
+tracks. The same preferred-size check serves intrinsic measurement.
+See [CSS Grid §12.5](https://www.w3.org/TR/css-grid-2/#algo-content).
+Native ownership **D9.1.1v4 / D9.1.3v2**.
+
+All six stored fractional-span fixtures match fresh Chromium 148 grid and
+child widths and positions exactly. Four previously failed, and both
+non-regression controls still pass. The broad grid pattern passes 401 of
+403, with the existing text and number input differences. The static and
+script layout suites record 4,481 passes, six skips, and the same
+`dom_view_role_nested` failure as the control.
+Evidence: `temp/radiant-ledger-continuation/{grid-browser.log,grid-verification.txt,layout-baseline-final.log}`.
+
+<a id="ri-216"></a>
+
+### RI-216 — Nested flex measurement inflates percentage-sized SVGs
+
+**Fixed 2026-11-22.** The intrinsic-height fallback for a definite-width row
+flex item with a preferred aspect ratio measured its SVG child using an
+outer ancestor's inline size. A 32px-wide item with `aspect-ratio:2` and a
+100%-sized SVG with a square viewBox grew to 1200px tall. The parent item's
+transferred height gives the SVG a 16px percentage basis, as Chromium 148
+confirms. Fixed-height 40px children still contribute their natural extent.
+
+The flex intrinsic height query now measures the row at its resolved
+content width through the shared sizing entry point. That entry point
+retains the transferred percentage basis while measuring natural height.
+`NestedFlexRatioHeightUsesThePreferredWidth` and
+`RatioFlexHeightSeparatesPercentageBasisFromNaturalExtent` both fail
+before and pass after. Native ownership **D9.1.1v4 / D9.1.3v2**.
+Evidence: `temp/radiant-ledger-continuation/{svg-query.log,final-dynamic.log,browser-probes.log}`.
+
 <a id="ri-214"></a>
 
 ### RI-214 — Replays repeat ownership walks after a DOM retirement
@@ -203,6 +244,25 @@ after load in Chromium; Setpoint retains an authored loader overlay while its
 Evidence: `temp/online-visual-round175/load-browser*/results.json`,
 `load-boundary-frozen-http.log`, `load-boundary-frozen-extra.log`,
 `resource-focused-final.log`, `baseline-js.json` and `milestone-summary.json`.
+
+<a id="ri-208"></a>
+
+### RI-208 — Nested column flex text can undersize a ratio-dependent cross minimum
+
+**Fixed 2026-11-22.** An anonymous flex text item contributed its unwrapped
+line height to the inner column's main sizing. The parent row therefore
+accepted the 20px ratio-derived height even when the text wrapped into three
+lines. When the column has a known inline width, its item collection now uses
+the shared anonymous text formatter to measure wrapping before main sizing.
+Trial text rectangles are restored by the formatter (**D5.5.1 / D9.1.3v2 /
+D9.5.6v2**).
+
+The reduced case moves from 40×20px to 40×60px, matching Chromium 148.
+`DynamicLayoutTest.RowFlexKeepsTheWrappedHeightOfANestedRatioColumn` also
+checks the single-line row cross-size contract from RI-206. All 55 selected
+WPT flex aspect-ratio comparisons pass on both hosts. The original frozen173
+observation is in `temp/online-visual-round173/`. New evidence is in
+`temp/radiant-ordinary-fixes/`.
 
 <a id="ri-207"></a>
 
@@ -4001,6 +4061,24 @@ The extra Lambda sweep remains incomplete after its missing optional WebRTC
 prerequisite; ASan host linkage is a separate Lambda LR01-25 limitation.
 
 
+<a id="ri-056"></a>
+
+### RI-056 — Native input-value test target does not link its CSS resource call
+
+**Fixed and reverified 2026-11-22.** The isolated Lambda test target originally
+omitted the implementation of `process_css_resource` and failed to link its
+downloaded stylesheet tests. Radiant `01e0111` extracted that implementation
+into `resource_css.cpp`. Lambda `f31a61fe80` added the owner file to the test
+target's sources under **D9.1.1v4 / D9.1.3v2**. The original failing call
+was in `RadiantInputValueTest.DownloadedStylesheetsUseOwnerOrderAcrossCompletionOrder`
+in the aggregate `make build-test` run.
+
+At Lambda `3bed8e86ad` with Radiant `7ca2432`, a fresh debug build of
+`test_radiant_input_value_gtest` links and passes all 12 cases, including
+downloaded CSS owner order, media and disabled state. The original link
+failure is recorded in `temp/sync-demo/build-test.log`. Current evidence:
+`temp/radiant-ordinary-fixes/ri-056.log`.
+
 <a id="ri-055"></a>
 
 ### RI-055 — Paint engine lacks the M3 wet-media kernels
@@ -4356,6 +4434,28 @@ Verification evidence: `../../lambda/temp/online-visual/radiant-baseline-final.l
 `pristine-build.py`. The online comparison scripts and saved before/after
 images retain the remaining differences; none are filtered out to qualify these repairs.
 
+<a id="ri-019"></a>
+
+### RI-019 — Reflow aborts when the focused target becomes non-focusable
+
+**Fixed for the reproduced mutation path, 2026-11-22.** Native mutation
+publication pruned disconnected owners and then requested reflow. A connected
+owner could keep focus after its eligibility changed, so the unchanged state
+invariant rejected the next transition. Mutation publication now checks the
+connected owner through the host's existing eligibility query and uses the
+normal focus transition to clear it (**D1.10 / D5.5.1 / D9.1.3v2**).
+
+Five local debug controls abort before the change. They set `display:none`
+or `visibility:hidden`, change an ancestor's class, insert a stylesheet rule,
+or remove a focused anchor's `href`. All five and the existing disabled and
+inert controls clear focus and complete the geometry read after the repair.
+See `temp/radiant-ordinary-fixes/focus-*-after.log`. Historical failures on
+Designmodo, Pulsetic and the Eden ecosystem replay supplied the original
+reports. Their original logs are under `test/online/snapshots/` for
+`saas_landing_046` and `saas_landing_138`, and
+`temp/eden-load/smoke-all-final.log` for Eden. Those replays were outside
+this local verification.
+
 <a id="ri-018"></a>
 
 ### RI-018 — Online exports exhaust memory before viewport PNG encoding
@@ -4503,6 +4603,27 @@ the button 33.600px versus 33.59375px. A 0.574px button text width difference
 remains as font-metric residue; heading and input widths match. Integer-cast
 layout lint passes. Geometry and replay logs are under
 `../../lambda/temp/kianhup-style/`.
+
+<a id="ri-011"></a>
+
+### RI-011 — Cloned multicol text trim has a pre-existing capacity mismatch
+
+**Fixed for auto-height horizontal inline flow, 2026-11-22.** The cloned text
+block used a
+full line advance for the final line in each column, even though its cloned
+block edges trim leading again. Line projection now fits the trimmed extent.
+Fragment boxes and following siblings use the consumed flow through the last
+trimmed line (**D9.1.1v4 / D9.1.3v2**).
+
+`wpt-css-inline/text-box-trim-multicol-003` and the owner regression
+`ClonedTextBoxTrimFitsFourLinesInEachFullColumn` place the text in groups of
+four, four and two, with the following block at the Chromium coordinates.
+Seven line-count controls match Chromium 148 for text positions and the
+cloned box width. Of these, three retain the existing difference in how an
+independent following block splits across columns. No layout reference is
+updated. The 13 stored multicol trim comparisons pass on both hosts.
+The original comparison is in `temp/radiant-layout-20261111/`. New evidence
+is in `temp/radiant-ordinary-fixes/`.
 
 <a id="ri-010"></a>
 
@@ -5588,6 +5709,22 @@ pins source and executable/archive hashes; only documentation changed afterward.
 Six PNG/SVG clip states independently match fresh Chrome pixels. The original
 failing native clip report remains in `temp/ledger-next-clip-before.{json,log}`.
 
+<a id="rad02-2"></a>
+
+#### RAD02-2 — Generated content keeps counters, images and text in order
+
+**Fixed 2026-11-22.** The original report listed `counter()`, `counters()`,
+`attr()`, `url()` and concatenation as stubs. The current engine already
+evaluates these values. A mixed list still failed because the ordered counter
+pass reevaluated the pseudo-element as a text string, dropping the image and
+the following entries. It now uses the existing ordered content materializer
+for mixed lists containing images, preserving any list-item marker.
+
+The new native regression checks the counter, 12×12 image, and attribute
+suffix across retained updates. The focused PNG changes from zero red
+pixels to a visible red image. Authority **D5.5.3 / D9.1.2v2 / D9.1.3v2**.
+Evidence: `temp/radiant-ledger-continuation/{mixed-test-before.log,final-dynamic.log,mixed-content-before.png,mixed-content-after.png}`.
+
 <a id="rad02-3"></a>
 
 #### RAD02-3
@@ -5642,6 +5779,24 @@ hero grows from 105px to 604.4px; exact font/spacing parity is not claimed.
 Evidence: Lambda `temp/online-visual-round3/{flex-before.log,dynamic-after.log,
 baseline-layout.log,imagemagick-local.json,imagemagick-after.json}`.
 
+
+<a id="ri-029"></a>
+
+### RI-029 — Modal dialogs and backdrops paint in the document top layer
+
+**Fixed 2026-11-19 in Radiant `494680e`, reverified 2026-11-22.** The
+original Leaflet capture allowed ordinary page content over its modal and
+lacked the dim backdrop. Radiant lays out and paints the document's
+ordered top layer independently of ancestor clips and stacking contexts.
+Native hit testing visits it in reverse paint order and applies modal
+inertness (**D9.1.1v4 / D9.1.3v2 / D9.5.6v2**).
+
+The original qualification passed 88 pinned modal and top-layer checks.
+A fresh offline capture puts a blue dialog and green backdrop above a
+maximum-`z-index` red layer in PNG, SVG and flat PDF. It also places the
+dialog outside its 1×1 clipped ancestor. Evidence:
+[HTML implementation record](impl/Lambda_Impl_HTML_Support.md) and
+`temp/radiant-ledger-continuation/modal.{html,png,svg,pdf}`.
 
 <a id="ri-030"></a>
 
@@ -6296,6 +6451,24 @@ grid-absolute-browser.json, native-after-inset-basis.log, ui-before/final.log,
 the identical stripe-frozen.html and before/after PNGs. An early native test
 mutation sequence and a pre-link stale-binary invocation are explicitly marked
 diagnostic/invalid in the checkpoint and are not final before/after counts.
+
+<a id="ri-060"></a>
+
+### RI-060 — Native style replacement retains removed padding in a grid child
+
+**Fixed 2026-11-22.** Retained recascade reset border and margin storage but
+kept the previous used padding. Replacing `grid-area:photo;padding:5px;
+border:2px solid` with `grid-area:photo;width:calc(100% - 20px);height:50%`
+therefore left the native grid item at 190px instead of 180px. The native
+boundary reset now restores padding to its initial value before applying the
+current cascade (**D5.5.3 / D9.1.1v4 / D9.1.3v2**).
+
+`DynamicLayoutTest.GridStyleReplacementClearsRemovedPadding` reproduces the
+original mutation with `DomElement::set_attribute`, native recascade and
+forced layout. It fails against the pinned source and passes with the repair.
+All 13 grid checks pass. The original investigation is in
+`temp/online-visual-round14/`. New evidence is in
+`temp/radiant-ordinary-fixes/`.
 
 <a id="ri-059"></a>
 
