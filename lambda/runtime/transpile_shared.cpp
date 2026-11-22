@@ -222,7 +222,7 @@ static bool find_widened_dependency(AstNode* node, void* data) {
     WidenedDependency* scan = (WidenedDependency*)data;
     if (scan->found) return false;
     if (node->node_type != AST_NODE_IDENT) return true;
-    NameEntry* entry = ((AstIdentNode*)node)->entry;
+    NameEntry* entry = ((LambdaAstIdentNode*)node)->entry;
     if (!entry || entry->has_type_annotation) return false;
     if (entry->type_widened) { scan->found = true; return false; }
     if (entry->is_mutable || !entry->node ||

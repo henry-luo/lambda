@@ -157,6 +157,10 @@ struct JsTranspiler : JsScript {
     // Direct-scope rebuild state, live only inside js_rebuild_direct_scope_graph.
     struct JsDirectScopeFixups* direct_fixups;
 
+    // Parse-only buffers stay with the tracked builder during compiler recovery.
+    struct JsCParseValue* reduction_values;
+    JsAstNode** reduction_children;
+
 };
 
 // JavaScript type mapping functions
@@ -202,6 +206,7 @@ void js_syntax_error(JsTranspiler* tp, SourceSpan span, const char* message);
 // Transpiler lifecycle functions
 JsTranspiler* js_transpiler_create(Runtime* runtime);
 void js_transpiler_destroy(JsTranspiler* tp);
+void js_transpiler_release_reduction_scratch(JsTranspiler* tp);
 JsFunctionNode* js_script_field_initializer_ensure(JsScript* script, JsFieldDefinitionNode* field,
     JsStaticBlockNode* block = nullptr);
 Pool* js_script_execution_pool(JsScript* script);

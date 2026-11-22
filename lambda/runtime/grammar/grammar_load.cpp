@@ -248,7 +248,7 @@ void mark_island_refs(Loader* L, AstNode* node) {
     for (; node; node = node->next) {
         switch (node->node_type) {
         case AST_NODE_IDENT: {
-            NameEntry* entry = ((AstIdentNode*)node)->entry;
+            NameEntry* entry = ((LambdaAstIdentNode*)node)->entry;
             if (entry && entry->scope == L->token_scope) {
                 for (uint32_t i = 0; i < rule_count(L); i++) {
                     if (rule_at(L, i)->name == entry->name) rule_at(L, i)->used = true;
@@ -260,8 +260,8 @@ void mark_island_refs(Loader* L, AstNode* node) {
             mark_island_refs(L, ((AstPatternSeqNode*)node)->first);
             break;
         case AST_NODE_BINARY_TYPE:
-            mark_island_refs(L, ((AstBinaryNode*)node)->left);
-            mark_island_refs(L, ((AstBinaryNode*)node)->right);
+            mark_island_refs(L, ((LambdaAstBinaryNode*)node)->left);
+            mark_island_refs(L, ((LambdaAstBinaryNode*)node)->right);
             break;
         case AST_NODE_UNARY_TYPE:
             mark_island_refs(L, ((AstUnaryNode*)node)->operand);

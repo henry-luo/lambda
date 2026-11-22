@@ -361,7 +361,7 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
             emit_lambda_dump_list(source, "child", ((AstScript*)node)->child, indent + 1);
             break;
         case AST_NODE_IDENT: {
-            AstIdentNode* ident = (AstIdentNode*)node;
+            LambdaAstIdentNode* ident = (LambdaAstIdentNode*)node;
             emit_dump_string_field("name", ident->name);
             AstNode* declaration = ident->entry ? ident->entry->node : NULL;
             if (declaration && (declaration->node_type == AST_NODE_FUNC ||
@@ -399,7 +399,7 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
         case AST_NODE_BINARY:
         case AST_NODE_PIPE:
         case AST_NODE_BINARY_TYPE: {
-            AstBinaryNode* bin = (AstBinaryNode*)node;
+            LambdaAstBinaryNode* bin = (LambdaAstBinaryNode*)node;
             emit_dump_strview_field("op", bin->op_str);
             if (node->node_type == AST_NODE_BINARY) {
                 emit_dump_type_field("value_type", node->type);
@@ -594,7 +594,7 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
         }
         case AST_NODE_MEMBER_EXPR:
         case AST_NODE_INDEX_EXPR: {
-            AstFieldNode* field = (AstFieldNode*)node;
+            LambdaAstFieldNode* field = (LambdaAstFieldNode*)node;
             emit_lambda_dump_field(source, "object", field->object, indent + 1);
             emit_lambda_dump_field(source, "field", field->field, indent + 1);
             break;
@@ -615,7 +615,7 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
             emit_lambda_dump_field(source, "object", ((AstNavigationNode*)node)->object, indent + 1);
             break;
         case AST_NODE_CALL_EXPR: {
-            AstCallNode* call = (AstCallNode*)node;
+            LambdaAstCallNode* call = (LambdaAstCallNode*)node;
             emit_dump_type_field("value_type", node->type);
             emit_dump_type_element_field("value_type", node->type);
             emit_dump_value_effect_field(node->type);

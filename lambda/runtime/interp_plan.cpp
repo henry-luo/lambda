@@ -280,17 +280,17 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
         return;
     }
     if (node->node_type == AST_NODE_CALL_EXPR) {
-        AstCallNode* call = (AstCallNode*)node;
+        LambdaAstCallNode* call = (LambdaAstCallNode*)node;
         AstNode* call_callee = ast_unwrap_primary(call->function);
-        AstFieldNode* member = call_callee &&
+        LambdaAstFieldNode* member = call_callee &&
                 call_callee->node_type == AST_NODE_MEMBER_EXPR
-            ? (AstFieldNode*)call_callee : NULL;
+            ? (LambdaAstFieldNode*)call_callee : NULL;
         AstNode* method_name = member ? ast_unwrap_primary(member->field) : NULL;
         AstNode* receiver = member ? ast_unwrap_primary(member->object) : NULL;
-        AstIdentNode* receiver_ident = receiver && receiver->node_type == AST_NODE_IDENT
-            ? (AstIdentNode*)receiver : NULL;
-        AstIdentNode* method_ident = method_name && method_name->node_type == AST_NODE_IDENT
-            ? (AstIdentNode*)method_name : NULL;
+        LambdaAstIdentNode* receiver_ident = receiver && receiver->node_type == AST_NODE_IDENT
+            ? (LambdaAstIdentNode*)receiver : NULL;
+        LambdaAstIdentNode* method_ident = method_name && method_name->node_type == AST_NODE_IDENT
+            ? (LambdaAstIdentNode*)method_name : NULL;
         TypeObject* receiver_type = member && member->object && member->object->type &&
                 type_nominal_record(member->object->type) != NULL
             ? (TypeObject*)member->object->type : NULL;
@@ -318,7 +318,7 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
                 AstNode* owner = ast_collect_cow_path(&path, call->argument)
                     ? ast_unwrap_primary(path.root) : NULL;
                 NameEntry* owner_entry = owner && owner->node_type == AST_NODE_IDENT
-                    ? ((AstIdentNode*)owner)->entry : NULL;
+                    ? ((LambdaAstIdentNode*)owner)->entry : NULL;
                 // eval_call already publishes a borrowed projected leaf;
                 // dynamic/import roots still have no replacement channel.
                 if (!owner_entry || owner_entry->import || !call->argument->next ||
@@ -331,7 +331,7 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
         }
         AstFuncNode* direct = ast_direct_call_function(call);
         if (call_callee && call_callee->node_type == AST_NODE_IDENT) {
-            AstIdentNode* imported = (AstIdentNode*)call_callee;
+            LambdaAstIdentNode* imported = (LambdaAstIdentNode*)call_callee;
             AstImportNode* import = imported->entry ? imported->entry->import : NULL;
             if (lambda_import_is_js(import) &&
                     ast_call_has_named_args(call)) {
@@ -411,7 +411,7 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
         bool has_path = ast_collect_cow_path(&path, ca->object);
         NameEntry* entry = has_path && path.root &&
                 path.root->node_type == AST_NODE_IDENT
-            ? ((AstIdentNode*)path.root)->entry : NULL;
+            ? ((LambdaAstIdentNode*)path.root)->entry : NULL;
         // The shared COW setters dispatch by the runtime owner layout. A
         // direct binding to a markup-derived Element can therefore use the
         // same map/array replacement path as a literal without assuming its
@@ -499,7 +499,7 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
     // and non-integral keys therefore have the same total read as literals;
     // only the coordinate buffer's capacity constrains admission (S8.2.1v4).
     if (node->node_type == AST_NODE_INDEX_EXPR) {
-        AstFieldNode* field = (AstFieldNode*)node;
+        LambdaAstFieldNode* field = (LambdaAstFieldNode*)node;
         if (field->field && field->field->next &&
                 !interp_ndim_indices_supported(field->field)) {
             sc->ok = false;
@@ -661,7 +661,7 @@ static void plan_mark_cow_owned(NameEntry* entry) {
     AstNode* init = ast_cow_value_source(((AstDeclaratorNode*)decl)->init);
     if (!init) return;
     if (init->node_type == AST_NODE_IDENT) {
-        NameEntry* src = ((AstIdentNode*)init)->entry;
+        NameEntry* src = ((LambdaAstIdentNode*)init)->entry;
         entry->cow_owned = (src && src->cow_owned) || entry->param_alias_written;
         return;
     }
@@ -689,7 +689,7 @@ static void plan_destination(Pool* pool, AstNode* node, Type* contract, int dept
     case AST_NODE_CALL_EXPR: {
         // argument hints may construct layouts, but admission failures stay at call entry
         if (construction_only) return;
-        AstCallNode* call = (AstCallNode*)node;
+        LambdaAstCallNode* call = (LambdaAstCallNode*)node;
         AstNode* callee = ast_unwrap_primary(call->function);
         LambdaArrayContractInfo array = {};
         if (callee && callee->node_type == AST_NODE_SYS_FUNC &&
@@ -753,7 +753,7 @@ static void plan_place(PlanCtx* pc, AstCompoundAssignNode* assignment) {
     if (!place) { pc->failed = true; return; }
     if (!ast_collect_cow_path(&place->path, assignment->object) || !place->path.root ||
             place->path.root->node_type != AST_NODE_IDENT) return;
-    place->root = ((AstIdentNode*)place->path.root)->entry;
+    place->root = ((LambdaAstIdentNode*)place->path.root)->entry;
     if (!place->root) return;
     int64_t index_mask = 0;
     place->leaf_contract = lambda_type_contract_has_binder(place->root->declared_type, true)
@@ -872,7 +872,7 @@ static void plan_assign_scope(PlanCtx* pc, NameScope* scope) {
 // A capture's dense slot is stable for the lifetime of its immutable function
 // definition. Link each read occurrence while the existing frame-plan walk is
 // already classifying bindings, so the hot walker need not rescan FnCapture.
-static void plan_link_capture_identifier(PlanCtx* pc, AstIdentNode* ident) {
+static void plan_link_capture_identifier(PlanCtx* pc, LambdaAstIdentNode* ident) {
     if (!ident) return;
     ident->interp_capture_owner = NULL;
     ident->interp_frame_slot_read = false;
@@ -902,7 +902,7 @@ static void plan_link_capture_identifier(PlanCtx* pc, AstIdentNode* ident) {
         !special_decl && entry->slot >= 0;
 }
 
-static void plan_link_call_shape(Pool* pool, AstCallNode* call) {
+static void plan_link_call_shape(Pool* pool, LambdaAstCallNode* call) {
     // An oversized list retains the existing walker-side scan and runtime
     // diagnostic instead of narrowing its source count into the shared plan.
     (void)ast_plan_call_shape(call);
@@ -964,7 +964,7 @@ static uint32_t plan_constrained_type_need(AstNode* node) {
 static uint32_t plan_match_pattern_need(AstNode* pattern) {
     if (!pattern) return 0;
     if (pattern->node_type == AST_NODE_BINARY_TYPE) {
-        AstBinaryNode* binary = (AstBinaryNode*)pattern;
+        LambdaAstBinaryNode* binary = (LambdaAstBinaryNode*)pattern;
         if (binary->op == OPERATOR_UNION) {
             uint32_t left = plan_match_pattern_need(binary->left);
             uint32_t right = plan_match_pattern_need(binary->right);
@@ -1028,7 +1028,7 @@ static uint32_t plan_need(AstNode* node) {
         return 1 + plan_need(((AstUnaryNode*)node)->operand);
     case AST_NODE_BINARY:
     case AST_NODE_PIPE: {
-        AstBinaryNode* b = (AstBinaryNode*)node;
+        LambdaAstBinaryNode* b = (LambdaAstBinaryNode*)node;
         uint32_t l = plan_need(b->left);
         // Left is held while right runs, and both are published across the
         // helper call, so the call itself has two slots live.
@@ -1074,7 +1074,7 @@ static uint32_t plan_need(AstNode* node) {
     }
     case AST_NODE_MEMBER_EXPR:
     case AST_NODE_INDEX_EXPR: {
-        AstFieldNode* f = (AstFieldNode*)node;
+        LambdaAstFieldNode* f = (LambdaAstFieldNode*)node;
         uint32_t o = plan_need(f->object);
         uint32_t k = 1 + plan_need_max_siblings(f->field);
         uint32_t at_call = 2;
@@ -1096,7 +1096,7 @@ static uint32_t plan_need(AstNode* node) {
         // from its activation window. Reserve one additional operand for a
         // possible pipe injection; named and special calls retain their
         // existing RootSpan route and harmlessly leave this reservation idle.
-        AstCallNode* c = (AstCallNode*)node;
+        LambdaAstCallNode* c = (LambdaAstCallNode*)node;
         uint32_t fn = plan_need(c->function);
         uint32_t argument_slots = 1;
         for (AstNode* argument = c->argument; argument; argument = argument->next) {
@@ -1460,7 +1460,7 @@ static void plan_view(PlanCtx* outer, AstViewNode* view) {
 // them into a loop. Tail position propagates exactly where lowering's
 // `in_tail_position` does: the body itself, the last value of a content block,
 // both arms of an `if`, and a `return` operand.
-static bool plan_tail_call_keeps_var_homes(AstCallNode* call, AstFuncNode* fn) {
+static bool plan_tail_call_keeps_var_homes(LambdaAstCallNode* call, AstFuncNode* fn) {
     TypeFunc* signature = lambda_type_func_signature(fn->type);
     if (!ast_type_func_has_var_parameter(signature)) return true;
     NameEntry* entries[LAMBDA_MAX_FUNCTION_ARGS] = {};
@@ -1485,7 +1485,7 @@ static void plan_mark_tail_calls(AstNode* node, AstFuncNode* fn) {
     if (!node) return;
     switch (node->node_type) {
     case AST_NODE_CALL_EXPR: {
-        AstCallNode* call = (AstCallNode*)node;
+        LambdaAstCallNode* call = (LambdaAstCallNode*)node;
         // A propagating call (`f(...)^`) still has to inspect its result, so it
         // is not a tail position even though it is syntactically last.
         // a colour-guarded call keeps its entry so the check runs (S12.1.4v2)
@@ -1683,11 +1683,11 @@ static void plan_walk(AstNode* node, void* ctx) {
     if (!node || pc->failed) return;
     switch (node->node_type) {
     case AST_NODE_IDENT:
-        plan_link_capture_identifier(pc, (AstIdentNode*)node);
+        plan_link_capture_identifier(pc, (LambdaAstIdentNode*)node);
         break;
     case AST_NODE_CALL_EXPR:
     case AST_NODE_NEW_EXPR:
-        plan_link_call_shape(pc->script->pool, (AstCallNode*)node);
+        plan_link_call_shape(pc->script->pool, (LambdaAstCallNode*)node);
         break;
     case AST_NODE_FUNC:
     case AST_NODE_FUNC_EXPR:
@@ -1712,12 +1712,12 @@ static void plan_walk(AstNode* node, void* ctx) {
         break;
     }
     case AST_NODE_MEMBER_EXPR: {
-        AstFieldNode* access = (AstFieldNode*)node;
+        LambdaAstFieldNode* access = (LambdaAstFieldNode*)node;
         TypeMap* shape = (TypeMap*)lambda_type_nonnull_map_contract(
             access->object ? access->object->type : NULL);
         if (shape && shape->is_trusted_contract && !access->computed && access->field &&
                 access->field->node_type == AST_NODE_IDENT) {
-            String* name = ((AstIdentNode*)access->field)->name;
+            String* name = ((LambdaAstIdentNode*)access->field)->name;
             ShapeEntry* field = name ? typemap_shape_lookup_last(shape, name->chars, (int)name->len) : NULL;
             if (field && field->name && !(field->flags & JSPD_IS_ACCESSOR)) {
                 access->interp_field = (InterpFieldPlan*)pool_calloc(pc->script->pool,
@@ -1731,10 +1731,10 @@ static void plan_walk(AstNode* node, void* ctx) {
         break;
     }
     case AST_NODE_INDEX_EXPR: {
-        AstFieldNode* access = (AstFieldNode*)node;
+        LambdaAstFieldNode* access = (LambdaAstFieldNode*)node;
         AstNode* object = ast_unwrap_primary(access->object);
         NameEntry* entry = object && object->node_type == AST_NODE_IDENT
-            ? ((AstIdentNode*)object)->entry : NULL;
+            ? ((LambdaAstIdentNode*)object)->entry : NULL;
         InterpBoundaryPlan* boundary = entry ? entry->interp_boundary : NULL;
         ArrayNumElemType element;
         if (boundary && boundary->array.rank == 1 && access->field &&
@@ -1751,7 +1751,7 @@ static void plan_walk(AstNode* node, void* ctx) {
         break;
     }
     case AST_NODE_BINARY: {
-        AstBinaryNode* binary = (AstBinaryNode*)node;
+        LambdaAstBinaryNode* binary = (LambdaAstBinaryNode*)node;
         binary->interp_int_arithmetic =
             (binary->op == OPERATOR_ADD || binary->op == OPERATOR_SUB ||
              binary->op == OPERATOR_MUL) &&
@@ -1980,7 +1980,7 @@ static bool interp_satellite_match_pattern_supported(AstNode* pattern) {
     case AST_NODE_LITERAL:
         return true;
     case AST_NODE_BINARY_TYPE: {
-        AstBinaryNode* bi = (AstBinaryNode*)pattern;
+        LambdaAstBinaryNode* bi = (LambdaAstBinaryNode*)pattern;
         return bi->op == OPERATOR_UNION &&
             interp_satellite_match_pattern_supported(bi->left) &&
             interp_satellite_match_pattern_supported(bi->right);
@@ -2045,14 +2045,14 @@ static void interp_scan_satellite_node_kind(AstNode* node, SatelliteScanCtx* sc)
     case AST_NODE_BINARY:
         // `is` on a constrained type calls its predicate function (S11.4.11),
         // which a satellite image does not carry, as a constrained arm above
-        if (((AstBinaryNode*)node)->op == OPERATOR_IS &&
-                ast_constrained_type(((AstBinaryNode*)node)->right)) {
+        if (((LambdaAstBinaryNode*)node)->op == OPERATOR_IS &&
+                ast_constrained_type(((LambdaAstBinaryNode*)node)->right)) {
             sc->ok = false;
             return;
         }
         break;
     case AST_NODE_CALL_EXPR: {
-        AstCallNode* call = (AstCallNode*)node;
+        LambdaAstCallNode* call = (LambdaAstCallNode*)node;
         AstNode* callee = ast_unwrap_primary(call->function);
         AstFuncNode* direct = ast_direct_call_function(call);
         if (callee && callee->node_type != AST_NODE_SYS_FUNC && !direct) {
@@ -2073,7 +2073,7 @@ static void interp_scan_satellite_node_kind(AstNode* node, SatelliteScanCtx* sc)
         break;
     }
     case AST_NODE_IDENT: {
-        AstIdentNode* ident = (AstIdentNode*)node;
+        LambdaAstIdentNode* ident = (LambdaAstIdentNode*)node;
         NameEntry* entry = ident->entry;
         if (!entry) break;
         if (entry->node && entry->node->node_type == AST_NODE_KEY_EXPR) {

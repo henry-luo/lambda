@@ -117,8 +117,13 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
         break;
     case AST_NODE_BINARY: {
         AstBinaryNode* bnode = (AstBinaryNode*)node;
-        log_debug("[binary expr %.*s.%d:%s]", (int)bnode->op_str.length, bnode->op_str.str,
-            bnode->op, type_name);
+        if (script->profile == &lambda_profile) {
+            [[maybe_unused]] auto* lambda_node = (LambdaAstBinaryNode*)bnode;
+            log_debug("[binary expr %.*s.%d:%s]", (int)lambda_node->op_str.length,
+                lambda_node->op_str.str, bnode->op, type_name);
+        } else {
+            log_debug("[binary expr %d:%s]", bnode->op, type_name);
+        }
         print_ast_node(script, bnode->left, indent + 1);
         print_ast_node(script, bnode->right, indent + 1);
         break;
@@ -380,7 +385,7 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
         break;
     }
     case AST_NODE_BINARY_TYPE: {
-        AstBinaryNode* bt_node = (AstBinaryNode*)node;
+        auto* bt_node = (LambdaAstBinaryNode*)node;
         log_debug("[binary type %.*s.%d:%s]", (int)bt_node->op_str.length, bt_node->op_str.str,
             bt_node->op, type_name);
         print_ast_node(script, bt_node->left, indent + 1);

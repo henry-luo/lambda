@@ -39,7 +39,7 @@ static InputScriptRequest js_common_ast_cache_request(const char* source,
     request.resolution_base = identity;
     request.backend = "ast";
     request.execution_mode = "ast-template";
-    request.ast_abi = 3; // scopes carry immutable activation offsets and scratch bounds
+    request.ast_abi = 4; // compact shared AST node and binding layouts
     // A module grammar creates a different global scope graph even when the
     // source text contains no import or export declaration.
     request.module_mode = module_parse;
@@ -508,8 +508,16 @@ JsTranspiler* js_transpiler_create(Runtime* runtime) {
     return tp;
 }
 
+void js_transpiler_release_reduction_scratch(JsTranspiler* tp) {
+    mem_free(tp->reduction_values);
+    mem_free(tp->reduction_children);
+    tp->reduction_values = NULL;
+    tp->reduction_children = NULL;
+}
+
 static void js_transpiler_destroy_tail(JsTranspiler* tp) {
     if (!tp) return;
+    js_transpiler_release_reduction_scratch(tp);
     if (tp->error_buf) {
         strbuf_free(tp->error_buf);
     }

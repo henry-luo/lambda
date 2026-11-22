@@ -81,6 +81,50 @@ The measurement sums `direct_bytes` for the main document's tag, deducting child
 
 The local per-page release traces are in `temp/block-prop-impl/new.json`.
 
+## 6. JavaScript-enabled release memory census
+
+On 2026-11-22, the hosted arm64 release completed paired JS-off and JS-on runs on the same 224 pages. Both modes used separate processes for each page, a 1200 × 800 viewport, local resources and a 250 ms virtual post-load settling window. The sample follows startup and layout and precedes view serialization and teardown. JS-enabled documents retained their realms through capture. The benchmark exercised startup scripts and locally available dependencies. No input interactions ran.
+
+The build used Lambda `9cc3be8e57`, Radiant `161ad05`, Clang `-O3` and full LTO. Both modes used the same executable with an isolated copy of Input `b35af04`, which supplied the validation-scope API required by this host. The JS-off column is the hosted control for this experiment. Section 5 used the standalone native layout probe.
+
+### Process and document memory
+
+| Process metric across 224 page pairs | JS off | JS on |
+|---|---:|---:|
+| Median physical footprint | 19.77 MiB | 76.24 MiB |
+| p95 physical footprint | 25.92 MiB | 117.66 MiB |
+| Median RSS | 36.73 MiB | 101.36 MiB |
+| p95 RSS | 44.03 MiB | 142.16 MiB |
+| p95 high-water RSS at capture | 44.03 MiB | 143.47 MiB |
+
+With JS enabled, **174 pages** retained a live DOM script realm. Their median paired footprint increase was **63.52 MiB**. The other 50 pages had a median paired change of **−0.02 MiB**. In three pairs on a separate minimal page, enabling one DOM text assignment increased median paired footprint by **29.55 MiB**. Five corpus pages emitted a recognized JavaScript error and still produced a layout. The diagnostic pass recorded 45 script tasks with load failures and 12 skipped by the remote-resource policy.
+
+| Allocator totals across 224 independent page runs | JS off | JS on | Increase |
+|---|---:|---:|---:|
+| Main-document tagged bytes | 395.81 MiB | 529.73 MiB | 133.92 MiB |
+| Root allocator used bytes | 951.00 MiB | 4,473.68 MiB | 3,522.69 MiB |
+| Root allocator reserved bytes | 1,992.86 MiB | 10,248.00 MiB | 8,255.15 MiB |
+
+The main-document increase came primarily from the document pool (+49.83 MiB), the view property pool (+31.23 MiB), canonical specified styles (+27.24 MiB), the page Input arena (+18.47 MiB) and the node arena (+4.75 MiB). It includes DOM and style changes from scripts and differences due to HTML parsing with scripting enabled.
+
+### Scripting memory by allocator
+
+| Largest increases in root allocator used bytes across 224 pairs | Increase |
+|---|---:|
+| Retained JavaScript AST pools (`js.ast`) | 1,219.55 MiB |
+| Input arenas outside the main document, including runtime parser backing | 709.43 MiB |
+| Garbage-collected heaps (`eval.heap`) | 634.02 MiB |
+| Evaluator runtime pools (`eval.runtime.pool`) | 539.11 MiB |
+| Lambda direct-parser AST pools activated by the scripting path | 254.00 MiB |
+
+These five categories explain about **95%** of the increase in registered used bytes. Retained JavaScript programs own their AST storage under D8.4.1. The Input arena label covers multiple parser uses and gives no language breakdown. JS-on GC heaps accounted for **638.25 MiB used** and **2,702.00 MiB reserved** across independent runs. Used bytes, reserved capacity and OS residency are separate measurements (D5.2.4). [JavaScript AST pools](../../lambda/js/js_scope.cpp) · [Runtime pool and heap creation](../../lambda/runtime/lambda-mem.cpp)
+
+A separate `MEMTRACK_MODE=STATS` pass recorded **1,566.53 MiB** in additional requested bytes. The largest increases were `system` (+1,154.82 MiB), `js-runtime` (+132.82 MiB), `cache-other` (+114.93 MiB), `container` (+99.62 MiB) and `eval` (+27.30 MiB). `system` groups general runtime allocations, including backing chunks and source copies. `js-runtime` identifies one category of native allocations. Tracked backing allocations can also appear in the allocator registry.
+
+Darwin VM tags attributed **55%** of the added dirtied bytes to `MALLOC_SMALL` (+5,951.16 MiB), **42%** to untagged regions (+4,531.39 MiB) and **2%** to stacks (+244.36 MiB). These regions overlap the allocator accounting. Resident executable mappings grew by **171.72 MiB** in aggregate, with JIT pages grouped among other executable mappings.
+
+The local benchmark report, per-page CSV, and raw allocator and VM snapshots are under `temp/js-memory-benchmark/`.
+
 ## Appendix A. Code entry points
 
 | Step | Entry point |

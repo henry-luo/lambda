@@ -14,14 +14,14 @@ static inline bool mir_place_copy_snapshot_required(const NameEntry* binding) {
 static inline bool mir_is_direct_binding(AstNode* node, const NameEntry* binding) {
     AstNode* value = ast_unwrap_primary(node);
     return value && value->node_type == AST_NODE_IDENT &&
-        ((AstIdentNode*)value)->entry == binding;
+        ((LambdaAstIdentNode*)value)->entry == binding;
 }
 
 struct MirBindingUseCount { const NameEntry* binding; int count; };
 
 static inline bool mir_count_binding_uses(AstNode* node, void* data) {
     MirBindingUseCount* uses = (MirBindingUseCount*)data;
-    if (node->node_type == AST_NODE_IDENT && ((AstIdentNode*)node)->entry == uses->binding)
+    if (node->node_type == AST_NODE_IDENT && ((LambdaAstIdentNode*)node)->entry == uses->binding)
         uses->count++;
     return true;
 }
@@ -89,8 +89,8 @@ static inline bool mir_confined_scalar_snapshot(const AstIndex* index, AstFuncNo
         if (parent == binding->node) continue;
         AstNode* key = NULL;
         if (parent && parent->node_type == AST_NODE_INDEX_EXPR &&
-                ast_unwrap_primary(((AstFieldNode*)parent)->object) == original) {
-            key = ((AstFieldNode*)parent)->field;
+                ast_unwrap_primary(((LambdaAstFieldNode*)parent)->object) == original) {
+            key = ((LambdaAstFieldNode*)parent)->field;
         } else if (parent && parent->node_type == AST_NODE_INDEX_ASSIGN_STAM &&
                 ast_unwrap_primary(((AstCompoundAssignNode*)parent)->object) == original) {
             key = ((AstCompoundAssignNode*)parent)->key;
@@ -99,7 +99,7 @@ static inline bool mir_confined_scalar_snapshot(const AstIndex* index, AstFuncNo
             if (scalar_key(key, context)) continue;
         }
         if (!parent || parent->node_type != AST_NODE_CALL_EXPR) return false;
-        AstCallNode* call = (AstCallNode*)parent;
+        LambdaAstCallNode* call = (LambdaAstCallNode*)parent;
         AstNode* callee = ast_unwrap_primary(call->function);
         if (callee && callee->node_type == AST_NODE_SYS_FUNC &&
                 ((AstSysFuncNode*)callee)->fn_info &&

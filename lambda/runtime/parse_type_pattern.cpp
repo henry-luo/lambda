@@ -208,14 +208,14 @@ static const int PATTERN_MAX_COUNT = 1000;
 // numeric and bool literals here always carry value-bearing types instead.
 AstNode* new_node(Lexer* lx, AstNodeType kind, size_t size, LambdaSyntaxForm form) {
     AstNode* node = alloc_ast_node_from_span(lx->tp, kind, lx->origin, size);
-    node->syntax_form = form;
+    lambda_ast_build_state(node).syntax_form = form;
     return node;
 }
 
 AstNode* make_binary_node(Lexer* lx, AstNode* left, AstNode* right, Operator op,
         const char* op_text, size_t op_len, LambdaSyntaxForm form) {
-    AstBinaryNode* ast_node = (AstBinaryNode*)new_node(lx, AST_NODE_BINARY_TYPE,
-        sizeof(AstBinaryNode), form);
+    LambdaAstBinaryNode* ast_node = (LambdaAstBinaryNode*)new_node(lx, AST_NODE_BINARY_TYPE,
+        sizeof(LambdaAstBinaryNode), form);
     ast_node->op = op;
     ast_node->op_str = {.str = op_text, .length = op_len};
     ast_node->left = left;
@@ -350,8 +350,8 @@ AstNode* parse_number_literal(Lexer* lx) {
     };
     AstNode* node = alloc_ast_node_from_span(lx->tp, AST_NODE_PRIMARY, span,
         sizeof(AstPrimaryNode));
-    node->syntax_form = LSF_TP_LITERAL;
-    node->syntax_aux = kind;
+    lambda_ast_build_state(node).syntax_form = LSF_TP_LITERAL;
+    lambda_ast_build_state(node).syntax_aux = kind;
     return node;
 }
 
@@ -415,8 +415,8 @@ AstNode* parse_island_primary(Lexer* lx) {
     if (!w.length) { fail(lx, "expected a pattern"); return NULL; }
     // otherwise a reference to a named pattern; the regex compiler follows the
     // NameEntry to the definition's AST
-    AstIdentNode* ident = (AstIdentNode*)new_node(lx, AST_NODE_IDENT,
-        sizeof(AstIdentNode), LSF_TP_PATTERN_REF);
+    LambdaAstIdentNode* ident = (LambdaAstIdentNode*)new_node(lx, AST_NODE_IDENT,
+        sizeof(LambdaAstIdentNode), LSF_TP_PATTERN_REF);
     ident->name = name_pool_create_strview(lx->tp->name_pool, w);
     return (AstNode*)ident;
 }
@@ -627,7 +627,7 @@ AstNamedNode* parse_field(Lexer* lx) {
         sizeof(AstNamedNode), LSF_TP_FIELD);
     named->name = name_pool_create_strview(lx->tp->name_pool, field);
     named->as = field_type;
-    named->syntax_flags = field_optional ? TP_FLAG_FIELD_OPTIONAL : 0u;
+    lambda_ast_build_state(named).syntax_flags = field_optional ? TP_FLAG_FIELD_OPTIONAL : 0u;
     return named;
 }
 
@@ -719,7 +719,7 @@ AstNode* parse_element_type(Lexer* lx) {
             sizeof(AstNamedNode), LSF_TP_FIELD);
         named->name = name_pool_create_strview(lx->tp->name_pool, field);
         named->as = field_type;
-        named->syntax_flags = field_optional ? TP_FLAG_FIELD_OPTIONAL : 0u;
+        lambda_ast_build_state(named).syntax_flags = field_optional ? TP_FLAG_FIELD_OPTIONAL : 0u;
         named->key = default_value;
         if (!prev_item) { ast_node->item = (AstNode*)named; }
         else { prev_item->next = (AstNode*)named; }
@@ -789,7 +789,7 @@ AstNode* parse_fn_type(Lexer* lx, bool is_proc) {
     TypeFunc* fn_type = (TypeFunc*)alloc_type(lx->tp->pool, LMD_TYPE_FUNC, sizeof(TypeFunc));
     fn_type->is_proc = is_proc;
     ast_node->type = (Type*)fn_type;
-    if (is_proc) ast_node->syntax_flags |= TP_FLAG_FN_PROC;
+    if (is_proc) lambda_ast_build_state(ast_node).syntax_flags |= TP_FLAG_FN_PROC;
 
     TypeParam* prev_param = NULL;
     bool has_signature = false;
@@ -837,7 +837,7 @@ AstNode* parse_fn_type(Lexer* lx, bool is_proc) {
         if (!returned) { return NULL; }
         ast_node->body = returned;
         if (eat(lx, '^')) {
-            ast_node->syntax_flags |= TP_FLAG_RAISES;
+            lambda_ast_build_state(ast_node).syntax_flags |= TP_FLAG_RAISES;
             skip_space(lx);
             StrView following = peek_word(lx);
             if ((following.length && !word_is(following, "as")) || at(lx, '(')) {
@@ -913,14 +913,14 @@ AstNode* parse_primary(Lexer* lx) {
     if (base_index >= 0) {
         AstTypeNode* node = (AstTypeNode*)new_node(lx, AST_NODE_TYPE,
             sizeof(AstTypeNode), LSF_TP_BASE);
-        node->syntax_aux = (uint16_t)base_index;
+        lambda_ast_build_state(node).syntax_aux = (uint16_t)base_index;
         return (AstNode*)node;
     }
     // a name in type position is a reference to a declared type, an IDENT
     // like a resolved value-position name so the transpiler's alias handling
     // works; a binder reference becomes an AST_NODE_TYPE when it resolves
-    AstIdentNode* ident = (AstIdentNode*)new_node(lx, AST_NODE_IDENT,
-        sizeof(AstIdentNode), LSF_TP_NAME);
+    LambdaAstIdentNode* ident = (LambdaAstIdentNode*)new_node(lx, AST_NODE_IDENT,
+        sizeof(LambdaAstIdentNode), LSF_TP_NAME);
     ident->name = name_pool_create_strview(lx->tp->name_pool, w);
     return (AstNode*)ident;
 }
@@ -1094,8 +1094,8 @@ AstNode* parse_unary(Lexer* lx) {
         lx->p += w.length;
         AstNode* upper = parse_primary(lx);
         if (!upper) { return NULL; }
-        AstBinaryNode* ast_node = (AstBinaryNode*)new_node(lx, AST_NODE_BINARY,
-            sizeof(AstBinaryNode), LSF_TP_RANGE);
+        LambdaAstBinaryNode* ast_node = (LambdaAstBinaryNode*)new_node(lx, AST_NODE_BINARY,
+            sizeof(LambdaAstBinaryNode), LSF_TP_RANGE);
         ast_node->op = OPERATOR_TO;
         ast_node->op_str = {.str = "to", .length = 2};
         ast_node->left = primary;
@@ -1163,7 +1163,7 @@ AstNode* parse_binder(Lexer* lx, bool allow_error_suffix) {
     if (allow_error_suffix && eat(lx, '^')) {
         // S7.4.2v3: the same broad union shorthand in every type position.
         AstNode* error = new_node(lx, AST_NODE_TYPE, sizeof(AstTypeNode), LSF_TP_BASE);
-        error->syntax_aux = lambda_base_type_index((StrView){"error", 5});
+        lambda_ast_build_state(error).syntax_aux = lambda_base_type_index((StrView){"error", 5});
         base = make_binary_node(lx, base, error, OPERATOR_UNION, "|", 1, LSF_TP_BINARY);
         StrView named_error = peek_word(lx);
         if ((named_error.length && !word_is(named_error, "as")) || at(lx, '(')) {
@@ -1285,7 +1285,7 @@ static bool record_aliased_bound_type(Type* dependency, void* context) {
     return true;
 }
 
-void resolve_type_name(Transpiler* tp, AstIdentNode* ident) {
+void resolve_type_name(Transpiler* tp, LambdaAstIdentNode* ident) {
     StrView w = {ident->name->chars, ident->name->len};
     NameEntry* entry = lookup_name(tp, w);
     if (entry && entry->is_binder && entry->binder) {
@@ -1296,10 +1296,10 @@ void resolve_type_name(Transpiler* tp, AstIdentNode* ident) {
         record_bound_type_use(tp, ref, entry);
         // a binder reference is a type node, not a name: morph in place so
         // the parent keeps its child pointer
-        static_assert(sizeof(AstTypeNode) <= sizeof(AstIdentNode),
+        static_assert(sizeof(AstTypeNode) <= sizeof(LambdaAstIdentNode),
             "a type-name node must be able to hold its bound-reference form");
         memset((char*)ident + sizeof(AstNode), 0,
-            sizeof(AstIdentNode) - sizeof(AstNode));
+            sizeof(LambdaAstIdentNode) - sizeof(AstNode));
         ident->node_type = AST_NODE_TYPE;
         ident->type = (Type*)ref;
         return;
@@ -1366,7 +1366,7 @@ void resolve_field_shape(Transpiler* tp, AstNode* first_field,
         AstNamedNode* named = (AstNamedNode*)item;
         ShapeEntry* entry = append_shape_entry_typed(tp, named->name, named->type,
             shape, &prev_entry, byte_offset);
-        entry->is_optional = (named->syntax_flags & TP_FLAG_FIELD_OPTIONAL) != 0;
+        entry->is_optional = (lambda_ast_build_state(named).syntax_flags & TP_FLAG_FIELD_OPTIONAL) != 0;
         (*length)++;
         // Stride by the field's STORAGE class, not a flat pointer width.
         // A field whose contract does not name one concrete carrier
@@ -1411,7 +1411,7 @@ void resolve_fn_type(Transpiler* tp, AstFuncNode* ast_node) {
         // to the wrapped type: `mk(2)(3)` typed `fn (y: int) int`, so a map
         // literal laid out an int as a function pointer.
         Type* contract = unwrap_simple_type_type(returned->type);
-        if (ast_node->syntax_flags & TP_FLAG_RAISES) {
+        if (lambda_ast_build_state(ast_node).syntax_flags & TP_FLAG_RAISES) {
             contract = lambda_type_union_normalized(tp->pool, contract, &TYPE_ERROR);
         }
         set_fn_return_contract(tp, fn_type, contract, true);
@@ -1452,7 +1452,7 @@ void resolve_occurrence(Transpiler* tp, AstUnaryNode* ast_node) {
 
 // Declared in type_build.hpp; outside the anonymous namespace so build_ast.cpp
 // reaches it, while register_wrapped stays file-local.
-bool reduce_binary_type_node(Transpiler* tp, AstBinaryNode* node, Type* left, Type* right) {
+bool reduce_binary_type_node(Transpiler* tp, LambdaAstBinaryNode* node, Type* left, Type* right) {
     Type* reduced = lambda_type_operation_reduced(left, right, node->op);
     if (!reduced) return false;
     if (reduced == &TYPE_NONE) {
@@ -1491,9 +1491,9 @@ void fill_sequence_pattern_slots(Transpiler* tp, TypeList* type,
 
 void resolve_type_pattern(Transpiler* tp, AstNode* node) {
     if (!node) return;
-    uint8_t form = node->syntax_form;
+    uint8_t form = lambda_ast_build_state(node).syntax_form;
     if (!lambda_syntax_form_is_type_pattern(form) && form != LSF_BINDER) return;
-    node->syntax_form = LSF_NONE;
+    lambda_ast_build_state(node).syntax_form = LSF_NONE;
     switch (form) {
     case LSF_BINDER:
         resolve_type_pattern(tp, ((AstNamedNode*)node)->as);
@@ -1506,16 +1506,16 @@ void resolve_type_pattern(Transpiler* tp, AstNode* node) {
         break;
     case LSF_TP_LITERAL:
         node->type = build_type_literal_from_span(tp, node->source_span,
-            (LambdaAstLiteralKind)node->syntax_aux);
+            (LambdaAstLiteralKind)lambda_ast_build_state(node).syntax_aux);
         break;
     case LSF_TP_ANY:
         node->type = wrap_type(tp, set_type_any(tp, ANY_EXPLICIT));
         break;
     case LSF_TP_BASE:
-        node->type = lambda_base_type_from_index(tp, node->syntax_aux);
+        node->type = lambda_base_type_from_index(tp, lambda_ast_build_state(node).syntax_aux);
         break;
     case LSF_TP_NAME:
-        resolve_type_name(tp, (AstIdentNode*)node);
+        resolve_type_name(tp, (LambdaAstIdentNode*)node);
         break;
     case LSF_TP_CHAR_CLASS: {
         AstPatternCharClassNode* cc = (AstPatternCharClassNode*)node;
@@ -1523,7 +1523,7 @@ void resolve_type_pattern(Transpiler* tp, AstNode* node) {
         break;
     }
     case LSF_TP_PATTERN_REF: {
-        AstIdentNode* ident = (AstIdentNode*)node;
+        LambdaAstIdentNode* ident = (LambdaAstIdentNode*)node;
         NameEntry* entry = lookup_name(tp, (StrView){ident->name->chars, ident->name->len});
         // S11.4.12: a later top-level pattern resolves first, so patterns
         // compile in dependency order
@@ -1628,7 +1628,7 @@ void resolve_type_pattern(Transpiler* tp, AstNode* node) {
         break;
     }
     case LSF_TP_BINARY: {
-        AstBinaryNode* binary = (AstBinaryNode*)node;
+        LambdaAstBinaryNode* binary = (LambdaAstBinaryNode*)node;
         resolve_type_pattern(tp, binary->left);
         resolve_type_pattern(tp, binary->right);
         if (reduce_binary_type_node(tp, binary, binary->left->type, binary->right->type)) break;
@@ -1640,14 +1640,14 @@ void resolve_type_pattern(Transpiler* tp, AstNode* node) {
         break;
     }
     case LSF_TP_REGISTERED_BINARY: {
-        AstBinaryNode* binary = (AstBinaryNode*)node;
+        LambdaAstBinaryNode* binary = (LambdaAstBinaryNode*)node;
         resolve_type_pattern(tp, binary->left);
         resolve_type_pattern(tp, binary->right);
         register_binary_type(tp, binary);
         break;
     }
     case LSF_TP_RANGE: {
-        AstBinaryNode* ast_node = (AstBinaryNode*)node;
+        LambdaAstBinaryNode* ast_node = (LambdaAstBinaryNode*)node;
         resolve_type_pattern(tp, ast_node->left);
         resolve_type_pattern(tp, ast_node->right);
         // D4.1.1: a range type shares the LMD_TYPE_TYPE tag and is told apart

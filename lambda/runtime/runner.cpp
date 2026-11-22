@@ -1502,7 +1502,7 @@ static InputScriptRequest lambda_script_cache_request(Runtime* runtime,
         : tier == LAMBDA_TIER_INTERP
             ? (is_import ? "interp-module" : "interp-script")
             : (is_import ? "module" : "script");
-    request.ast_abi = 1;
+    request.ast_abi = 2;
     request.compiler_abi = 1;
     request.optimize_level = runtime->optimize_level;
     request.module_mode = is_import;
