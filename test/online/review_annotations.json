@@ -572,6 +572,12 @@
       "url": "https://www.pelagohealth.com/",
       "manual_major_remaining": "Hero media, heading and actions are present. The large browser consent dialog remains absent; retain the major review despite the lower coarse score.",
       "evidence": "comparison/repairs.html#round-136"
+    },
+    {
+      "label": "saas_landing_173",
+      "url": "https://mode.com/",
+      "manual_major_remaining": "The consent dialog and hero heading now render, but the main navigation remains unstyled and large hero photographs and the query illustration remain absent.",
+      "evidence": "comparison/repairs.html#round-149"
     }
   ]
 }

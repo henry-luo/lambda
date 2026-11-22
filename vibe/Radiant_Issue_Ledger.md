@@ -20,6 +20,73 @@ observations still require re-verification. Add new Radiant issues here.
 
 ## Open issues
 
+<a id="ri-209"></a>
+
+- [RI-209 — Window load precedes required image/background completion](<Radiant_Issue_Ledger (fixed).md#ri-209>).
+
+<a id="ri-208"></a>
+
+### RI-208 — Nested column flex text can undersize a ratio-dependent cross minimum
+
+**Open observation, 2026-11-22; cause unconfirmed.** A column flex container
+inside a row flex item, with breakable text, aspect-ratio:2 and max-width:40px,
+produces 40x20px under frozen173 versus 40x60px in Chromium. This differs from
+the outer-column cross-size defect repaired as RI-207. The observation is
+outside that repair's qualified scope; no minimum or dimension is overridden.
+Ownership follows **D9.1.1v4 / D9.1.3v2 / D9.5.6v2**. Evidence:
+`temp/online-visual-round173/text-probes/text-row-innercolumn.html`,
+`text-browser-expanded.json` and `text-native.json`. No online page clearance
+or complete aspect-ratio conformance is established.
+
+<a id="ri-207"></a>
+
+- [RI-207 — Column flex aspect-ratio items undersize their automatic cross axis](<Radiant_Issue_Ledger (fixed).md#ri-207>).
+
+<a id="ri-206"></a>
+
+- [RI-206 — Single-line flex ratio minima use wrapped text height](<Radiant_Issue_Ledger (fixed).md#ri-206>).
+
+<a id="ri-205"></a>
+
+- [RI-205 — Release captures accept rejected HTTP document bodies](<Radiant_Issue_Ledger (fixed).md#ri-205>).
+
+<a id="ri-204"></a>
+
+- [RI-204 — Parsed eager images wait behind stylesheet completion](<Radiant_Issue_Ledger (fixed).md#ri-204>).
+
+<a id="ri-203"></a>
+
+- [RI-203 — Scalar height queries lose valid results on unrelated layout passes](<Radiant_Issue_Ledger (fixed).md#ri-203>).
+
+<a id="ri-202"></a>
+
+- [RI-202 — CSSOM dimensions expose the border box for content-box elements](<Radiant_Issue_Ledger (fixed).md#ri-202>).
+
+<a id="ri-201"></a>
+
+- [RI-201 — Relational dependency checks rebuild unrelated measurement text](<Radiant_Issue_Ledger (fixed).md#ri-201>).
+
+<a id="ri-200"></a>
+
+### RI-200 — Legacy frameset documents have no frame embedding/layout path — **FEATURE GAP**
+
+**2026-11-22.** Native document rendering belongs to Radiant under
+**D9.1.1v4 / D9.1.3v2 / D9.5.6v2**. Eclipse Help is a real HTML4 frameset:
+its outer rows are 55,24,* and its three frame children load the banner,
+toolbar and navigation/content documents. Chromium displays those panes;
+the retained native capture is blank. The source is preserved at
+temp/online-visual-round2/documents/eclipse_help.html and the current triage
+contact is temp/online-visual-round165/triage-contact.png.
+
+The existing frameset branch in layout_block.cpp supplies viewport dimensions
+only. The native layout/render code has no frame-child embedding path; its
+iframe support does not provide frameset track sizing or load frame sources.
+This is a legacy HTML feature gap, not evidence that an ordinary CSS box
+collapsed. A complete implementation needs nested row/column track layout,
+frame document ownership and embedding, and is deferred under the online
+review's instruction to avoid major new features. Eclipse remains high;
+no synthetic pane, document rewrite or visual clearance is introduced.
+
 <a id="ri-199"></a>
 
 ### RI-199 — FIXED

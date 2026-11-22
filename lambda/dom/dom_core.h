@@ -441,6 +441,7 @@ Item dom_cssom_stylesheet_rule_at(Item, Item);
 // expanded by the publication trampolines and the arity check, so it must be
 // visible wherever dom_api.def is.
 Item js_range_clone_contents(Item);
+Item dom_range_create_contextual_fragment(Item, Item);
 Item js_range_clone_range(Item);
 Item js_range_compare_boundary_points(Item, Item, Item);
 Item js_range_compare_point(Item, Item, Item);

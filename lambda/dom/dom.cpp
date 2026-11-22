@@ -334,7 +334,7 @@ static String* dom_fragment_text(Item item) {
     return (s && s->len > 0) ? s : nullptr;
 }
 
-enum class DomFragmentScriptMode { inert, parser_inserted };
+enum class DomFragmentScriptMode { inert, parser_inserted, dynamic };
 
 static void dom_set_fragment_script_state(DomElement* root, DomFragmentScriptMode mode) {
     for (DomNode* node = root; node;) {
@@ -6222,12 +6222,11 @@ static void dom_collapse_selection_before_child_replace(DomElement* elem,
 
 
 
-// Parse `html_str` as a fragment in `elem`'s document and append the resulting
-// nodes to `target`. Shared by the innerHTML setter and dom_core_parse_fragment
-// (ES39 core `parse_fragment`): one parse loop, two callers.
+// Parse in the context's document without replacing its existing children.
 static bool dom_parse_markup_into(DomElement* target, const char* html_str,
                                   bool notify_mutation, DomElement* context = nullptr,
-                                  bool declarative = false) {
+                                  bool declarative = false,
+                                  DomFragmentScriptMode script_mode = DomFragmentScriptMode::inert) {
     DomDocument* doc = target ? target->doc : nullptr;
     if (!doc || !doc->input) return false;
     if (!context) context = target->shadow_host_element();
@@ -6240,7 +6239,7 @@ static bool dom_parse_markup_into(DomElement* target, const char* html_str,
     Element* body_elem = html5_fragment_get_body(parser);
     if (!body_elem) return false;
     for (int64_t i = 0; i < body_elem->length; i++) {
-        DomNode* child = dom_build_fragment_node(body_elem->items[i], doc, context);
+        DomNode* child = dom_build_fragment_node(body_elem->items[i], doc, context, script_mode);
         if (!child || !dom_parser_move_child(target, child)) continue;
         dom_post_insert(target, child, notify_mutation);
         dom_observers_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT,
@@ -6307,14 +6306,52 @@ Item dom_set_html_unsafe(Item receiver, Item markup, Item options, bool shadow) 
 // context node's document and returned as a detached fragment. The innerHTML
 // derivation (set_inner_html) is "remove children; parse_fragment; append",
 // and this is the parse step of it, on the same loop the setter uses.
-extern "C" Item dom_core_parse_fragment(Item context, Item markup) {
-    DomNode* ctx = (DomNode*)dom_unwrap_element(context);
+static Item dom_parse_fragment(Item context, Item markup, DomFragmentScriptMode script_mode) {
+    RootFrame roots(3);
+    Rooted<Item> owner(roots, context), source(roots, markup), result(roots, ItemNull);
+    DomNode* ctx = (DomNode*)dom_unwrap_element(owner.get());
     DomDocument* doc = ctx && ctx->is_element() ? ((DomElement*)ctx)->doc : nullptr;
-    if (!doc || get_type_id(markup) != LMD_TYPE_STRING) return ItemNull;
+    if (!doc || get_type_id(source.get()) != LMD_TYPE_STRING) return ItemNull;
     DomElement* fragment = dom_document_fragment_create(doc);
     if (!fragment) return ItemNull;
-    if (!dom_parse_markup_into(fragment, fn_to_cstr(markup), false, ctx->as_element())) return ItemNull;
-    return dom_wrap_element(fragment);
+    // element construction can reenter script and collect an unpublished fragment (D6.3.3).
+    result.set(dom_wrap_element(fragment));
+    {
+        DomScriptReactionScope script_reactions(doc);
+        if (!dom_parse_markup_into(fragment, fn_to_cstr(source.get()), false,
+                ctx->as_element(), false, script_mode)) return ItemNull;
+    }
+    return result.get();
+}
+
+extern "C" Item dom_core_parse_fragment(Item context, Item markup) {
+    return dom_parse_fragment(context, markup, DomFragmentScriptMode::inert);
+}
+
+static Item dom_parse_insertion_fragment(Item start, Item markup, DomFragmentScriptMode script_mode) {
+    RootFrame roots(3);
+    Rooted<Item> boundary(roots, start), source(roots, markup), context(roots, ItemNull);
+    DomNode* node = (DomNode*)dom_unwrap_element(boundary.get());
+    DomDocument* doc = dom_node_ancestor_document(node);
+    if (!doc) return ItemNull;
+    if (doc->xml_document)
+        return dom_raise_named("NotSupportedError", "XML fragment parsing is unsupported");
+    if (dom_is_element(boundary.get())) context.set(boundary.get());
+    else if (node->is_text() || node->node_type == DOM_NODE_COMMENT)
+        context.set(dom_parent_element_or_null(node));
+    DomElement* element = (DomElement*)dom_unwrap_element(context.get());
+    // Document/fragment starts and the HTML root use a fresh body, leaving the range untouched.
+    if (!element || dom_element_is_html_tag(element, MARKUP_NAME_HTML)) {
+        element = (DomElement*)dom_create_backed_element_bridge(doc, "body");
+        if (!element) return ItemNull;
+        context.set(dom_wrap_element(element));
+    }
+    return dom_parse_fragment(context.get(), source.get(), script_mode);
+}
+
+extern "C" Item dom_parse_contextual_fragment(Item start, Item markup) {
+    // contextual scripts are prepared on later insertion; HTML setters keep their inert mode.
+    return dom_parse_insertion_fragment(start, markup, DomFragmentScriptMode::dynamic);
 }
 
 static Item dom_replace_children(Item parent_item, Item* args, int argc);
@@ -7073,7 +7110,7 @@ extern "C" Item dom_document_active_element_bridge(void* doc_ptr) {
     return root ? dom_wrap_element(root) : ItemNull;
 }
 
-// The nine URL components that document, location and history all expose.
+// Location and history read the owning document's native URL record.
 // One accessor row instead of a repeated strcmp chain per surface.
 typedef const char* (*JsUrlComponentGet)(const Url*);
 typedef struct JsUrlComponent {
@@ -7123,6 +7160,14 @@ static bool js_url_component_item(const Url* url, const char* prop, Item* out) {
         return true;
     }
     return false;
+}
+
+Item dom_location_get_component(Item document, size_t index) {
+    DomDocument* doc = js_document_proxy_doc_from_item(document);
+    if (!doc || index >= dom_location_component_count()) return ItemError;
+    Item value = ItemNull;
+    return js_url_component_item(doc->url, k_url_components[index].name, &value)
+        ? value : ItemError;
 }
 
 static bool dom_form_named_getter_reserved_name(const char* prop);
@@ -7443,11 +7488,6 @@ static Item dom_document_get_property_for(DomDocument* doc_arg, Item prop_name) 
     if (prop_id == JS_DOM_PROP_DOCUMENT) {
         return doc_to_proxy_item(doc);
     }
-    {
-        Item url_component = ItemNull;
-        if (js_url_component_item(doc->url, prop, &url_component)) return url_component;
-    }
-
     // readyState — legacy defaults to "complete"; the Phase 4 post-DOM
     // script scheduler updates this during modeled lifecycle transitions.
     if (prop_id == JS_DOM_PROP_READY_STATE) {
@@ -13874,6 +13914,15 @@ static bool dom_insert_fragment_children_before(DomElement* parent,
                                                 bool notify_observers = true) {
     if (!parent || !fragment ||
         (ref_child && ref_child->parent != (DomNode*)parent)) return false;
+    RootFrame roots(4);
+    Rooted<Item> owner(roots, dom_wrap_element(parent)), source(roots, dom_wrap_element(fragment));
+    Rooted<Item> reference(roots, ref_child ? dom_wrap_element(ref_child) : ItemNull);
+    Rooted<Item> added(roots, ItemNull);
+    if (notify_observers) {
+        // snapshot actual children before backing edits empty the fragment (D6.3.3).
+        added.set(dom_observers_node_snapshot(fragment->first_child, true));
+        if (item_is_error(added.get())) return false;
+    }
     // backing edits can relink surviving wrappers; never follow the old sibling chain.
     while (DomNode* child = fragment->first_child) {
         if (!dom_prepare_cross_document_insertion(child, parent)) {
@@ -13897,8 +13946,10 @@ static bool dom_insert_fragment_children_before(DomElement* parent,
         }
         dom_post_insert((DomNode*)parent, child);
     }
-    if (notify_observers) dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT,
-        (DomNode*)parent, (DomNode*)parent);
+    if (notify_observers) {
+        dom_observers_children_replace_notify(parent, added.get(), ItemNull);
+        dom_mutation_notify();
+    }
     return true;
 }
 
@@ -14878,30 +14929,33 @@ extern "C" Item dom_insert_adjacent_element_bridge(void* elem_ptr, Item position
 extern "C" Item dom_insert_adjacent_html_bridge(void* elem_ptr, Item position_arg,
                                                    Item html_arg) {
     DomElement* elem = (DomElement*)elem_ptr;
-    if (!elem) return ItemNull;
-    const char* position = fn_to_cstr(position_arg);
-    const char* html_str = fn_to_cstr(html_arg);
-    if (!html_str || !elem->doc) return ItemNull;
+    if (!elem || !elem->doc) return ItemNull;
+    RootFrame roots(6);
+    Rooted<Item> position(roots, position_arg), markup(roots, html_arg);
+    Rooted<Item> owner(roots, dom_wrap_element(elem)), parent(roots, ItemNull);
+    Rooted<Item> fragment(roots, ItemNull), reference(roots, ItemNull);
+    position.set(js_to_string(position.get()));
+    JS_RETURN_IF_ERROR(position.get());
+    markup.set(js_to_string(markup.get()));
+    JS_RETURN_IF_ERROR(markup.get());
     DomElement* target_parent = nullptr;
     DomNode* ref_node = nullptr;
-    DomAdjacentSlot slot = dom_adjacent_slot(elem, position, &target_parent, &ref_node);
+    DomAdjacentSlot slot = dom_adjacent_slot(elem, fn_to_cstr(position.get()), &target_parent, &ref_node);
     if (slot == DOM_ADJACENT_INVALID) {
         return dom_raise_named("SyntaxError", "Invalid adjacent position");
     }
-    if (slot == DOM_ADJACENT_NO_PARENT) return ItemNull;
-    DomDocument* doc = elem->doc;
-    DomElement* fragment = dom_parse_html_fragment(doc, html_str, target_parent);
-    if (!fragment) return ItemNull;
-
-    while (fragment->first_child) {
-        DomNode* child = fragment->first_child;
-        fragment->remove_child(child);
-        if (ref_node)
-            ((DomNode*)target_parent)->insert_before(child, ref_node);
-        else
-            ((DomNode*)target_parent)->append_child(child);
-    }
-    return ItemNull;
+    if (slot == DOM_ADJACENT_NO_PARENT ||
+        (target_parent->doc && target_parent->doc->js.doc_node == target_parent))
+        return dom_raise_named("NoModificationAllowedError", "Adjacent HTML requires an element or fragment parent");
+    parent.set(dom_wrap_element(target_parent));
+    if (ref_node) reference.set(dom_wrap_element(ref_node));
+    fragment.set(dom_parse_insertion_fragment(parent.get(), markup.get(), DomFragmentScriptMode::inert));
+    JS_RETURN_IF_ERROR(fragment.get());
+    if (fragment.get().item == ITEM_NULL) return ItemNull;
+    // raw sibling links bypass backing edits, stylesheet activation, observers and custom-element reactions.
+    Item result = dom_insert_before_bridge(target_parent, fragment.get(), reference.get());
+    JS_RETURN_IF_ERROR(result);
+    return make_js_undefined();
 }
 
 static Item dom_insert_text_value_before_child(DomElement* parent, Item value,
@@ -14987,9 +15041,9 @@ extern "C" Item dom_append_variadic_bridge(void* elem_ptr, Item* args, int argc)
 
 static Item dom_replace_children(Item parent_item, Item* args, int argc) {
     RootSpan converted((size_t)argc);
-    RootFrame roots(5);
+    RootFrame roots(4);
     Rooted<Item> parent_root(roots, parent_item), fragment_root(roots, ItemNull);
-    Rooted<Item> added_root(roots, ItemNull), removed_root(roots, ItemNull), node_root(roots, ItemNull);
+    Rooted<Item> added_root(roots, ItemNull), removed_root(roots, ItemNull);
     Item status = dom_convert_node_arguments(args, argc, &converted);
     JS_RETURN_IF_ERROR(status);
     DomElement* parent = (DomElement*)dom_unwrap_element(parent_root.get());
@@ -15020,18 +15074,10 @@ static Item dom_replace_children(Item parent_item, Item* args, int argc) {
         }
     }
 
-    added_root.set(js_array_new(0));
-    removed_root.set(js_array_new(0));
     // snapshots pin removed wrappers through backing-tree edits and observer delivery (D6.3.3).
-    for (DomNode* child = is_fragment ? insertion->as_element()->first_child.get() : insertion;
-         child; child = is_fragment ? child->next_sibling.get() : nullptr) {
-        node_root.set(dom_wrap_element(child));
-        js_array_push(added_root.get(), node_root.get());
-    }
-    for (DomNode* child = parent->first_child; child; child = child->next_sibling) {
-        node_root.set(dom_wrap_element(child));
-        js_array_push(removed_root.get(), node_root.get());
-    }
+    added_root.set(dom_observers_node_snapshot(
+        is_fragment ? insertion->as_element()->first_child.get() : insertion, is_fragment));
+    removed_root.set(dom_observers_node_snapshot(parent->first_child, true));
     if (!is_fragment) {
         fragment_root.set(dom_create_document_fragment(parent->doc));
         if (fragment_root.get().item == ITEM_NULL) return ItemError;

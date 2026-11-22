@@ -869,3 +869,6 @@ DOM_RAW(frame_request_once_native, timing, uint64_t, (void* owner, const char* e
 DOM_OP(CORE, create_tree_walker_filtered, tree, 3, "fn(root: any, what: any, filter: any) -> any", dom_create_tree_walker_filtered_bridge, 0, "", none, "", "")
 
 DOM_OP(CORE, show_dialog, forms, 1, "pn(n: any) -> null", dom_core_show_dialog, DOM_F_MUTATES, "", none, "", "")
+
+// append Range parsing without moving the existing catalog slots (D9.5.4).
+DOM_OP(CORE, range_create_contextual_fragment, range, 2, "pn(r: any, markup: string) -> any", dom_range_create_contextual_fragment, DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")

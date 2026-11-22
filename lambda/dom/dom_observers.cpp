@@ -732,10 +732,11 @@ static void observer_queue_children_record(JsObserverState* observer,
     }
 }
 
-static Item observer_single_node_array(DomNode* node) {
-    RootFrame roots(2);
+extern "C" Item dom_observers_node_snapshot(void* first, bool siblings) {
+    RootFrame roots(3);
+    Rooted<Item> owner(roots, first ? dom_wrap_element(first) : ItemNull);
     Rooted<Item> nodes(roots, js_array_new(0)), wrapped(roots, ItemNull);
-    if (node) {
+    for (DomNode* node = (DomNode*)first; node; node = siblings ? node->next_sibling.get() : nullptr) {
         wrapped.set(dom_wrap_element(node));
         js_array_push(nodes.get(), wrapped.get());
     }
@@ -745,8 +746,8 @@ static Item observer_single_node_array(DomNode* node) {
 static void observer_queue_child_record(JsObserverState* observer,
         JsObserverTarget* registration, DomNode* parent, DomNode* added, DomNode* removed) {
     RootFrame roots(2);
-    Rooted<Item> added_root(roots, observer_single_node_array(added));
-    Rooted<Item> removed_root(roots, observer_single_node_array(removed));
+    Rooted<Item> added_root(roots, dom_observers_node_snapshot(added, false));
+    Rooted<Item> removed_root(roots, dom_observers_node_snapshot(removed, false));
     observer_queue_children_record(observer, registration, parent, added_root.get(), removed_root.get());
 }
 
@@ -813,8 +814,8 @@ extern "C" void dom_observers_child_replace_notify(void* parent_ptr,
                                                          void* added_ptr,
                                                          void* removed_ptr) {
     RootFrame roots(2);
-    Rooted<Item> added_root(roots, observer_single_node_array((DomNode*)added_ptr));
-    Rooted<Item> removed_root(roots, observer_single_node_array((DomNode*)removed_ptr));
+    Rooted<Item> added_root(roots, dom_observers_node_snapshot(added_ptr, false));
+    Rooted<Item> removed_root(roots, dom_observers_node_snapshot(removed_ptr, false));
     dom_observers_children_replace_notify(parent_ptr, added_root.get(), removed_root.get());
 }
 

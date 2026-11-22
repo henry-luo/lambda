@@ -10,5 +10,6 @@ for(const [index,fixture]of fixtures.entries())test('flex ratio constraints: '+f
     const actual=JSON.parse(match[1]);
     assert.ok(actual.every((value,i)=>Math.abs(value-fixture.expected[i])<=1),
         'got '+actual+'; expected '+fixture.expected);
-    assert.deepEqual(rgb(image,fixture.expected[0]+50,fixture.expected[1]+50),[0,255,0]);
+    assert.deepEqual(rgb(image,fixture.expected[0]+Math.min(50,fixture.expected[2]/2),
+        fixture.expected[1]+Math.min(50,fixture.expected[3]/2)),[0,255,0]);
 });

@@ -14,6 +14,294 @@ are unchanged. Full evidence is under `../../lambda/temp/kianhup-style/`.
 
 ## Fixed issues
 
+<a id="ri-209"></a>
+
+### RI-209 — Window load precedes required image/background completion
+
+**Fixed 2026-11-22.** Native request ownership and the script-host boundary
+follow **D5.5.1 / D9.1.1v4 / D9.1.3v2 / D9.5.6v2**; capture frames follow
+**D10.1.7**. The loader waited for every modeled request for at most250ms,
+then dispatched window.load while eager images and selected CSS backgrounds
+were still pending. A loopback server holds each image until the load beacon
+or a650ms fallback: frozen174 sends the beacon first, while Chromium148 waits
+for eager images/backgrounds and excludes lazy/preload requests. The eager
+image distinction also follows the [HTML image loading algorithm](https://html.spec.whatwg.org/multipage/images.html#updating-the-image-data).
+
+The native boundary now checks current admitted eager image sources, including
+detached Image requests, selected background/background-image URLs and actual
+stylesheet links. It reuses existing CSS value/base-URL resolution and cascade
+comparison. Hidden/contents backgrounds, unused before/after content and
+overridden URLs do not acquire blockers; preloads, lazy images and post-load
+fetches retain their separate completion paths. Image completion polling and
+element events run before the boundary. Input's related polling starvation
+repair is LI-102. The wait uses the existing navigation budget and observes
+its elapsed deadline; transfer budgets, admission limits, snapshot resource
+grace and the shared1000ms post-load frame are unchanged. The explicit
+diagnostic load-timeout override remains available.
+
+All17 new native cases pass with17 Chromium controls; frozen174 passes seven
+and fails ten. All41 existing discovery and nine late-completion cases pass.
+The dynamic layout milestone passes630/630 with identical inventory/outcomes
+to174. Static layout geometry is unchanged; its preceding baseline was not
+repeated. Complete font/media/pseudo-element load conformance is not established.
+
+No whole-page clearance is claimed. Current WebKit article photos also start
+after load in Chromium; Setpoint retains an authored loader overlay while its
+239880-byte module is skipped by existing admission. Neither is forced visible.
+Evidence: `temp/online-visual-round175/load-browser*/results.json`,
+`load-boundary-frozen-http.log`, `load-boundary-frozen-extra.log`,
+`resource-focused-final.log`, `baseline-js.json` and `milestone-summary.json`.
+
+<a id="ri-207"></a>
+
+### RI-207 — Column flex aspect-ratio items undersize their automatic cross axis
+
+**Fixed for qualified horizontal-writing column contributions, 2026-11-22.**
+Fast intrinsic text paths retain the single-line 10px height but omit the
+fit-content automatic cross width needed by the preferred aspect ratio.
+Both the flex base and automatic minimum therefore miss the 20px or 50px
+ratio contribution. The two original column fixtures produce 20x10px instead
+of 40x20px; a small explicit flex basis also bypasses the correct minimum.
+This follows [Flexbox 9.2](https://www.w3.org/TR/css-flexbox-1/#algo-main-item).
+Ownership follows **D5.5.1 / D9.1.1v4 / D9.1.3v2 / D9.5.6v2**.
+
+A shared native helper reuses existing fit-content, min/max and box-aware ratio
+transfer routines. Intrinsic storage publishes width inputs first, preventing
+the shared width query from recursively re-entering the current measurement,
+then retains the ratio floor in the column height contribution. Fixed content
+keeps its larger contribution; preferred cross sizes and replaced/orthogonal
+items keep their existing paths. No second size estimator or per-page branch
+is introduced. The public header adds a function, with no data-layout change.
+
+All 40 PNG cases pass with Chromium qualification. Frozen173 passes 33 and
+fails seven new column cases. Controls include grow/shrink, explicit bases
+and sizes, zero minima, stretch, wrap, scrolling and fixed/tall content. The
+first permanent fixture draft accidentally inherited flex-shrink:0 from its
+builder; the corrected fixtures retain the isolated source's flex-shrink:1.
+That draft is diagnostic evidence only. All 22 existing aspect-ratio flex
+fixtures now pass against unchanged references, including the two remaining
+column cases. Layout integer lint passes.
+
+At the milestone, the same 3852-case inventory improves from 3844 to 3847
+passes. Only the three RI-206/RI-207 aspect cases change; all five remaining
+failures preserve their prior outcomes. Six skips and zero errors remain.
+The separate dynamic-layout inventory passes 630/630 with exact case agreement.
+This does not establish any new high-severity online-page clearance. All
+1067 canonical pairs and their records stay intact at 108 high. **D10.1.7**
+timing, script/resource limits and vendor code are unchanged. The separate
+nested-column observation remains RI-208. Evidence:
+`temp/online-visual-round174/ratio-before.log`, `ratio-after.log`,
+`ratio-browser-qualified.log`, `aspect-controls.log`, `milestone-summary.json`,
+`baseline-layout.json` and `baseline-js.json`.
+
+<a id="ri-206"></a>
+
+### RI-206 — Single-line flex ratio minima use wrapped text height
+
+**Fixed for qualified physical-height contributions, 2026-11-22.** The
+aspect-ratio automatic minimum asks for a min-content cross contribution.
+The shared helper instead measures height again at the flexed width. A
+single-line row flex item with breakable text and a 40px maximum width gets
+a 60px wrapped-height minimum, overriding its correct 20px ratio height.
+The existing intrinsic path preserves the single-line contribution required
+by [Flexbox 9.9.2](https://www.w3.org/TR/css-flexbox-1/#intrinsic-cross-sizes).
+The ratio minimum now selects that path for a non-wrapping row flex container;
+ordinary block and wrapping containers keep width-dependent measurement.
+Existing direction/wrap helpers and intrinsic storage are reused. Ownership
+follows **D5.5.1 / D9.1.1v4 / D9.1.3v2 / D9.5.6v2**.
+
+All 23 focused PNG cases pass and have Chromium qualification. Frozen172
+passes 20 and fails the three direct/nested single-line text cases. Controls
+preserve block/wrapping minima, explicit and zero minima, scrollable overflow,
+and a fixed child's actual 100px contribution. An initial reduction incorrectly
+expected a fixed-child minimum to be capped by the other axis; Chromium
+rejected that expectation, and no production version of that hypothesis was
+built. Only the qualified single-line contribution repair is installed.
+
+All 22 existing aspect-ratio flex fixtures are compared with frozen172. One
+old row failure becomes a pass, the 19 prior passing cases remain passing,
+and two original column failures remain unchanged. Fresh Chromium checks all
+eight maximum-size fixtures against their original inputs and references.
+Integer lint passes. The 630-case dynamic layout milestone passes with exact
+inventory agreement on frozen172 before this increment; it is not repeated
+after this focused change. No full 3852-case repeat, whole-page clearance or
+exact-detail match is claimed. Existing column mismatches remain RI-207.
+**D10.1.7** timing, limits and canonical page pairs are unchanged. Evidence:
+`temp/online-visual-round173/ratio-before-qualified.log`, `ratio-after.log`,
+`ratio-browser-qualified.log`, `frozen-aspect-controls.json`,
+`repaired-aspect-controls.json`, `aspect-browser.json` and `baseline-js.json`.
+
+<a id="ri-205"></a>
+
+### RI-205 — Release captures accept rejected HTTP document bodies
+
+**Fixed for HTTP response classification, 2026-11-22.** The Library of
+Congress recheck receives a 403 challenge but reports both ok and loadOk as
+true. Input correctly returns the response status and origin body. Radiant's
+document-response marker uses log_info, which lib/log.h removes under NDEBUG;
+the capture harness sees load completion without the rejection. Native
+ownership and the host seam follow **D9.1.1v4 / D9.1.3v2 / D9.5.6v2**;
+capture qualification follows **D10.1.7**.
+
+The marker now survives release compilation. Loader configuration identifies
+an embedded document before its DOM embedding edge exists, and derives that
+state from the existing edge for inherited navigation. Child HTTP errors use
+an embedded-response marker, so an optional rejected iframe cannot reject its
+successful parent capture. Origin response bodies still render as diagnostic
+PNGs. No site-specific error matching or blanket subresource rejection is
+added. Input and runtime-state layouts are unchanged.
+
+Frozen171 fails direct and redirected main-document 403 classification; its
+original optional image/iframe control passes. The repair passes all 14
+capture-harness checks. Three final native controls also pass after requiring
+the optional iframe's actual rejected-response marker, ruling out an unloaded
+child as the explanation for parent success. Layout integer lint passes.
+The native host's header consumers rebuild; node-core dependency files do not
+include the changed loader-config header. Full baselines are not repeated.
+
+No challenge image replaces a canonical success, no page is cleared, and the
+report remains at 108 high. FigJam and Frame still skip eight and ten large
+startup tasks respectively, and NVD retains its recorded main-module barrier
+(JS13-L1). These observations do not qualify admitting the full applications.
+Script limits, capture windows and vendor code are unchanged. Evidence:
+`temp/online-visual-round172/http-before.log`, `http-after.log`, `http-final.log`,
+`admission-summary.json` and `review/live/loc/after/`.
+
+<a id="ri-204"></a>
+
+### RI-204 — Parsed eager images wait behind stylesheet completion
+
+**Fixed for loader-stage HTTP discovery, 2026-11-22.** Initial dependency
+prefetch queued stylesheets and waited for their completion before image
+discovery. Parsed eager images could not overlap that wait or subsequent
+script execution. The loader now queues them after the stylesheet requests
+and before the wait, using the existing image-discovery callback. Responsive
+source selection, the active base, admission, fetch priority, deduplication
+and document ownership share their normal paths. Explicit lazy images stay
+outside this early pass; inert templates and script-enabled noscript content
+remain inert. Ownership follows **D5.5.1 / D9.1.1v4 / D9.1.3v2 / D9.5.6v2**;
+see [HTML image loading](https://html.spec.whatwg.org/multipage/images.html#updating-the-image-data).
+
+Two causal HTTP fixtures hold a stylesheet until its selected image arrives
+or a fixture-only fallback releases it. Frozen170 requests neither image
+before that release. The repair passes both ordinary and responsive-picture
+cases, including active-base resolution, invalid/mixed-case loading states,
+one request, inert/unselected/lazy controls, element completion before
+window.load, natural size and PNG pixels. Chromium headless shell confirms
+both final cases. All 41 resource-discovery tests, nine image-completion
+tests and layout integer lint pass. Full baselines are not repeated.
+
+Squarespace's fresh native pair now contains its large hero photograph and
+headline and falls below the major threshold. Mean error against the same
+fresh Chromium reference is 18.87% for the historical native image, 6.27%
+for frozen170, and 4.14% for the repaired capture. Frozen170 also restores
+the main content, so the page clearance reflects cumulative fixes and the
+current recapture, not proof that this one repair restored the whole page.
+Animated skew, small typography and a browser-only promotional strip remain.
+The updated report has 108 high-severity pages. **D10.1.7** capture policy,
+resource grace, script limits and vendor code are unchanged. Jetty's hero
+is lazy and WebKit's photos are CSS backgrounds; neither is claimed fixed.
+Evidence: `temp/online-visual-round171/discovery-before.log`,
+`discovery-after.log`, `discovery-final.log`, `discovery-browser-final.log`,
+`image-completion.log`, `same-reference-metrics.json`, `final/`, `frozen/`
+and `browser-review/`.
+
+<a id="ri-203"></a>
+
+### RI-203 — Scalar height queries lose valid results on unrelated layout passes
+
+**Fixed for qualified retained queries, 2026-11-22.** The scalar height cache
+discarded every entry when the document mutation or measurement generation
+changed, including changes in unrelated subtrees. Width queries already use
+subtree, inherited-style, presentation, font and layout versions to retain
+eligible results. Height entries now reuse that version comparison and the
+existing resource/ordered-effect exclusions. Descendant restrictions propagate
+through hits and computations. Provisional contexts cannot publish retained
+results; current-pass queries keep their existing constraint behavior, while
+old-pass history uses the existing nine-query retention bound. Ownership follows
+**D5.5.1 / D9.1.1v4 / D9.1.3v2 / D9.5.6v2**.
+
+The focused native test fails three unchanged-subtree reuse assertions against
+frozen169 and passes with the repair. It also checks changed source height,
+inherited em sizing and a source edit measured in a provisional context. An
+initial provisional control incorrectly required discarding an older, still
+valid normal result; the final control changes the source and requires fresh
+normal geometry. All 49 IncrementalCssTest cases were run: 42 pass, including
+the new case, and seven pre-existing failures retain the same assertion
+outcomes as frozen169. Thirteen native PNG mutation/CSSOM groups, two existing
+UI fixtures with 22 assertions, and layout integer lint pass. MIR/Chromium and
+full baselines are not repeated for this native cache increment.
+
+In bounded 20-batch Primer traces, final stable-pass height computations fall
+from 2981 to 2759 and hits increase from 126 to 314. Both traces take about
+11.1 seconds; neither is a completed page capture or evidence of a startup
+speedup. The 120-second startup watchdog remains unresolved. No page is
+cleared, and the report retains 109 high-severity pages. Capture policy under
+**D10.1.7**, deadlines and source admission are unchanged. Evidence:
+`temp/online-visual-round170/core-before-with-libraries.log`,
+`core-before-controls.json`, `core-final.json`, `bounded-profile-comparison.json`,
+`primer-symbolicated.txt`, `relational-ast.log`, `ui-regressions.log` and `lint.log`.
+
+<a id="ri-202"></a>
+
+### RI-202 — CSSOM dimensions expose the border box for content-box elements
+
+**Fixed for qualified sizing cases, 2026-11-22.** Native CSSOM serialization
+read the retained border-box dimensions for both box-sizing modes. A 90px
+content-box width with 6px padding and 2px borders therefore serialized as
+106px. Chromium reports 90px while retaining the 106px border rectangle.
+The serializer now uses the existing boundary-to-content conversion for
+committed content-box sizes. Border-box and pre-layout specified sizes retain
+their respective sizing boxes; no box-metric calculation is duplicated.
+Ownership follows **D5.5.1 / D9.1.1v4 / D9.1.3v2 / D9.5.6v2** and
+[CSSOM resolved values](https://www.w3.org/TR/cssom-1/#resolved-values).
+
+The focused `computed-size` group fails on frozen168 and passes with the
+repair in AST, MIR and Chromium. It checks width/height, both box-sizing
+modes, min/max constraints, independent border geometry and transforms that
+must not alter resolved CSS sizes. The strengthened empty-text control also
+checks the 90px CSS width against its 106px border rectangle. This is bounded
+qualification, not complete CSSOM dimension conformance. Evidence:
+`temp/online-visual-round169/box-browser-probe.json`,
+`computed-size-before.log`, `final-ast.log`, `final-mir.log` and
+`test/online/render_relational_mutations.test.cjs`.
+
+<a id="ri-201"></a>
+
+### RI-201 — Relational dependency checks rebuild unrelated measurement text
+
+**Fixed for qualified dependency paths, 2026-11-22.** Primer repeatedly
+measures a hidden text clone during startup. Full-document reconciliation
+occurs even when the mutation cannot affect its relational selectors. Of 18
+authored selector probes, the intermediate repair still falls back only for
+`.w-richtext:is(.article-rich,.rich-text) :is(ul,ol):has(>li>span+span)`:
+internal sibling combinators bypassed ancestor filtering, and static
+functional type guards were ignored. Native ownership and the shared DOM
+seam follow **D9.1.1v4 / D9.1.3v2 / D9.5.6v2 / D8.4.4**.
+
+The dependency walk distinguishes leading sibling paths from internal
+siblings, checks the existing selector-prefix predicate, and evaluates fully
+static compound `:is()`/`:where()`/`:not()` guards with the existing matcher.
+Descendant/child witnesses use stable type/class/id/attribute conditions;
+positional and empty conditions also inspect the parent and removed subtree.
+Text records retain local selector recascade and view-property reset, so
+removed empty-state padding cannot survive. Column paths, recursive leading
+siblings, unknown state/functions and batched attribute changes keep the
+conservative dependency path. See
+[Selectors 4 relational selectors](https://www.w3.org/TR/selectors-4/#relational).
+
+Thirteen focused groups pass in AST and MIR and have Chromium qualification;
+six groups fail on frozen168. Two existing DOM UI fixtures retain all 22
+assertions, and 27 metadata/SVG mutation regressions pass. A new wrapped
+leading-sibling control caught an intermediate width regression; that
+candidate was never installed. The strengthened empty-text control caught
+stale padding in another intermediate path before installation. Integer lint
+passes. The repair does not qualify major missing features, change script
+admission or alter **D10.1.7** capture timing. Evidence:
+`temp/online-visual-round169/selector-probes/results.json`,
+`frozen-final-fixtures.log`, `typed-after-first.log`, `empty-box-probe.html`,
+`final-ast.log`, `final-mir.log`, `final-regressions.log` and `final-ui.log`.
+
 <a id="ri-199"></a>
 
 ### RI-199 — Native test harnesses failed to link in the full test build

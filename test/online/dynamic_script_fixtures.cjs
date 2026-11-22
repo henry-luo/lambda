@@ -4,12 +4,12 @@ const dynamicScriptCases = ['basic', 'ordered', 'async', 'removed', 'src-change'
     'late-fetch', 'late-fetch-chain', 'late-fetch-immediate'];
 const dynamicScriptBudgetCases = ['large-async', 'large-ordered'];
 const dynamicModuleCases = ['basic', 'ordered', 'async', 'removed', 'connected-src',
-    'failed', 'throw', 'import', 'cached', 'large-async'];
+    'failed', 'throw', 'import', 'cached', 'large-async', 'late-timer', 'chain', 'late-chain'];
 
 function dynamicScriptExpected(mode, module = false) {
     const absent = ['failed', 'empty-src', 'empty-body', 'inert', 'unsupported', 'adopted', 'async-idl', ...dynamicScriptBudgetCases].includes(mode);
     const runs = absent ? [] : mode === 'async' ? ['B', 'A']
-        : ['ordered', 'chain'].includes(mode) ? ['A', 'B'] : ['A'];
+        : ['ordered', 'chain', 'late-chain'].includes(mode) ? ['A', 'B'] : ['A'];
     const result = {runs, scopes:runs.map(id => module ? null : id === 'A' ? 'first' : 'second'),
         loads:mode === 'cached' ? 2 : mode === 'empty-body' ? 1 : runs.length, errors:mode === 'failed' || mode === 'empty-src' ? 1 : 0,
         asynchronous:true, shape:true, beforeWindow:!mode.startsWith('late') && mode !== 'empty-src', asyncIdl:true};
@@ -28,7 +28,7 @@ function dynamicScriptHtml(mode, origin, module = false) {
         window.inAppend=false;window.sourceAsynchronous=true;window.sourceShape=true;
         window.sourceBeforeWindow=true;window.sourceAsyncIdl=true;window.windowLoaded=false;window.reported=false;
         window.sourceAttributes=true;
-        window.sourceDataReady=${!mode.startsWith('late-fetch') && mode !== 'import'};
+        window.sourceDataReady=${!mode.startsWith('late-fetch') && mode !== 'import' && mode !== 'late-timer'};
         const mode=${JSON.stringify(mode)},origin=${JSON.stringify(origin)},expected=${JSON.stringify(expected)};
         function report(){
             if(reported || !sourceDataReady || !windowLoaded || sourceLoads!==expected.loads || sourceErrors!==expected.errors)return;
@@ -122,7 +122,11 @@ function serveDynamicScript(request, response) {
             sheet.href=${JSON.stringify('http://' + request.headers.host + '/sheet.css?case=stylesheet')};`
             : "var sheet=document.createElement('style');sheet.textContent='#styleprobe{background:blue}';";
         source += 'document.head.appendChild(sheet);';
-        if (mode === 'chain' && id === 'A') source += "appendSource('B',20);";
+        if ((mode === 'chain' || mode === 'late-chain') && id === 'A') source += "appendSource('B',20);";
+        if (mode === 'late-timer') source += `Promise.resolve().then(function(){
+            setTimeout(function(){sourceShape=sourceShape && sourceLoads===1;
+                sourceDataReady=true;report()},100);
+        });`;
         if (mode.startsWith('late-fetch')) {
             const dataUrl = JSON.stringify('http://' + request.headers.host + '/data.json?case=' + mode + '&delay=80');
             source += `fetch(${dataUrl}).then(function(response){return response.json()})`;

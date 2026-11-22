@@ -2388,10 +2388,11 @@ void js_message_event_install_prototype(Item prototype) {
     event_install_to_string_tag(object.get(), "MessageEvent");
 }
 
-Item js_ctor_message_event_fn(Item type_arg, Item init_arg) {
-    RootFrame roots(5);
+static Item message_event_construct(Item type_arg, Item init_arg, const uint64_t* delivery_data) {
+    RootFrame roots(6);
     Rooted<Item> type(roots, type_arg), init(roots, init_arg);
     Rooted<Item> state(roots, ItemNull), value(roots, ItemNull), event(roots, ItemNull);
+    Rooted<Item> data(roots, delivery_data ? Item{.item = *delivery_data} : ItemNull);
     type.set(js_to_string(type.get()));
     JS_RETURN_IF_ERROR(type.get());
     bool flags[3];
@@ -2400,10 +2401,15 @@ Item js_ctor_message_event_fn(Item type_arg, Item init_arg) {
     // inherited dictionary members precede the subclass's alphabetically ordered members.
     static const int order[] = {MESSAGE_DATA, MESSAGE_LAST_ID, MESSAGE_ORIGIN, MESSAGE_PORTS, MESSAGE_SOURCE};
     for (int slot : order) {
-        value.set(read_init(init.get(), message_event_fields[slot]));
-        JS_RETURN_IF_ERROR(value.get());
-        if (!js_is_object_value(init.get())) value.set(make_js_undefined());
-        value.set(message_event_convert_field(slot, value.get()));
+        if (slot == MESSAGE_DATA && delivery_data) {
+            // transport data bypasses dictionary defaults; undefined is a valid payload.
+            value.set(data.get());
+        } else {
+            value.set(read_init(init.get(), message_event_fields[slot]));
+            JS_RETURN_IF_ERROR(value.get());
+            if (!js_is_object_value(init.get())) value.set(make_js_undefined());
+            value.set(message_event_convert_field(slot, value.get()));
+        }
         JS_RETURN_IF_ERROR(value.get());
         JS_RETURN_IF_ERROR(js_elements_set_int(state.get(), slot, value.get()));
     }
@@ -2414,15 +2420,18 @@ Item js_ctor_message_event_fn(Item type_arg, Item init_arg) {
     return event.get();
 }
 
+Item js_ctor_message_event_fn(Item type_arg, Item init_arg) {
+    return message_event_construct(type_arg, init_arg, nullptr);
+}
+
 Item js_create_message_event(const char* type, Item data, Item source, Item origin) {
     RootFrame roots(5);
     Rooted<Item> data_root(roots, data), source_root(roots, source), origin_root(roots, origin);
     Rooted<Item> init(roots, js_new_object()), type_root(roots, js_name_item(type));
-    dom_realm_set_cstr(init.get(), "data", data_root.get());
     dom_realm_set_cstr(init.get(), "source", source_root.get());
     if (get_type_id(origin_root.get()) != LMD_TYPE_NULL)
         dom_realm_set_cstr(init.get(), "origin", origin_root.get());
-    return js_ctor_message_event_fn(type_root.get(), init.get());
+    return message_event_construct(type_root.get(), init.get(), data_root.home());
 }
 
 enum StorageEventSlot { STORAGE_KEY, STORAGE_NEW_VALUE, STORAGE_OLD_VALUE, STORAGE_AREA,

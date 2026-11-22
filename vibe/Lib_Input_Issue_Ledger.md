@@ -15,6 +15,34 @@ Resolved records are in the [fixed issue ledger](<Lib_Input_Issue_Ledger (fixed)
 
 ## Open issues
 
+<a id="li-102"></a>
+
+- [LI-102 — Pending resource polling starves later completions](<Lib_Input_Issue_Ledger (fixed).md#li-102>).
+
+<a id="li-101"></a>
+
+### LI-101 — FIXED FOR TABLE FRAGMENT CONTEXTS AND BODY TAG REJECTION
+
+The shared HTML parser now selects fragment insertion modes from a virtual
+context and rejects stray table structure in body mode under
+**D9.1.1v4 / D9.1.3v2**. See the
+[fixed record](<Lib_Input_Issue_Ledger (fixed).md#li-101>).
+
+<a id="li-100"></a>
+
+### LI-100 — FIXED FOR PATHNAME WRITES
+
+The native pathname setter rebuilds coherent URL state and reuses shared
+encoded-dot normalization under D9.1.1v4 / D9.1.3v2. See the
+[pathname repair and qualification limits](<Lib_Input_Issue_Ledger (fixed).md#li-100>).
+
+<a id="li-099"></a>
+
+### LI-099 — FIXED
+
+The curl multi transport serializes resource URLs with the shared URL parser.
+See the [resource URL repair](<Lib_Input_Issue_Ledger (fixed).md#li-099>).
+
 <a id="li-098"></a>
 
 ### LI-098 — FIXED

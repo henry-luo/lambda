@@ -7,6 +7,10 @@ var eventChannel = new workerThreads.MessageChannel();
 var eventDrainChannel = new workerThreads.MessageChannel();
 
 console.log('receive empty:', receiveMessageOnPort(receiveChannel.port2));
+receiveChannel.port1.postMessage(undefined);
+var receivedUndefined = receiveMessageOnPort(receiveChannel.port2);
+console.log('receive undefined envelope:', receivedUndefined !== undefined && Object.hasOwn(receivedUndefined, 'message'));
+console.log('receive undefined payload:', receivedUndefined && receivedUndefined.message);
 receiveChannel.port1.postMessage({ name: 'alpha' });
 receiveChannel.port1.postMessage('beta');
 var receivedFirst = receiveMessageOnPort(receiveChannel.port2);
