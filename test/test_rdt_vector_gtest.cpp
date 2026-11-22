@@ -637,7 +637,10 @@ TEST(TextOverflowPaint, ScopedProjectionPreservesSourceAndRestoresNestedState) {
     owner.view_type = nested.view_type = RDT_VIEW_BLOCK;
     BlockProp properties = BLOCK_PROP_DEFAULT;
     ScrollProp scroll = SCROLL_PROP_DEFAULT;
-    properties.text_overflow = CSS_VALUE_ELLIPSIS; scroll.overflow_x = CSS_VALUE_HIDDEN;
+    BlockPropExt rare = BLOCK_EXTRAS_DEFAULT;
+    properties.ext = lam::own(&rare);
+    rare.text_overflow = CSS_VALUE_ELLIPSIS;
+    scroll.overflow_x = CSS_VALUE_HIDDEN;
     owner.blk = lam::view_prop(&properties); owner.scroller = lam::view_prop(&scroll);
     float advance = font_measure_char(handle, 'A');
     owner.width = advance * 4.25f + font_measure_char(handle, 0x2026);
@@ -766,7 +769,10 @@ TEST(TextOverflowPaint, SpacingProjectionKeepsComputedAdvancesAndCollapsedByteOf
     RenderContext context = {}; context.ui_context = lam::up(&ui); context.font = box;
     DomElement owner = {}; owner.node_type = DOM_NODE_ELEMENT; owner.set_synthetic(true);
     owner.view_type = RDT_VIEW_BLOCK; owner.width = 62; owner.height = 24;
-    BlockProp properties = BLOCK_PROP_DEFAULT; properties.text_overflow = CSS_VALUE_ELLIPSIS;
+    BlockProp properties = BLOCK_PROP_DEFAULT;
+    BlockPropExt rare = BLOCK_EXTRAS_DEFAULT;
+    properties.ext = lam::own(&rare);
+    rare.text_overflow = CSS_VALUE_ELLIPSIS;
     properties.white_space = CSS_VALUE_NOWRAP;
     ScrollProp scroll = SCROLL_PROP_DEFAULT; scroll.overflow_x = CSS_VALUE_HIDDEN;
     owner.blk = lam::view_prop(&properties); owner.scroller = lam::view_prop(&scroll);

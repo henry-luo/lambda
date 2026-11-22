@@ -2184,7 +2184,7 @@ TEST_F(IncrementalCssTest, ComputedTextPropertiesDoNotDependOnProvisionalBoxRole
     resolve();
     ASSERT_NE(target->blk, nullptr);
     EXPECT_EQ(target->block()->text_align, CSS_VALUE_CENTER);
-    EXPECT_FLOAT_EQ(target->block()->text_indent, 32.0f);
+    EXPECT_FLOAT_EQ(target->block()->rare().text_indent, 32.0f);
     EXPECT_FLOAT_EQ(target->block()->given_min_width, 15.0f);
     int64_t full = g_style_resolve_measure;
     const ViewType roles[] = {RDT_VIEW_INLINE, RDT_VIEW_BLOCK, RDT_VIEW_INLINE};
@@ -2193,7 +2193,7 @@ TEST_F(IncrementalCssTest, ComputedTextPropertiesDoNotDependOnProvisionalBoxRole
         resolve();
         EXPECT_EQ(g_style_resolve_measure, full);
         EXPECT_EQ(target->block()->text_align, CSS_VALUE_CENTER);
-        EXPECT_FLOAT_EQ(target->block()->text_indent, 32.0f);
+        EXPECT_FLOAT_EQ(target->block()->rare().text_indent, 32.0f);
         EXPECT_FLOAT_EQ(target->block()->given_min_width, 15.0f);
     }
 }
