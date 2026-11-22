@@ -3565,8 +3565,8 @@ unchanged at **107 high, zero critical, 960 low**.
 The user cleared the goal and requested wrap-up; work is stopped.
 
 
-Round160 fixes **RI-216** (definitely sized grid images omitted their paint
-surface) and **RI-217** (transparent video pixels retained decoder-buffer
+Round160 fixes **RI-218** (definitely sized grid images omitted their paint
+surface) and **RI-219** (transparent video pixels retained decoder-buffer
 contents). Ownership follows **D5.5.1 / D9.1.1v4 / D9.1.3v2**.
 Getsafe's saved-document photograph is restored; its live anti-flicker/script
 admission difference remains unresolved. Going's fresh shared-1000ms pair

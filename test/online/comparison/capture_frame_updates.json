@@ -4306,7 +4306,7 @@
       "label": "saas_landing_259",
       "url": "https://www.going.com/how-it-works",
       "round": 160,
-      "reason": "Existing decoded-frame repairs RI-210/RI-211 restore the hero; RI-217 replaces transparent pixels instead of blending over decoder storage. Fresh shared-frame review clears the major difference.",
+      "reason": "Existing decoded-frame repairs RI-210/RI-211 restore the hero; RI-219 replaces transparent pixels instead of blending over decoder storage. Fresh shared-frame review clears the major difference.",
       "lambda_pin": "9c0955a3a6319a03710935421792bb9af3603139ccafedb058319c6e70bd658e",
       "evidence": "comparison/repairs.html#round-160",
       "old_lambda_settle_ms": "1000",
