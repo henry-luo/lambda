@@ -3563,3 +3563,24 @@ canonical rows/pairs**, manifests, frame history, URLs and reviews remain
 unchanged at **107 high, zero critical, 960 low**.
 [Before/after evidence](comparison/repairs.html#round-159).
 The user cleared the goal and requested wrap-up; work is stopped.
+
+
+Round160 fixes **RI-216** (definitely sized grid images omitted their paint
+surface) and **RI-217** (transparent video pixels retained decoder-buffer
+contents). Ownership follows **D5.5.1 / D9.1.1v4 / D9.1.3v2**.
+Getsafe's saved-document photograph is restored; its live anti-flicker/script
+admission difference remains unresolved. Going's fresh shared-1000ms pair
+clears its major difference at **1.44% mean error**, reducing the report to
+**106 high, zero critical, 961 low**. Only that pair is refreshed.
+
+Focused checks pass: **17 native grid tests, six PNG/SVG cases, six Chromium
+controls, four video tests**, and layout integer lint. No full baseline was
+repeated for this focused batch. [Evidence](comparison/repairs.html#round-160).
+The goal remains active.
+
+Follow-up to round160 (2026-11-22): the single Radiant milestone gate exits
+zero with **8,175 passed, 298 partial, 20 skipped** of 8,493 cases. Both
+installed renderers were restored to the qualified release pin afterward.
+The comparison remains **106 high, zero critical, 961 low**; diagnostic
+references with pending images were not promoted. No capture clock, source
+admission budget or expected baseline result changed.

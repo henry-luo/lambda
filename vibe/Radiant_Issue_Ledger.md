@@ -20,6 +20,14 @@ observations still require re-verification. Add new Radiant issues here.
 
 ## Open issues
 
+<a id="ri-217"></a>
+
+- [RI-217 — Transparent video frames blend over uninitialized decoder storage](<Radiant_Issue_Ledger (fixed).md#ri-217>).
+
+<a id="ri-216"></a>
+
+- [RI-216 — Definitely sized grid images have no paint surface](<Radiant_Issue_Ledger (fixed).md#ri-216>).
+
 <a id="ri-215"></a>
 
 ### RI-215 — Two expanded document-editor replays fail on the current checkout

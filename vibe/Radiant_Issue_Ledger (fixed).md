@@ -14,6 +14,63 @@ are unchanged. Full evidence is under `../../lambda/temp/kianhup-style/`.
 
 ## Fixed issues
 
+<a id="ri-217"></a>
+
+### RI-217 — Transparent video frames blend over uninitialized decoder storage
+
+**Fixed 2026-11-22.** Going's decoded hero played, but transparent regions
+outside the capsule contained random pixels. The macOS backend drew each
+CGImage with Core Graphics' default source-over blending into an allocated
+or reused frame buffer. Transparent source pixels retained the old destination
+bytes. The draw now uses copy blending so the complete decoded frame,
+including transparency, replaces that storage. Buffer ownership and the
+immutable paint snapshot remain unchanged
+(**D5.5.1 / D9.1.1v4 / D9.1.3v2**).
+
+The new native regression uses a generated 64x48px ProRes 4444 movie. It
+poisons the returned frame buffer with opaque white, waits for a subsequent
+decoded frame, then checks transparent RGBA corners and an opaque red center.
+Before the repair all four transparent channels incorrectly remain 255;
+afterward they are zero. The generator and 12.8KB fixture are native-owned;
+the test downloads no media. All four focused video tests pass, including
+the existing dimension, poster and following-foreground paint controls.
+The checks require the macOS decoder service. The fresh shared-1000ms Going
+pair restores its hero and clean transparency at 1.44% mean error, clearing
+the major difference. The report retains 106 high-severity pages. Evidence is
+under `temp/online-visual-round179/` and
+[report160](../test/online/comparison/repairs.html#round-160).
+
+A follow-up `make test-radiant-baseline` exits zero with 8,175 passed,
+298 partial and 20 skipped of 8,493 cases. This milestone covers the paired
+RI-216/RI-217 source state; the previously qualified release executables
+were restored afterward. Existing expected results were retained. Evidence:
+`temp/online-visual-round181/radiant-baseline.log`.
+
+<a id="ri-216"></a>
+
+### RI-216 — Definitely sized grid images have no paint surface
+
+**Fixed 2026-11-22.** Getsafe's hero image had a valid 560x560px grid box
+but no pixels. Both original and responsive AVIF files decoded and painted
+as ordinary images; substituting local bytes in the full document retained
+the failure. Grid finalization returned immediately for replaced content.
+Definite sizing could skip intrinsic queries, leaving no EmbedStyle or image
+surface for painting.
+
+The final replaced-item branch now calls the existing image admission helper
+before returning. Grid retains its resolved dimensions; the shared loader
+retains resource ownership and revalidates source changes
+(**D5.5.1 / D9.1.1v4 / D9.1.3v2**). No decoder, vendor, timing or site-specific
+change is involved.
+
+The new native test fails before the fix because the image has no embed
+storage, then passes including a source mutation. All 17 focused native grid
+tests pass. Four generic PNG/SVG rendering cases fail before and pass after;
+nested-block and flex controls pass on both sides. Chromium agrees with all
+six fixtures, and layout integer lint passes. Evidence is under
+`temp/online-visual-round179/`. These focused checks establish the native
+defect and repair; online-page clearance requires its paired full-page review.
+
 <a id="ri-214"></a>
 
 ### RI-214 — Replays repeat ownership walks after a DOM retirement
