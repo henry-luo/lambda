@@ -20,6 +20,10 @@ observations still require re-verification. Add new Radiant issues here.
 
 ## Open issues
 
+<a id="ri-210"></a>
+
+- [RI-210 — Release build used a removed DOM validation cache API](<Radiant_Issue_Ledger (fixed).md#ri-210>).
+
 <a id="ri-209"></a>
 
 - [RI-209 — Window load precedes required image/background completion](<Radiant_Issue_Ledger (fixed).md#ri-209>).
