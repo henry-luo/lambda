@@ -6,6 +6,41 @@ remain in the [active issue ledger](Lib_Input_Issue_Ledger.md).
 
 ## Fixed issues
 
+<a id="li-103"></a>
+
+### LI-103 — Legacy gap aliases retain independent property identities
+
+**Fixed 2026-11-22.** Shared CSS parsing and ownership follow **D5.5.1 /
+D9.1.1v4 / D9.1.3v2**. Getsafe's navigation declares grid-column-gap:.25rem
+inside each inline-block menu item. Final flex layout applies the 4px gaps,
+but early intrinsic queries look up column-gap and find no declaration.
+The wrapper loses 8px and wraps its second item, adding 89px to the header.
+
+The shared canonical-property table now maps grid-gap, grid-row-gap and
+grid-column-gap to their standard identities, as required by
+[CSS Box Alignment §8.4](https://www.w3.org/TR/2025/WD-css-align-3-20250311/#gap-legacy).
+The existing declaration normalizer handles every mapped alias, including
+single declarations, stylesheets and nested declaration runs. Consumers and
+CSSOM reuse that identity for intrinsic queries, final layout and priority.
+The existing WebKit compatibility grammar is retained. No layout-specific
+alias fallback, page selector or public data-layout change was introduced.
+
+The four-case reduction passes standard px/rem/variable controls before the
+repair, but the legacy spelling produces 192px instead of 200px and wraps.
+All eight permanent native cases now agree with Chromium, including the
+shorthand, variables, source order and important priority. All 16 focused
+parser tests pass; the normalization table covers the three gap aliases and
+existing WebKit cases. The unchanged Getsafe DOM/CSS replay restores its
+navigation row and hero position. Its photograph and consent typography
+remain unresolved; no whole-page clearance is claimed.
+
+Evidence: `temp/online-visual-round178/gap-probe.log`,
+`gap-alias-native.log`, `gap-alias-browser.json`, `input-parser-tests.log`,
+`getsafe-after/native.png` and
+[comparison round159](../test/online/comparison/repairs.html#round-159).
+No baseline was repeated for this focused repair; the user cleared the goal
+and requested wrap-up after the root cause was isolated.
+
 <a id="li-102"></a>
 
 ### LI-102 — Pending resource polling starves later completions

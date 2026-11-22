@@ -3919,6 +3919,37 @@ TEST(CssVariableSubstitutionTest, EmptyFallbackIsRemovedButMissingValueIsInvalid
     pool_destroy(pool);
 }
 
+TEST(CssVariableSubstitutionTest, EnvironmentNamesFallbacksAndEmptyTokens) {
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+    struct Sample {const char* source; double pixels; bool valid;};
+    const Sample samples[] = {
+        {"env(safe-area-inset-left,var(--missing))", 0, true},
+        {"eNv(safe-area-inset-top)", 0, true},
+        {"env(safe-area-inset-\\6c eft)", 0, true},
+        {"env(SAFE-AREA-INSET-LEFT,13px)", 13, true},
+        {"env(unknown,env(safe-area-inset-bottom))", 0, true},
+        {"env(unknown,) 4px", 4, true},
+        {"env(unknown)", 0, false},
+        {"env(unknown 0 0,17px)", 17, true},
+        {"env(safe-area-inset-left 0 0,17px)", 17, true},
+    };
+    for (const Sample& sample : samples) {
+        CssDeclaration* declaration = css_parse_property_declaration("--result", 8,
+            sample.source, strlen(sample.source), pool);
+        ASSERT_NE(declaration, nullptr) << sample.source;
+        const CssValue* value = css_resolve_var_value(pool, declaration->value, nullptr, nullptr);
+        if (!sample.valid) {
+            EXPECT_EQ(value, nullptr) << sample.source;
+            continue;
+        }
+        ASSERT_NE(value, nullptr) << sample.source;
+        ASSERT_EQ(value->type, CSS_VALUE_TYPE_LENGTH) << sample.source;
+        EXPECT_EQ(value->data.length.value, sample.pixels) << sample.source;
+    }
+    pool_destroy(pool);
+}
+
 TEST(CssVariableSubstitutionTest, ComputedNamesUseWholeFirstArgumentAndKeepFallbackLazy) {
     Pool* pool = pool_create();
     ASSERT_NE(pool, nullptr);

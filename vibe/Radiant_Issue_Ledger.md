@@ -20,6 +20,18 @@ observations still require re-verification. Add new Radiant issues here.
 
 ## Open issues
 
+<a id="ri-212"></a>
+
+- [RI-212 — Unsubstituted CSS environment values poison layout coordinates](<Radiant_Issue_Ledger (fixed).md#ri-212>).
+
+<a id="ri-211"></a>
+
+- [RI-211 — Media commands before layout report an unavailable backend](<Radiant_Issue_Ledger (fixed).md#ri-211>).
+
+<a id="ri-210"></a>
+
+- [RI-210 — Opening playback retains a poster despite an available video frame](<Radiant_Issue_Ledger (fixed).md#ri-210>).
+
 <a id="ri-209"></a>
 
 - [RI-209 — Window load precedes required image/background completion](<Radiant_Issue_Ledger (fixed).md#ri-209>).

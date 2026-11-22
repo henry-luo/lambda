@@ -14,6 +14,109 @@ are unchanged. Full evidence is under `../../lambda/temp/kianhup-style/`.
 
 ## Fixed issues
 
+<a id="ri-212"></a>
+
+### RI-212 — Unsubstituted CSS environment values poison layout coordinates
+
+**Fixed 2026-11-22.** Shared computed-value substitution and scratch ownership
+follow **D5.5.1 / D9.1.1v4 / D9.1.3v2**. Patreon's server-rendered primary
+navigation had NaN positions and dimensions: its negative margins used
+calc() over custom properties containing max(env(safe-area-inset-left), …).
+The shared resolver traversed env() arguments but never substituted the
+environment value, leaving math unresolved and poisoning the descendant boxes.
+
+The existing bounded substitution path now handles env() alongside var(),
+including preserved tokens, inherited custom properties, nested math, lazy
+fallbacks, empty fallbacks and unknown names. The four safe-area insets resolve
+to zero for Radiant's rectangular viewports, as required by
+[CSS Environment Variables §2.1](https://www.w3.org/TR/css-env-1/#safe-area-insets).
+Names retain case and decoded CSS escapes. Unknown environment values without
+a fallback invalidate the computed declaration through the existing path.
+No coordinate clamp, site rule or capture timing adjustment was added.
+
+All nine new rendering cases fail before the repair and pass afterward;
+Chromium 148 agrees on the same fixtures. All ten shared substitution unit
+tests pass, including nine environment-name/fallback samples in the new test.
+Integer lint passes. The final static layout milestone retains the exact
+3852-case inventory and all previous outcomes: 3847 passes, five existing
+failures, six reported skips and zero errors. Final dynamic layout also retains
+all 630 passes and the previous inventory/outcomes. Evidence:
+`temp/online-visual-round176/environment-{before,after}.log`,
+`environment-browser/results.json`, `rdt-environment-tests.log`,
+`baseline-static-comparison.json`, and
+[comparison round157](../test/online/comparison/repairs.html#round-157).
+
+Patreon's fresh 1000ms post-load pair restores the primary navigation and
+video hero, leaving small attribution/typography differences. It clears the
+major category (mean error 6.46%, changed area 13.09%). This is cumulative
+page-level evidence for RI-210/RI-211/RI-212; the controlled video witness
+isolates RI-210. The queue becomes 107 high / zero critical / 960 low.
+
+<a id="ri-211"></a>
+
+### RI-211 — Media commands before layout report an unavailable backend
+
+**Fixed 2026-11-22.** Native document ownership follows **D5.5.1 /
+D9.1.1v4 / D9.1.3v2**; the shared DOM host boundary follows **D9.5.6v2**.
+A muted video calling play() from window.load rejected with NotSupportedError,
+"Media backend is unavailable", although the same file decoded through the
+declarative HTML path. radiant_media_prepare accessed doc->state before the
+first layout created its StateStore and consequently returned no media state.
+
+Preparation now uses the existing idempotent state_store_create before looking
+up the media owner. Ownership and teardown stay with the document. Existing
+audible-start checks under **D11.3.1** remain in their original path; no request
+is authorized by this initialization guard. The scripted-play fixture fails
+after RI-210 alone and passes after this correction.
+
+All six shared video controls agree with Chromium 148, and all 54 related
+resource/percentage checks pass. The dynamic layout milestone passes 630/630
+with identical inventory and outcomes to round175. Integer lint passes.
+The final three-fix milestone also retains all static baseline outcomes
+(3847 passes, five existing failures). Evidence:
+`temp/online-visual-round176/video-scripted-diagnostic.log`,
+`video-first-frame-after-state.log`, `video-browser/results.json`,
+`media-controls.log`, `baseline-js.json` and `milestone-summary.json`.
+
+<a id="ri-210"></a>
+
+### RI-210 — Opening playback retains a poster despite an available video frame
+
+**Fixed 2026-11-22.** Native rendering and media ownership follow
+**D5.5.1 / D9.1.1v4 / D9.1.3v2**, with capture timing under **D10.1.7**.
+RI-134's first-frame path could decode a complete video while its asynchronous
+player opened, but the poster selector admitted frames only in Playing/Paused.
+Thus an accepted autoplay request with a poster never reached the available
+frame path. The same clip without a poster rendered correctly.
+
+The selector now also consults the existing MediaViewState.native_play_requested
+flag while opening. A poster is replaced only after the existing frame getter
+actually supplies pixels; idle, failed and unplayed media retain their poster.
+No backend API, public data layout, transfer limit or clock changes.
+
+The new autoplay/poster control fails before repair with zero landscape pixels
+and passes afterward. Six shared controls cover paused/autoplay clips with and
+without posters, scripted playback and an unavailable source. The original
+landscape/poster checks are retained in a shared fixture module. Chromium
+qualifies all six. RI-211 repairs the separately exposed early-play rejection.
+
+Patreon's unchanged 12.5 MB clip and original poster provide a controlled
+witness: with identical local video bytes, the earlier renderer paints the red
+couch poster and the repaired renderer paints the podcast video. Compared with
+Chromium playing the same bytes, mean image error drops from 15.22% to 2.82%
+and changed area from 46.33% to 2.57%; the isolated clip leaves the major category.
+This verifies source/frame selection without establishing exact video-time
+agreement. The isolated remote source retained its poster at the existing
+window; a later full-page capture displays the video. Its earlier full-page
+attempt timed out at 150 seconds, and changed live resources prevent attributing
+that timing difference to this fix. RI-212 repairs the separately observed
+missing primary navigation and records the cumulative full-page clearance.
+Convai's hero remains missing in its fresh capture. Evidence:
+`temp/online-visual-round176/`:
+`video-poster-before.log`, `video-first-frame-after.log`,
+`video-first-frame-after-state.log`, `patreon-local-before/native.png`,
+`patreon-local-after/native.png` and the corresponding source/result files.
+
 <a id="ri-209"></a>
 
 ### RI-209 — Window load precedes required image/background completion

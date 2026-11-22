@@ -2,13 +2,13 @@
   "summary": {
     "catalog": 1067,
     "compared": 1067,
-    "generated_at": "2026-11-22T05:43:04.120Z",
-    "major_candidates": 82,
+    "generated_at": "2026-11-22T10:04:29.220Z",
+    "major_candidates": 81,
     "manual_major_omissions": 26,
     "severity": {
       "critical": 0,
-      "high": 108,
-      "low": 959
+      "high": 107,
+      "low": 960
     },
     "unavailable": 0,
     "dimension_mismatches": 0
@@ -1323,32 +1323,6 @@
       "manual_major_remaining": "",
       "severity": "high",
       "severity_reason": "Automated broad-difference threshold reached."
-    },
-    {
-      "label": "saas_landing_492",
-      "url": "https://www.patreon.com/europe",
-      "status": "compared",
-      "error": "",
-      "lambda_snapshot": "saas_landing_492-lambda.png",
-      "browser_snapshot": "saas_landing_492-browser.png",
-      "lambda_attempt_utc": "2026-11-20T23:45:28.634Z",
-      "browser_attempt_utc": "2026-11-20T23:45:32.437Z",
-      "lambda_settle_ms": 1000,
-      "browser_settle_ms": 1000,
-      "mean_error": 0.18669455337690533,
-      "changed_area": 0.5234375,
-      "blank_mismatch": false,
-      "major_candidate": true,
-      "dimensions_match": true,
-      "lambda_width": 1200,
-      "lambda_height": 800,
-      "browser_width": 1200,
-      "browser_height": 800,
-      "manual_major_remaining": "",
-      "severity": "high",
-      "severity_reason": "Automated broad-difference threshold reached.",
-      "lambda_animation_origin": "post-load",
-      "browser_animation_origin": "post-load"
     },
     {
       "label": "saas_landing_516",
@@ -9169,6 +9143,32 @@
       "manual_major_remaining": "",
       "severity": "low",
       "severity_reason": "Below the major triage threshold."
+    },
+    {
+      "label": "saas_landing_492",
+      "url": "https://www.patreon.com/europe",
+      "status": "compared",
+      "error": "",
+      "lambda_snapshot": "saas_landing_492-lambda.png",
+      "browser_snapshot": "saas_landing_492-browser.png",
+      "lambda_attempt_utc": "2026-11-22T10:03:34.247Z",
+      "browser_attempt_utc": "2026-11-22T09:48:53.850Z",
+      "lambda_settle_ms": 1000,
+      "browser_settle_ms": 1000,
+      "mean_error": 0.06455536492374563,
+      "changed_area": 0.1309375,
+      "blank_mismatch": false,
+      "major_candidate": false,
+      "dimensions_match": true,
+      "lambda_width": 1200,
+      "lambda_height": 800,
+      "browser_width": 1200,
+      "browser_height": 800,
+      "manual_major_remaining": "",
+      "severity": "low",
+      "severity_reason": "Below the major triage threshold.",
+      "lambda_animation_origin": "post-load",
+      "browser_animation_origin": "post-load"
     },
     {
       "label": "flatbuffers_docs",

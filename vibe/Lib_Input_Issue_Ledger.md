@@ -15,6 +15,10 @@ Resolved records are in the [fixed issue ledger](<Lib_Input_Issue_Ledger (fixed)
 
 ## Open issues
 
+<a id="li-103"></a>
+
+- [LI-103 — Legacy gap aliases retain independent property identities](<Lib_Input_Issue_Ledger (fixed).md#li-103>).
+
 <a id="li-102"></a>
 
 - [LI-102 — Pending resource polling starves later completions](<Lib_Input_Issue_Ledger (fixed).md#li-102>).

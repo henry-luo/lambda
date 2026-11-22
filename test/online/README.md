@@ -3513,3 +3513,53 @@ clearance is established: all **1067 canonical rows/pairs**, manifests,
 frame records, URLs and reviews stay unchanged at **108 high, zero critical,
 959 low**. [Evidence](comparison/repairs.html#round-156).
 The user cleared the goal after verification.
+
+
+Round157 fixes **RI-210 / RI-211 / RI-212**: opening videos can use decoded
+frames behind their posters; play() before first layout initializes the owned
+media state; the shared CSS substitution path resolves env() in inherited
+variables, math and fallbacks. Ownership follows **D5.5.1 / D9.1.1v4 /
+D9.1.3v2 / D9.5.6v2**, with shared capture frames under **D10.1.7**.
+
+All **79 focused checks** pass, including **15 Chromium-qualified fixtures**.
+At this three-fix milestone, static layout retains **3847 passes / five existing
+failures**, six reported skips and zero errors over the same 3852 evaluated
+cases. Final dynamic layout retains **630/630**. Every preceding baseline row
+outcome and inventory is preserved; integer lint passes.
+
+Patreon's fresh pair restores the primary navigation and video hero and clears
+the major category (mean error **6.46%**, changed area **13.09%**). Small
+attribution and typography differences remain. A controlled comparison using
+its actual video bytes separately proves the poster/frame repair. The other
+**1066 canonical row objects** and manifests, all URLs and all reviews are
+preserved. The report now has **107 high, zero critical, 960 low**.
+[Evidence and before/after images](comparison/repairs.html#round-157).
+Goal remains active.
+
+
+Round158 is a focused diagnostic review, with **no additional engine fix or
+page clearance**. Six native opacity/restyle controls pass. Metronome's menu
+overlay failure is reproduced in Chromium with the same zero initialization
+clock; its normal clock completes Webflow's immediate actions (**JS13-L55**,
+**D8.4.4 / D9.5.6v2 / D10.1.7**). No clock or visibility workaround is added.
+Monarch's hero uses a Mux component and still encounters six skipped chunks.
+An isolated Setpoint admission override restores the heading/navigation but
+leaves its product panel blank; shipping limits stay unchanged. Prismic's
+saved DOM/CSS replay shows no large static layout difference. No baseline
+rerun was needed. All **1067 canonical rows/pairs**, manifests, frame records,
+URLs and reviews remain unchanged at **107 high, zero critical, 960 low**.
+[Diagnostic evidence](comparison/repairs.html#round-158). Goal remains active.
+
+
+Round159 fixes **LI-103**: legacy grid-gap, grid-row-gap and grid-column-gap
+now share canonical declaration identities with the standard gap properties
+(**D5.5.1 / D9.1.1v4 / D9.1.3v2**). This restores Getsafe's navigation width
+and removes an extra menu row that displaced its hero by 89px.
+
+All **eight native layout cases**, **eight matching Chromium cases**, and
+**16 focused parser tests** pass. The main photograph remains unresolved;
+no whole-page clearance is claimed. No baseline was repeated. All **1067
+canonical rows/pairs**, manifests, frame history, URLs and reviews remain
+unchanged at **107 high, zero critical, 960 low**.
+[Before/after evidence](comparison/repairs.html#round-159).
+The user cleared the goal and requested wrap-up; work is stopped.

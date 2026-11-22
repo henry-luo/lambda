@@ -200,6 +200,23 @@ requests, errors, CSS backgrounds/variables/pseudos, shorthand precedence and
 optional siblings against the document load boundary (**D5.5.1 / D9.5.6v2 /
 D10.1.7**, RI-209/LI-102). Its shared fixtures also support Chromium checks.
 
+`render_video_first_frame.test.cjs` checks available video frames and poster
+selection for paused, autoplay, scripted-play and failed-source cases on macOS.
+The shared fixtures preserve the original landscape/poster pixel assertions
+(**D5.5.1 / D9.5.6v2 / D10.1.7**, RI-134/RI-210/RI-211).
+
+`render_environment_value.test.cjs` checks safe-area environment values in
+lengths, math, inherited variables and shorthands, plus unknown-name fallback
+and invalidation. The shared fixtures also qualify against Chromium; the
+`CssVariableSubstitutionTest` unit suite checks lazy/empty fallbacks and decoded,
+case-sensitive names (**D5.5.1 / D9.1.3v2**, RI-212).
+
+`render_gap_alias.test.cjs` checks nested intrinsic widths with standard and
+legacy gap spellings, variables, shorthand, source order and important
+priority. Its shared fixtures also qualify against Chromium; input parser
+tests verify canonical declaration identity (**D5.5.1 / D9.1.1v4 /
+D9.1.3v2**, LI-103).
+
 `capture_snapshots.test.cjs` checks release-renderer main-document HTTP rejection,
 redirected rejection and successful parents with rejected optional images/iframes,
 alongside browser capture and retry bookkeeping (**D10.1.7**, RI-205).

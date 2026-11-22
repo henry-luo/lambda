@@ -617,6 +617,31 @@ plural-rules.html, plural-rules-native-output.log and plural-browser-result.json
 
 <a id="js13-l54"></a>
 
+### JS13-L55 — Webflow immediate initialization fails at a zero clock — **EXTERNAL EDGE CASE**
+
+**Observed 2026-11-22; no engine repair.** Metronome's desktop hero is blurred
+by its fixed `.nav-menu-fade` overlay. The authored stylesheet sets opacity 0;
+script-free replay preserves that value, and six focused opacity/transition/
+restyle controls pass. The Webflow script instead writes inline opacity 1.
+Its immediate opacity-to-zero and display-none instances start at timestamp 0.
+At performance.now() == 0, zero elapsed time divided by zero duration becomes
+NaN; its reducer normalizes progress to zero and leaves both instances
+incomplete. Viewport width 1200 and the `main` media query are correct.
+
+The identical instrumented document reproduces this behavior in Chromium 148
+when its initialization performance clock is zero: origin 1, destination 0,
+progress 0, incomplete, with the overlay left visible. The normal Chromium
+clock completes both instances and hides the overlay. The diagnostic's SRI
+hash matches its instrumented script bytes; earlier SRI-rejected attempts are
+unqualified. No site style, framework code or arbitrary clock offset is added
+to production. Shared JS ownership and snapshot frames follow **D8.4.4 /
+D9.5.6v2 / D10.1.7**. The page remains high severity.
+
+Evidence: `temp/online-visual-round177/metronome-state.log`,
+`metronome-mq.log`, `overlay-probe.log`, and
+`browser-{normal,zero}-clock-sri/result.json`. The full-page capture and native
+view tree are retained beside the diagnostic; canonical pairs are unchanged.
+
 ### JS13-L54 — Adjacent HTML insertion bypasses stylesheet and mutation publication — **FIXED FOR QUALIFIED HTML INSERTION**
 
 **2026-11-22.** Shared DOM mutation follows **D8.4.4 / D9.5.6v2** and precise
@@ -2206,6 +2231,35 @@ the normal resource cache. This does not establish Shadow DOM as the cause of
 every remaining blank page or of that site's remaining theme mismatch.
 
 ### JS13-L1 — snapshot script admission can leave the whole document hidden — **OPEN**
+
+Round177 (2026-11-22) refines two media/startup diagnoses. Monarch's actual
+hero is a mux-player component; its only ordinary light-DOM videos are hidden
+or below the first viewport. The current native run skips six async chunks
+(131397–1058840 bytes). An ordinary video-frame or loadeddata patch is therefore
+not established as a repair for this hero. The component's remaining shadow,
+scoped-style and stream path is unqualified; current partial shadow rendering
+under JS13-L2 must not be described as wholly absent. Mux documents its shadow
+encapsulation in the [player API](https://www.mux.com/docs/guides/player-api-reference/html).
+
+A separate Setpoint diagnostic uses the existing process-local
+RADIANT_JS_PRELAYOUT_DEFER_BYTES=0 override. Its 239880-byte module executes;
+load completes in 14.62 seconds and the heading/navigation appear, while the
+large product panel remains blank. This is admission evidence, not a shipping
+policy change, performance comparison or full-page clearance. All normal
+source limits remain unchanged. Evidence: temp/online-visual-round177/
+diagnostic-qualification.json, browser/saas_landing_394/{dom.html,media.json},
+current native task logs, and setpoint-admission-diagnostic/ (**D8.4.4 /
+D9.5.6v2 / D10.1.7**).
+
+Round176 (2026-11-22) isolates Agiloft's white viewport. Its wrapper and
+ancestors reach opacity 1 with visible, correctly positioned native boxes;
+the final view tree instead contains an opaque fixed div._vis_hide_layer at
+z-index 2147483647. The authored VWO bootstrap removes that cover in finish(),
+with a 2000ms settings fallback. Its 716230-byte tag is skipped by native source
+admission. The separate core-animation callback exception does not establish
+the blank-page cause. No cover is removed and no timer/source limit changes.
+Evidence: `temp/online-visual-round176/agiloft-view.json`, current navigation
+HTML, native trace and instrumented snapshots (**D8.4.4 / D10.1.7**).
 
 Round172 (2026-11-22) rechecks two older media omissions with the qualified
 RI-204 renderer and the existing 1000ms frame. FigJam still lacks its large
