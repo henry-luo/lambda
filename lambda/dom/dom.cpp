@@ -7148,26 +7148,31 @@ Item dom_location_set_component(Item document, size_t index, Item value) {
     return result;
 }
 
-// The component's value as a JS string, or false when `prop` is not one of
-// them. A missing URL or component reads as "", as it does in a browser for a
-// document that has not been navigated.
+static Item dom_url_component_value(const Url* url, JsUrlComponentGet get) {
+    const char* value = url ? get(url) : nullptr;
+    return js_name_item(value ? value : "");
+}
+
 static bool js_url_component_item(const Url* url, const char* prop, Item* out) {
     if (!prop || !out) return false;
     for (size_t i = 0; i < sizeof(k_url_components) / sizeof(k_url_components[0]); i++) {
         if (strcmp(k_url_components[i].name, prop) != 0) continue;
-        const char* value = url ? k_url_components[i].get(url) : NULL;
-        *out = js_name_item(value ? value : "");
+        *out = dom_url_component_value(url, k_url_components[i].get);
         return true;
     }
     return false;
 }
 
+extern "C" Item dom_core_location_hash(Item n) {
+    // lambda views read their own document's live history URL without a JS Location object.
+    const DomDocument* doc = static_cast<DomDocument*>(dom_document_from_item(n));
+    return doc ? dom_url_component_value(doc->url, url_get_hash) : ItemNull;
+}
+
 Item dom_location_get_component(Item document, size_t index) {
     DomDocument* doc = js_document_proxy_doc_from_item(document);
     if (!doc || index >= dom_location_component_count()) return ItemError;
-    Item value = ItemNull;
-    return js_url_component_item(doc->url, k_url_components[index].name, &value)
-        ? value : ItemError;
+    return dom_url_component_value(doc->url, k_url_components[index].get);
 }
 
 static bool dom_form_named_getter_reserved_name(const char* prop);

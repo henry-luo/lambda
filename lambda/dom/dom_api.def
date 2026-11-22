@@ -872,3 +872,6 @@ DOM_OP(CORE, show_dialog, forms, 1, "pn(n: any) -> null", dom_core_show_dialog, 
 
 // append Range parsing without moving the existing catalog slots (D9.5.4).
 DOM_OP(CORE, range_create_contextual_fragment, range, 2, "pn(r: any, markup: string) -> any", dom_range_create_contextual_fragment, DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+
+// live location read for documents driven by either language (D9.5.6v2).
+DOM_OP(CORE, location_hash, navigation, 1, "fn(n: any) -> string|null", dom_core_location_hash, DOM_F_NEUTRAL, "", none, "", "")

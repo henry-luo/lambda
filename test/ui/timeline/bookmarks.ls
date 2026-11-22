@@ -18,7 +18,7 @@ view <bookmark_demo> state fragment:"",notices:0 {
 on timeline_bookmark(value) { notices=notices+1 }
 on click(evt) {
     let key=dom.get_attribute(evt.target,"id");
-    if (key=="read") { fragment=dom.owner_document(evt.target).hash }
+    if (key=="read") { fragment=dom.location_hash(evt.target) }
     else if (key=="back" or key=="forward") { dom.history_traverse(evt.target,if (key=="back") -1 else 1) }
     else if (key=="restore") {
         let host=dom.query_selector(dom.closest(evt.target,"main"),"[data-timeline-host]");

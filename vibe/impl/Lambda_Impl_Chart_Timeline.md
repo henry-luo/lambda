@@ -179,6 +179,19 @@ they are not runtime dependencies or vendored implementation code.
   The new JavaScript native-fragment fixture verifies hashchange URL fields.
   Full baseline gates remain outstanding after these engine changes.
 
+- **Bookmark regression fixed 2026-11-22.** Moving URL components from
+  `Document` to JavaScript `Location` in `f4b5c6d88` broke the timeline's
+  fragment reads. `dom.location_hash(node)` reads the owning document's live
+  URL through the DOM catalog and shares the component reader with JavaScript
+  (D9.5.4 / D9.5.6v2). The existing UI assertions went from 5/12 to 12/12 in
+  Auto, interpreter, and JIT. The five DOM history replays and three JavaScript
+  Location ownership controls pass. The sandbox run passed 30 of 32 timeline
+  fixtures. The two audio failures also occurred with the pre-fix host and
+  packages. Both audio fixtures pass with macOS decoder access. The full
+  Radiant baseline with native access reports 8,174 passed, 298 partial, 20
+  skipped and zero failures, including all 329 UI checks. Replay evidence is
+  in `temp/timeline-bookmarks/`.
+
 - Native local audio/video commands now execute after rendering and report
   accepted clip-end/error notifications; inferred remote providers retain
   application controllers. The initial native fixture passes five assertions,

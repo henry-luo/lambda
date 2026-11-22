@@ -72,6 +72,7 @@ Item dom_engine_viewport_size(Item n);
 Item dom_engine_cancel_frame(Item n, Item token);
 Item dom_engine_watch_window(Item n, Item event_name, Item enabled);
 Item dom_engine_history_traverse(Item n, Item delta);
+Item dom_core_location_hash(Item n);
 Item dom_engine_media_info(Item n);
 Item dom_engine_media_command(Item n, Item command, Item value);
 
