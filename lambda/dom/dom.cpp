@@ -1292,6 +1292,8 @@ static Item dom_custom_element_visit_tree(DomNode* node, DomCustomElementTreeAct
 extern "C" void dom_custom_element_tree_changed(void* node_ptr, bool connected) {
     if (!dom_realm_active()) return;
     DomNode* node = (DomNode*)node_ptr;
+    // wrapping a subtree shares ownership checks across its descendants.
+    DomNodeValidationScope owners(node ? node->doc.get() : nullptr);
     dom_custom_element_visit_tree(node, connected ? DOM_CUSTOM_CONNECT : DOM_CUSTOM_DISCONNECT);
 }
 

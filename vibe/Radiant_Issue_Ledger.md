@@ -20,6 +20,26 @@ observations still require re-verification. Add new Radiant issues here.
 
 ## Open issues
 
+<a id="ri-215"></a>
+
+### RI-215 — Two expanded document-editor replays fail on the current checkout
+
+**Open, 2026-11-22.** Run `test_ui_automation_gtest.exe --suite baseline
+--test 'doc_editor_*'`. The tree-alignment replay looks for
+`test/test_graph_parser_gtest.cpp`. Its source belongs to lambda-input at
+`lambda-input/test/test_graph_parser_gtest.cpp` (**D9.1.1v4**).
+The markup-formats replay expects the AsciiDoc title in the first preview
+heading and receives “Section 1”. The heading mismatch remains unassigned
+between input and the preview (**D10.1.2 / S12.1.3v6**).
+
+Both assertion outcomes reproduce with the original editor source and the
+pre-fix viewer. Evidence is under
+`temp/radiant-ten-under-five/doc-regression-control/`.
+
+<a id="ri-214"></a>
+
+- [RI-214 — Replays repeat ownership walks after a DOM retirement](<Radiant_Issue_Ledger (fixed).md#ri-214>).
+
 <a id="ri-213"></a>
 
 - [RI-213 — Release build used a removed DOM validation cache API](<Radiant_Issue_Ledger (fixed).md#ri-213>).
@@ -126,6 +146,12 @@ background compilation under load. The event and frame contracts follow
 D8.3.4 and D10.1.7. The underlying Scene3D budget also remains open in
 RI-196. Results are under `temp/radiant-debug-regression/`.
 
+After RI-214, the stock debug baseline passes with seven UI workers.
+Text-to-PDF takes 4.973 s and essay toggle takes 4.531 s. The source scroll
+reset takes 5.631 s, direct table 7.575 s and slide animations 6.089 s.
+Two isolated debug passes meet the five-second target. See
+`temp/radiant-ten-under-five/final-baseline/test_summary.json`.
+
 <a id="ri-197"></a>
 
 ### RI-197 — FIXED
@@ -150,6 +176,13 @@ The engine retains native resources and updates the requested frame under
 **D5.5.2** and **D10.1.7**. The remaining timing gap affects the performance
 target. The replay checks and timing artifacts are recorded in the
 [UI tuning checkpoint](impl/Radiant_Impl_UI_Test_Tuning.md#current-checkpoint).
+
+After RI-214, the five requested Scene3D cases each complete within 3.915 s
+in two isolated debug passes. In the nine-worker baseline their times range
+from 5.600 to 8.717 s. One of the largest sample costs is now loading and
+painting the linked Collection documents or Midtown's first scene
+(**D9.1.3v2 / D10.1.7**). See
+`temp/radiant-ten-under-five/final-baseline/test_summary.json`.
 
 <a id="ri-195"></a>
 

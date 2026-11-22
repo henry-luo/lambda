@@ -133,6 +133,18 @@ See the [fixed record](<Lambda_Issue_Ledger (fixed).md#lr12-68>).
 Parser-head staging publishes child arrivals to mutation observers. See the
 [load-time cascade repair](<Lambda_Issue_Ledger (fixed).md#lr12-69>).
 
+<a id="lr12-70"></a>
+
+## LR12-70 — Two execution-tier parity tests fail in the Lambda baseline
+
+**OPEN**, reproduced on 2026-11-22 at Lambda `4c4b96bf1` with Input
+`3ad3293`. `Tune27FixturesHonorTierSupport` loses the JIT batch result.
+`FunctionLocalStateSurvivesCollectionAndPromotion` exits 139 when it runs
+`fn_local_decomposition_capture.ls`. Both outcomes reproduce with the host
+built before RI-214. The cause is unconfirmed. D6.3.3, D8.2.6, and D8.3.3
+cover native roots, demand-driven lowering, and calls into promoted code.
+Runs are recorded in `temp/radiant-ten-under-five/lambda-controls/`.
+
 <a id="lr12-67"></a>
 
 ## LR12-67 — `dom.set_attribute` stores a numeric list as an empty string
@@ -189,6 +201,12 @@ the separately recorded media playback stall also recurred in that run.
 The Hotwire HTTP client fixture likewise exited 139 in an unrestricted
 loopback rerun (`temp/sheet-clock/hotwire.log`); its relationship to the DOM
 fixtures is unconfirmed.
+
+On 2026-11-22, `dom_document_location_to_string` and `dom_module_props`
+produced identical mismatched output on the hosts built before and after
+RI-214. The unrestricted Hotwire auto-tier replay also stopped after the
+first server response on both hosts. Evidence is in
+`temp/radiant-ten-under-five/lambda-controls/`.
 
 <a id="lr09-35"></a>
 ## LR09-35 — Disk watch can miss the first creation in the Lambda baseline

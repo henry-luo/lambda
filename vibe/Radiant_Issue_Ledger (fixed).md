@@ -14,6 +14,34 @@ are unchanged. Full evidence is under `../../lambda/temp/kianhup-style/`.
 
 ## Fixed issues
 
+<a id="ri-214"></a>
+
+### RI-214 — Replays repeat ownership walks after a DOM retirement
+
+**Fixed 2026-11-22.** The RI-213 build repair removed two DOM validation
+optimizations. The Input revision in the current checkout provides both APIs
+again. Radiant had continued to use expired proofs for surviving ViewState
+owners after an unrelated DOM retirement. Optimized samples traced repeated
+ownership walks to this path in the PDF, Slides, and Hamster replays.
+
+StateStore now renews each surviving owner's proof. Pruning, graph validation
+and Lambda custom-element traversal reuse the Input validation scope for
+unproven addresses. The existing form-control lifetime test retires a
+sibling and checks generation renewal and detached-control behavior
+(**D5.5.1 / D9.1.3v2**).
+
+The document editor also gives its file-tree scrollport size containment.
+The containing panel determines the scrollport size, and expanded rows
+determine its scroll range (**D5.5.3 / S12.1.3v6**).
+
+The 39 state-store tests, three custom-element goldens, and all ten
+requested replays passed in the debug build. Two isolated passes took
+1.703–3.915 s per command. The full stock debug baseline had 8,175 passes,
+298 partials, 20 skips, and zero failures. In that run text-to-PDF fell
+from 37.519 s to 4.973 s. The release-profile build also passed the ten
+replays. Evidence is under `temp/radiant-ten-under-five/`. RI-196 and
+RI-198 track the remaining parallel timing gaps.
+
 <a id="ri-213"></a>
 
 ### RI-213 — Release build used a removed DOM validation cache API
@@ -31,6 +59,9 @@ checks (**D10.1.7**) for the same completion condition.
 
 Reproduction: `make release` on macOS. Verification: `make release` succeeds;
 the Lambda runtime, adapters, Radiant archive and final executable all build.
+
+The current Input revision provides the faster validation APIs. RI-214
+records their restoration and verification in the paired checkout.
 
 <a id="ri-212"></a>
 
