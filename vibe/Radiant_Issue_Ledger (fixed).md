@@ -4513,6 +4513,17 @@ reports. Their original logs are under `test/online/snapshots/` for
 `temp/eden-load/smoke-all-final.log` for Eden. Those replays were outside
 this local verification.
 
+**Focus event follow-up, 2026-11-23.** `css_focus_fixup` passed 18 of 24
+assertions after the early eligibility check was added. The state-only clear
+left the post-reflow transition without a target for `blur` and `focusout`.
+Mutation publication now calls the existing document focus transition through
+the event-host provider before reflow validates state (**D1.10 / D5.5.1 /
+D9.1.3v2**). The fixture passes all 24 assertions at 1x and 2x. A timer-driven
+ancestor hide also preserves a blur listener's refocus and layout read. A
+keyboard edit followed by hiding the input delivers `change`, `blur`, and
+`focusout` in order. Reproduction and verification are in
+`temp/css-focus-fixup/`.
+
 <a id="ri-018"></a>
 
 ### RI-018 — Online exports exhaust memory before viewport PNG encoding

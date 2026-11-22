@@ -5874,7 +5874,7 @@ static const DomHostEngineOps radiant_host_operations = {
     radiant_host_prepare_children_mutation,
     radiant_host_control_is_disabled,
     radiant_host_control_focus_programmatic,
-    radiant_focus_popup_candidate,
+    radiant_change_document_focus,
     radiant_host_control_store_text,
     radiant_host_control_invalidate_behavior,
     radiant_host_control_open_dropdown,
@@ -6099,7 +6099,7 @@ static const RadiantEventHostOps lambda_radiant_event_host_ops = {
     radiant_dispatch_scene_animation_event, radiant_dispatch_scene_state_event,
     lambda_radiant_allow_frame_reflow, dom_engine_frame_tick, radiant_document_has_pending_frames,
     radiant_focus_element, radiant_collect_stranded_dom, radiant_editing_animation_active,
-    radiant_editing_animation_tick, radiant_set_input_capabilities,
+    radiant_editing_animation_tick, radiant_set_input_capabilities, radiant_change_document_focus,
 };
 
 static const RadiantEventNavigationHostOps lambda_radiant_event_navigation_host_ops = {

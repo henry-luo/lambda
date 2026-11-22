@@ -11888,8 +11888,8 @@ void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard
     }
 }
 
-void radiant_focus_popup_candidate(DomDocument* document, DomElement* element) {
-    if (!document || !document->state || !element) return;
+void radiant_change_document_focus(DomDocument* document, DomElement* element) {
+    if (!document || !document->state) return;
     EventContext event = {};
     event.ui_context = (UiContext*)document->js.host_ui_context;
     event.target_document = document;
