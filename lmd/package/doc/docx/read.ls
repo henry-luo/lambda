@@ -48,3 +48,27 @@ pub fn convert(source, options, include_serialized: bool) map^ {
         raise c.fail("unsupported",diagnostics[0].code ++ ": " ++ diagnostics[0].message,diagnostics[0].part)
     else {*:rendered,metadata:pkg.metadata,diagnostics:diagnostics}
 }
+
+pub fn preview_setup(source) map^ {
+    let pkg = package.preview_package(source)^
+    let options = checked({include_empty_paragraphs:true,presentation:"source",snapshot:true})^;
+    {member:pkg.parts[pkg.main],options:options,setup:model.preview_setup(pkg)^,
+        pending:[],counters:{},notes:[],started:false}
+}
+
+pub fn preview_batch(cursor, parsed, eof) map^ {
+    let body = package.preview_body(parsed,cursor.setup.pkg.main)^
+    let batch = model.preview_blocks(cursor.setup,body,cursor.options,not cursor.started)^
+    let done = eof or batch.stop
+    let blocks = cursor.pending ++ batch.blocks
+    // Keep a trailing list together so numbering and nesting survive XML batch boundaries.
+    let end = if (done) len(blocks) else max([0,*[for (i,node in blocks where node.list == null) i+1]])^
+    let ready = slice(blocks,0,end)
+    let pending = slice(blocks,end)
+    let notes = model.preview_annotations(ready,cursor.setup,cursor.options,cursor.notes)^;
+    let rendered = renderer.render({blocks:ready,annotations:notes,page_style:batch.page_style},
+        cursor.options,false,{counters:cursor.counters,done:done,paper_known:batch.paper_known})^;
+    {document:rendered.document,metadata:cursor.setup.pkg.metadata,stop:done,
+        diagnostics:cursor.setup.pkg.diagnostics ++ batch.diagnostics ++ rendered.diagnostics,
+        continuation:{*:cursor,pending:pending,counters:rendered.counters,notes:notes,started:batch.started}}
+}

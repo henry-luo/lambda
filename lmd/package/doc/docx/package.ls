@@ -63,6 +63,22 @@ fn word_tag(node, scope) any^ {
     if (c.uri(tag.uri)^ == c.W) tag.local else null
 }
 
+pub fn preview_package(source) map^ {
+    let pkg = opc.capture_parts(source,c.fail,c.uri,"DOCX")^;
+    if (content_type(pkg,pkg.main) != "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml" or
+        pkg.parts[pkg.main] == null)
+        raise c.fail("invalid-package","Expected a DOCX WordprocessingML document",pkg.main)
+    else {*:pkg,stories:stories(pkg)^,diagnostics:story_diagnostics(pkg)^}
+}
+
+pub fn preview_body(parsed, part) map^ {
+    let document = [for (child in x.elements(parsed)^ where word_tag(child,{})^ == "document") child][0]
+    let scope = x.bindings(document)
+    let body = [for (child in x.elements(document)^ where word_tag(child,scope)^ == "body") child][0];
+    if (body == null) raise c.fail("invalid-package","Expected a DOCX WordprocessingML body",part)
+    else {blocks:x.elements(body),scope:x.bindings(body,scope)}
+}
+
 pub fn open_package(source, snapshot = false) map^ {
     let pkg = opc.capture(source,c.fail,c.uri,"DOCX",snapshot)^
     let document = pkg.root

@@ -10,6 +10,11 @@ import drawing: .drawing
 import presentation: .presentation
 import first_page: lambda.doc.first_page
 
+pub fn preview_setup(pkg) map^ {
+    let sheet = styles.prepare(pkg)^;
+    {pkg:pkg,sheet:sheet,defaults:styles.paragraph(sheet,null)^}
+}
+
 fn result(nodes = [], diagnostics = []) => {nodes:nodes,diagnostics:diagnostics}
 fn warning(pkg, code, message) map^ => c.issue(code,pkg.main,message)
 
@@ -352,4 +357,25 @@ pub fn build(pkg, options) map^ {
     let notes = annotations(contents.nodes,pkg,sheet,options)^;
     {blocks:contents.nodes,annotations:notes,page_style:presentation.page_style(section,defaults.run),
         diagnostics:pkg.diagnostics ++ contents.diagnostics ++ c.collect(notes,"diagnostics")}
+}
+
+pub fn preview_blocks(setup, body, options, at_start) map^ {
+    let nodes = [for (node in body.blocks) c.xml_node(node,body.scope)^]
+    let cut = first_page.cut(nodes,(node,index) any^ =>
+        snapshot_boundary(node,setup.sheet,at_start and index == 0))^
+    let contents = block_many(if (cut == null) nodes else cut.children,setup.pkg,setup.sheet,options)^
+    let tail = nodes[last]
+    let section = if (cut.section != null) cut.section
+        else if (tail.tag == "sectPr" and tail.uri == c.W) tail else null;
+    {blocks:contents.nodes,diagnostics:contents.diagnostics,stop:cut != null,
+        started:not at_start or len(nodes)>0,paper_known:section != null,
+        page_style:presentation.page_style(section,setup.defaults.run)}
+}
+
+pub fn preview_annotations(blocks, setup, options, previous) array^ {
+    let notes = annotations(blocks,setup.pkg,setup.sheet,options)^;
+    previous ++ [for (i,note in notes where not any([for (prior in previous) prior.key == note.key]))
+        {*:note,number:1+len([for (prior in previous where prior.story == note.story) prior])+
+            len([for (j,other in notes where j<i and other.story == note.story and
+                not any([for (prior in previous) prior.key == other.key])) other])}]
 }

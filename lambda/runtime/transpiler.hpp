@@ -274,7 +274,7 @@ const LambdaDocumentTransformConfig* lambda_document_transform_for_input_type(
 // its configured public transform without synthesizing a Lambda bridge script.
 Input* run_lambda_document_transform_with_options(Runtime* runtime,
     const char* input_target, const LambdaDocumentTransformConfig* transform,
-    const LambdaDocumentTransformOption* options, int option_count);
+    const LambdaDocumentTransformOption* options, int option_count, Script** loaded_package = nullptr);
 // A worker-built satellite is inert until the evaluator seals its module-state
 // layout and publishes its entries. The fixed member set keeps the image
 // self-contained and mirrors the bounded direct-callee cluster.

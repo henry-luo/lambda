@@ -198,12 +198,13 @@ fn plain_text(blocks, options) => join([for (node in blocks)
         if (text == "" and not options.include_empty_paragraphs) "" else text ++ "\n\n"
     } else join([for (row in node.rows) join([for (cell in row.cells where cell.merge != "continue")
         (let text = plain_text(cell.blocks,options), if (ends_with(text,"\n\n")) slice(text,0,len(text)-2) else text)],"\t") ++ "\n"],"")],"")
-pub fn render(model, options, include_serialized: bool) map^ {
+pub fn render(model, options, include_serialized: bool, stream = null) map^ {
     let layers = [for (node in ((c.model_nodes(model.blocks ++ model.annotations)) ^ { [] })
         where node.placement.absolute == true) node.placement]
     let opts = {*:options,annotations:model.annotations,layers:layers}
-    let blocks = render_blocks(model.blocks,0,{},opts)^
-    let notes = [for (note in model.annotations, let rendered = render_blocks(note.blocks,0,{},opts)^)
+    let blocks = render_blocks(model.blocks,0,if (stream == null) {} else stream.counters,opts)^
+    let notes = [for (note in (if (stream == null or stream.done) model.annotations else []),
+        let rendered = render_blocks(note.blocks,0,{},opts)^)
         {*:note,nodes:rendered.nodes,diagnostics:[for (issue in rendered.diagnostics) {*:issue,part:note.part}]}]
     let sections = [for (kind in ["footnote","endnote","comment"],
         let group = [for (note in notes where note.story == kind) note] where len(group) > 0)
@@ -211,7 +212,10 @@ pub fn render(model, options, include_serialized: bool) map^ {
             <li id:(options.id_prefix ++ note.key),*note.nodes>]>>]
     let root_style = (if (options.presentation == "source") model.page_style else "") ++
         (if (len(layers) > 0) "position:relative;z-index:0;" else "")
-    let document = <article class:"docx-document",*:presentation.attributes(root_style),*(blocks.nodes ++ sections)>;
+    let document = <article class:"docx-document",*:presentation.attributes(root_style),
+        *:if (stream==null) {} else {id:"docx-preview-flow",
+            [ "data-preview-paper" ]:if (stream.paper_known) model.page_style else null},
+        *(blocks.nodes ++ sections)>;
     let diagnostics = blocks.diagnostics ++ c.collect(notes,"diagnostics");
     // The viewer consumes the document tree directly.
     if (include_serialized) {
@@ -219,7 +223,9 @@ pub fn render(model, options, include_serialized: bool) map^ {
             join([for (kind in ["footnote","endnote","comment"], note in notes where note.story == kind)
                 reference_label(note,opts) ++ " " ++ plain_text(note.blocks,opts)],""),
             diagnostics:diagnostics}
-    } else {
+    } else if (stream == null) {
         {document:document,diagnostics:diagnostics}
+    } else {
+        {document:document,diagnostics:diagnostics,counters:blocks.counters}
     }
 }

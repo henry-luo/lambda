@@ -543,8 +543,9 @@ in batches and stop when a laid-out prefix fills the viewport. Markup that
 needs whole-document reference resolution or an embedded transformation
 requires further support.
 
-DOCX stops at a supported page break or when estimated line wrapping and
-block heights fill the page. PPTX opens the first slide and its dependencies.
+DOCX reads the main Word XML member in blocks. Radiant extends the same
+layout until the viewport fills or a supported page break ends the first
+page (D5.5.3, D9.1.2v2, D9.3.4). PPTX opens the first slide and its dependencies.
 LaTeX performs normal TeX expansion and stops conversion at the first supported
 forced page break (D9.3.4, D10.2.2). PDF parses the source before importing page
 one. XSL-FO and Radiant page documents preview the first composed page.

@@ -92,7 +92,7 @@ fn metadata(parts, rels, failure, canonical) map^ {
             (node.tag,x.tree_text(node))])
     }
 }
-pub fn capture(source, failure, canonical, label, raw_main = false) map^ {
+pub fn capture_parts(source, failure, canonical, label) map^ {
     let archive = if (source is string) {
         if (contains(source,":") or starts_with(source,"//")) raise failure("invalid-source","A local " ++ label ++ " path is required")
         else input(source,"zip")^
@@ -105,8 +105,11 @@ pub fn capture(source, failure, canonical, label, raw_main = false) map^ {
     let main = first(main_rels);
     if (len(main_rels) != 1 or main.external) raise failure("invalid-package","Expected one internal main-document relationship")
     else {parts:parts,types:content_types,main:main.target,
-        root:if (raw_main) xml_root(parts,main.target,true,failure)^
-            else xml(parts,main.target,true,failure,canonical)^,
         relationships:relationships(parts,main.target,false,failure,canonical)^,
         metadata:metadata(parts,root_rels,failure,canonical)^}
+}
+pub fn capture(source, failure, canonical, label, raw_main = false) map^ {
+    let pkg = capture_parts(source,failure,canonical,label)^;
+    {*:pkg,root:if (raw_main) xml_root(pkg.parts,pkg.main,true,failure)^
+        else xml(pkg.parts,pkg.main,true,failure,canonical)^}
 }

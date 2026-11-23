@@ -4,27 +4,27 @@ The [CLI design](../../doc/Lambda_CLI.md#preview--first-page-document-preview) d
 
 ## Current checkpoint
 
-- Format coverage and benchmark, 2026-11-23, `lambda` checkout on `master` at `a0892901da` with local Lambda, Input and Radiant changes.
-- Agreed scope covers first-page output, caller-selected thumbnail dimensions, coarse rendering for unreadably small thumbnail text, mode-specific animation, incremental parsing driven by layout, and the two latency targets.
+- Retained block-markup and DOCX layout implemented 2026-11-24 on `master` at `f0f5bbe5c3` with local Lambda, Input and Radiant changes. Earlier release measurements used `a0892901da` with local changes.
+- Agreed scope covers first-page output, caller-selected thumbnail dimensions, coarse rendering for unreadably small thumbnail text, mode-specific animation, layout-driven incremental parsing and layout, and the two latency targets.
 - The CLI requires exactly one mode and a local input. A thumbnail requires a new PNG output path. Both pixel dimensions default to 256 if omitted. The renderer fits the viewport or physical page into the requested box. Snapshots use viewer geometry.
-- HTML resumes the tokenizer and tree builder between batches. Markdown, MediaWiki, reStructuredText, Org, AsciiDoc and Textile read lines as the existing block parser requests them and stop between blocks. Nested directive parsing keeps its own line boundary. Radiant currently rebuilds the candidate DOM and layout for each batch. The committed first viewport stays at the top even when parser lookahead extends below it. Resize growth and incremental DOM invalidation still need implementation (D9.1.1v4, D9.1.2v2).
+- Markdown, MediaWiki, reStructuredText, Org, AsciiDoc and Textile append complete blocks to one DOM, then resume the same layout pass from the first new block. Release checks show one root layout across multiple batches and unchanged pixels. HTML retains the tokenizer and tree builder and still uses the candidate-layout callback. See §11 for the completed work and verification (D5.5.3, D9.1.1v4, D9.1.2v2).
 - HTML uses the local resource policy and inert scripts. The first implementation assumes UTF-8 input and first-page dependencies available in the loaded prefix. Markdown forward link or footnote dependencies and embedded transforms are outside the fast path. PDF selectively converts and composes page one after the existing full source parse.
-- The preview loader passes `snapshot: true` to the DOCX, PPTX and LaTeX transforms (D9.3.4). PPTX selects the first slide relationship before loading slide parts. DOCX reads the ZIP and parses main XML, then expands names and normalizes only the selected body blocks. A saved or explicit break in that prefix ends the conversion. In unmarked flow the estimate uses page size, margins, paragraph indentation and leading, mean glyph advance, hard line breaks, and the heights of tables and inline drawings. One oversized block stays whole. This estimate approximates Word pagination. LaTeX still expands the source then cuts the AST before rendering adapters at forced breaks (D10.2.2).
+- DOCX CLI preview streams the main Word XML member and continues the retained layout when it needs another batch. It reuses the Word package's supported explicit, resolved and saved break rules. The public DOCX conversion option `snapshot: true` still supports its original bounded-model heuristic. PPTX selects the first slide before loading slide parts. LaTeX expands the source and cuts its AST before rendering adapters at forced breaks (D5.5.3, D9.1.2v2, D9.3.4, D10.2.2).
 - Safe file formats outside the incremental and first-page transforms reuse the standard viewer loaders with local resource policy (D11.1.2). XSL-FO and Radiant page thumbnails select the first composed page. EPUB starts at the beginning without reading or writing saved progress. The coverage run found an existing EPUB compile error from propagating the non-error `store.restore` return contract (S7.5.1v6). Removing that postfix restored the viewer route.
-- Transform verification used the local release build. Four DOCX break variants retained the first text and omitted the second. PPTX loaded one slide with invalid XML in later slides. LaTeX kept content after `\pagebreak[1]` and stopped at a macro-expanded `\newpage`. All six CLI fixtures produced nonblank 256 × 256 PNGs and completed headless snapshot runs. Evidence is under `temp/preview/transform-fonv5r2y/`.
+- Transform verification used the local release build. Four DOCX break variants retained the first text and omitted the second, and the streamed DOCX fixtures match those baseline pixels. PPTX loaded one slide with invalid XML in later slides. LaTeX kept content after `\pagebreak[1]` and stopped at a macro-expanded `\newpage`. Earlier evidence is under `temp/preview/transform-fonv5r2y/`. See §12 for streamed DOCX.
 - Coarse raster paint handles untransformed small runs in flowing thumbnails. Layout still uses real font metrics. The default cutoff is a projected size of 3 output pixels. Fine tuning, actual-face avoidance in layout and PDF coarse paint remain open (D9.1.1v4).
 - `make build-release-compile` and the Radiant integer-cast lint pass. The final arm64 macOS release build produced nonblank 256 × 192 PNGs for long HTML, short and long Markdown, and a two-page PDF. At 128 pixels, equal-length words in a monospace face produced identical strokes. At 640 pixels the glyph shapes differed.
 - Long HTML and Markdown produced identical thumbnails when appending a tail increased each input from 1.9 MB to 11.6 MB. The larger files exceed the preview byte budget, so success confirms early stop. A sparse HTML file rendered a visible block after over 8 KiB of hidden content. Route evidence is under `temp/preview/routes-5jiva8ay/`.
 - Warm filesystem launch-to-PNG p95 was 25.6 ms for long HTML and 28.0 ms for long Markdown across 20 fresh processes per fixture. One launch immediately after relinking took 634.3 ms. Cold startup is unqualified. Headless snapshot launch through exit was 34.8 ms for long HTML, 24.1 ms for long Markdown, and 34.1 ms for the two-page PDF. Live presentation and animation still need verification. Measurements are in `temp/preview/release-eoyf5rsc/results.txt`.
 - Coverage benchmark in §6 measures 43 preview fixtures in both modes and six additional ordinary viewer inputs. All five new incremental markup routes produced identical images when source size grew from about 1.2 MB to 12.2 MB. The unmarked Word fixture retained nine paragraphs and the identical image with 3,000 and 6,000 body paragraphs. Evidence is under `temp/preview/coverage/prefix-93xnkkfo/`.
-- The XML parser fix (D9.1.1v4, D10.1.4, LI-107) bounds the strict character-data terminator scan to its text run. The 2.44 MB raw Word XML parse went from about 1.82 s in the initial launch probe to 19.0 ms median across five release launches. First-page Word preview still parses the main member's XML, so indexed or resumable OPC intake remains open.
+- The XML parser fix (D9.1.1v4, D10.1.4, LI-107) bounds the strict character-data terminator scan to its text run. The 2.44 MB raw Word XML parse went from about 1.82 s in the initial launch probe to 19.0 ms median across five release launches. CLI DOCX preview now feeds that strict parser one batch of body elements at a time. See §12.
 - Thumbnail sessions use the first-frame GIF decoder for local files and embedded data images. A 160-frame GIF dropped from 146.3 ms p95 to 16.2–22.3 ms in two runs. XHTML still loads through the full strict XML route defined by D10.1.4. See §7.
 - Both preview modes route `.ls` to Radiant's escaped source view. The source loader reads the full file and the preview displays the first viewport. `lambda view` continues to evaluate script documents (D9.1.1v4, D9.1.2v2). See §8 for source preview measurements.
 - GLB uses Input's binary model importer and Radiant's native Scene3D renderer. The thumbnail skips animation conversion and reduces embedded textures to the output scale. The snapshot keeps the first applicable clip and uses a camera fitted to the initial posed bounds (D9.1.1v4, D9.1.2v2, D10.1.7). See §9.
 - GLB thumbnail texture decode caps the longest edge at the output's longest edge. Static triangle scenes can omit subpixel parts before native geometry and texture preparation. See §9.1 (D9.1.1v4, D10.1.7).
 - The snapshot target is 250 ms to the first usable frame. See §9.2 for qualification of the animated GLB and the native color resolve change (D9.1.3v2, D10.1.7).
 - Snapshot fixes the Lambda tier to strict T0. DOCX and PPTX viewers consume their document models directly. See §10 for the package startup and JIT measurements (D8.3.1v3, D9.3.4).
-- Next work is indexed PDF acquisition and a Word body XML input cursor through OPC. Also qualify live snapshots and cold startup, and profile actual face loading for coarse text.
+- Next action is the HTML continuation adapter in §4. It needs to preserve open HTML containers and handle dependency changes that can affect already laid-out nodes. Indexed PDF acquisition, live and cold-start timing, and coarse-text face profiling remain open.
 
 ## 1. Integration points and ownership
 
@@ -33,7 +33,7 @@ The [CLI design](../../doc/Lambda_CLI.md#preview--first-page-document-preview) d
 | Lambda CLI | [command dispatch](../../lambda/main.cpp), including `parse_doc_window_launch_options` and the build-profile exclusions | Add mode parsing and validation before opening the source or initializing a window. Reuse view launch and raster output facilities. Thumbnail needs offscreen Radiant. Snapshot needs the windowed build. The runtime-only CLI should report the missing capability (D9.2.1v2, D9.2.2). |
 | Input | [input dispatch](../../lambda-input/lambda/input/input.cpp), [markup parsers](../../lambda-input/lambda/input/markup/), [HTML5 parser](../../lambda-input/lambda/input/html5/) | Extend the existing source service and format parsers with bounded reads and resumable state. Input owns source identity, acquisition and Mark lifetimes (D9.1.2v2, D9.1.4v2, D11.1.2). |
 | Lambda document packages | [document viewer](../../lmd/package/doc/doc_viewer.ls), [PDF](../../lmd/package/doc/pdf/pdf.ls), [DOCX](../../lmd/package/doc/docx/) | Reuse the format's existing presentation and styles. Supply first-page data and reachable resources through the host interface. Preserve package ownership under D9.3.4. |
-| Radiant | [document loader](../../radiant/radiant/cmd_layout.cpp), [paged layout](../../radiant/radiant/layout_paged.cpp), [raster output](../../radiant/radiant/render_img.cpp) | Retain one document and layout context across refills. Return first-page flow and break information. Reuse offscreen paint for thumbnails and window presentation for snapshots (D9.1.1v4, D9.1.3v2). |
+| Radiant | [document loader](../../radiant/radiant/cmd_layout.cpp), [block layout](../../radiant/radiant/layout_block.cpp), [paged layout](../../radiant/radiant/layout_paged.cpp) | Own the first-page geometry and the refill decision. Retain the DOM, view tree and flow state across appends. Publish the finished layout to the offscreen or window renderer (D5.5.3, D9.1.1v4, D9.1.3v2). |
 
 The PDF loader already forwards `import_pages` and `max_pages` to the transform. The viewer also has an all-document PDF presentation route. Trace acquisition through [the native PDF reader](../../lambda-input/lambda/input/input-pdf.cpp) before attributing any saving to page selection. Likewise, the Markdown dispatch takes a source string, and the DOCX package uses shared OPC access. Placing a limit after these calls can leave the most expensive work intact.
 
@@ -42,9 +42,55 @@ The PDF loader already forwards `import_pages` and `max_pages` to the transform.
 1. **Choose the page geometry before reading content.** For fixed pages, obtain the first page's box and orientation from the format. For flow, use the viewer's initial content viewport at a reproducible reading size. A tiny thumbnail fits that logical page into its output canvas with padding. Its pixel width must not cause a paragraph to wrap at icon width. Use float geometry throughout Radiant.
 2. **Open a resumable input session.** Keep the source handle, offset or object cursor, decoder carry, structural parser state, resource requests, and the Input owner alive together. Each advance accepts a bounded work allowance and yields a change to the retained document, a dependency request, a real page boundary, EOF, or an error. Distinguish a temporary chunk boundary from EOF. The parser can consume input without emitting a complete block. Record this progress so the controller neither spins nor finalizes a partial token.
 3. **Estimate a first batch.** For flow, start from available line width and page height, font metrics and a conservative estimate of bytes per visible line. Update the estimate from the measured advance in normal flow. Bound the next read even when a long comment, hidden section or compressed part yields little visible content. Record the estimate and actual consumption for tuning. Indexed pages use direct seeks instead.
-4. **Lay out and refill on demand.** Radiant reports whether following flow can still enter page one, the remaining block space and any unresolved visible geometry. If room remains, advance the same parser and append or revise its affected tail. Invalidate layout from the earliest changed ancestor, including earlier dependents when a style, font, table width or image size changes. Repeat until overflow proves the viewport is filled, the formatter commits a page break, or Input reaches EOF. Margins, columns, transparent backgrounds and an intentionally blank first page make pixel occupancy an invalid stopping test.
+4. **Lay out and refill on demand.** At the end of the available flow, layout checks whether the first page has room for more content. With room and an open input session, layout asks for the next batch, attaches it to the retained DOM and continues from its current position. With a full page or a committed page break, layout ends without requesting another batch. A confirmed EOF completes a short page. See §2.1 for the continuation and finalization rules.
 5. **Resolve first-page dependencies and present.** Include page geometry, visible text, styles, fonts and images needed for the reference appearance. Apply late geometry changes and recheck the fill decision. Freeze the thumbnail timeline at initial presentation time, paint once offscreen, encode PNG and publish the completed image. Snapshot paints into the viewer and services animation, repaint and asset callbacks for the retained page. Screen clipping alone does not suppress off-page loading or animation work. A resize recomputes the first viewport and resumes the cursor only if more content fits.
 6. **Bound the lifecycle.** Use the existing host resource policy for document and subresource access (D11.1.2). Propose inert document scripts and no external fetches on automatic file-manager launch. Start snapshot animation coverage with declarative animation and animated images. Qualify script-driven animations separately against viewer policy before advertising parity. Cancel pending reads, decodes and callbacks on close, replacement or failure. Release Input and DOM owners after their last consumer. Bound decoded bytes, nesting, raster allocation and per-advance work. On an unsupported dependency or exhausted budget, return a diagnostic without publishing an incomplete image as success.
+
+### 2.1 Resume layout at the last available node
+
+Use one Input session, one Radiant DOM and one view tree per preview.
+The [block-markup loader](../../radiant/radiant/cmd_layout.cpp:3871) builds
+the DOM once and supplies later batches as appends at its flow boundary.
+Input owns the parser cursor and the source Mark tree. Radiant attaches each
+new source occurrence through the existing
+DOM construction and mutation paths and retains the resulting nodes and views
+(D5.5.3, D9.1.1v4, D9.1.2v2, D9.1.4v2).
+
+1. **Detect the input frontier.** In the layout traversal, reaching the last
+   available input node while the parser can still advance is a temporary
+   boundary. Nested containers with complete children still close normally.
+   Keep the active flow open at the frontier with its next-child position,
+   block cursor, pending line and margins, float exclusions, and page state.
+   Complete end-of-document layout only after a terminal result.
+2. **Check the page gap.** Measure remaining space from the active flow
+   position and the page's usable block extent. Use the layout state for
+   margins, floats and fragmentation. An exactly full page, overflow into
+   page two, or a committed first-page break ends layout without another
+   read. A positive gap in normal flow requests more input. An intentionally
+   blank page with a committed break is complete.
+3. **Pull and continue.** Advance the existing parser by one bounded batch.
+   Append stable Markdown blocks under the same flow container. For a
+   simple append, resolve styles for the new range and resume at its first
+   node with the existing layout state. The first implementation can pull
+   synchronously at a top-level Markdown block boundary so the active layout
+   call retains its context. A batch that advances through comments,
+   whitespace or hidden content can leave the gap unchanged. Continue while
+   the parser makes progress within the read budget. True EOF finalizes the
+   current layout, including a partially filled page. Read or parse failure
+   and budget exhaustion follow the loader's error path.
+4. **Repair affected geometry in place.** If a batch changes an open tail,
+   changes a structural selector such as `:last-child`, or resolves a
+   visible resource that changes sizing, invalidate the affected range and
+   restart layout at its earliest affected flow boundary. Keep the document,
+   views and valid prefix geometry. An ordinary append visits only the new
+   nodes for layout. Admit containers with cross-batch sizing dependencies
+   only when their reflow scope and stop condition have been verified.
+5. **Publish the completed pass.** Finalize the first viewport once.
+   For block markup, the regular host layout entry point starts the pass
+   after the host sets the viewport, scale and fonts. Its geometry publication
+   supplies the first thumbnail or window paint. Keep the cursor with a live
+   snapshot if a later viewport change needs more content. Close the input at
+   EOF or when its preview is retired.
 
 ### Coarse text in thumbnails
 
@@ -58,7 +104,7 @@ Radiant owns this optimization (D9.1.1v4). Classify each run by its projected in
 
 | Format | First-page work | Boundary and correctness checks |
 |--------|-----------------|---------------------------------|
-| Markdown | Resume the native markup parser at its prior offset. Preserve list, paragraph, fence, table and inline state. Publish stable blocks and revise the open block as needed. | Split reads inside UTF-8, CRLF, fences, setext headings and table delimiters. A later definition can affect a visible reference. Resolve it by targeted lookup or a bounded, measured scan. Record unresolved cases as coverage limits. |
+| Markdown and other block markup | Resume the native parser at its prior line and append complete blocks. Start layout continuation at top-level block boundaries, then support open-block changes where needed. | Split reads inside UTF-8, CRLF, fences, setext headings and table delimiters. A later definition can affect a visible reference. Resolve it by targeted lookup or a bounded, measured scan. Record unresolved cases as coverage limits. |
 | HTML | Feed the existing tokenizer and tree builder successive decoded chunks. Keep insertion mode, open elements and pending text. Attach parsed content to the same DOM and reuse style, resource and layout invalidation. | Split tags, entities, raw text and table content across reads. Later styles, selectors or script mutations can change earlier nodes. Define the supported first-frame dependency policy explicitly and compare with `view` on that subset. |
 | PDF | Read trailer and cross-reference data as needed, walk the first page-tree branch, and resolve the page's inherited boxes, rotation, contents and resource closure. Reuse the existing single-page transform. | Indexed reads may legitimately reach the end of a file. Count bytes and resolved objects, including indirect and compressed objects. Blank page one must stay blank. Record recovery paths for damaged or unsupported indexes separately. |
 | Word (.docx) | Use the ZIP directory and OPC relationships to locate the main document, styles, numbering, section settings and first-page headers or media. Incrementally inflate and parse body XML. Feed paragraphs, runs and table fragments to the existing Word presentation. | DOCX normally flows. Respect explicit page and section breaks and dependencies that occur later, including section properties. Compare against the Lambda viewer at matching geometry. Bound inflation of large entries and leave unrelated members unopened. |
@@ -69,8 +115,8 @@ For giant paragraphs, tables, or tokens, a whole block can exceed the page budge
 ## 4. Delivery phases and exit checks
 
 1. **Baseline and trace.** Select fixtures and matching reference renders. Instrument source opens/reads, parse, package startup and transform, resource decode, layout, paint, presentation and encoding. Measure the cost of launching a fresh process before choosing parser batch sizes.
-2. **Implement a vertical slice on Markdown.** Connect both command modes to one Input session and Radiant refill controller. Implement coarse thumbnail text and demonstrate the font-work counters above on a mixed-size page. Demonstrate a sparse prefix that requires several reads, a short document that stops at EOF, and a long document that stops after one viewport. Trace monotonic progress, bounded read-ahead and reuse of parser state.
-3. **Add HTML and animation.** Cover chunk boundaries, head dependencies and late size changes. Use a controlled clock to compare a thumbnail to the initial frame. Observe two distinct snapshot frames for visible animation and verify that a later animation never starts. Exercise close during a refill and a resize that exposes more first-page content.
+2. **Implement the retained loop on Markdown.** Expose bounded advances of the same Input session. Replace the candidate-layout callback with the pull at the end of available flow in both command modes. Exercise a sparse prefix across several refills, a short document ending at EOF, and exact fit and overflow with a large unread tail. Check DOM and view identity and count layout visits to the completed prefix. Run the existing coarse thumbnail fidelity checks against the retained geometry.
+3. **Extend to the other streamed markup routes.** Reuse the block append path for MediaWiki, reStructuredText, Org, AsciiDoc and Textile. For HTML, cover open containers, chunk boundaries, head dependencies and late size changes. Exercise close during a refill and resize that exposes more first-page content. Use a controlled clock to compare a thumbnail to the initial frame and verify that only visible first-page animations start in snapshot mode.
 4. **Add PDF and DOCX.** Prove page-selective acquisition as well as first-page rendering. Use page-one dependencies stored near the end of each file and large, unrelated later content. Check explicit breaks, blank pages, images, tables and headers. Record measured support and limitations for each route.
 5. **Qualify and document.** Run the release measurements below, compare outputs and fix the largest measured costs. Verify build-profile diagnostics, invalid dimensions, write failures and interrupted input. Publish supported formats, defaults and measured results in the CLI reference when each route qualifies.
 
@@ -80,9 +126,13 @@ For giant paragraphs, tables, or tokens, a whole block can exceed the page budge
 - **Use a reproducible release corpus.** Run `make release` in the primary checkout per the developer guide. Pin hardware, OS, commit, fonts, viewport, output size and input hashes. Use local files, fresh processes and no precomputed previews. Measure a cold-cache cohort separately from repeated filesystem-warm launches. Record sample counts and cache preparation. Keep raw traces under `temp/preview/`.
 - **Set gates per fixture and route.** Qualification is p95 below 50 ms on each native thumbnail fixture and p95 below 250 ms on each snapshot fixture on the reference machine, including long Markdown, PDF and DOCX. Report cold and warm results separately, including p50, p95 and maximum. Record transformed thumbnail times separately. A fast median across formats cannot establish either target.
 - **Prove work scales with the first page.** Construct paired files with identical first-page dependencies and progressively larger tails. Record bytes read/inflated, nodes and PDF objects parsed, resources decoded, refill count, pages laid out/painted and peak memory. Verify that adding independent tail content leaves body processing bounded, allowing documented index/metadata costs. Instrumentation must expose an accidental full-file read even on a fast cache.
+- **Prove layout resumes.** Force several append-only batches in one first page. Assert one DOM and one view tree, unchanged identity and geometry for the completed prefix, one layout visit per completed flow block at the refill boundary, and zero parser advances after layout declares the page full. Check that a real dependency change reflows only affected geometry. Compare the final layout and pixels across batch boundaries and against a single-batch reference.
 - **Compare like for like.** Capture page one from the existing view or paged renderer with identical geometry, fonts, assets and animation time. Compare visible text and geometry, then raster output with the existing rendering tolerance. Include sparse, intentionally blank, forced-break, single oversized element, and late-dependency cases. For thumbnails also check exact output dimensions and aspect ratio. Record failures and measured exceptions in this plan before declaring a format ready.
 
 ## 6. Release benchmark at 128 × 128
+
+These results predate the retained layout pass in §2.1 and serve as its
+comparison baseline.
 
 Run on 2026-11-23 on arm64 macOS with the release executable from
 `make build-release-compile`. Each cell is **p50 / p95 in milliseconds**
@@ -439,10 +489,9 @@ effect. The temporary probes recorded worker and export durations under
   through a full parser pass before the compiler parses each module to build
   its AST. Reuse a verified source-identity-bound result where the existing
   import resolver and cache permit it (D8.3.5, D8.5.1, D9.3.3).
-- For large Word documents the transform still inflates and parses main XML
-  before selecting the first-page prefix. An incremental OPC body reader
-  targets the remaining size-dependent cost. Large standalone `.ls` source
-  previews have a separate opportunity to bound text reads and layout.
+- The DOCX measurements here predate the OPC body reader in §12. Large
+  standalone `.ls` source previews have a separate opportunity to bound
+  text reads and layout.
 
 The paired comparison used 20 measured fresh release processes per fixture
 and configuration after one warmup. The configurations ran in shuffled
@@ -480,3 +529,106 @@ medians. These samples leave cold startup and live-window latency
 unqualified. Raw launch times are under
 `temp/preview/script-tiers/run-1n8tjv_k/`. The prebuild on/off comparison
 is under `temp/preview/script-tiers/run-knfx82wh/`.
+
+## 11. Retained block-markup layout
+
+Input exposes a bounded pull over the existing block parser and keeps its
+line cursor, lookahead and Mark tree for the life of the source. Radiant
+copies each block into its native DOM once. The body flow loop checks its
+block position before closing the last available child. If the viewport
+still has room, the parser produces another batch and the same loop lays
+out the appended siblings. Cascade and generated list content are prepared
+for the appended range. The loader owns the source through a document
+resource so a live snapshot can request more input on a later layout pass
+(D5.5.3, D9.1.1v4, D9.1.2v2, D9.1.4v2).
+
+The current continuation point is the body of a document with bundled
+block-markup styles. HTML has its own parser-frontier and style
+dependencies. Its candidate callback still needs replacement. The next
+stage needs to attach closed siblings under the retained open containers,
+apply parser changes that can affect the prefix, and qualify earlier
+geometry invalidation. Native window startup was exercised. Resize-driven
+continuation and reflow for late dependencies still need direct coverage.
+
+The release regression `MarkdownThumbnailResumesTheFirstLayout` forces
+several batches and checks one root layout and byte-identical compact
+and sparse thumbnails. A richer Markdown fixture completed six parser
+batches in one root layout in thumbnail, headless snapshot and native
+window snapshot. The five other block-markup formats each completed four
+batches in a single root layout and matched their compact references.
+A 12 MB Markdown fixture stopped at about 25 KB consumed when the
+viewport filled. Both CLI modes reported an error on malformed input
+encountered during refill. The modular parser suite passed 88 cases and
+the Markdown baseline passed 1,343 cases. The integer-cast layout lint
+passed. Traces are under `temp/preview/retained/checks-wy761bpk/`.
+
+The paired macOS arm64 release benchmark used 20 measured warm launches
+per fixture, build and mode with an excluded warmup. Thumbnails were
+128 × 128. Snapshot samples include headless first render and teardown.
+Each cell is p50 / p95 in milliseconds.
+
+| Fixture and mode | Previous | Retained |
+|------------------|---------:|---------:|
+| Six-batch Markdown thumbnail | 24.0 / 25.0 | 19.6 / 20.0 |
+| Six-batch Markdown snapshot | 25.8 / 26.2 | 23.6 / 24.2 |
+| Long Markdown thumbnail | 22.8 / 23.2 | 20.1 / 20.5 |
+| Long Markdown snapshot | 25.1 / 25.3 | 25.2 / 25.8 |
+
+Raw samples are in `temp/preview/retained/bench-bfsbp75i/`.
+
+## 12. Retained DOCX preview
+
+OPC resolves the main member from the package relationships and validates
+its content type. The archive backend retains its existing compressed
+snapshot and ZIP index. Input pulls Stored or DEFLATE data from the chosen
+member in 4 KiB reads under the shared ZIP limits. The stream checks the
+declared size and CRC when it reaches the member's end. Preview can stop
+reading after page one (S12.4.1v3, S14.3.1v3, D9.1.2v2, D11.1.2).
+
+The XML cursor finds complete direct children of the Word body and passes
+up to eight children per batch, yielding earlier after about 4 KiB at a
+child boundary. It preserves the enclosing namespace declarations and
+uses the strict document parser for each batch. The Word package prepares
+the style sheet and related part metadata once and carries numbering and
+annotation state across batches. The Lambda host roots that state for the
+document's lifetime (D6.3.3, D9.3.4). Explicit, resolved and saved breaks
+use the existing Word snapshot boundary logic.
+
+Radiant creates the Word preview and its article once. At the layout
+frontier it requests another batch if the viewport has room. It mounts
+the new Word elements under the same article and lays out those siblings
+in the active pass. A newly encountered section that changes paper
+geometry reflows the retained document before first paint (D5.5.3,
+D9.1.1v4). The preview uses default paper geometry until it encounters
+section properties. Section properties beyond a filled viewport stay
+unread. Tables and contiguous list runs keep their full layout context, so
+an oversized table or list can require additional input before layout
+has a complete unit. Other OPC parts still use their existing loaders.
+
+The 160,001-paragraph fixture stopped after consuming 2,397 bytes of main XML
+through three batches and one root layout. It matched the thumbnail of
+the shorter fixture with the same opening content. Stored ZIP and an XML
+defect beyond the viewport yielded the same image. Invalid XML in the
+requested prefix failed preview. Four page-break variants, strict and
+minimal DOCX, and the list, annotation and drawing fixtures matched the
+previous release's pixels. A short file with paper dimensions in a later
+batch retained its DOM, performed the section reflow, and matched the
+previous release. Native first-frame and forced-GC refill checks passed.
+Evidence is under `temp/preview/docx-stream/check-33s0erwu/` and
+`temp/preview/docx-stream/reference-3o0id6wz/`.
+
+The paired release benchmark used 20 measured warm-cache launches per
+fixture, executable and mode on macOS arm64. Thumbnails were 128 × 128.
+Snapshots include headless first render and exit. Values are p50 / p95 in
+milliseconds.
+
+| Fixture | Previous thumbnail | Streamed thumbnail | Previous snapshot | Streamed snapshot |
+|---------|-------------------:|-------------------:|------------------:|------------------:|
+| Minimal Word document | 73.6 / 79.9 | 70.6 / 76.6 | 87.8 / 91.5 | 86.0 / 88.3 |
+| 6,000 paragraphs | 98.4 / 99.6 | 86.2 / 89.5 | 119.3 / 122.7 | 109.8 / 113.4 |
+| 160,001 paragraphs | 390.5 / 395.9 | 81.0 / 82.6 | 407.0 / 425.9 | 94.3 / 97.4 |
+
+Raw samples are under `temp/preview/docx-stream/bench-0wzx1kz5/`. The
+release ZIP suite passed 38 cases, and 93 DOCX, PPTX and LaTeX goldens
+passed under strict interpretation. The Markdown retained-layout
+regression also passed with the shared refill path.
