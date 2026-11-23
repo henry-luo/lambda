@@ -11,6 +11,7 @@ const {scriptCompletionSource, scriptCompletionHtml} = require('./script_complet
 const root = path.resolve(__dirname, '../..');
 const scratch = fs.mkdtempSync(path.join(root, 'temp/css-resource-discovery-'));
 const requests = [];
+const imageDiscovery = new Map();
 let server, origin;
 
 function fetchBaseHtml(run, local = false, xhr = false) {
@@ -54,6 +55,49 @@ before(async () => {
         const run = url.searchParams.get('run');
         requests.push({run, path: url.pathname, initial: url.searchParams.has('initial')});
         response.setHeader('Cache-Control', 'no-store');
+        if (url.pathname === '/image-discovery-page') {
+            imageDiscovery.set(run, {released: false, early: [], release: null});
+            const picture = run === 'early-picture';
+            response.writeHead(200, {'Content-Type': 'text/html'});
+            response.end(`<!doctype html><head><base href="/image-discovery/">
+                <link rel="stylesheet" href="sheet.css?run=${run}"></head><body>
+                <template><img src="inert.svg?run=${run}"></template>
+                <noscript><img src="noscript.svg?run=${run}"></noscript>
+                <script>var heroLoads=0;document.body.addEventListener('load',function(event){
+                    if(event.target.id==='hero')heroLoads++},true);
+                window.addEventListener('load',function(){var hero=document.getElementById('hero');
+                    console.log('EAGER_IMAGE_RESULT',JSON.stringify({loads:heroLoads,complete:hero.complete,
+                        width:hero.naturalWidth,current:hero.currentSrc.indexOf('/selected.svg?')>=0}))});</script>
+                ${picture ? `<picture><source media="(max-width:400px)" srcset="mobile.svg?run=${run}">
+                    <source media="(min-width:1000px)" type="image/svg+xml"
+                        srcset="selected.svg?run=${run} 80w, large.svg?run=${run} 160w" sizes="80px">` : ''}
+                <img id="hero" loading="${picture ? 'EaGeR' : 'invalid'}" width="80" height="80"
+                    src="${picture ? 'fallback' : 'selected'}.svg?run=${run}">
+                ${picture ? '</picture>' : ''}
+                <img loading="lazy" width="80" height="80" src="lazy.svg?run=${run}">
+                </body>`);
+            return;
+        }
+        if (url.pathname.startsWith('/image-discovery/')) {
+            const state = imageDiscovery.get(run);
+            if (url.pathname.endsWith('/sheet.css')) {
+                const timer = setTimeout(() => state.release(), 400);
+                state.release = () => {
+                    if (state.released) return;
+                    state.released = true;
+                    clearTimeout(timer);
+                    response.writeHead(200, {'Content-Type': 'text/css'});
+                    response.end('body{margin:0}img{display:block}');
+                };
+                if (state.early.includes('/image-discovery/selected.svg')) state.release();
+            } else {
+                if (!state.released) state.early.push(url.pathname);
+                response.writeHead(200, {'Content-Type': 'image/svg+xml'});
+                response.end('<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80"><path fill="lime" d="M0 0H80V80H0Z"/></svg>');
+                if (url.pathname.endsWith('/selected.svg') && state.release) state.release();
+            }
+            return;
+        }
         if (url.pathname === '/script-completion-page') {
             response.writeHead(200, {'Content-Type': 'text/html'});
             response.end(scriptCompletionHtml(run));
@@ -213,6 +257,23 @@ async function renderHttpFixture(run, route = '/page') {
     assert.equal(result.ok, true, result.error);
     return {image: pngLibrary(root).sync.read(fs.readFileSync(png)),
         log: fs.readFileSync(path.join(scratch, result.outputLog), 'utf8')};
+}
+
+for (const run of ['early-image', 'early-picture']) {
+    test('eager image discovery overlaps blocking CSS: ' + run, async () => {
+        const {image, log} = await renderHttpFixture(run, '/image-discovery-page');
+        assert.deepEqual(imageDiscovery.get(run).early, ['/image-discovery/selected.svg'],
+            'only the selected eager image starts before the stylesheet completes');
+        const selected = requests.filter(row => row.run === run);
+        assert.equal(selected.filter(row => row.path === '/image-discovery/selected.svg').length, 1,
+            'later discovery reuses the same request');
+        assert(!selected.some(row => /\/(inert|noscript|mobile|large|fallback)\.svg$/.test(row.path)),
+            'inert nodes and unselected responsive candidates do not acquire resources');
+        assert.deepEqual(loggedResult(log, 'EAGER_IMAGE_RESULT'), {
+            loads: 1, complete: true, width: 80, current: true,
+        }, 'early bytes retain element completion before window.load');
+        assert.deepEqual(rgb(image, 40, 40), [0, 255, 0]);
+    });
 }
 
 for (const run of ['blocking', 'defer', 'async', 'module', 'throw', 'empty', 'removed', 'fetch-error', 'inline', 'inline-module']) {

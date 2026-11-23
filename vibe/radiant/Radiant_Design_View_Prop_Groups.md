@@ -1,6 +1,6 @@
 # Radiant design: View property groups
 
-**Status** · Retained design as of 2026-11-21. The [implementation record](../impl/Radiant_Impl_View_Prop_Groups.md) tracks the original refactor. Appendix A records the release measurements and their build scope.
+**Status** — Retained design as of 2026-11-22. The [implementation record](../impl/Radiant_Impl_View_Prop_Groups.md) tracks the original refactor. Appendix A records the release measurements and their build scope.
 
 **Scope** · Property storage reachable from `DomElement` and its optional groups, from DOM construction through browsing and paged layout, paint, and teardown. Preserve CSS behavior, CSSOM answers, and the shared DOM/view node used by Radiant.
 
@@ -12,17 +12,17 @@ The largest savings come from the payload allocated for common elements. Moving 
 
 | Record | Before, arm64 | Retained, arm64 |
 |---|---:|---:|
-| `DomElement` | 376 B | 328 B |
+| `DomElement` | 376 B | 344 B |
 | `DomStyleRareExt` | 568 B | 256 B |
 | `DomStyleExt` | — | 48 B |
-| `BlockProp` | 456 B | 344 B |
+| `BlockProp` | 456 B | 160 B |
 | `ScrollProp` | 216 B | 80 B |
 | `TransformProp` | 408 B | 56 B |
 | `FormControlProp` | 256 B | 208 B |
 | `BoundaryProp` | 224 B | 192 B |
 | `LayoutCache` | 1,240 B | 864 B |
 
-These are direct compiler record sizes. Earlier captures use the name `DomElementExt` for `DomStyleRareExt`. Optional allocations and shared storage contribute to the measured totals in Appendix A. [Element records](../../lambda-input/lambda/input/css/dom_element.hpp) · [View payloads](../../radiant/radiant/view.hpp) · [Layout cache](../../radiant/radiant/layout.hpp)
+These are direct compiler record sizes. The property refactor reached 328 B per element. Removing the separate lifecycle record subsequently added 16 B of inline ownership data to the node header. Earlier captures use the name `DomElementExt` for `DomStyleRareExt`. Optional allocations and shared storage contribute to the measured totals in Appendix A. [Element records](../../lambda-input/lambda/input/css/dom_element.hpp) · [View payloads](../../radiant/radiant/view.hpp) · [Layout cache](../../radiant/radiant/layout.hpp)
 
 ## 2. Split properties by use and lifetime
 
@@ -38,10 +38,13 @@ Use three tests to place a field. Does it have the same lifetime as its neighbor
 
 | Optional group | Size | Contents |
 |---|---:|---|
-| `BlockPropExt` | 104 B | List style, counters, box decoration breaks, fragmentation breaks, widows, and orphans |
+| `BlockListProp` | 88 B | List marker style, image and string, and CSS counters |
+| `BlockPropExt` | 192 B | Infrequent alignment, indentation, wrapping, hyphenation, text trim, `fit-content()` arguments and fragmentation. Contains rare retained float, vertical-flow and clamp output. |
 | `BlockContainmentProp` | 32 B | Containment, container-query axes and names, intrinsic size hints, and content visibility |
 
-Both groups belong to the view pool. Allocate them on a write requiring the group and use immutable defaults on a read of an absent group. A CSS-wide keyword, explicit default, NaN percentage sentinel, presence bit, or deferred calc must retain its current meaning. Keep simultaneous computed and used forms where their consumers need both (DV9b, DV10). [Block definitions](../../radiant/radiant/view.hpp) · [Typed defaults](../../radiant/radiant/view_prop_defaults.cpp) · [Size conversion](../../radiant/radiant/layout_box.cpp)
+The view pool owns the groups. The list and rare allocations are independent, and the rare group owns a containment group only when containment requires storage. Reads use immutable defaults in the absence of a group. Writes of initial values can leave a group absent, including NaN percentage sentinels. Explicit presence bits and deferred calc values preserve their existing meanings. This split keeps common inline line metrics and size constraints direct, including min/max sizing, writing mode, bidi and zoom. [Block definitions](../../radiant/radiant/view.hpp) · [Typed defaults](../../radiant/radiant/view_prop_defaults.cpp)
+
+Retained layout saves rare flow output by value. Replay restores the output into the destination block, allocating its rare group only when the result needs one. It keeps view ownership pointers out of retained flow results. Reset and teardown release both optional groups, including the rare group's owned containment data (D5.1.4, D5.5.1, D5.5.3, DV9b, DV10 and VR15). [Retained flow](../../radiant/radiant/layout_pass.cpp) · [View teardown](../../radiant/radiant/view_pool.cpp)
 
 ### DV4.3 — Split scroll, transform, and form payloads by feature
 
@@ -177,9 +180,31 @@ The pseudo-style stage passed 142 native CSS/DOM integration tests and 3,857 sta
 
 The November 21 profiles and comparison with the shared-reset endpoint are under `temp/view-prop-doc-refresh/`. The join with the original baseline is in `temp/view-prop-doc-refresh/end-to-end/comparison.csv` and `summary.json`. The archived shared-reset comparison is under `temp/view-prop-overall/`.
 
+### DOM lifecycle ownership
+
+Removing the 104-byte per-node lifecycle record reduced document-pool and node-arena bytes after construction from 50.55 to 32.46 MiB across all 224 pages (35.79%). All document-tagged allocator bytes, including Input-owned nodes and view properties, fell from 342.07 to 326.00 MiB after first layout (4.70%). Both builds used the same property groups. This comparison measures the lifecycle change independently of earlier property sharing and cache changes (D5.2.4, D5.5.1–D5.5.3). [Lifecycle measurements](Radiant_Design_DOM_Node_Lifecycle.md#release-memory-after-record-removal)
+
 ### Document-pool alignment trial
 
 The allocator-only trial paired the same 224 pages. Live document-pool block spans, including headers and padding, fell from 105.17 to 97.01 MiB (7.76%). The document pool and active node arena together fell from 110.07 to 101.90 MiB (7.42%). Committed document-pool memory fell from 137.98 to 127.41 MiB (7.67%). All 224 normalized layout trees matched. The figures are in `temp/doc-pool-alignment/summary.json` (D5.1.4, D5.2.4).
+
+### Block property split
+
+The placement census counted 64,613 populated blocks across 224 pages at 1200 × 800 and sampled the same documents again after retained reflow at 800 × 700. The old mixed extension held list or counter state on 13,328 blocks and fragmentation state on 22. The overlap of the moved fields gave the allocation estimate. A third independent feature group added a pointer to every populated block and increased modeled pool space by 0.63 MiB. The implemented split uses two optional groups and moves 57 of the old core's 95 fields (DV4.2).
+
+| Measured metric across 224 pages | Before block split | After block split | Reduction |
+|---|---:|---:|---:|
+| Block struct payload after first layout | 22.52 MiB | 11.73 MiB | 47.94% |
+| Actual block allocation spans after first layout | 25.50 MiB | 14.33 MiB | 43.78% |
+| Actual block allocation spans after resize reflow | 25.50 MiB | 14.36 MiB | 43.70% |
+| View property pool payload after first layout | 161.55 MiB | 150.73 MiB | 6.69% |
+| All document-tagged allocator bytes after first layout | 326.00 MiB | 315.18 MiB | 3.32% |
+
+The split release retained 64,613 core blocks, 13,328 list groups and 4,083 rare groups after first layout. Rare groups occur on 6.32% of blocks and rise to 4,175 allocations after resize reflow. Allocation spans include each pool block's header, alignment and slack in the live block. The broader allocator rows use requested payload bytes, so they also capture changes such as retained replay data. Each page ran independently with scripting disabled, local resources and the same viewport settings as the main view census. The 224 normalized first-layout trees match the control. [Current view census](Radiant_Design_View.md#5-release-memory-census)
+
+Two interleaved CPU timing runs each used one warm-up and five samples per page per build. Combining the ten samples per page gave a first-layout median of **23.851 → 24.061 ms (+0.88%)** and p95 of **43.464 → 43.407 ms (−0.13%)**. The median changes in the two runs were +1.19% and +0.09%. The median CPU time for load was **7.391 → 7.278 ms**. This comparison measures script-disabled load and first layout. The resize census measures retained memory.
+
+The full Radiant baseline passed with 8,176 passes, 296 partial passes and 20 skips. All 141 native dynamic tests passed, including the regression for lazy default writes and independent list allocation. The standalone incremental CSS and CSSOM run reproduced the same seven failures on the pre-split executable and the split build.
 
 ## Appendix B. Original proposal evidence
 
@@ -212,7 +237,7 @@ The main integration points are [typed defaults](../../radiant/radiant/view_prop
 
 - ~~Target **at most 96 B** for the common payload in the first prototype, including its extension link.~~ The 80 B probe held 14 logical properties. The retained block core keeps the co-read sizing and flow fields in DV4.2.
 - ~~Target **128–160 B** for the populated `DomStyleRareExt` shell, including admitted moved slots.~~ DV6.1 and DV6.2 describe the 256 B rare extension and 48 B directory.
-- ~~On this ABI, those candidates represent **56 B of inline slots** in total. If all move with no added inline storage or padding, the node could reach **320 B** from 376 B.~~ The first slot moves produced a 352 B node. The tag and class changes in DV6.6 and DV6.7 contributed to the current 328 B layout.
+- ~~On this ABI, those candidates represent **56 B of inline slots** in total. If all move with no added inline storage or padding, the node could reach **320 B** from 376 B.~~ The first slot moves produced a 352 B node. The tag and class changes in DV6.6 and DV6.7 contributed to the 328 B property-refactor endpoint.
 - ~~Store fallback tag spellings in the optional element directory.~~ That trial found 102 fallback nodes and brought the directory from 48 to 56 B. DV6.6 uses a sparse document table for fallback spellings, so the directory uses 48 B.
 - ~~Move the class-cache pointer into `DomStyleExt`.~~ The 224-page census projected 19,323 additional directory allocations and 1,000,816 more bytes of allocation spans with that placement. DV6.7 keeps one pointer on the element.
 

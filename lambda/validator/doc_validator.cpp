@@ -179,7 +179,7 @@ static int validator_register_type_declaration(SchemaValidator* validator,
     Type* declared_type = nullptr;
 
     if (declaration->node_type == AST_NODE_VARIABLE_DECLARATOR) {
-        AstDeclaratorNode* declarator = (AstDeclaratorNode*)declaration;
+        LambdaAstDeclaratorNode* declarator = (LambdaAstDeclaratorNode*)declaration;
         if (!declarator->is_type_definition) return 0;
         name = declarator->name;
         declared_type = declarator->type;

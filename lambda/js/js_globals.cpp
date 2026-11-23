@@ -13856,19 +13856,28 @@ static Item js_message_port_queue(Item port) {
     return queue_root.get();
 }
 
-static Item js_message_port_shift_message(Item port) {
-    Item queue = js_get_key_cstr(port, "__message_queue__");
-    if (get_type_id(queue) != LMD_TYPE_ARRAY) return make_js_undefined();
-    int64_t len = js_array_length(queue);
+static Item js_message_port_shift_message(Item port, bool* has_message) {
+    *has_message = false;
+    RootFrame roots(5);
+    Rooted<Item> owner(roots, port), queue(roots, js_get_key_cstr(owner.get(), "__message_queue__"));
+    Rooted<Item> value(roots, ItemNull), next_queue(roots, ItemNull), entry(roots, ItemNull);
+    JS_RETURN_IF_ERROR(queue.get());
+    if (get_type_id(queue.get()) != LMD_TYPE_ARRAY) return make_js_undefined();
+    int64_t len = js_array_length(queue.get());
     if (len <= 0) return make_js_undefined();
 
-    Item value = js_elements_get_int(queue, 0);
-    Item next_queue = js_array_new(0);
+    // rebuilding the queue can collect both its carrier and the removed payload.
+    value.set(js_elements_get_int(queue.get(), 0));
+    next_queue.set(js_array_new(0));
+    JS_RETURN_IF_ERROR(next_queue.get());
     for (int64_t i = 1; i < len; i++) {
-        js_array_push(next_queue, js_elements_get_int(queue, i));
+        entry.set(js_elements_get_int(queue.get(), i));
+        JS_RETURN_IF_ERROR(js_array_push(next_queue.get(), entry.get()));
     }
-    js_set_key_cstr(port, "__message_queue__", next_queue);
-    return value;
+    JS_RETURN_IF_ERROR(js_set_key_cstr(owner.get(), "__message_queue__", next_queue.get()));
+    // undefined is valid message data; presence comes from the queue length.
+    *has_message = true;
+    return value.get();
 }
 
 static bool js_message_port_is_filehandle(Item value) {
@@ -14068,8 +14077,10 @@ static Item js_message_port_deliver(Item env_item) {
     Rooted<Item> target(roots, env ? env[0] : make_js_undefined());
     Rooted<Item> msg(roots, ItemNull), event(roots, ItemNull), handler(roots, ItemNull);
     if (!js_message_port_is_port(target.get())) return make_js_undefined();
-    msg.set(js_message_port_shift_message(target.get()));
-    if (get_type_id(msg.get()) == LMD_TYPE_UNDEFINED) return make_js_undefined();
+    bool has_message = false;
+    msg.set(js_message_port_shift_message(target.get(), &has_message));
+    JS_RETURN_IF_ERROR(msg.get());
+    if (!has_message) return make_js_undefined();
     // dequeuing removes the queue's ownership before envelope construction can collect.
     event.set(js_message_port_make_message_event(msg.get()));
     JS_RETURN_IF_ERROR(event.get());
@@ -14182,11 +14193,12 @@ extern "C" Item js_message_port_receive_message_on_port(Item port) {
         return js_throw_type_error_code(JS_ERR_INVALID_ARG_TYPE,
             "The \"port\" argument must be a MessagePort instance");
     }
-    Item msg = js_message_port_shift_message(port);
-    if (get_type_id(msg) == LMD_TYPE_UNDEFINED) return make_js_undefined();
-
-    RootFrame roots(2);
-    Rooted<Item> message_root(roots, msg);
+    RootFrame roots(3);
+    Rooted<Item> owner_root(roots, port), message_root(roots, ItemNull);
+    bool has_message = false;
+    message_root.set(js_message_port_shift_message(owner_root.get(), &has_message));
+    JS_RETURN_IF_ERROR(message_root.get());
+    if (!has_message) return make_js_undefined();
     Item result = js_new_object();
     Rooted<Item> result_root(roots, result);
     // The envelope/key allocations can compact after dequeuing the message,
@@ -17514,11 +17526,12 @@ static Item js_url_field_get(Item callee, Item receiver, Item*, int, uint64_t*) 
     return js_elements_get_int(record, index);
 }
 
+static constexpr size_t JS_URL_PATHNAME_INDEX = 8;
 static constexpr size_t JS_URL_SEARCH_INDEX = 9;
 static constexpr size_t JS_URL_PARAMS_INDEX = js_url_field_count - 1;
 static Item js_url_record_from_native(const Url* url, Item params);
 
-static Item js_url_replace_query_or_href(Item receiver, size_t index, Item input, bool refresh_params) {
+static Item js_url_replace_component(Item receiver, size_t index, Item input, bool refresh_params) {
     RootFrame roots(6);
     Rooted<Item> owner(roots, receiver), text(roots, input);
     Rooted<Item> record(roots, js_url_record(owner.get())), replacement(roots, ItemNull);
@@ -17531,7 +17544,11 @@ static Item js_url_replace_query_or_href(Item receiver, size_t index, Item input
     if (index == 0) parsed = url_parse(value);
     else {
         parsed = url_parse(it2s(js_elements_get_int(record.get(), 0))->chars);
-        if (parsed) {
+        if (parsed && index == JS_URL_PATHNAME_INDEX) {
+            if (url_set_pathname(parsed, value) != URL_OK) {
+                url_destroy(parsed); mem_free(value); return ItemError;
+            }
+        } else if (parsed) {
             const char* query = value[0] == '?' ? value + 1 : value;
             uint8_t keep[256];
             // the URL query set preserves escapes, while form serialization comes from URLSearchParams.
@@ -17586,7 +17603,7 @@ Item js_url_search_params_update(Item params_item) {
     if (!js_object_has_class(owner.get(), JS_CLASS_URL)) return make_js_undefined();
     query.set(node_url_search_params_string(params.get()));
     JS_RETURN_IF_ERROR(query.get());
-    return js_url_replace_query_or_href(owner.get(), JS_URL_SEARCH_INDEX, query.get(), false);
+    return js_url_replace_component(owner.get(), JS_URL_SEARCH_INDEX, query.get(), false);
 }
 
 static Item js_url_field_set(Item callee, Item receiver, Item* args, int argc, uint64_t*) {
@@ -17596,8 +17613,8 @@ static Item js_url_field_set(Item callee, Item receiver, Item* args, int argc, u
     JS_RETURN_IF_ERROR(record.get());
     Rooted<Item> value(roots, js_to_string(argc ? args[0] : make_js_undefined()));
     JS_RETURN_IF_ERROR(value.get());
-    if (index == 0 || index == JS_URL_SEARCH_INDEX)
-        return js_url_replace_query_or_href(owner.get(), index, value.get(), true);
+    if (index == 0 || index == JS_URL_SEARCH_INDEX || index == JS_URL_PATHNAME_INDEX)
+        return js_url_replace_component(owner.get(), index, value.get(), index != JS_URL_PATHNAME_INDEX);
     JS_RETURN_IF_ERROR(js_elements_set_int(record.get(), index, value.get()));
     return make_js_undefined();
 }

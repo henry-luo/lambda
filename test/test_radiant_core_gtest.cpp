@@ -1,3 +1,4 @@
+#include "lambda/io/mark_editor.hpp"
 #include "../lambda/module/radiant/radiant_runtime_init.hpp"
 #include <gtest/gtest.h>
 
@@ -1138,14 +1139,18 @@ protected:
 
     void TearDown() override {
         // snapshots own cloned expressions, but never own their applied view props.
-        radiant::css_resolved_style_release(target->layout_cache, tree.prop_pool);
-        radiant::intrinsic_height_cache_release(target->layout_cache, tree.prop_pool);
+        release_queries(target);
         scratch_release(&context.scratch);
         arena_destroy(scratch);
         document.view_tree = nullptr;
         document.document_pool = nullptr;
         css_property_system_cleanup();
         RadiantCoreTest::TearDown();
+    }
+
+    void release_queries(DomElement* node) {
+        radiant::intrinsic_height_cache_release(node->layout_cache, tree.prop_pool);
+        radiant::css_resolved_style_release(node->layout_cache, tree.prop_pool);
     }
 
     void set_property(DomElement* element, const char* name, const char* value) {
@@ -1688,6 +1693,55 @@ TEST_F(IncrementalCssTest, HeightQueriesInvalidateEnvironmentAndGenerationButNor
     context.ui_context = nullptr;
 }
 
+TEST_F(IncrementalCssTest, HeightQueriesRetainUnchangedSubtreesAcrossIncrementalPasses) {
+    document.incremental_layout = true;
+    set_property("display", "block");
+    DomElement* subject = append_intrinsic_child();
+    DomElement* unrelated = append_intrinsic_child();
+    set_property(subject, "display", "block");
+    set_property(subject, "height", "30px");
+    set_property(unrelated, "display", "block");
+    EXPECT_FLOAT_EQ(calculate_max_content_height(&context, subject, 100.0f), 30.0f);
+    uint64_t computations = context.profiler.height_computations;
+    for (const char* size : {"40px", "50px", "60px"}) {
+        set_property(unrelated, "height", size);
+        document.advance_mutation_epoch();
+        advance_measurement_cache_generation(&tree);
+        EXPECT_FLOAT_EQ(calculate_max_content_height(&context, subject, 100.0f), 30.0f);
+        EXPECT_EQ(context.profiler.height_computations, computations);
+    }
+
+    // a source edit and inherited font change must retire the old scalar query.
+    set_property(subject, "height", "45px");
+    advance_measurement_cache_generation(&tree);
+    EXPECT_FLOAT_EQ(calculate_max_content_height(&context, subject, 100.0f), 45.0f);
+    EXPECT_GT(context.profiler.height_computations, computations);
+    set_property(subject, "height", "2em");
+    set_property("font-size", "10px");
+    resolve();
+    EXPECT_FLOAT_EQ(calculate_max_content_height(&context, subject, 100.0f), 20.0f);
+    computations = context.profiler.height_computations;
+    set_property("font-size", "15px");
+    resolve();
+    advance_measurement_cache_generation(&tree);
+    EXPECT_FLOAT_EQ(calculate_max_content_height(&context, subject, 100.0f), 30.0f);
+    EXPECT_GT(context.profiler.height_computations, computations);
+
+    // provisional queries cannot publish a retained result for the next pass.
+    context.css_query_probe = true;
+    set_property(subject, "height", "4em");
+    advance_measurement_cache_generation(&tree);
+    computations = context.profiler.height_computations;
+    EXPECT_FLOAT_EQ(calculate_max_content_height(&context, subject, 100.0f), 60.0f);
+    EXPECT_GT(context.profiler.height_computations, computations);
+    context.css_query_probe = false;
+    advance_measurement_cache_generation(&tree);
+    computations = context.profiler.height_computations;
+    EXPECT_FLOAT_EQ(calculate_max_content_height(&context, subject, 100.0f), 60.0f);
+    EXPECT_GT(context.profiler.height_computations, computations);
+    for (DomElement* node : {subject, unrelated}) release_queries(node);
+}
+
 TEST_F(IncrementalCssTest, HeightQueriesReuseOnlyGeometryIndependentSubtrees) {
     DomElement* child = append_intrinsic_child();
     set_property("display", "block");
@@ -2183,7 +2237,7 @@ TEST_F(IncrementalCssTest, ComputedTextPropertiesDoNotDependOnProvisionalBoxRole
     resolve();
     ASSERT_NE(target->blk, nullptr);
     EXPECT_EQ(target->block()->text_align, CSS_VALUE_CENTER);
-    EXPECT_FLOAT_EQ(target->block()->text_indent, 32.0f);
+    EXPECT_FLOAT_EQ(target->block()->rare().text_indent, 32.0f);
     EXPECT_FLOAT_EQ(target->block()->given_min_width, 15.0f);
     int64_t full = g_style_resolve_measure;
     const ViewType roles[] = {RDT_VIEW_INLINE, RDT_VIEW_BLOCK, RDT_VIEW_INLINE};
@@ -2192,7 +2246,7 @@ TEST_F(IncrementalCssTest, ComputedTextPropertiesDoNotDependOnProvisionalBoxRole
         resolve();
         EXPECT_EQ(g_style_resolve_measure, full);
         EXPECT_EQ(target->block()->text_align, CSS_VALUE_CENTER);
-        EXPECT_FLOAT_EQ(target->block()->text_indent, 32.0f);
+        EXPECT_FLOAT_EQ(target->block()->rare().text_indent, 32.0f);
         EXPECT_FLOAT_EQ(target->block()->given_min_width, 15.0f);
     }
 }
@@ -2604,6 +2658,59 @@ protected:
         return snapshot;
     }
 };
+
+TEST_F(DomRetirementTest, StateStorePreservesOwnerLifetimeStamps) {
+    DomElement* parent = root();
+    DomElement* owner = element("video");
+    DomElement* sibling = element("span");
+    ASSERT_TRUE(attach(parent, owner));
+    ASSERT_TRUE(attach(parent, sibling));
+    struct StateStoreCleanup {
+        DomDocument* document;
+        ~StateStoreCleanup() { state_store_destroy(document); }
+    } cleanup{&doc};
+    ASSERT_NE(state_store_create(&doc), nullptr);
+    DocState* state = doc.state;
+
+    const DomNodeRef original_owner = dom_node_ref(owner);
+    ASSERT_NE(original_owner.lifetime_stamp, 0u);
+    ASSERT_NE(media_view_state_get(state, owner, true), nullptr);
+    ViewStateEntry key = {.view_id = original_owner.expected_id, .kind = VIEW_STATE_MEDIA};
+    auto lookup = [&]() {
+        return static_cast<const ViewStateEntry*>(hashmap_get(state->view_state_map, &key));
+    };
+    const ViewStateEntry* entry = lookup();
+    ASSERT_NE(entry, nullptr);
+    EXPECT_EQ(entry->owner.address, owner);
+    EXPECT_EQ(entry->owner.expected_id, original_owner.expected_id);
+    EXPECT_EQ(entry->owner.lifetime_stamp, original_owner.lifetime_stamp);
+    ViewState* retained_state = entry->state;
+
+    ASSERT_TRUE(parent->remove_child(sibling));
+    ASSERT_EQ(dom_retire_sweep(&doc), 1u);
+    uint32_t current_stamp = dom_node_ref(parent).lifetime_stamp;
+    ASSERT_NE(current_stamp, 0u);
+    ASSERT_NE(current_stamp, original_owner.lifetime_stamp);
+    // unrelated retirement expires the proof while the owner and its state survive.
+    EXPECT_EQ(state_store_prune_after_reflow(state), 0u);
+    entry = lookup();
+    ASSERT_NE(entry, nullptr);
+    EXPECT_EQ(entry->state, retained_state);
+    EXPECT_EQ(entry->owner.lifetime_stamp, current_stamp);
+
+    DomElement* replacement = element("video");
+    ASSERT_TRUE(attach(parent, replacement));
+    view_state_preserve_subtree_identity(state, owner, replacement);
+    EXPECT_EQ(lookup(), nullptr);
+    const DomNodeRef replacement_owner = dom_node_ref(replacement);
+    key.view_id = replacement_owner.expected_id;
+    entry = lookup();
+    ASSERT_NE(entry, nullptr);
+    EXPECT_EQ(entry->state, retained_state);
+    EXPECT_EQ(entry->owner.address, replacement);
+    EXPECT_EQ(entry->owner.expected_id, replacement_owner.expected_id);
+    EXPECT_EQ(entry->owner.lifetime_stamp, replacement_owner.lifetime_stamp);
+}
 
 TEST_F(DomRetirementTest, FocusValidationUsesOwnedRootAfterReflow) {
     DomElement* owned_root = root();
@@ -3227,12 +3334,33 @@ TEST_F(DomRetirementTest, SourceWrapperKeepsAdoptedNodeAliveUntilReleased) {
     DomNodeRef moved_ref = dom_node_ref(child);
     dom_node_schedule_detached(&destination, child);
     EXPECT_EQ(dom_retire_sweep(&destination), 0u);
-    EXPECT_EQ(dom_node_ref_validate(&doc, source_ref), child);
+    // the physical handle is still live, but the source document no longer owns its identity.
+    EXPECT_EQ(dom_node_ref_validate(&doc, source_ref), nullptr);
+    EXPECT_EQ(source_ref.address->doc, &destination);
+    EXPECT_EQ(dom_node_ref_validate(&destination, moved_ref), child);
     ASSERT_TRUE(dom_node_unpin(&doc, source_ref, DOM_NODE_PIN_WRAPPER));
     EXPECT_EQ(dom_retire_sweep(&destination), 1u);
     EXPECT_EQ(dom_node_ref_validate(&doc, source_ref), nullptr);
     EXPECT_EQ(dom_node_ref_validate(&destination, moved_ref), nullptr);
     destination.destroy();
+}
+
+TEST_F(DomRetirementTest, InputBackedPinCanReleaseAfterIssuingDocumentCloses) {
+    DomDocument issuer;
+    ASSERT_TRUE(issuer.init(input));
+    DomText* text = DomText::create_in(input->arena, 0);
+    ASSERT_NE(text, nullptr);
+    text->id = dom_document_alloc_node_id(&issuer);
+    ASSERT_TRUE(dom_node_registry_register(&issuer, text, sizeof(DomText) + sizeof(String) + 1, true));
+    DomNodeRef handle = dom_node_ref(text);
+    dom_observe_native_pins(&issuer);
+    ASSERT_TRUE(dom_node_pin(&issuer, handle, DOM_NODE_PIN_EVENT_QUEUE));
+    ASSERT_TRUE(dom_adopt_detached_subtree(&issuer, &doc, text));
+    issuer.destroy();
+    dom_node_schedule_detached(&doc, text);
+    EXPECT_EQ(dom_retire_sweep(&doc), 0u);
+    ASSERT_TRUE(dom_node_unpin(&issuer, handle, DOM_NODE_PIN_EVENT_QUEUE));
+    EXPECT_EQ(dom_retire_sweep(&doc), 1u);
 }
 
 TEST_F(DomRetirementTest, AttributePinKeepsDetachedOwnerAndRetiresTogether) {
@@ -3327,7 +3455,7 @@ TEST_F(DomRetirementTest, UnregisteredLayoutBoxDoesNotRetainAuthoredSubtree) {
     EXPECT_EQ(dom_node_ref_validate(&doc, ref), nullptr);
 }
 
-TEST_F(DomRetirementTest, RetirementRepairsStaleEdgesOnceForTheWholeBatch) {
+TEST_F(DomRetirementTest, RemovingWideSubtreePreservesSurvivingLinksWithoutScanningDocument) {
     DomElement* parent = root();
     DomElement* branch = element("branch");
     ASSERT_TRUE(attach(parent, branch));
@@ -3337,11 +3465,14 @@ TEST_F(DomRetirementTest, RetirementRepairsStaleEdgesOnceForTheWholeBatch) {
     DomElement* retained = element("retained");
     ASSERT_TRUE(attach(parent, retained));
 
-    // A backing-tree edit can leave raw edges in a surviving wrapper.
+    // the verifier diagnoses a second owner while the subtree is still live.
     retained->first_child = branch->first_child;
     retained->last_child = branch->last_child;
+    EXPECT_FALSE(dom_child_links_valid(retained));
+    retained->first_child = nullptr;
+    retained->last_child = nullptr;
     ASSERT_TRUE(parent->remove_child(branch));
-    retained->prev_sibling = lam::up(branch);
+    EXPECT_TRUE(dom_child_links_valid(parent));
     EXPECT_EQ(dom_retire_sweep(&doc), 1025u);
     EXPECT_EQ(retained->first_child, nullptr);
     EXPECT_EQ(retained->last_child, nullptr);
@@ -3350,7 +3481,7 @@ TEST_F(DomRetirementTest, RetirementRepairsStaleEdgesOnceForTheWholeBatch) {
     EXPECT_EQ(parent->last_child, retained);
     DomLifecycleStats stats = {};
     dom_lifecycle_get_stats(&doc, &stats);
-    EXPECT_EQ(stats.retirement_edge_visits, stats.registered_nodes);
+    EXPECT_EQ(stats.retirement_edge_visits, 0u);
 }
 
 TEST_F(DomRetirementTest, ConsumedMutationRecordsReleaseDetachedSubtree) {
@@ -3559,7 +3690,53 @@ TEST_F(DomRetirementTest, NodeArenaGrowthPlateausAcrossTenThousandRetirements) {
     EXPECT_GE(after.bump_back_count - warm.bump_back_count, 10000u);
 }
 
-TEST_F(DomRetirementTest, RecycledNodesReleaseTheirRegistryRecords) {
+TEST_F(DomRetirementTest, AttachedTextNeedsNoLifecyclePoolAllocation) {
+    DomElement* parent = root();
+    PoolStats before = {}, after = {};
+    pool_get_detailed_stats(doc.document_pool, &before);
+    DomNodeRef first = {};
+    for (unsigned i = 0; i < 512; ++i) {
+        DomText* text = DomText::create_detached_copy(&doc, "t", 1);
+        ASSERT_NE(text, nullptr);
+        ASSERT_TRUE(static_cast<DomNode*>(parent)->append_child(text));
+        ASSERT_EQ(text->detached_root_slot, 0u);
+        if (!i) first = dom_node_ref(text);
+    }
+    pool_get_detailed_stats(doc.document_pool, &after);
+    EXPECT_EQ(after.live_bytes, before.live_bytes);
+    EXPECT_EQ(dom_node_ref_validate(&doc, first), parent->first_child);
+    EXPECT_EQ(dom_node_ref_validate(&doc, {reinterpret_cast<DomNode*>(uintptr_t(1)), first.expected_id}), nullptr);
+}
+
+TEST_F(DomRetirementTest, MarkEditorKeepsSeparateOccurrencesAfterRepeatedInsertion) {
+    input->ui_mode = true;
+    MarkBuilder builder(input);
+    Item source = builder.element("div").child(builder.element("i").text("leaf").final()).final();
+    DomElement* parent = build_dom_tree_from_element(source.element, &doc, nullptr);
+    ASSERT_NE(parent, nullptr);
+    doc.root = lam::up(parent);
+    DomNode* first = parent->first_child;
+    ASSERT_NE(first, nullptr);
+    Element* backing = dom_element_to_element(parent);
+    Item target = {.element = backing};
+    MarkEditor editor(&doc, EDIT_MODE_INLINE);
+    ASSERT_EQ(editor.elmt_insert_child(target, 1, backing->items[0]).element, backing);
+    ASSERT_TRUE(dom_child_links_valid(parent));
+    DomNode* second = first->next_sibling;
+    ASSERT_NE(second, nullptr);
+    ASSERT_NE(first, second);
+    ASSERT_EQ(backing->items[1].element, dom_element_to_element(second->as_element()));
+    ASSERT_EQ(editor.elmt_insert_child(target, 2, builder.element("b").final()).element, backing);
+    EXPECT_TRUE(dom_child_links_valid(parent));
+    EXPECT_EQ(first->next_sibling, second);
+    EXPECT_EQ(second->next_sibling, parent->last_child);
+    ASSERT_TRUE(static_cast<DomNode*>(parent)->remove_child(first));
+    EXPECT_TRUE(dom_child_links_valid(parent));
+    EXPECT_EQ(dom_retire_sweep(&doc), 2u);
+    EXPECT_EQ(parent->first_child, second);
+}
+
+TEST_F(DomRetirementTest, RecycledNodesReleaseDetachedOwnershipStorage) {
     DomElement* parent = root();
     PoolStats warm = {};
     pool_get_detailed_stats(doc.document_pool, &warm);
@@ -3575,7 +3752,7 @@ TEST_F(DomRetirementTest, RecycledNodesReleaseTheirRegistryRecords) {
     }
     for (int i = 0; i < 64; i++) ASSERT_TRUE(parent->remove_child(children[i]));
     EXPECT_EQ(dom_retire_sweep(&doc), 64u);
-    // a record outlives no recycled slot; a stale ref still fails validation
+    // detached ownership storage returns to its initial footprint after the batch
     PoolStats after = {};
     pool_get_detailed_stats(doc.document_pool, &after);
     EXPECT_EQ(after.live_bytes, warm.live_bytes);

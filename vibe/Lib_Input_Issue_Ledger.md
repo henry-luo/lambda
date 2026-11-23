@@ -15,9 +15,9 @@ Resolved records are in the [fixed issue ledger](<Lib_Input_Issue_Ledger (fixed)
 
 ## Open issues
 
-<a id="li-098"></a>
+<a id="li-104"></a>
 
-### LI-098 — Reactive DOM replacements retain numeric attribute copies
+### LI-104 — Reactive DOM replacements retain numeric attribute copies
 
 **Fix in verification, 2026-11-22.** Replacing a view occurrence repeatedly
 left copied numeric arrays in the document's Input arena after node
@@ -30,6 +30,44 @@ The Input owner now puts numeric array copies in an occurrence-owned arena
 and releases the arena when the node retires or its document closes
 (D5.1.4, D5.5.1–D5.5.3). This blocks reliable long Homer sessions. Build and
 replay evidence is under `temp/homer-kill/`.
+<a id="li-103"></a>
+
+- [LI-103 — Legacy gap aliases retain independent property identities](<Lib_Input_Issue_Ledger (fixed).md#li-103>).
+
+<a id="li-102"></a>
+
+- [LI-102 — Pending resource polling starves later completions](<Lib_Input_Issue_Ledger (fixed).md#li-102>).
+
+<a id="li-101"></a>
+
+### LI-101 — FIXED FOR TABLE FRAGMENT CONTEXTS AND BODY TAG REJECTION
+
+The shared HTML parser now selects fragment insertion modes from a virtual
+context and rejects stray table structure in body mode under
+**D9.1.1v4 / D9.1.3v2**. See the
+[fixed record](<Lib_Input_Issue_Ledger (fixed).md#li-101>).
+
+<a id="li-100"></a>
+
+### LI-100 — FIXED FOR PATHNAME WRITES
+
+The native pathname setter rebuilds coherent URL state and reuses shared
+encoded-dot normalization under D9.1.1v4 / D9.1.3v2. See the
+[pathname repair and qualification limits](<Lib_Input_Issue_Ledger (fixed).md#li-100>).
+
+<a id="li-099"></a>
+
+### LI-099 — FIXED
+
+The curl multi transport serializes resource URLs with the shared URL parser.
+See the [resource URL repair](<Lib_Input_Issue_Ledger (fixed).md#li-099>).
+
+<a id="li-098"></a>
+
+### LI-098 — FIXED
+
+Bulk DOM ownership checks share a structural snapshot under D5.5.1.
+See the [ownership validation record](<Lib_Input_Issue_Ledger (fixed).md#li-098>).
 
 <a id="li-097"></a>
 

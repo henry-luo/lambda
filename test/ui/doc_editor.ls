@@ -1075,7 +1075,8 @@ on mouseup(evt) {
                            padding: 0; border: 0; border-radius: 4px; background: transparent;
                            color: #aeb9ca; cursor: pointer; font-size: 19px; line-height: 26px; }
       .tree-filter-clear:hover { background: #3b4557; color: #fff; }
-      .project-tree { min-height: 0; flex: 1; overflow: auto; padding: 8px 6px 16px; }
+      /* Expanded rows determine the scroll range. The file panel sizes the scrollport. */
+      .project-tree { contain: size; min-height: 0; flex: 1; overflow: auto; padding: 8px 6px 16px; }
       /* Keep long row labels scrollable without recursively measuring every
          expanded descendant for each ancestor's max-content width. */
       .tree-entry, .tree-children { min-width: 0; }

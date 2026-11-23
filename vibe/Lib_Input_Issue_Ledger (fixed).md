@@ -6,6 +6,158 @@ remain in the [active issue ledger](Lib_Input_Issue_Ledger.md).
 
 ## Fixed issues
 
+<a id="li-103"></a>
+
+### LI-103 — Legacy gap aliases retain independent property identities
+
+**Fixed 2026-11-22.** Shared CSS parsing and ownership follow **D5.5.1 /
+D9.1.1v4 / D9.1.3v2**. Getsafe's navigation declares grid-column-gap:.25rem
+inside each inline-block menu item. Final flex layout applies the 4px gaps,
+but early intrinsic queries look up column-gap and find no declaration.
+The wrapper loses 8px and wraps its second item, adding 89px to the header.
+
+The shared canonical-property table now maps grid-gap, grid-row-gap and
+grid-column-gap to their standard identities, as required by
+[CSS Box Alignment §8.4](https://www.w3.org/TR/2025/WD-css-align-3-20250311/#gap-legacy).
+The existing declaration normalizer handles every mapped alias, including
+single declarations, stylesheets and nested declaration runs. Consumers and
+CSSOM reuse that identity for intrinsic queries, final layout and priority.
+The existing WebKit compatibility grammar is retained. No layout-specific
+alias fallback, page selector or public data-layout change was introduced.
+
+The four-case reduction passes standard px/rem/variable controls before the
+repair, but the legacy spelling produces 192px instead of 200px and wraps.
+All eight permanent native cases now agree with Chromium, including the
+shorthand, variables, source order and important priority. All 16 focused
+parser tests pass; the normalization table covers the three gap aliases and
+existing WebKit cases. The unchanged Getsafe DOM/CSS replay restores its
+navigation row and hero position. Its photograph and consent typography
+remain unresolved; no whole-page clearance is claimed.
+
+Evidence: `temp/online-visual-round178/gap-probe.log`,
+`gap-alias-native.log`, `gap-alias-browser.json`, `input-parser-tests.log`,
+`getsafe-after/native.png` and
+[comparison round159](../test/online/comparison/repairs.html#round-159).
+No baseline was repeated for this focused repair; the user cleared the goal
+and requested wrap-up after the root cause was isolated.
+
+<a id="li-102"></a>
+
+### LI-102 — Pending resource polling starves later completions
+
+**Fixed 2026-11-22.** Document resource ownership follows **D5.5.1 /
+D9.1.1v4 / D9.1.3v2**. dom_document_has_pending_work returned immediately
+when the first registered callback reported pending. These callbacks also
+deliver finished native work, so an outstanding lazy image could prevent
+a completed eager sibling from publishing its image/load event.
+
+The walk now polls every registered callback and accumulates the pending
+result. No resource ownership or public data layout changes. RI-209's
+lazy-sibling fixture holds an optional image past the eager completion and
+checks that the eager element event precedes window.load while the optional
+request remains outstanding. All17 lifecycle,41 discovery and nine late-image
+controls pass; the dynamic layout inventory remains630/630. Evidence:
+`temp/online-visual-round175/resource-focused-final.log`, `load-browser/results.json`
+and `baseline-js.json`. Full pending-callback conformance is not claimed.
+
+<a id="li-101"></a>
+
+### LI-101 — Fragment parsing ignores table context and accepts stray table structure
+
+**Fixed for the qualified HTML profile, 2026-11-22.** Input owns HTML parsing
+under **D9.1.1v4 / D9.1.3v2**. Fragment creation put every HTML context in body
+mode. Its generic start-tag fallback admitted tr/td and other table structure,
+so body fragments incorrectly retained those elements. Simply rejecting them
+also broke legitimate table contexts.
+
+HTML fragments now keep only the synthetic html root on the open stack;
+reset-insertion-mode substitutes the real context at its bottom. Table,
+section, row, caption and colgroup modes reuse existing tree construction.
+Closing context tags cannot pop the synthetic root. Body mode rejects the
+specified stray table start tags through its existing error path. Ordinary
+fragment continuation and html-context head/body creation stay covered.
+
+All 85 HtmlParserTest unit cases pass, including new body-rejection and
+seven-context controls. Six AST/MIR contextual-fragment groups, five nearby
+DOM goldens and a Lambda-only Range golden pass in the dependent host.
+Before repair the Range-only candidate failed all three body-fallback
+assertions. Evidence: temp/online-visual-round167/input-html.log,
+range-ast-qualified.log, range-ast-final.log, range-mir.log and
+nearby-results.json. No claim of full HTML fragment, XML or MathML conformance.
+
+<a id="li-100"></a>
+
+### LI-100 — Native pathname mutation leaves href stale and skips path normalization
+
+**Fixed for pathname writes, 2026-11-22.** URL parsing belongs to Input under
+**D9.1.1v4 / D9.1.3v2**. url_set_pathname replaced one raw string without
+updating href. It also treated query/fragment delimiters as path text without
+encoding and skipped special-scheme slash and encoded-dot handling.
+
+The setter filters URL tabs/newlines, normalizes special backslashes, applies
+the path encoding set and reuses url_normalize_path. The normalizer first
+canonicalizes only complete literal/percent-encoded dot segments; escaped
+filename dots and empty segments remain intact. The setter parses a coherent
+replacement and transfers it into the existing carrier atomically, preserving
+query and fragment. Opaque paths retain their existing state.
+
+The 13-row focused setter table fails before repair. All 85 native URL unit
+cases pass afterward (38 extra/safety and47 core). JS pathname binding and
+its AST/MIR/Chromium controls are recorded in JS13-L49. Chromium 148 differs
+from native Input and Node for a Windows file-URL drive assignment with a
+vertical bar; that control is explicitly unqualified for browser agreement.
+Other component setters and absolute-constructor path normalization are not
+qualified by this repair. No transfer/source limit or capture clock changes.
+Evidence: temp/online-visual-round163/input-pathname-before.log,
+input-extra-after.log, input-url-after.log and pathname-browser-final-trace.log.
+[Setter](../lambda-input/lib/url.c) · [Shared normalizer](../lambda-input/lib/url_parser.c) ·
+[Focused table](../lambda-input/test/lib/test_url_extra_gtest.cpp)
+
+<a id="li-099"></a>
+
+### LI-099 — Raw resource URL strings bypass serialization before curl
+
+**Fixed 2026-11-22.** The network provider belongs to input under
+**D9.1.1v4 / D9.1.3v2**. Readymag's absolute CSS font URLs contain literal
+spaces. The multi backend passed the raw resource string to CURLOPT_URL,
+so curl rejected the request before any transfer. The shared URL parser
+already encodes spaces and UTF-8 and preserves existing percent escapes.
+
+configure_transfer now parses the URL and gives curl its serialized href,
+then releases the temporary Url after curl copies it. Invalid URLs and option
+errors use the existing transfer failure path. Resource identity, admission,
+cache keys, timeouts and source limits retain their existing contracts.
+
+The new space/Unicode file-transfer regression fails before repair. All15
+network unit cases pass afterward, including plain and already-escaped file
+URLs, plus10 existing renderer resource/base-URL controls. Readymag's current
+native page has zero malformed-URL errors and uses the downloaded sans font.
+It still has major layout/compositing differences. A fresh1000ms Chromium
+capture is transitional, so no whole-page clearance or metric improvement is
+claimed. Canonical captures and the109-high inventory remain preserved.
+
+Evidence: temp/online-visual-round160/network-test-before.log,
+network-test-after.log, resource-focused.log and live/saas_landing_205/after/.
+[Implementation](../lambda-input/lambda/network/curl_multi_backend.cpp) ·
+[Focused regression](../lambda-input/test/test_network_scheduler_gtest.cpp)
+
+<a id="li-098"></a>
+
+### LI-098 — Bulk weak DOM validation repeats the ownership walk
+
+**Fixed 2026-11-22.** With structural DOM ownership, one node retirement can
+expire every outstanding weak lifetime stamp for the document. Pruning many
+retained references then walked the owning forest for each cold address.
+Wrapping a subtree for custom element reactions could repeat the same work.
+
+Input shares a scratch membership snapshot within each bulk operation
+under D5.5.1 and D9.1.3v2. New registrations and lifetime changes expire the
+snapshot. A weak reference checks its expected node ID after ownership is
+established. The native regression retires nodes while a snapshot is live
+and verifies that only the surviving references resolve.
+[Implementation](../lambda-input/lambda/input/css/dom_lifecycle.cpp) ·
+[Native regression](../lambda-input/test/test_input_dom_native_gtest.cpp)
+
 <a id="li-097"></a>
 
 ### LI-097 — Legacy WebKit box declarations need standard equivalents

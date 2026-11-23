@@ -2040,7 +2040,10 @@ extern "C" Item js_event_loop_drain_result(bool keep_intervals) {
 
 extern "C" void js_event_loop_drain_script_turn(bool has_dom_document,
                                                   bool drain_timers) {
-    if (dom_is_host_driven_loop()) {
+    // nested source evaluation belongs to its callback's task; draining here
+    // can re-enter or close the active timer before script load dispatch.
+    if (dom_is_host_driven_loop() ||
+            (js_active_runtime_state && js_runtime_state.event_loop->callback_running)) {
         js_microtask_flush();
         return;
     }

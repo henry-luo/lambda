@@ -49,7 +49,7 @@ the resulting archives with an independent DOCX reader; setup and scope are in
 | Script source writers: `lmd/package/doc/misc*` | `make test-input` + `make test-lambda-baseline` | `python3 test/script_format_roundtrip.py --report temp/script-format-roundtrip.json` (`--format` / `--route` select cases); `./test/test_lambda_gtest.exe --gtest_filter='*doc_misc_roundtrip*'`. EML/VCF/ICS pass; prose readback currently fails. Details: [`Script_Formats_Support.md`](../doc/Script_Formats_Support.md#verification) |
 | CSS engine: `lambda/input/css/` | **`make test-radiant-baseline`** + `make test-input` (`test_css_*` binaries) | `./test/test_css_parser_gtest.exe`; `make layout test=<file>` |
 | Radiant layout / render / events: `radiant/` | **`make test-radiant-baseline`** (the `radiant` suite's baseline native and script checks) | `make layout test=baseline_301_simple_margin`; `make layout suite=<dir>`; `./test/test_ui_automation_gtest.exe --suite baseline --test <id>`; `make test-render test=<name>` |
-| Online page capture / HTTP document sessions: `test/online/` | Focused Node tests; live URL captures run separately | `node --test test/online/render_image_decode.test.cjs test/online/render_late_resources.test.cjs test/online/capture_snapshots.test.cjs test/online/compare_snapshots.test.cjs test/online/render_session.test.cjs test/online/render_html_scripts.test.cjs test/online/render_script_preparation.test.cjs test/online/render_dynamic_scripts.test.cjs test/online/render_click_reentrancy.test.cjs test/online/render_event_target_prototype.test.cjs test/online/render_browser_globals.test.cjs test/online/render_node_iterator.test.cjs test/online/render_url_live.test.cjs test/online/render_readable_stream.test.cjs test/online/render_error_stack.test.cjs test/online/render_document_title.test.cjs test/online/render_dialog_display.test.cjs test/online/render_stylesheet.test.cjs test/online/render_clip.test.cjs test/online/render_observers.test.cjs test/online/render_observer_zero_area.test.cjs test/online/render_dataset_metadata.test.cjs test/online/render_grid.test.cjs test/online/render_rem.test.cjs test/online/render_grid_absolute.test.cjs test/online/render_grid_nested.test.cjs test/online/render_flex_percentage.test.cjs test/online/render_nested_pseudo.test.cjs test/online/render_flex_inline_break.test.cjs test/online/render_flex_used_width.test.cjs test/online/render_grid_row_width.test.cjs test/online/render_intrinsic_width_value.test.cjs test/online/render_positioned_order.test.cjs test/online/render_video_percentage.test.cjs test/online/render_video_first_frame.test.cjs test/online/render_canvas_transform.test.cjs test/online/render_console_groups.test.cjs test/online/render_svg_percentage_intrinsics.test.cjs test/online/render_svg_comment.test.cjs test/online/render_compact_conditions.test.cjs test/online/render_grid_flow_variable.test.cjs test/online/render_abs_percentage_height.test.cjs test/online/render_css_resource_discovery.test.cjs test/online/render_dom_clone_comments.test.cjs test/online/render_node_content_accessors.test.cjs test/online/render_nested_ratio_height.test.cjs test/online/render_flex_contents_ratio.test.cjs test/online/render_flex_contents_position.test.cjs test/online/render_opacity_positioned.test.cjs test/online/render_backdrop_visibility.test.cjs test/online/render_root_body_overflow.test.cjs test/online/render_individual_translate_math.test.cjs test/online/render_flex_grid_z_index.test.cjs test/online/render_nested_positioned.test.cjs test/online/render_rounded_clip_text.test.cjs test/online/render_flex_omitted_basis.test.cjs test/online/render_inline_rounded_background.test.cjs test/online/render_inline_button_context.test.cjs test/online/render_capture_settle.test.cjs test/online/render_intrinsic_image_basis.test.cjs test/online/render_lab_colors.test.cjs test/online/render_contextual_colors.test.cjs test/online/render_inline_separators.test.cjs test/online/render_balance_heading.test.cjs test/online/render_flex_ratio_constraints.test.cjs test/online/render_text_background_ancestor.test.cjs test/online/render_intrinsic_motion_baseline.test.cjs test/online/render_svg_image_motion.test.cjs test/online/render_gif_playback.test.cjs test/online/render_gradient_double_stop.test.cjs test/online/render_text_shadow_inheritance.test.cjs test/online/render_font_face_auto_weight.test.cjs test/online/render_generated_style_measurement.test.cjs` (loopback sockets and native rendering required; `LAMBDA_RENDER_EXE` selects a qualified renderer). See [online inventory and comparison](online/README.md). |
+| Online page capture / HTTP document sessions: `test/online/` | Focused Node tests; live URL captures run separately | `node --test test/online/render_image_decode.test.cjs test/online/render_late_resources.test.cjs test/online/capture_snapshots.test.cjs test/online/compare_snapshots.test.cjs test/online/render_session.test.cjs test/online/render_html_scripts.test.cjs test/online/render_script_preparation.test.cjs test/online/render_dynamic_scripts.test.cjs test/online/render_click_reentrancy.test.cjs test/online/render_event_target_prototype.test.cjs test/online/render_dom_expando_collisions.test.cjs test/online/render_browser_globals.test.cjs test/online/render_node_iterator.test.cjs test/online/render_url_live.test.cjs test/online/render_readable_stream.test.cjs test/online/render_error_stack.test.cjs test/online/render_document_title.test.cjs test/online/render_dialog_display.test.cjs test/online/render_stylesheet.test.cjs test/online/render_clip.test.cjs test/online/render_observers.test.cjs test/online/render_observer_zero_area.test.cjs test/online/render_dataset_metadata.test.cjs test/online/render_grid.test.cjs test/online/render_rem.test.cjs test/online/render_grid_absolute.test.cjs test/online/render_grid_nested.test.cjs test/online/render_flex_percentage.test.cjs test/online/render_nested_pseudo.test.cjs test/online/render_flex_inline_break.test.cjs test/online/render_flex_used_width.test.cjs test/online/render_grid_row_width.test.cjs test/online/render_intrinsic_width_value.test.cjs test/online/render_positioned_order.test.cjs test/online/render_video_percentage.test.cjs test/online/render_video_first_frame.test.cjs test/online/render_canvas_transform.test.cjs test/online/render_console_groups.test.cjs test/online/render_svg_percentage_intrinsics.test.cjs test/online/render_svg_comment.test.cjs test/online/render_compact_conditions.test.cjs test/online/render_grid_flow_variable.test.cjs test/online/render_abs_percentage_height.test.cjs test/online/render_css_resource_discovery.test.cjs test/online/render_dom_clone_comments.test.cjs test/online/render_node_content_accessors.test.cjs test/online/render_nested_ratio_height.test.cjs test/online/render_flex_contents_ratio.test.cjs test/online/render_flex_contents_position.test.cjs test/online/render_opacity_positioned.test.cjs test/online/render_backdrop_visibility.test.cjs test/online/render_root_body_overflow.test.cjs test/online/render_individual_translate_math.test.cjs test/online/render_flex_grid_z_index.test.cjs test/online/render_nested_positioned.test.cjs test/online/render_rounded_clip_text.test.cjs test/online/render_flex_omitted_basis.test.cjs test/online/render_inline_rounded_background.test.cjs test/online/render_inline_button_context.test.cjs test/online/render_capture_settle.test.cjs test/online/render_intrinsic_image_basis.test.cjs test/online/render_lab_colors.test.cjs test/online/render_contextual_colors.test.cjs test/online/render_inline_separators.test.cjs test/online/render_balance_heading.test.cjs test/online/render_flex_ratio_constraints.test.cjs test/online/render_text_background_ancestor.test.cjs test/online/render_intrinsic_motion_baseline.test.cjs test/online/render_svg_image_motion.test.cjs test/online/render_gif_playback.test.cjs test/online/render_gradient_double_stop.test.cjs test/online/render_text_shadow_inheritance.test.cjs test/online/render_font_face_auto_weight.test.cjs test/online/render_generated_style_measurement.test.cjs` (loopback sockets and native rendering required; `LAMBDA_RENDER_EXE` selects a qualified renderer). See [online inventory and comparison](online/README.md). |
 | RTL and vertical writing-mode layout fixtures | **`make test-layout-baseline`** + **`make test-radiant-baseline`** (recorded full and partial scores) | `make layout suite=wpt-css-writing-modes` for raw conformance; `make capture-layout suite=wpt-css-writing-modes` to refresh Chromium references |
 | CSS Ruby layout fixtures | Standalone WPT suite; not yet in the aggregate layout baseline | `make layout suite=wpt-css-ruby`; `make capture-layout suite=wpt-css-ruby` to generate Chromium references |
 | Live DevTools: `lambda/devtools/`, `lambda/runtime/devtools_scratch.cpp`, `lambda/module/radiant/devtools_adapter.*`, `radiant/devtools_adapter.hpp`, `radiant/devtools_host.cpp`, `utils/devtool/` | **`make test-lambda-baseline`** + **`make test-radiant-baseline`** for native changes | `node --test test/devtools/protocol.test.mjs` (also in the Radiant baseline); frontend/UI commands in [`devtools/README.md`](devtools/README.md) |
@@ -170,6 +170,61 @@ delivery within the selected capture interval, including fetch, XHR, chained
 requests and frozen after-window/zero-window completion. It uses local HTTP
 resources and native PNG output; `LAMBDA_RENDER_EXE` selects the qualified
 renderer (**D6.4.1 / D6.4.4 / D10.1.7**).
+
+`node --test test/online/render_range_fragments.test.cjs` checks contextual
+Range parsing, document ownership, coercion and inserted-script lifecycle.
+`proc/dom_range_contextual_fragment.ls` exercises the shared body without a
+JavaScript realm (**D8.4.4 / D6.3.3 / D9.5.6v2**).
+
+`node --test test/online/render_html_insertion.test.cjs` checks adjacent HTML
+insertion, stylesheet activation, ownership, coercion and observer/custom-element
+publication. `proc/dom_fragment_insertion.ls` guards fragment insertion without
+a JavaScript realm (**D8.4.4 / D6.3.3 / D9.5.6v2**).
+
+`node --test test/online/render_relational_mutations.test.cjs` checks scoped
+relational invalidation, inserted/removed witnesses, positional and empty
+text changes, internal/leading sibling paths, and resolved CSS sizing boxes
+(**D9.5.6v2 / D9.1.1v4 / D9.1.3v2**, RI-201/RI-202).
+
+`IncrementalCssTest.HeightQueriesRetainUnchangedSubtreesAcrossIncrementalPasses`
+checks scalar height reuse after unrelated edits, source/inherited-font
+invalidation and provisional-query isolation (**D5.5.1**, RI-203).
+
+`render_css_resource_discovery.test.cjs` also checks that selected eager images
+overlap blocking stylesheet loading, reuse their requests and retain load-event
+delivery; lazy, inert and unselected sources stay outside that early pass
+(**D5.5.1 / D9.1.1v4 / D9.1.3v2**, RI-204).
+
+`render_load_boundary.test.cjs` checks eager/lazy images, detached and chained
+requests, errors, CSS backgrounds/variables/pseudos, shorthand precedence and
+optional siblings against the document load boundary (**D5.5.1 / D9.5.6v2 /
+D10.1.7**, RI-209/LI-102). Its shared fixtures also support Chromium checks.
+
+`render_video_first_frame.test.cjs` checks available video frames and poster
+selection for paused, autoplay, scripted-play and failed-source cases on macOS.
+The shared fixtures preserve the original landscape/poster pixel assertions
+(**D5.5.1 / D9.5.6v2 / D10.1.7**, RI-134/RI-210/RI-211).
+
+`render_environment_value.test.cjs` checks safe-area environment values in
+lengths, math, inherited variables and shorthands, plus unknown-name fallback
+and invalidation. The shared fixtures also qualify against Chromium; the
+`CssVariableSubstitutionTest` unit suite checks lazy/empty fallbacks and decoded,
+case-sensitive names (**D5.5.1 / D9.1.3v2**, RI-212).
+
+`render_gap_alias.test.cjs` checks nested intrinsic widths with standard and
+legacy gap spellings, variables, shorthand, source order and important
+priority. Its shared fixtures also qualify against Chromium; input parser
+tests verify canonical declaration identity (**D5.5.1 / D9.1.1v4 /
+D9.1.3v2**, LI-103).
+
+`capture_snapshots.test.cjs` checks release-renderer main-document HTTP rejection,
+redirected rejection and successful parents with rejected optional images/iframes,
+alongside browser capture and retry bookkeeping (**D10.1.7**, RI-205).
+
+`render_flex_ratio_constraints.test.cjs` checks intrinsic ratio minima for
+single-line flex text and fit-content column contributions, with block/wrapping,
+explicit-minimum, scrolling, fixed-child and flex-allocation controls
+(**D5.5.1 / D9.1.1v4 / D9.1.3v2**, RI-206/RI-207).
 
 ## 2. Suites (`build_lambda_config.json` → `test.test_suites`)
 

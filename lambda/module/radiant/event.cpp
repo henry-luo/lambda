@@ -6272,11 +6272,12 @@ static bool dom_js_document_has_broad_structural_css_dependency(DomDocument* doc
 }
 
 static bool dom_js_selector_has_combinator_dependency(CssSelector* selector,
-        CssCombinator minimum = CSS_COMBINATOR_COLUMN) {
+        CssCombinator minimum = CSS_COMBINATOR_COLUMN, bool leading_siblings_only = false) {
     if (!selector) return false;
     if (selector->leading_combinator >= minimum) return true;
+    CssCombinator internal_minimum = leading_siblings_only ? CSS_COMBINATOR_COLUMN : minimum;
     for (size_t i = 0; i + 1 < selector->compound_selector_count; i++) {
-        if (selector->combinators[i] >= minimum) return true;
+        if (selector->combinators[i] >= internal_minimum) return true;
     }
     for (size_t i = 0; i < selector->compound_selector_count; i++) {
         CssCompoundSelector* compound = selector->compound_selectors[i];
@@ -6285,7 +6286,7 @@ static bool dom_js_selector_has_combinator_dependency(CssSelector* selector,
             CssSimpleSelector* simple = compound->simple_selectors[s];
             if (!simple) continue;
             for (size_t f = 0; f < simple->function_selector_count; f++) {
-                if (dom_js_selector_has_combinator_dependency(simple->function_selectors[f], minimum))
+                if (dom_js_selector_has_combinator_dependency(simple->function_selectors[f], minimum, leading_siblings_only))
                     return true;
             }
         }
@@ -6492,15 +6493,33 @@ struct DomJsChildListDependency {
     bool include_structural;
 };
 
+static bool dom_js_simple_selector_is_static(CssSimpleSelector* simple) {
+    if (!simple) return false;
+    if (simple->type == CSS_SELECTOR_TYPE_ELEMENT ||
+        simple->type == CSS_SELECTOR_TYPE_CLASS || simple->type == CSS_SELECTOR_TYPE_ID ||
+        simple->type == CSS_SELECTOR_TYPE_UNIVERSAL ||
+        (simple->type >= CSS_SELECTOR_ATTR_EXACT && simple->type <= CSS_SELECTOR_ATTR_CASE_SENSITIVE)) return true;
+    if ((simple->type != CSS_SELECTOR_PSEUDO_IS && simple->type != CSS_SELECTOR_PSEUDO_WHERE &&
+         simple->type != CSS_SELECTOR_PSEUDO_NOT) || !simple->function_selector_count) return false;
+    for (size_t f = 0; f < simple->function_selector_count; f++) {
+        CssSelector* selector = simple->function_selectors[f];
+        if (!selector || selector->leading_combinator != CSS_COMBINATOR_NONE ||
+            selector->compound_selector_count != 1 || !selector->compound_selectors[0]) return false;
+        CssCompoundSelector* compound = selector->compound_selectors[0];
+        for (size_t s = 0; s < compound->simple_selector_count; s++) {
+            if (!dom_js_simple_selector_is_static(compound->simple_selectors[s])) return false;
+        }
+    }
+    return true;
+}
+
 static bool dom_js_compound_can_match_anchor(CssCompoundSelector* compound,
         DomElement* element, SelectorMatcher* matcher) {
     for (size_t i = 0; i < compound->simple_selector_count; i++) {
         CssSimpleSelector* simple = compound->simple_selectors[i];
         if (!simple) continue;
-        bool stable = simple->type == CSS_SELECTOR_TYPE_ELEMENT ||
-            simple->type == CSS_SELECTOR_TYPE_CLASS || simple->type == CSS_SELECTOR_TYPE_ID ||
-            (simple->type >= CSS_SELECTOR_ATTR_EXACT && simple->type <= CSS_SELECTOR_ATTR_CASE_SENSITIVE);
-        if (stable && !selector_matcher_matches_simple(matcher, simple, element)) return false;
+        if (dom_js_simple_selector_is_static(simple) &&
+            !selector_matcher_matches_simple(matcher, simple, element)) return false;
     }
     return true;
 }
@@ -6518,21 +6537,32 @@ static bool dom_js_subtree_selector_misses(DomNode* node, void* context) {
 
 static bool dom_js_has_argument_can_match_subtree(CssSelector* argument,
         DomJsChildListDependency* dependency) {
-    if (!dependency->changed_subtree || !argument ||
-        argument->compound_selector_count != 1 ||
-        argument->leading_combinator >= CSS_COMBINATOR_NEXT_SIBLING) return true;
-    CssCompoundSelector* compound = argument->compound_selectors[0];
-    if (!compound) return true;
-    for (size_t i = 0; i < compound->simple_selector_count; i++) {
-        CssSimpleSelector* simple = compound->simple_selectors[i];
-        // positions/states/functions may change existing candidates outside the moved subtree.
-        if (!simple || (simple->type != CSS_SELECTOR_TYPE_ELEMENT &&
-            simple->type != CSS_SELECTOR_TYPE_CLASS && simple->type != CSS_SELECTOR_TYPE_ID &&
-            simple->type != CSS_SELECTOR_TYPE_UNIVERSAL)) return true;
+    if (!dependency->changed_subtree || !argument || !argument->compound_selector_count ||
+        dom_js_selector_has_combinator_dependency(argument, CSS_COMBINATOR_NEXT_SIBLING)) return true;
+    bool positional = false;
+    for (size_t c = 0; c < argument->compound_selector_count; c++) {
+        CssCompoundSelector* compound = argument->compound_selectors[c];
+        if (!compound) return true;
+        for (size_t i = 0; i < compound->simple_selector_count; i++) {
+            CssSimpleSelector* simple = compound->simple_selectors[i];
+            if (!simple) return true;
+            if (dom_js_simple_selector_is_static(simple)) continue;
+            if (simple->function_selector_count) return true;
+            DomJsStructuralTarget target = dom_js_structural_target(simple->type);
+            // focus/relational/functional state can change outside this child-list closure.
+            if (target != DOM_JS_STRUCTURAL_TARGET_SELF && target != DOM_JS_STRUCTURAL_TARGET_CHILD) return true;
+            positional = true;
+        }
     }
-    DomJsSubtreeSelectorMatch query = {compound, &dependency->matcher};
-    return !view_geometry_walk_dom_tree(dependency->changed_subtree,
-        dom_js_subtree_selector_misses, &query);
+    for (size_t c = 0; c < argument->compound_selector_count; c++) {
+        DomJsSubtreeSelectorMatch query = {argument->compound_selectors[c], &dependency->matcher};
+        if (!view_geometry_walk_dom_tree(dependency->changed_subtree,
+                dom_js_subtree_selector_misses, &query)) return true;
+        // positions and :empty can change existing siblings or the parent, not only moved nodes.
+        if (positional && dependency->parent && !view_geometry_walk_dom_tree(dependency->parent,
+                dom_js_subtree_selector_misses, &query)) return true;
+    }
+    return false;
 }
 
 static bool dom_js_selector_prefix_can_match_anchor(CssSelector* selector, size_t index,
@@ -6638,15 +6668,14 @@ static bool dom_js_selector_has_child_list_dependency(CssSelector* selector, voi
                 }
                 if (!can_change) continue;
             }
-            // sibling/column arguments can reach anchors outside the parent's
-            // ancestry. Descendant/child arguments require an enclosing anchor.
+            // only leading siblings escape the anchor's descendants; internal siblings still have an enclosing anchor.
             for (size_t f = 0; f < simple->function_selector_count; f++) {
                 if (dom_js_selector_has_combinator_dependency(
-                        simple->function_selectors[f], CSS_COMBINATOR_NEXT_SIBLING)) return true;
+                        simple->function_selectors[f], CSS_COMBINATOR_NEXT_SIBLING, true)) return true;
             }
             for (DomNode* node = dependency->parent; node; node = node->parent) {
-                if (node->is_element() && dom_js_compound_can_match_anchor(
-                        compound, node->as_element(), &dependency->matcher)) return true;
+                if (node->is_element() && dom_js_selector_prefix_can_match_anchor(
+                        selector, c, node->as_element(), &dependency->matcher)) return true;
             }
         }
     }
@@ -6808,6 +6837,11 @@ static bool dom_js_mutation_can_incremental(DomDocument* doc,
             // :has() argument, so its ancestor match set is unchanged.
             continue;
         }
+        if (record->kind == DOM_JS_MUTATION_TEXT &&
+            !dom_js_document_has_child_list_dependency(doc, record->parent, false, record->target)) {
+            // character data can affect an enclosing :has(:empty), but cannot supply unrelated element witnesses.
+            continue;
+        }
         if (record->kind == DOM_JS_MUTATION_ATTRIBUTE ||
             record->kind == DOM_JS_MUTATION_TEXT) {
             if (!checked_broad_structural_css) {
@@ -6842,10 +6876,11 @@ static void dom_js_add_subtree_root(DomElement* candidate,
     roots[(*count)++] = candidate;
 }
 
-static bool dom_js_mutation_needs_subtree_cascade(DomJsMutationKind kind) {
+static bool dom_js_mutation_needs_subtree_cascade(DomDocument* doc, DomJsMutationKind kind) {
+    if (kind == DOM_JS_MUTATION_TEXT) return dom_js_document_has_structural_css_dependency(doc);
     return kind != DOM_JS_MUTATION_CONTROL_VALUE &&
         kind != DOM_JS_MUTATION_STYLE && kind != DOM_JS_MUTATION_INLINE_STYLE &&
-        kind != DOM_JS_MUTATION_STYLE_REPAINT && kind != DOM_JS_MUTATION_TEXT;
+        kind != DOM_JS_MUTATION_STYLE_REPAINT;
 }
 
 static void dom_js_recascade_subtree(DomDocument* doc, DomElement* root,
@@ -6854,7 +6889,7 @@ static void dom_js_recascade_subtree(DomDocument* doc, DomElement* root,
     if (!doc || !root) return;
 
     if (kind == DOM_JS_MUTATION_CONTROL_VALUE) return;
-    if (!dom_js_mutation_needs_subtree_cascade(kind)) {
+    if (!dom_js_mutation_needs_subtree_cascade(doc, kind)) {
         root->set_styles_resolved(false);
         return;
     }
@@ -6872,7 +6907,7 @@ static bool dom_js_recascade_mutations(DomDocument* doc, SelectorMatcher* matche
         if (!dom_js_record_has_connected_endpoint(doc, record)) continue;
         DomElement* root = dom_js_record_cascade_root(doc, record);
         if (!root) continue;
-        if (dom_js_mutation_needs_subtree_cascade(record->kind)) {
+        if (dom_js_mutation_needs_subtree_cascade(doc, record->kind)) {
             // All edits are already applied: overlapping roots need one pass
             // over the final DOM, rather than one full cascade per journal entry.
             dom_js_add_subtree_root(root, roots, &count);
@@ -6970,6 +7005,7 @@ static bool dom_js_reset_mutated_layout_subtrees(DomDocument* doc,
             record->kind != DOM_JS_MUTATION_INLINE_STYLE &&
             record->kind != DOM_JS_MUTATION_STYLE_REPAINT &&
             record->kind != DOM_JS_MUTATION_ATTRIBUTE &&
+            !(record->kind == DOM_JS_MUTATION_TEXT && dom_js_mutation_needs_subtree_cascade(doc, record->kind)) &&
             !dom_js_slot_distribution_host(doc, record)) {
             continue;
         }
@@ -10549,7 +10585,7 @@ struct HoverEventPath {
 
     View* at(size_t index) const {
         return index < count
-            ? static_cast<View*>(dom_node_ref_validate(document, nodes[index])) : nullptr;
+            ? static_cast<View*>(nodes[index].address) : nullptr;
     }
 };
 
@@ -11838,8 +11874,8 @@ void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard
     }
 }
 
-void radiant_focus_popup_candidate(DomDocument* document, DomElement* element) {
-    if (!document || !document->state || !element) return;
+void radiant_change_document_focus(DomDocument* document, DomElement* element) {
+    if (!document || !document->state) return;
     EventContext event = {};
     event.ui_context = (UiContext*)document->js.host_ui_context;
     event.target_document = document;
@@ -12062,19 +12098,16 @@ static bool navigation_request_is_live(const RadiantNavigationRequest* request,
     if (out_target) *out_target = nullptr;
     if (out_fragment) *out_fragment = nullptr;
     if (!request) return false;
-    DomNode* source = dom_node_ref_validate(request->source_document,
-                                            request->source_ref);
+    DomNode* source = request->source_ref.address;
     if (!source || !source->is_element()) return false;
     if (out_source) *out_source = source->as_element();
     if (request->target_kind == RADIANT_NAVIGATION_TARGET_EXISTING) {
-        DomNode* target = dom_node_ref_validate(request->target_document,
-                                                request->target_ref);
+        DomNode* target = request->target_ref.address;
         if (!target || !target->is_element()) return false;
         if (out_target) *out_target = target->as_element();
     }
     if (request->fragment_ref.address) {
-        DomNode* fragment = dom_node_ref_validate(request->fragment_document,
-                                                  request->fragment_ref);
+        DomNode* fragment = request->fragment_ref.address;
         if (!fragment || !fragment->is_element()) return false;
         if (out_fragment) *out_fragment = fragment->as_element();
     }

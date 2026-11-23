@@ -23,7 +23,7 @@ for (const [module, modes] of [[false, [...dynamicScriptCases, ...dynamicScriptB
         const selected = requests.filter(url => url.searchParams.get('case') === mode && url.searchParams.has('module') === module);
         if (mode !== 'cached') assert.equal(selected.length, ['inert', 'unsupported', 'empty-src', 'async-idl'].includes(mode) ? 0
             : mode === 'late-fetch-chain' ? 3
-                : ['ordered', 'async', 'chain', 'stylesheet', 'late-fetch', 'late-fetch-immediate'].includes(mode) ? 2 : 1,
+                : ['ordered', 'async', 'chain', 'late-chain', 'stylesheet', 'late-fetch', 'late-fetch-immediate'].includes(mode) ? 2 : 1,
         'preparation owns each request');
     });
   }

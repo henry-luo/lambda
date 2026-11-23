@@ -20,38 +20,202 @@ observations still require re-verification. Add new Radiant issues here.
 
 ## Open issues
 
-<a id="ri-196"></a>
+<a id="ri-220"></a>
 
-### RI-196 — FIXED
+### RI-220 — FIXED
 
 Native select popups choose a side with enough room and glyph replay clips
 to the destination surface. See the
-[GLB viewer dropdown crash](<Radiant_Issue_Ledger (fixed).md#ri-196>).
+[GLB viewer dropdown crash](<Radiant_Issue_Ledger (fixed).md#ri-220>).
+<a id="ri-219"></a>
+
+- [RI-219 — Transparent video frames blend over uninitialized decoder storage](<Radiant_Issue_Ledger (fixed).md#ri-219>).
+
+<a id="ri-218"></a>
+
+- [RI-218 — Definitely sized grid images have no paint surface](<Radiant_Issue_Ledger (fixed).md#ri-218>).
+
+<a id="ri-217"></a>
+
+- [RI-217 — Grid spans across fractional tracks lose a definite size contribution](<Radiant_Issue_Ledger (fixed).md#ri-217>).
+
+<a id="ri-216"></a>
+
+- [RI-216 — Nested flex measurement inflates percentage-sized SVGs](<Radiant_Issue_Ledger (fixed).md#ri-216>).
+
+<a id="ri-215"></a>
+
+### RI-215 — Two expanded document-editor replays fail on the current checkout
+
+**Open, 2026-11-22.** Run `test_ui_automation_gtest.exe --suite baseline
+--test 'doc_editor_*'`. The tree-alignment replay looks for
+`test/test_graph_parser_gtest.cpp`. Its source belongs to lambda-input at
+`lambda-input/test/test_graph_parser_gtest.cpp` (**D9.1.1v4**).
+The markup-formats replay expects the AsciiDoc title in the first preview
+heading and receives “Section 1”. The heading mismatch remains unassigned
+between input and the preview (**D10.1.2 / S12.1.3v6**).
+
+Both assertion outcomes reproduce with the original editor source and the
+pre-fix viewer. Evidence is under
+`temp/radiant-ten-under-five/doc-regression-control/`.
+
+<a id="ri-214"></a>
+
+- [RI-214 — Replays repeat ownership walks after a DOM retirement](<Radiant_Issue_Ledger (fixed).md#ri-214>).
+
+<a id="ri-213"></a>
+
+- [RI-213 — Release build used a removed DOM validation cache API](<Radiant_Issue_Ledger (fixed).md#ri-213>).
+
+<a id="ri-212"></a>
+
+- [RI-212 — Unsubstituted CSS environment values poison layout coordinates](<Radiant_Issue_Ledger (fixed).md#ri-212>).
+
+<a id="ri-211"></a>
+
+- [RI-211 — Media commands before layout report an unavailable backend](<Radiant_Issue_Ledger (fixed).md#ri-211>).
+
+<a id="ri-210"></a>
+
+- [RI-210 — Opening playback retains a poster despite an available video frame](<Radiant_Issue_Ledger (fixed).md#ri-210>).
+
+<a id="ri-209"></a>
+
+- [RI-209 — Window load precedes required image/background completion](<Radiant_Issue_Ledger (fixed).md#ri-209>).
+
+<a id="ri-208"></a>
+
+- [RI-208 — Nested column flex text can undersize a ratio-dependent cross minimum](<Radiant_Issue_Ledger (fixed).md#ri-208>).
+
+<a id="ri-207"></a>
+
+- [RI-207 — Column flex aspect-ratio items undersize their automatic cross axis](<Radiant_Issue_Ledger (fixed).md#ri-207>).
+
+<a id="ri-206"></a>
+
+- [RI-206 — Single-line flex ratio minima use wrapped text height](<Radiant_Issue_Ledger (fixed).md#ri-206>).
+
+<a id="ri-205"></a>
+
+- [RI-205 — Release captures accept rejected HTTP document bodies](<Radiant_Issue_Ledger (fixed).md#ri-205>).
+
+<a id="ri-204"></a>
+
+- [RI-204 — Parsed eager images wait behind stylesheet completion](<Radiant_Issue_Ledger (fixed).md#ri-204>).
+
+<a id="ri-203"></a>
+
+- [RI-203 — Scalar height queries lose valid results on unrelated layout passes](<Radiant_Issue_Ledger (fixed).md#ri-203>).
+
+<a id="ri-202"></a>
+
+- [RI-202 — CSSOM dimensions expose the border box for content-box elements](<Radiant_Issue_Ledger (fixed).md#ri-202>).
+
+<a id="ri-201"></a>
+
+- [RI-201 — Relational dependency checks rebuild unrelated measurement text](<Radiant_Issue_Ledger (fixed).md#ri-201>).
+
+<a id="ri-200"></a>
+
+### RI-200 — Legacy frameset documents have no frame embedding/layout path — **FEATURE GAP**
+
+**2026-11-22.** Native document rendering belongs to Radiant under
+**D9.1.1v4 / D9.1.3v2 / D9.5.6v2**. Eclipse Help is a real HTML4 frameset:
+its outer rows are 55,24,* and its three frame children load the banner,
+toolbar and navigation/content documents. Chromium displays those panes;
+the retained native capture is blank. The source is preserved at
+temp/online-visual-round2/documents/eclipse_help.html and the current triage
+contact is temp/online-visual-round165/triage-contact.png.
+
+The existing frameset branch in layout_block.cpp supplies viewport dimensions
+only. The native layout/render code has no frame-child embedding path; its
+iframe support does not provide frameset track sizing or load frame sources.
+This is a legacy HTML feature gap, not evidence that an ordinary CSS box
+collapsed. A complete implementation needs nested row/column track layout,
+frame document ownership and embedding, and is deferred under the online
+review's instruction to avoid major new features. Eclipse remains high;
+no synthetic pane, document rewrite or visual clearance is introduced.
+
+<a id="ri-199"></a>
+
+- [RI-199 — Native test harnesses failed to link in the full test build](<Radiant_Issue_Ledger (fixed).md#ri-199>).
+
+<a id="ri-198"></a>
+
+### RI-198 — Four named replays exceed five seconds in the full debug baseline
+
+**Open, 2026-11-22.** After RI-197 and LI-098, the six reported cases pass
+together in 2.171–3.880 s each on the macOS debug build. Running
+`make run-radiant-baseline` with the original timing history and ordinary
+worker settings passes the suite. The text-to-PDF replay takes 5.778 s,
+Hamster editor 5.294 s, direct table 6.950 s and slide animations 5.681 s.
+The Type 1 PDF and essay cases meet the five-second budget in that run.
+
+The remaining profiles include live layout, PDF transformation and
+background compilation under load. The event and frame contracts follow
+D8.3.4 and D10.1.7. The underlying Scene3D budget also remains open in
+RI-196. Results are under `temp/radiant-debug-regression/`.
+
+After RI-214, the stock debug baseline passes with seven UI workers.
+Text-to-PDF takes 4.973 s and essay toggle takes 4.531 s. The source scroll
+reset takes 5.631 s, direct table 7.575 s and slide animations 6.089 s.
+Two isolated debug passes meet the five-second target. See
+`temp/radiant-ten-under-five/final-baseline/test_summary.json`.
+
+**Release recheck, 2026-11-22.** The source scroll reset, text-to-PDF, slide
+animations and direct table replays all pass with the runner configured for
+seven workers. Their times are 2.409, 2.886, 3.036 and 3.454 s. This is a
+four-case release run and the full debug baseline observation stays open
+(**D8.3.4 / D10.1.7**). A rebuilt release host passes the same replays in
+2.647–3.381 s. See `temp/radiant-ordinary-fixes/ri-198-release*.log`.
+
+<a id="ri-197"></a>
+
+- [RI-197 — Retained view state discards the DOM lifetime stamp](<Radiant_Issue_Ledger (fixed).md#ri-197>).
+
+<a id="ri-196"></a>
+
+### RI-196 — Interactive Scene3D View cases exceed the parallel debug budget
+
+**Open, 2026-11-22.** Run the existing Radiant View baseline with the
+`debug_native` executable and its normal nine-worker batch. The target is
+under five seconds per case and under 38.3 seconds for the batch.
+Collection spends most of its time loading, laying out and painting linked
+documents. Midtown spends time building the cold document, drawing the
+first frame and processing drive frames. Hamster spends most of its time
+in live edits and frames. Meadow meets the case budget after retaining
+seed-owned geometry.
+
+The engine retains native resources and updates the requested frame under
+**D5.5.2** and **D10.1.7**. The remaining timing gap affects the performance
+target. The replay checks and timing artifacts are recorded in the
+[UI tuning checkpoint](impl/Radiant_Impl_UI_Test_Tuning.md#current-checkpoint).
+
+After RI-214, the five requested Scene3D cases each complete within 3.915 s
+in two isolated debug passes. In the nine-worker baseline their times range
+from 5.600 to 8.717 s. One of the largest sample costs is now loading and
+painting the linked Collection documents or Midtown's first scene
+(**D9.1.3v2 / D10.1.7**). See
+`temp/radiant-ten-under-five/final-baseline/test_summary.json`.
+
+**Release recheck, 2026-11-22.** Both Collection replays, Midtown desktop,
+Hamster editor and Meadow pass in 1.031–3.793 s per case on the selected
+release host. The five-case run does not qualify the full parallel debug
+baseline (**D5.5.2 / D10.1.7**). A rebuilt release host passes the same
+replays in 1.038–3.100 s. See
+`temp/radiant-ordinary-fixes/ri-196-release*.log`.
 
 <a id="ri-195"></a>
 
-### RI-195 — FIXED
-
-The Scene3D mixer and device-loss tests use a device-bound submix with
-hardware output disabled. See the
-[Scene3D audio fixture repair](<Radiant_Issue_Ledger (fixed).md#ri-195>).
+- [RI-195 — Headless Scene3D fixtures bypass the device mixer](<Radiant_Issue_Ledger (fixed).md#ri-195>).
 
 <a id="ri-194"></a>
 
-### RI-194 — FIXED
-
-A flex item that is a grid (or any container whose `content_height` stops at its
-own flow cursor) keeps its descendants in its scroll range, so the wheel scrolls
-it. See the [flex scroll-range repair](<Radiant_Issue_Ledger (fixed).md#ri-194>).
+- [RI-194 — A flex-sized grid scroll container has no scroll range](<Radiant_Issue_Ledger (fixed).md#ri-194>).
 
 <a id="ri-193"></a>
 
-### RI-193 — FIXED
-
-In a definite grid container, an auto row no longer grows to a scroll
-container item's content height, so `overflow: auto` grid items scroll as in
-Chromium. See the
-[minimum-contribution repair](<Radiant_Issue_Ledger (fixed).md#ri-193>).
+- [RI-193 — Auto grid rows grow to scroll containers' content in a definite container](<Radiant_Issue_Ledger (fixed).md#ri-193>).
 
 <a id="ri-192"></a>
 
@@ -68,354 +232,147 @@ block Lambda work. Workaround: run each case in its own process with
 `--gtest_filter`. RI-191 was verified that way (87 animation, motion and clip
 cases).
 
+**Recheck, 2026-11-22.** A fresh debug build at Lambda `3bed8e86ad` with
+Radiant `7ca2432` passes both original pairs together in one process, repeated
+ten times with native macOS graphics access. The historical cause remains
+unconfirmed. See `temp/radiant-ordinary-fixes/ri-192-native-repeat.log`
+(**D5.5.1 / D9.1.3v2**).
+
 <a id="ri-191"></a>
 
-### RI-191 — FIXED
-
-Autoplay clips and motion controllers that an edit adds to a scene first
-rendered without clips now claim the host clock. A seek or an explicit host
-command still keeps manual control. See the
-[clock-claim repair](<Radiant_Issue_Ledger (fixed).md#ri-191>).
+- [RI-191 — Clips added by a scene3d re-render never receive host ticks](<Radiant_Issue_Ledger (fixed).md#ri-191>).
 
 <a id="ri-190"></a>
 
-### RI-190 — FIXED
-
-CSS resource discovery resolves a document base only when it encounters a
-resource URL and reuses that lookup for the discovery pass. See the
-[CSS discovery performance repair](<Radiant_Issue_Ledger (fixed).md#ri-190>).
+- [RI-190 — CSS resource discovery repeatedly scans the DOM for a base URL](<Radiant_Issue_Ledger (fixed).md#ri-190>).
 
 <a id="ri-189"></a>
 
-### RI-189 — FIXED
-
-Retained recascade now resets non-inherited opacity before applying current
-declarations and effects. An expired no-fill animation can no longer leave
-its final active sample when opacity is undeclared. See the
-[opacity restoration repair](<Radiant_Issue_Ledger (fixed).md#ri-189>).
+- [RI-189 — Expired no-fill effects retain undeclared opacity](<Radiant_Issue_Ledger (fixed).md#ri-189>).
 
 <a id="ri-188"></a>
 
-### RI-188 — FIXED
-
-A document with no native resource manager can acquire its first remote
-stylesheet after script execution. Discovery now visits links before the
-manager guard, reusing the existing manager-initializing queue helper. See the
-[first stylesheet repair](<Radiant_Issue_Ledger (fixed).md#ri-188>).
-
+- [RI-188 — First script-created remote stylesheet is never requested](<Radiant_Issue_Ledger (fixed).md#ri-188>).
 
 <a id="ri-187"></a>
 
-### RI-187 — FIXED
-
-Snapshot preparation settles late native image state and resource callbacks
-in the retained document realm without advancing its selected clock. See the
-[late resource completion repair](<Radiant_Issue_Ledger (fixed).md#ri-187>).
+- [RI-187 — Snapshot downloads finish without publishing image state or callbacks](<Radiant_Issue_Ledger (fixed).md#ri-187>).
 
 <a id="ri-186"></a>
 
-### RI-186 — FIXED
-
-Linear-gradient resolution allocates stop storage for a sole double-position
-color group, consistently with Input's LI-096 validation repair. See the
-[gradient allocation repair](<Radiant_Issue_Ledger (fixed).md#ri-186>).
+- [RI-186 — Linear-gradient resolution discards a sole double-position color](<Radiant_Issue_Ledger (fixed).md#ri-186>).
 
 <a id="ri-185"></a>
 
-### RI-185 — FIXED
-
-GIF playback samples elapsed frame deadlines across missed ticks, normalizes
-encoded repeat counts, and retains the final frame until cancellation. See
-the [GIF playback repair](<Radiant_Issue_Ledger (fixed).md#ri-185>).
+- [RI-185 — Sparse GIF ticks and completion select the wrong frame](<Radiant_Issue_Ledger (fixed).md#ri-185>).
 
 <a id="ri-184"></a>
 
-### RI-184 — FIXED
-
-Parser-discovered external scripts dispatch completion after evaluation and
-microtasks, with restored currentScript and the original rooted event target.
-Completion preserves bootstrap's pending stylesheet writes. See the
-[script completion repair](<Radiant_Issue_Ledger (fixed).md#ri-184>).
+- [RI-184 — External script success never dispatches the element load event](<Radiant_Issue_Ledger (fixed).md#ri-184>).
 
 <a id="ri-183"></a>
 
-### RI-183 — FIXED
-
-CSS resource discovery now queues image-set string sources through the existing
-URL visitor while keeping type() strings as metadata. See the
-[image-set discovery repair](<Radiant_Issue_Ledger (fixed).md#ri-183>).
-
+- [RI-183 — image-set string sources never enter the resource queue](<Radiant_Issue_Ledger (fixed).md#ri-183>).
 
 <a id="ri-182"></a>
 
-### RI-182 — FIXED
-
-A local document's selected CSS resources can now initialize the network
-manager before its first background image is consumed. See the
-[CSS resource initialization repair](<Radiant_Issue_Ledger (fixed).md#ri-182>).
-
+- [RI-182 — CSS-only local documents cannot start their first network resource](<Radiant_Issue_Ledger (fixed).md#ri-182>).
 
 <a id="ri-181"></a>
 
-### RI-181 — FIXED
-
-Snapshot preparation now lazily creates the network manager for a local
-HTML document's first admitted remote image or poster. See the
-[resource initialization repair](<Radiant_Issue_Ledger (fixed).md#ri-181>).
+- [RI-181 — Local HTML image/poster exports never initialize network discovery](<Radiant_Issue_Ledger (fixed).md#ri-181>).
 
 <a id="ri-180"></a>
 
-### RI-180 — FIXED
-
-HTML resource discovery and early script/stylesheet prefetch honor authored
-fetchpriority hints. Passive image decoding preserves the owner's priority.
-See the [priority repair](<Radiant_Issue_Ledger (fixed).md#ri-180>).
-
+- [RI-180 — Authored fetchpriority never reaches resource scheduling](<Radiant_Issue_Ledger (fixed).md#ri-180>).
 
 <a id="ri-179"></a>
 
-### RI-179 — FIXED
-
-Local font shorthands stop implicit inheritance; missing scalar components
-inherit computed parent values while native UA defaults remain local. See the
-[font inheritance repair](<Radiant_Issue_Ledger (fixed).md#ri-179>).
+- [RI-179 — Font inheritance overwrites local shorthand and re-evaluates ancestor declarations](<Radiant_Issue_Ledger (fixed).md#ri-179>).
 
 <a id="ri-178"></a>
 
-### RI-178 — FIXED
-
-Loader-time normal/pseudo computed reads now select and project font shorthand
-components. See the
-[font CSSOM repair](<Radiant_Issue_Ledger (fixed).md#ri-178>).
-
+- [RI-178 — Loader computed-style queries ignore font shorthand components](<Radiant_Issue_Ledger (fixed).md#ri-178>).
 
 <a id="ri-177"></a>
 
-### RI-177 — FIXED
-
-Grid alignment now consumes a nested flex formatter's completed height instead
-of replacing it with an intrinsic estimate. See the
-[final-height repair](<Radiant_Issue_Ledger (fixed).md#ri-177>).
+- [RI-177 — Grid alignment replaces final flex height with an intrinsic estimate](<Radiant_Issue_Ledger (fixed).md#ri-177>).
 
 <a id="ri-176"></a>
 
-### RI-176 — FIXED
-
-A multi-track span crossing flexible tracks has a zero automatic minimum;
-explicit item and intrinsic track minima remain effective. See the
-[spanning-minimum repair](<Radiant_Issue_Ledger (fixed).md#ri-176>).
-
+- [RI-176 — Flexible spanning grid items retain a content-based automatic minimum](<Radiant_Issue_Ledger (fixed).md#ri-176>).
 
 <a id="ri-175"></a>
 
-### RI-175 — FIXED
-
-Internal table display roles now use the shared display-name serializer in
-CSSOM and layout output. See the
-[table-role reflection repair](<Radiant_Issue_Ledger (fixed).md#ri-175>).
+- [RI-175 — CSSOM reports internal table rows as block](<Radiant_Issue_Ledger (fixed).md#ri-175>).
 
 <a id="ri-174"></a>
 
-### RI-174 — FIXED
-
-Display rollback no longer reapplies an author all reset after the cascade
-has removed it. See the
-[UA fallback repair](<Radiant_Issue_Ledger (fixed).md#ri-174>).
-
-### RI-173 — FIXED
-
-SVG stroke-phase updates no longer force HTML flow when selector and motion
-checks permit paint-only reconciliation (**D9.1.3v2 / D9.5.6v2 / D5.5.1**).
-See the [fixed record](Radiant_Issue_Ledger%20%28fixed%29.md#ri-173).
-
-### RI-172 — FIXED
-
-Transform substitutions and CSS-wide resets retain layout when they may remove
-an existing containing block (**D9.1.3v2 / CI-18**). See the
-[fixed record](Radiant_Issue_Ledger%20%28fixed%29.md#ri-172).
-
-### RI-171 — FIXED
-
-The layout-only WPT harness omitted an inequality assertion, aborting fixture
-setup before temporary display styles were cleared. A truthful SameValue
-assertion restores cleanup; the original case now matches all four elements.
-No layout implementation, reference or required-pass entry changed.
-Ownership follows **D9.1.1v4 / D10.1.7**. See the
-[fixed record](Radiant_Issue_Ledger%20%28fixed%29.md#ri-171).
-
-
-### RI-170 — FIXED
-
-Retained paint publication now consumes its own layout-dirty flags against an
-unchanged layout environment (**D9.1.3v2 / D10.1.7**). See the
-[fixed record](Radiant_Issue_Ledger%20%28fixed%29.md#ri-170).
-
-### RI-141 — Native export image fixture misses its preloaded cache entry
-
-Open, 2026-11-20. In the standalone native release suite,
-`DynamicLayoutTest.ExportQueuesOrdinaryNetworkImagesBeforeInitialLayout`
-stores an SVG for `https://example.test/radiant-export-ready.svg`. Export
-still attempts DNS and produces fallback image geometry. The same failure
-occurs when the test runs alone with an isolated cache. The cache-read
-cause is unconfirmed. The other 119 tests in the cache and dynamic-layout
-run passed. This blocks a clean dynamic-layout gate for the property group
-refactor; it did not block static parity or memory measurement.
-Evidence is in `temp/view-prop-groups/layout-dynamic-isolated.log`.
-Resource acquisition follows D9.1.2v2.
-
-### RI-140 — Image button paint and dialog pointer selection
-
-Partial. The image-button layout loads `src` through the shared replaced
-image path, and raster form dispatch now paints it through the same content
-renderer used by images. Flat SVG and PDF also paint the loaded source. The
-native replay checks the painted pixel, click-local result, focus after close
-and cleared pixel. Natural-size, broken-image fallback and other image input
-geometry remain unqualified (**D9.1.1v4 / D9.1.3v2**).
-
-### RI-139 — Dynamic body zoom loses the first list's collapsed block-start margin
-
-Open. `wpt-css-lists/list-style-image-zoom-dynamic.html` doubles the body zoom
-after a geometry read. Radiant scales the list and marker content, but places
-the body and list at 16 px instead of 32 px. Root height comes out 32 px short.
-The case reproduces in isolation at `6f38618` and after the named-slot layout
-repair. The fixture has no shadow tree. It remains a failure in the CSS Lists
-baseline (**D9.1.1v4 / D9.1.3v2**).
+- [RI-174 — Display rollback reapplies the discarded all reset and shows metadata text](<Radiant_Issue_Ledger (fixed).md#ri-174>).
 
 <a id="ri-138"></a>
 
-### RI-138 — FIXED
-
-Trial layout no longer commits iframe viewport sizing or clamps retained
-scroll offsets (**D5.5.1**). See the
-[EPUB page-turn reproduction](<Radiant_Issue_Ledger (fixed).md#ri-138>).
+- [RI-138 — Trial flow resets the scroll position of an EPUB frame](<Radiant_Issue_Ledger (fixed).md#ri-138>).
 
 <a id="ri-137"></a>
 
-### RI-137 — FIXED
-
-Inline flex containers export baselines after their child content is laid
-out (**D5.5.1**). See the
-[baseline-source reproduction](<Radiant_Issue_Ledger (fixed).md#ri-137>).
+- [RI-137 — Inline flex exports a baseline before its children have line geometry](<Radiant_Issue_Ledger (fixed).md#ri-137>).
 
 <a id="ri-136"></a>
 
-### RI-136 — FIXED
-
-Flex items flattened through boxless DOM wrappers use the real flex box's
-padding/border offsets. Affinity's navigation is readable and aligned; its
-separate artwork startup omission remains. See the
-[boxless flex positioning repair](<Radiant_Issue_Ledger (fixed).md#ri-136>).
+- [RI-136 — Boxless DOM ancestors erase flex decoration offsets](<Radiant_Issue_Ledger (fixed).md#ri-136>).
 
 <a id="ri-135"></a>
 
-### RI-135 — FIXED
-
-Retained descendants refresh inherited text shadows from the parent's computed
-list; explicit inherit/unset share the same owned-copy path. Boldare's complete
-outlined headline returns. See the
-[computed-shadow inheritance repair](<Radiant_Issue_Ledger (fixed).md#ri-135>).
+- [RI-135 — Retained descendants lose inherited text shadows](<Radiant_Issue_Ledger (fixed).md#ri-135>).
 
 <a id="ri-134"></a>
 
-### RI-134 — FIXED
-
-Video snapshots now ask the existing decoder for an available first frame while
-the asynchronous player is opening, retaining poster precedence and clocks.
-Mymind's large halo is restored. See the
-[first-frame readiness repair](<Radiant_Issue_Ledger (fixed).md#ri-134>).
+- [RI-134 — Video snapshots reject decodable frames while playback opens](<Radiant_Issue_Ledger (fixed).md#ri-134>).
 
 <a id="ri-133"></a>
 
-### RI-133 — FIXED
-
-Image signature detection skips bounded leading XML comments before inspecting
-SVG markup. Ordinary and XML-declaration controls retain their behavior.
-See the [SVG prefix repair](<Radiant_Issue_Ledger (fixed).md#ri-133>).
+- [RI-133 — Valid SVG images with leading XML comments are rejected](<Radiant_Issue_Ledger (fixed).md#ri-133>).
 
 <a id="ri-132"></a>
 
-### RI-132 — FIXED
-
-Balance and intrinsic-axis probes retain their already selected content width
-instead of resolving authored width/min/max constraints again. Three milestone
-regressions return to their unchanged 100% references. See the
-[assigned-width contract repair](<Radiant_Issue_Ledger (fixed).md#ri-132>).
+- [RI-132 — Assigned inline measures are resolved as containing widths again](<Radiant_Issue_Ledger (fixed).md#ri-132>).
 
 <a id="ri-131"></a>
 
-### RI-131 — FIXED
-
-Text-balancing line-count probes no longer start balancing the same paragraph
-again through the atomic inline-flow height fallback. Other paragraph owners
-retain independent balancing. See the [measurement recursion repair](<Radiant_Issue_Ledger (fixed).md#ri-131>).
+- [RI-131 — Text balancing recursively measures its own atomic inline flow](<Radiant_Issue_Ledger (fixed).md#ri-131>).
 
 <a id="ri-130"></a>
 
-### RI-130 — FIXED
-
-Text-clipped backgrounds reach nested block/inline descendants through the
-shared painter, retaining owner coordinates and ancestor paint order. Wiza's
-saved heading and copy return; its separate live startup omission stays high.
-See the [ancestor text-background repair](<Radiant_Issue_Ledger (fixed).md#ri-130>).
+- [RI-130 — Text-clipped backgrounds ignore descendant glyphs](<Radiant_Issue_Ledger (fixed).md#ri-130>).
 
 <a id="ri-129"></a>
 
-### RI-129 — FIXED
-
-Intrinsic inline-flow trials retain the measured box's resolved width and
-ratio-derived percentage-height basis. Percentage images no longer inflate
-Clay's 95px logo strip to 1494.8px. See the
-[containing-size repair](<Radiant_Issue_Ledger (fixed).md#ri-129>).
+- [RI-129 — Intrinsic inline flow loses the measured box's containing sizes](<Radiant_Issue_Ledger (fixed).md#ri-129>).
 
 <a id="ri-128"></a>
 
-### RI-128 — FIXED
-
-Animation background shorthands now feed the existing background-color track,
-retaining the shorthand grammar through variable substitution. Other background
-components remain outside this repair. See the
-[shorthand repair](<Radiant_Issue_Ledger (fixed).md#ri-128>).
+- [RI-128 — Background keyframe shorthands discard their color component](<Radiant_Issue_Ledger (fixed).md#ri-128>).
 
 <a id="ri-127"></a>
 
-### RI-127 — FIXED
-
-Exports honor the existing host-selected post-load window, including script-free
-CSS frame preparation. Unspecified exports retain their initial frame. See the
-[selected-frame repair](<Radiant_Issue_Ledger (fixed).md#ri-127>).
+- [RI-127 — Render exports ignore the host-selected settling frame](<Radiant_Issue_Ledger (fixed).md#ri-127>).
 
 <a id="ri-126"></a>
 
-### RI-126 — FIXED
-
-Intrinsic inline height now formats atomic boxes during its trial and preserves
-live frame scrolling. See the [trial-flow repair](<Radiant_Issue_Ledger (fixed).md#ri-126>).
+- [RI-126 — Intrinsic inline-height trials skip atomic placement and reset frame scrolling](<Radiant_Issue_Ledger (fixed).md#ri-126>).
 
 <a id="ri-125"></a>
 
-### RI-125 — FIXED
-
-The positioned-child pass allocates its flattened list through its
-own scratch scope (**D5.1.4 / D5.5.1**). See the
-[scratch ownership repair](<Radiant_Issue_Ledger (fixed).md#ri-125>).
+- [RI-125 — Absolute-child layout unwinds a foreign scratch allocation](<Radiant_Issue_Ledger (fixed).md#ri-125>).
 
 <a id="ri-124"></a>
 
-### RI-124 — FIXED
-
-Atomic inline fit tests now reuse the float edge comparator's scale-relative
-roundoff handling. Python's header no longer adds a line for a 0.00003px edge
-difference. Real overflowing boxes still wrap. See the
-[fractional edge repair](<Radiant_Issue_Ledger (fixed).md#ri-124>).
+- [RI-124 — Float roundoff falsely wraps an exactly fitting atomic inline](<Radiant_Issue_Ledger (fixed).md#ri-124>).
 
 <a id="ri-123"></a>
 
-### RI-123 — FIXED
-
-Intrinsic inline height now retains the parent's line strut when atomic inline
-boxes contain block descendants or positioned decorations. The existing inline
-formatter supplies baseline and line-box geometry instead of a child-height
-maximum. See the [line-height repair](<Radiant_Issue_Ledger (fixed).md#ri-123>).
+- [RI-123 — Intrinsic atomic-inline height loses the enclosing line strut](<Radiant_Issue_Ledger (fixed).md#ri-123>).
 
 <a id="ri-122"></a>
 
@@ -450,39 +407,19 @@ The page remains high severity.
 
 <a id="ri-121"></a>
 
-### RI-121 — FIXED
-
-Snapshot resource discovery now prepares eligible media before the existing
-wait and first layout. Local HTML can initialize its manager from a remote
-media source. The existing preload/autoplay/audio policy remains shared.
-See the [resource-ordering repair](<Radiant_Issue_Ledger (fixed).md#ri-121>).
+- [RI-121 — HTTP media sources enter the scheduler after the snapshot wait](<Radiant_Issue_Ledger (fixed).md#ri-121>).
 
 <a id="ri-120"></a>
 
-### RI-120 — FIXED
-
-SVG natural dimensions now require a successfully parsed length. An auto or
-nonnumeric height no longer invents a definite 150px natural axis and compresses
-Wispr's percentage-width SVGs.
-See the [SVG metadata repair](<Radiant_Issue_Ledger (fixed).md#ri-120>).
+- [RI-120 — SVG auto dimensions acquire a definite fallback natural size](<Radiant_Issue_Ledger (fixed).md#ri-120>).
 
 <a id="ri-119"></a>
 
-### RI-119 — FIXED
-
-Intrinsic height classification now excludes positioned decorations and
-recognizes inline content in independent flow roots. Overpass's saved hero
-no longer stacks its letters' height contributions.
-See the [inline-height repair](<Radiant_Issue_Ledger (fixed).md#ri-119>).
+- [RI-119 — Positioned decorations make inline intrinsic heights stack](<Radiant_Issue_Ledger (fixed).md#ri-119>).
 
 <a id="ri-118"></a>
 
-### RI-118 — FIXED
-
-Content-only intrinsic measurements now make descendant percentage widths
-indefinite even when the flex item has a preferred width. Orum's saved hero
-columns recover; its independent live blank capture remains unresolved.
-See the [intrinsic-width repair](<Radiant_Issue_Ledger (fixed).md#ri-118>).
+- [RI-118 — Preferred widths leak into flex content-only intrinsic minima](<Radiant_Issue_Ledger (fixed).md#ri-118>).
 
 <a id="ri-117"></a>
 
@@ -514,416 +451,223 @@ is needed for this read-only diagnosis.
 
 <a id="ri-116"></a>
 
-### RI-116 — FIXED
-
-Lifted layers now replay intermediate positioned ancestors in their containing
-block's coordinate basis. Readymag's live startup remains unresolved.
-See the [paint-coordinate repair](<Radiant_Issue_Ledger (fixed).md#ri-116>).
+- [RI-116 — Lifted layers retain an intermediate absolute ancestor's DOM offset](<Radiant_Issue_Ledger (fixed).md#ri-116>).
 
 <a id="ri-115"></a>
 
-### RI-115 — FIXED
-
-Flex height restoration now visits the same flattened items that supplied
-the snapshot. Superlist's app image returns and leaves high severity.
-See the [height-restoration repair](<Radiant_Issue_Ledger (fixed).md#ri-115>).
+- [RI-115 — Flex refinement forgets heights of items exposed through contents](<Radiant_Issue_Ledger (fixed).md#ri-115>).
 
 <a id="ri-114"></a>
 
-### RI-114 — FIXED
-
-The shared positioned-child layout pass now flattens contents wrappers just
-like flex/grid item collection. Superlist's separate app-image ratio-box loss
-remains unresolved. See the [positioned-box repair](<Radiant_Issue_Ledger (fixed).md#ri-114>).
+- [RI-114 — Positioned children beneath contents wrappers never receive layout](<Radiant_Issue_Ledger (fixed).md#ri-114>).
 
 <a id="ri-113"></a>
 
-### RI-113 — FIXED
-
-Preferred aspect ratios now evaluate dimensionless CSS math rather than
-collapsing calculated-ratio boxes. Remote's independent live startup remains
-unresolved. See the [ratio repair](<Radiant_Issue_Ledger (fixed).md#ri-113>).
+- [RI-113 — Calculated preferred aspect ratios collapse auto-sized boxes](<Radiant_Issue_Ledger (fixed).md#ri-113>).
 
 <a id="ri-112"></a>
 
-### RI-112 — FIXED
-
-Positioned document roots now enter raster painting directly rather than
-being deferred to a nonexistent parent stacking pass. Dayos's independent
-live startup overlay remains unresolved.
-See the [root-paint repair](<Radiant_Issue_Ledger (fixed).md#ri-112>).
+- [RI-112 — A positioned document root disappears from raster output](<Radiant_Issue_Ledger (fixed).md#ri-112>).
 
 <a id="ri-111"></a>
 
-### RI-111 — FIXED
-
-Canonical inline-property sharing no longer erases isolation, ruby position or explicit line-strut state.
-See the [identity repair](<Radiant_Issue_Ledger (fixed).md#ri-111>).
+- [RI-111 — Inline-property sharing erases isolation and other semantic differences](<Radiant_Issue_Ledger (fixed).md#ri-111>).
 
 <a id="ri-109"></a>
 
-### RI-109 — FIXED
-
-See the [qualified repair](<Radiant_Issue_Ledger (fixed).md#ri-109>).
+- [RI-109 — Relative HTML base URLs are ignored and absolute bases overwrite document identity](<Radiant_Issue_Ledger (fixed).md#ri-109>).
 
 <a id="ri-110"></a>
 
-### RI-110 — FIXED
-
-See the [qualified repair](<Radiant_Issue_Ledger (fixed).md#ri-110>).
-
+- [RI-110 — Resource and stylesheet discovery activates inert HTML template contents](<Radiant_Issue_Ledger (fixed).md#ri-110>).
 
 <a id="ri-108"></a>
 
-### RI-108 — FIXED
-
-Final grid percentage heights lost definiteness; intrinsic image ratios reused old percentage constraints.
-See the [grid and retained image-sizing repair](<Radiant_Issue_Ledger (fixed).md#ri-108>).
+- [RI-108 — Final grid percentage heights and intrinsic image ratios lose their current constraints](<Radiant_Issue_Ledger (fixed).md#ri-108>).
 
 <a id="ri-107"></a>
 
-### RI-107 — FIXED
-
-Reuse initially parsed stylesheets when delivering prefetched link completion.
-See the [completion repair](<Radiant_Issue_Ledger (fixed).md#ri-107>).
+- [RI-107 — Reuse initially parsed stylesheets when delivering prefetched link completion](<Radiant_Issue_Ledger (fixed).md#ri-107>).
 
 <a id="ri-106"></a>
 
-### RI-106 — FIXED
-
-Lifted positioned children painted over their ancestor's exported outline.
-See the [shared walker repair](<Radiant_Issue_Ledger (fixed).md#ri-106>).
+- [RI-106 — Lifted positioned children overpaint exported ancestor outlines](<Radiant_Issue_Ledger (fixed).md#ri-106>).
 
 <a id="ri-105"></a>
 
-### RI-105 — FIXED
-
-CSS Shapes WPT coverage reached 294 passing cases. See the
-[repair and scoped reference approvals](<Radiant_Issue_Ledger (fixed).md#ri-105>).
+- [RI-105 — CSS Shapes WPT contour and inline wrapping failures](<Radiant_Issue_Ledger (fixed).md#ri-105>).
 
 <a id="ri-104"></a>
 
-### RI-104 — FIXED
-
-Intrinsic margins resolved custom properties and font units on the measuring parent, collapsing a hero grid after NaN propagation.
-See the [owner-context repair](<Radiant_Issue_Ledger (fixed).md#ri-104>).
+- [RI-104 — Intrinsic margins use the measuring parent's variable and font scope](<Radiant_Issue_Ledger (fixed).md#ri-104>).
 
 <a id="ri-103"></a>
 
-### RI-103 — FIXED
-
-Final flex content shrank a grid-assigned height before positioned percentages resolved.
-See the [assigned-height repair](<Radiant_Issue_Ledger (fixed).md#ri-103>).
+- [RI-103 — Final flex content discards its grid-assigned cross size](<Radiant_Issue_Ledger (fixed).md#ri-103>).
 
 <a id="ri-102"></a>
 
-### RI-102 — FIXED
-
-Downloaded stylesheets never completed their DOM load/error events.
-See the [stylesheet completion repair](<Radiant_Issue_Ledger (fixed).md#ri-102>).
+- [RI-102 — Downloaded stylesheet completion never reached DOM listeners](<Radiant_Issue_Ledger (fixed).md#ri-102>).
 
 <a id="ri-101"></a>
 
-### RI-101 — FIXED
-
-Unregistered custom-layout names disabled ordered generated content globally.
-See the [registered-callback preparation repair](<Radiant_Issue_Ledger (fixed).md#ri-101>).
+- [RI-101 — Unknown custom-layout names disabled ordered generated effects](<Radiant_Issue_Ledger (fixed).md#ri-101>).
 
 <a id="ri-100"></a>
 
-### RI-100 — FIXED
-
-Inline buttons exposed internal label spaces to outer line-fill lookahead.
-See the [atomic-context repair](<Radiant_Issue_Ledger (fixed).md#ri-100>).
+- [RI-100 — Line-fill lookahead entered inline button labels](<Radiant_Issue_Ledger (fixed).md#ri-100>).
 
 <a id="ri-099"></a>
 
-### RI-099 — FIXED
-
-Oversized inline background radii generated inverted paths outside the fragment.
-See the [shared constrained-path repair](<Radiant_Issue_Ledger (fixed).md#ri-099>).
+- [RI-099 — Inline background curves exceeded their fragment bounds](<Radiant_Issue_Ledger (fixed).md#ri-099>).
 
 <a id="ri-098"></a>
 
-### RI-098 — FIXED
-
-Oversized rounded inset radii discarded glyphs and native hits.
-See the [shared used-radius repair](<Radiant_Issue_Ledger (fixed).md#ri-098>).
+- [RI-098 — Rounded inset glyph and hit clips use unnormalized radii](<Radiant_Issue_Ledger (fixed).md#ri-098>).
 
 <a id="ri-097"></a>
 
-### RI-097 — FIXED
-
-Nested zero-level foreground painted below a lifted absolute background.
-See the [context-owned layer repair](<Radiant_Issue_Ledger (fixed).md#ri-097>).
+- [RI-097 — Nested zero-level foreground paints below lifted absolute background](<Radiant_Issue_Ledger (fixed).md#ri-097>).
 
 <a id="ri-096"></a>
 
-### RI-096 — FIXED
-
-Static flex/grid items ignored authored stack levels.
-See the [stacking eligibility repair](<Radiant_Issue_Ledger (fixed).md#ri-096>).
+- [RI-096 — Static flex/grid items ignore z-index](<Radiant_Issue_Ledger (fixed).md#ri-096>).
 
 <a id="ri-095"></a>
 
-### RI-095 — FIXED
-
-Flex-assigned grids lost their allocated height during content layout.
-See the [assigned-context repair](<Radiant_Issue_Ledger (fixed).md#ri-095>).
+- [RI-095 — Flex-assigned grid height is replaced by intrinsic row height](<Radiant_Issue_Ledger (fixed).md#ri-095>).
 
 <a id="ri-094"></a>
 
-### RI-094 — FIXED
-
-Individual translation discarded percentage calculations.
-See the [affine-math repair](<Radiant_Issue_Ledger (fixed).md#ri-094>).
+- [RI-094 — Individual translate loses affine percentage calculations](<Radiant_Issue_Ledger (fixed).md#ri-094>).
 
 <a id="ri-093"></a>
 
-### RI-093 — FIXED
-
-Assigned grid/flex float contexts misplaced or omitted float exclusions.
-See the [repair and independent browser evidence](<Radiant_Issue_Ledger (fixed).md#ri-093>).
+- [RI-093 — Assigned grid/flex float contexts misplaced or omitted exclusions](<Radiant_Issue_Ledger (fixed).md#ri-093>).
 
 <a id="ri-092"></a>
 
-### RI-092 — FIXED
-
-Intrinsic column measurement omitted definite flex bases, with two later size handoff errors.
-See the [basis-contribution repair](<Radiant_Issue_Ledger (fixed).md#ri-092>).
+- [RI-092 — Intrinsic column height omits definite child flex bases](<Radiant_Issue_Ledger (fixed).md#ri-092>).
 
 <a id="ri-091"></a>
 
-### RI-091 — FIXED
-
-The isolated custom-layout and retained display-list test hosts now resolve
-their service boundaries without importing conflicting production providers.
-See the [link trace and aggregate qualification](<Radiant_Issue_Ledger (fixed).md#ri-091>).
+- [RI-091 — Isolated native test links import conflicting full-host providers](<Radiant_Issue_Ledger (fixed).md#ri-091>).
 
 <a id="ri-090"></a>
 
-### RI-090 — FIXED
-
-See the [fixed record](<Radiant_Issue_Ledger (fixed).md#ri-090>).
-
+- [RI-090 — Home and End stop at text fragments beside inline atoms](<Radiant_Issue_Ledger (fixed).md#ri-090>).
 
 <a id="ri-089"></a>
 
-### RI-089 — Min-content minimum widens floated intrinsic contribution boxes
-
-**Status:** FIXED, 2026-11-14. The sizing baseline passes 776/776 and the full
-Lambda Radiant baseline has zero failures. See the
-[contribution repair](<Radiant_Issue_Ledger (fixed).md#ri-089>).
+- [RI-089 — Min-content minimum widens floated intrinsic contribution boxes](<Radiant_Issue_Ledger (fixed).md#ri-089>).
 
 <a id="ri-088"></a>
 
-### RI-088 — FIXED for selected-flow restoration
-
-The three saved Mymind restoration failures are traced to derived pseudo
-cascade refreshes invalidating authored ancestor inputs (Input LI-069).
-Unregistered custom-layout markup also disabled ordered preparation (RI-101).
-Both repairs are qualified; see the [follow-up record](<Radiant_Issue_Ledger (fixed).md#ri-088>).
-The live page remains blank and is not cleared. Malformed CoreText-name
-messages are a separate observation; an independently decoded Stellar font
-contains those control bytes in its original name table, so those messages
-alone do not establish an ownership defect.
+- [RI-088 — Selected navigation flow failed restoration during measurement](<Radiant_Issue_Ledger (fixed).md#ri-088>).
 
 <a id="ri-087"></a>
 
-### RI-087 — Propagated body overflow clips its own zero-height box
-
-**Status:** FIXED for shared viewport-source selection and body-local paint,
-hit and coordinate scopes, 2026-11-14. See the
-[viewport-source repair](<Radiant_Issue_Ledger (fixed).md#ri-087>).
+- [RI-087 — Propagated body overflow clips its own zero-height box](<Radiant_Issue_Ledger (fixed).md#ri-087>).
 
 <a id="ri-086"></a>
 
-### RI-086 — Empty-child root collapse erases resolved minimum height
-
-**Status:** FIXED for the final root sizing step, 2026-11-14. See the
-[root sizing repair](<Radiant_Issue_Ledger (fixed).md#ri-086>).
-
+- [RI-086 — Empty-child root collapse erases resolved minimum height](<Radiant_Issue_Ledger (fixed).md#ri-086>).
 
 <a id="ri-085"></a>
 
-### RI-085 — Wide SVG Gaussian kernels exhaust the work budget
-
-**Status:** FIXED for bounded linear window evaluation, 2026-11-14. See the
-[wide Gaussian repair](<Radiant_Issue_Ledger (fixed).md#ri-085>).
-
+- [RI-085 — Wide SVG Gaussian kernels exhaust the work budget](<Radiant_Issue_Ledger (fixed).md#ri-085>).
 
 <a id="ri-084"></a>
 
-### RI-084 — Static effect contexts lose positioned descendants and empty-box backdrops
-
-**Status:** FIXED for block paint ownership and deferred descendant compositing,
-2026-11-14. See the [positioned opacity repair](<Radiant_Issue_Ledger (fixed).md#ri-084>).
-No online page clearance is claimed from this repair.
+- [RI-084 — Static effect contexts lose positioned descendants and empty-box backdrops](<Radiant_Issue_Ledger (fixed).md#ri-084>).
 
 <a id="ri-083"></a>
 
-### RI-083 — Early flex intrinsic widths omit deferred scalar gaps
-
-**Status:** FIXED for variable, calculated and font-relative scalar gaps,
-2026-11-14. See the [intrinsic gap repair](<Radiant_Issue_Ledger (fixed).md#ri-083>).
-
+- [RI-083 — Early flex intrinsic widths omit deferred scalar gaps](<Radiant_Issue_Ledger (fixed).md#ri-083>).
 
 <a id="ri-082"></a>
 
-### RI-082 — Gaussian work accounting charges skipped flat-run convolutions
-
-**Status:** FIXED for executed-work accounting and exact transparent runs,
-2026-11-14. See the [Gaussian repair](<Radiant_Issue_Ledger (fixed).md#ri-082>).
-Overflow's larger filter graph remains unresolved.
-
+- [RI-082 — Gaussian work accounting charges skipped flat-run convolutions](<Radiant_Issue_Ledger (fixed).md#ri-082>).
 
 <a id="ri-081"></a>
 
-### RI-081 — Wrapped flex height queries omit item cross margins
-
-**Status:** FIXED for outer cross-size contributions, 2026-11-14. See the
-[wrapped flex margin repair](<Radiant_Issue_Ledger (fixed).md#ri-081>).
-
+- [RI-081 — Wrapped flex height queries omit item cross margins](<Radiant_Issue_Ledger (fixed).md#ri-081>).
 
 <a id="ri-080"></a>
 
-### RI-080 — Nested ratio height queries consume parent free space and stale SVG heights
-
-**Status:** FIXED for preferred-width and definite SVG percentage-height queries,
-2026-11-14. See the [focused intrinsic repair](<Radiant_Issue_Ledger (fixed).md#ri-080>).
-
+- [RI-080 — Nested ratio height queries consume parent free space and stale SVG heights](<Radiant_Issue_Ledger (fixed).md#ri-080>).
 
 <a id="ri-079"></a>
 
-### RI-079 — Unmatched stylesheet icons exhaust resource discovery
-
-**Status:** FIXED for selected-cascade discovery, 2026-11-14. See the
-[bounded discovery repair](<Radiant_Issue_Ledger (fixed).md#ri-079>).
-
+- [RI-079 — Unmatched stylesheet icons exhaust resource discovery](<Radiant_Issue_Ledger (fixed).md#ri-079>).
 
 <a id="ri-078"></a>
 
-### RI-078 — Absolute percentage math keeps a provisional containing height
-
-**Status:** FIXED for late preferred-height resolution, 2026-11-14. See the
-[focused sizing repair](<Radiant_Issue_Ledger (fixed).md#ri-078>).
-
+- [RI-078 — Absolute percentage math keeps a provisional containing height](<Radiant_Issue_Ledger (fixed).md#ri-078>).
 
 <a id="ri-077"></a>
 
-### RI-077 — SVG inherited reads repeat shared ancestor declaration queries
-
-**Status:** FIXED for ancestor snapshot reuse, 2026-11-14. See the
-[bounded repair evidence](<Radiant_Issue_Ledger (fixed).md#ri-077>).
-Dock's independent whole-document capture deadline remains open as RI-031.
-
-
+- [RI-077 — SVG inherited reads repeat shared ancestor declaration queries](<Radiant_Issue_Ledger (fixed).md#ri-077>).
 
 <a id="ri-076"></a>
 
-### RI-076 — SVG percentage viewport attributes inflate intrinsic height
-
-**Status:** FIXED, 2026-11-14. See the [focused repair and qualification](<Radiant_Issue_Ledger (fixed).md#ri-076>).
-
-
+- [RI-076 — SVG percentage viewport attributes inflate intrinsic height](<Radiant_Issue_Ledger (fixed).md#ri-076>).
 
 <a id="ri-075"></a>
 
-### RI-075 — Canvas general matrix operations are unavailable to the DOM host
-
-**Status:** FIXED, 2026-11-14. See the [bounded matrix-operation repair](<Radiant_Issue_Ledger (fixed).md#ri-075>).
-
+- [RI-075 — Canvas general matrix operations are unavailable to the DOM host](<Radiant_Issue_Ledger (fixed).md#ri-075>).
 
 <a id="ri-074"></a>
 
-### RI-074 — A min-content minimum incorrectly caps the preferred width
-
-**Status:** FIXED, 2026-11-14. See the [focused repair evidence](<Radiant_Issue_Ledger (fixed).md#ri-074>).
-
+- [RI-074 — A min-content minimum incorrectly caps the preferred width](<Radiant_Issue_Ledger (fixed).md#ri-074>).
 
 <a id="ri-073"></a>
 
-### RI-073 — Cyclic percentage invalidation discards replaced media height
-
-**Status:** FIXED, 2026-11-13. See the [repair and qualification](<Radiant_Issue_Ledger (fixed).md#ri-073>).
-
+- [RI-073 — Cyclic percentage invalidation discards replaced media height](<Radiant_Issue_Ledger (fixed).md#ri-073>).
 
 <a id="ri-072"></a>
 
-### RI-072 — Atomic inline alignment loses enclosing relative Y offsets
-
-**Status:** FIXED, 2026-11-13. See the [repair and qualification](<Radiant_Issue_Ledger (fixed).md#ri-072>).
-
+- [RI-072 — Atomic inline alignment loses enclosing relative Y offsets](<Radiant_Issue_Ledger (fixed).md#ri-072>).
 
 <a id="ri-071"></a>
 
-### RI-071 — Absolute and relative zero-level siblings paint in separate passes
-
-**Status:** FIXED, 2026-11-13. See the [repair and qualification](<Radiant_Issue_Ledger (fixed).md#ri-071>).
-
+- [RI-071 — Absolute and relative zero-level siblings paint in separate passes](<Radiant_Issue_Ledger (fixed).md#ri-071>).
 
 <a id="ri-070"></a>
 
-### RI-070 — Inherited percentage width retains the parent's used width
-
-**Status:** FIXED, 2026-11-14. See the [computed-size repair](<Radiant_Issue_Ledger (fixed).md#ri-070>).
-
+- [RI-070 — Inherited percentage width retains the parent's used width](<Radiant_Issue_Ledger (fixed).md#ri-070>).
 
 <a id="ri-069"></a>
 
-### RI-069 — Height queries omit width expressions and constraints
-
-**Status:** FIXED, 2026-11-13. See the [repair and qualification](<Radiant_Issue_Ledger (fixed).md#ri-069>).
-
+- [RI-069 — Height queries omit width expressions and constraints](<Radiant_Issue_Ledger (fixed).md#ri-069>).
 
 <a id="ri-068"></a>
 
-### RI-068 — Grid row contributions reuse provisional whole-grid widths
-
-**Status:** FIXED, 2026-11-13. See the [repair and qualification](<Radiant_Issue_Ledger (fixed).md#ri-068>).
-
+- [RI-068 — Grid row contributions reuse provisional whole-grid widths](<Radiant_Issue_Ledger (fixed).md#ri-068>).
 
 <a id="ri-067"></a>
 
-### RI-067 — Row-flex cross heights reuse the preferred width after flexing
-
-**Status:** FIXED, 2026-11-13. See the [repair and qualification](<Radiant_Issue_Ledger (fixed).md#ri-067>).
-
+- [RI-067 — Row-flex cross heights reuse the preferred width after flexing](<Radiant_Issue_Ledger (fixed).md#ri-067>).
 
 <a id="ri-066"></a>
 
-### RI-066 — Auto flex columns measure empty wrappers and unlaid-out child boxes
-
-**Status:** FIXED, 2026-11-13. See the [repair and qualification](<Radiant_Issue_Ledger (fixed).md#ri-066>).
-
+- [RI-066 — Auto flex columns measure empty wrappers and unlaid-out child boxes](<Radiant_Issue_Ledger (fixed).md#ri-066>).
 
 <a id="ri-065"></a>
 
-### RI-065 — Structured inline breaks understate nested flex height
-
-**Status:** FIXED, 2026-11-13. See the [repair and qualification](<Radiant_Issue_Ledger (fixed).md#ri-065>).
-
+- [RI-065 — Structured inline breaks understate nested flex height](<Radiant_Issue_Ledger (fixed).md#ri-065>).
 
 <a id="ri-064"></a>
 
-### RI-064 — Inline CSS image URLs never enter snapshot resource discovery
-
-**Status:** FIXED, 2026-11-13. See the [repair and qualification](<Radiant_Issue_Ledger (fixed).md#ri-064>).
-
+- [RI-064 — Inline CSS image URLs never enter snapshot resource discovery](<Radiant_Issue_Ledger (fixed).md#ri-064>).
 
 <a id="ri-063"></a>
 
-### RI-063 — Decoded video overwrites foreground page content
-
-**Status:** FIXED, 2026-11-13. See the [repair and qualification](<Radiant_Issue_Ledger (fixed).md#ri-063>).
-
+- [RI-063 — Decoded video overwrites foreground page content](<Radiant_Issue_Ledger (fixed).md#ri-063>).
 
 <a id="ri-062"></a>
 
-### RI-062 — Cyclic percentage flex children inflate the content minimum
-
-**Status:** FIXED, 2026-11-13. See the [repair and qualification](<Radiant_Issue_Ledger (fixed).md#ri-062>).
-
+- [RI-062 — Cyclic percentage flex children inflate the content minimum](<Radiant_Issue_Ledger (fixed).md#ri-062>).
 
 <a id="ri-061"></a>
 
@@ -959,30 +703,7 @@ before/final PNGs, and canonical `test/online/snapshots/` logs for these labels.
 
 <a id="ri-060"></a>
 
-### RI-060 — Native style replacement retains removed padding in a grid child
-
-**Status:** OPEN, cause unconfirmed, 2026-11-13. **Lambda blocker:** no for
-Stripe initial rendering or the selected grid-area repair. Ownership
-**D9.1.1v4 / D9.1.3v2**; this is a native mutation observation, not proof of a
-general script/CSSOM failure.
-
-In the first native grid-area investigation, replace the subject's inline style
-`grid-area:photo;padding:5px;border:2px solid` with
-`grid-area:photo;width:calc(100% - 20px);height:50%`, using
-`DomElement::set_attribute`, `radiant_recascade_document` and forced layout.
-Its old5px padding remains after the border resets. Later variants also retain
-that padding. Chromium's fresh equivalent input has zero padding; the current
-fresh native cases agree with it. Style removal/reset ownership and the exact
-cache/projection cause remain unisolated. No reset is added merely to hide it.
-
-The selected area tests now load separate fresh inputs, matching the real PNG
-and independent Chromium contracts, while each input still repeats forced
-recascades. Live tests separately change tracks, area, alignment and explicit
-size, without claiming padding-removal coverage. The mutation discrepancy is
-retained here rather than assigned to grid placement. Evidence: Lambda
-`temp/online-visual-round14/native-after.log` and
-`padding-removal-reproducer.cppfrag`; see the checkpoint's distinction between
-the initial mutation probe and final fresh-input acceptance cases.
+- [RI-060 — Native style replacement retains removed padding in a grid child](<Radiant_Issue_Ledger (fixed).md#ri-060>).
 
 <a id="ri-059"></a>
 
@@ -998,28 +719,7 @@ the initial mutation probe and final fresh-input acceptance cases.
 
 <a id="ri-056"></a>
 
-### RI-056 — Native input-value test target does not link its CSS resource call
-
-**Status:** OPEN, 2026-11-12. **Lambda task blocker:** no for the sync demo's
-selected native UI and Lambda baseline gates; blocks the aggregate `make
-build-test` target. Source ownership: **D9.1.1v4 / D9.1.3v2**.
-
-From Lambda `3ffe3477a` plus the uncommitted sync demo, run `make build-test`.
-The arm64 linker fails building `test_radiant_input_value_gtest.exe` with undefined
-`_process_css_resource`, referenced twice by
-`RadiantInputValueTest.DownloadedStylesheetsUseOwnerOrderAcrossCompletionOrder`
-(`radiant/test/test_radiant_input_value_gtest.cpp:102,105`). The function is
-declared in `radiant/resource_loaders.h:23` and implemented in
-`radiant/resource_loaders.cpp:99`. Lambda's selected
-`build_lambda_config.json` target at the `test_radiant_input_value_gtest.cpp`
-entry lists stylesheet/form/host helpers, but does not include that resource
-implementation. The intended independent-test dependency closure or replacement
-waist is **unconfirmed**; no sibling source or test workaround was applied.
-Expected: the owning test target links its legitimate native dependencies.
-
-Evidence in Lambda: `temp/sync-demo/build-test.log`, lines 380–388. The sync
-runtime host builds successfully. Focused `test_radiant_view_gtest` and Lambda
-baseline work can continue without this unrelated target.
+- [RI-056 — Native input-value test target does not link its CSS resource call](<Radiant_Issue_Ledger (fixed).md#ri-056>).
 
 <a id="ri-055"></a>
 
@@ -1062,6 +762,18 @@ Reservation/nested-row continuation: Lambda-opus
 `temp/paged-reservations-integration-final/paged.xml` remains 504/505 with the
 same assertion messages. The final owner increment passes 82 focused cases,
 1,010 native cases (one disabled) and 4,481 layout cases (six skips).
+
+**2026-11-22 recheck.** Chromium 148 and the native paged test put the
+nested line and the image at a baseline 23px below the row top for fixed and
+auto table layout. Varying the empty cell's height from 0px to 60px increases
+the row height when needed while leaving that baseline at 23px in Chromium.
+Radiant's existing empty-cell change (`b17a3c0`) captures the content edge
+before the cell's height contributes to the row minimum. The Lambda
+integration assertion still derives its expected baseline from the empty
+cell's specified 30px height plus its top border and padding. Native
+`EmptyTableCellDoesNotRaiseTextBaselineToSpecifiedHeight` passes.
+The integration assertion remains open under **D9.1.1v4 / D9.1.3v2**.
+Evidence: `temp/radiant-ledger-continuation/{browser-probes.log,table-native-before.log}`.
 
 <a id="ri-051"></a>
 
@@ -1132,6 +844,24 @@ source, compiler/link arguments, object/archive checks, executables, raw samples
 export controls. This blocks a current performance no-regression claim, not the
 verified reservation/row behavior. The lost historical P7 archive waiver does
 not waive this new measured difference.
+
+**Partial repair, 2026-11-22.** Release profiles found that ordinary lines
+queried fragment ancestry even when they had no width override. The line
+start now checks for the override first. Consecutive width queries reuse the
+last matching record's array index, and an open inline run keeps the
+admission result for the rest of that run (**D5.5.1 / D9.1.3v2**).
+
+Four alternating release batches of seven samples per host put the current
+repair at 0.741 and 0.592 ms/page for 21 and 300 pages, down from 0.756 and
+0.618 ms/page before this repair. Both workloads retain their exact page and
+glyph digests. The reconstructed pre-reservation control is at 0.726 and
+0.618 ms/page in that batch, with greater variance on the 300-page workload.
+The 21-page cost still exceeds the old control by about 2%. The older source
+needed mechanical field-access updates for today's headers. An adaptive-track
+entry point absent from the old source aborts if called by either control.
+All 126 owner fragmentation tests pass. See
+`temp/radiant-ordinary-fixes/composition-admission-summary.json` and
+`final-paged.log` in the same directory.
 
 <a id="ri-048"></a>
 
@@ -1252,6 +982,9 @@ rendering repairs. The cause and any dependency on the macOS provider/service
 state remain unisolated; no assertion or skip was added. Evidence: Lambda
 `temp/online-visual-round4/{native-gate-final.log,speech-1.log,speech-2.log,speech-3.log}`.
 
+The current macOS replay and its platform lookup control are recorded at
+[RI-016](#ri-016). Both reports describe the same native test.
+
 <a id="ri-034"></a>
 
 - [RI-034 — Positioned intrinsic sizing leaks its query mode to following blocks](<Radiant_Issue_Ledger (fixed).md#ri-034>).
@@ -1361,19 +1094,7 @@ dock-control/result.json,dock-control/dock-control-lambda.log}`, plus canonical
 
 <a id="ri-029"></a>
 
-### RI-029 — Modal dialog top-layer and backdrop painting remain incomplete
-
-**Status:** OPEN feature gap, 2026-11-12. **Lambda blocker:** no; major new
-paint ordering is outside the current online bug-fix milestone. Ownership
-**D9.1.1v4 / D9.1.3v2**. Leaflet's reference page calls showModal: native DOM
-modal state and fixed centering exist, but the renderer has no top-layer
-painting pass and the parsed `::backdrop` has no layout/paint consumer.
-Ordinary page text can paint over the dialog and no dimming backdrop appears.
-These limits are already recorded in Lambda's HTML/CSS support matrix;
-this record ties them to `https://leafletjs.com/reference.html` and its online
-snapshot. The cause is not assigned to image loading or CSS opacity.
-Evidence: Lambda round2/browser/leaflet_docs.json, canonical paired PNGs,
-`render_block.cpp`, dialog DOM state and the support-matrix dialog/backdrop rows.
+- [RI-029 — Modal dialogs and backdrops paint in the document top layer](<Radiant_Issue_Ledger (fixed).md#ri-029>).
 
 <a id="ri-028"></a>
 
@@ -1448,41 +1169,7 @@ review even though its coarse error falls below the automated threshold.
 
 <a id="ri-019"></a>
 
-### RI-019 — Reflow aborts when the focused target becomes non-focusable
-
-**Status:** OPEN, 2026-11-11. **Lambda task blocker:** no for the selected finite
-snapshot milestone; the native focus invariant remains unresolved. Native state ownership:
-**D9.1.1v4 / D9.1.3v2**. The invalidation cause is **unconfirmed**.
-
-From Lambda `ff7085cf9`, `./lambda.exe render https://designmodo.com/postcards/faq/ -o ./temp/online-recovery/focus-046.png -vw 1200 -vh 800`
-and the equivalent command for `https://pulsetic.com/` both terminate with
-SIGABRT in about 38 seconds. Both report:
-`state_machine: assertion failed after doc_state_request_reflow: focused target is not focusable`
-and `radiant_state_assert_valid`, `state_machine.cpp:1193`.
-Expected: handle focus invalidation as page state changes and finish export;
-do not disable the assertion or suppress the crash in the launcher.
-
-Evidence in Lambda: `test/online/snapshots/saas_landing_046-lambda-output.log`,
-`saas_landing_046-lambda.log`, and corresponding `saas_landing_138` logs;
-`temp/online-recovery/probe_results.json` preserves exit signals and timings.
-After RI-017, both selected finite snapshots load/export successfully. This
-does not repair focus invalidation during later interactive reflow. The assertion
-remains enabled; no focus-state workaround was added.
-
-
-**Eden follow-up, 2026-11-15:** the staged Eden compatibility repair at
-`Lambda/temp/eden-load/eden` reaches the `ecosystem` native replay with Lambda
-`c2b705a98` (`lambda.exe` SHA-256
-`1603697a7eac9ab6a75c8491ae3e5ed8da358ebc36b982bc230f76407d0e3483`).
-With macOS graphics access, run `EDEN_LAMBDA_EXE=../../../lambda.exe ./eden smoke
---suite ecosystem` from that staged Eden directory (or select the equivalent
-absolute executable). The process aborts after initial rendering with
-`state_machine: assertion failed after hover_transition: focused target is not
-focusable`, at the same `radiant_state_assert_valid` invariant. The action that
-invalidates focus and whether it shares RI-019's cause are unconfirmed. This
-does not block Eden's initial terrain startup, but blocks the ecosystem replay.
-Evidence: `Lambda/temp/eden-load/smoke-all-final.log` near the first
-`hover_transition` failure. No assertion or fixture was changed.
+- [RI-019 — Reflow aborts when the focused target becomes non-focusable](<Radiant_Issue_Ledger (fixed).md#ri-019>).
 
 <a id="ri-018"></a>
 
@@ -1515,6 +1202,12 @@ returns a fallback voice or another provider state prevents rejection has
 not been isolated. No source or test changes were made for this separate
 failure. Evidence in the sibling Lambda checkout:
 `temp/kianhup-style/baseline-owner-native.log` and `test-owner-speech.log`.
+
+**2026-11-22 recheck.** The freshly built native media executable passed
+both tests on 20 repeats. Direct AVFoundation lookup returned nil for the
+invalid identifier and returned the expected identifier for a listed voice.
+The earlier platform failure remains unexplained. See
+`temp/radiant-ledger-continuation/{media-repeats.log,voice-probe-sandbox.txt}`.
 
 <a id="ri-012"></a>
 
@@ -1574,24 +1267,7 @@ The normal 5,936-case integration gate has zero failures on macOS.
 
 <a id="ri-011"></a>
 
-### RI-011 — Cloned multicol text trim has a pre-existing capacity mismatch
-
-**Status:** OPEN, 2026-11-11. **Task blocker:** no; this is an additional control,
-outside the ten reported failing comparisons (D9.1.1v4 / D9.1.3v2).
-
-`wpt-css-inline/text-box-trim-multicol-003` uses `box-decoration-break:clone`.
-A fresh Chrome capture places four 80px lines, with their edge leading trimmed,
-in each 290px column; native layout places three and creates an extra row.
-Element agreement is 100%, text agreement is 30% against that fresh capture.
-The existing stored baseline still passes and is unchanged. Insufficient
-trim-aware fragment capacity is a suspected cause, not yet confirmed.
-
-Reproduce with the shared layout tester and `-c wpt-css-inline -t
-text-box-trim-multicol-003.html`, then compare with a temporary fresh capture.
-`temp/radiant-layout-20261111/clone-control.cjs` compares the pinned pre-repair
-host and final host: their complete native layout trees are identical.
-`multicol-control.json` and `fresh-references/` retain the fresh mismatch.
-No clone repair or baseline/reference change is claimed in RI-010.
+- [RI-011 — Cloned multicol text trim has a pre-existing capacity mismatch](<Radiant_Issue_Ledger (fixed).md#ri-011>).
 
 Continued owner-local repairs (2026-11-11): RAD02-3 now clips positioned HTML
 paint, vector output and native hits; RAD03-3 / RAD04-3 share replaced-size
@@ -1714,9 +1390,7 @@ Authority: **D9.1.1v4 / D9.1.3v2**.
 
 <a id="rad02-2"></a>
 
-#### RAD02-2
-
-**Unimplemented `content:` functions.** `counter()`/`counters()`/`attr()`/`url()`/concatenation for the `content` property are all TODO stubs (`resolve_css_style.cpp:12738`,`:12743`,`:12748`,`:12753`,`:12759`), and pseudo-element content is guessed from selector context ("TODO: improve this", `:12694`).
+- [RAD02-2 — Generated content keeps counters, images and text in order](<Radiant_Issue_Ledger (fixed).md#rad02-2>).
 
 <a id="rad02-3"></a>
 

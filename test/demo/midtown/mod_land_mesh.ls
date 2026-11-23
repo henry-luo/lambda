@@ -5,6 +5,7 @@
 import u: .mod_util
 import m: .mod_mesh
 import t: lambda.scene3d.transform
+import field: lambda.procart.field
 import city: .mod_city
 import land: .mod_land
 import roads: .mod_roads
@@ -51,8 +52,8 @@ fn interleave(channels) any^ => flatten(transpose(channels))
 // one vertex and draws nothing, so the buffer comes from array arithmetic rather than a filtered loop
 fn grid_indices(w, rows, gone, hidden) any^ {
     let n = w * (rows - 1) - 1
-    let k = [for (q in 0 to (n - 1)) q]
-    let edge = [for (q in 0 to (n - 1)) if (q % w == w - 1) 0 else 1]
+    let k = (0 to (n - 1)) + 0
+    let edge = 1 - ((k % w) + 1) div w
     let g0 = slice(gone, 0, n), g1 = slice(gone, 1, n + 1), gw = slice(gone, w, n + w), gd = slice(gone, w + 1, n + w + 1)
     let h0 = slice(hidden, 0, n), h1 = slice(hidden, 1, n + 1), hw = slice(hidden, w, n + w), hd = slice(hidden, w + 1, n + w + 1)
     let keep0 = edge * (1 - g0) * (1 - gw) * (1 - g1) * (1 - h0 * hw * h1)
@@ -62,9 +63,15 @@ fn grid_indices(w, rows, gone, hidden) any^ {
 // unit normals of a height grid (w columns, `step` apart) as [x, y, z] channel arrays, from central
 // differences (one-sided at the edges)
 fn grid_normals(hs, w, rows, step) any^ {
-    let hx = [for (k, h in hs, let i = k % w) (hs[if (i < w - 1) k + 1 else k] - hs[if (i > 0) k - 1 else k]) / (if (i > 0 and i < w - 1) 2.0 * step else step)]
-    // Consecutive rows are contiguous, so each Z difference is a native array operation.
     let n = w * rows
+    let columns = (0 to (n - 1)) % w
+    let have_left = (columns + w - 1) div w
+    let have_right = 1 - (columns + 1) div w
+    // a row's edge uses its own height in place of the neighbouring row's sample.
+    let left = concat([hs[0]], slice(hs, 0, n - 1)) * have_left + hs * (1 - have_left)
+    let right = concat(slice(hs, 1, n), [hs[n - 1]]) * have_right + hs * (1 - have_right)
+    let hx = (right - left) / ((have_left + have_right) * step)
+    // consecutive rows are contiguous, so each Z difference is a native array operation.
     let first_row = (slice(hs, w, 2 * w) - slice(hs, 0, w)) / step
     let middle = (slice(hs, 2 * w, n) - slice(hs, 0, n - 2 * w)) / (2.0 * step)
     let last_row = (slice(hs, n - w, n) - slice(hs, n - 2 * w, n - w)) / step
@@ -89,10 +96,11 @@ let C2 = COLORS[2]
 let GX = land.GX
 let GZ = land.GZ
 // ground the city, its barrier and the promenade already cover
-fn covered(x, z) => abs(x) <= city.LIMIT + 1.0 and z >= 0.0 - city.LIMIT - 1.0 and z <= city.SHORE + 1.2
 fn wet(h) => h < land.SEA - 0.6
-fn hidden(k) any^ => (let x = land.X0 + (k % NX) * land.STEP, let z = land.Z0 + (k div NX) * land.STEP, covered(x, z) or wet(H[k]))
-let HIDDEN = [for (k in 0 to (NX * NZ - 1)) if (hidden(k)) 1 else 0]
+let COVERED = field.threshold(city.LIMIT + 1.0 - abs(GX), 0.0)^ *
+    field.threshold(GZ, 0.0 - city.LIMIT - 1.0)^ * field.threshold(city.SHORE + 1.2 - GZ, 0.0)^
+let DRY_GRID = field.threshold(H, land.SEA - 0.6)^
+let HIDDEN = [for (hidden in (1 - (1 - COVERED) * DRY_GRID)) if (hidden > 0.0) 1 else 0]
 let GONE = [for (d in region.DROPPED) if (d) 1 else 0]
 // Join native row slices in a balanced tree so each value is copied at most once per level.
 fn rows(values, i0, i1, j0, j1) any^ {

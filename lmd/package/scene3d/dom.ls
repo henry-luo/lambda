@@ -4,7 +4,11 @@ import camera: .camera
 
 // native numeric attributes need flat arrays and round-trip scalar precision, including light intensity.
 pub fn attribute(value) any^ => if (value is array) format(if (len(value)>0 and value[0] is array) [for (row in value) for (component in row) component] else value,'json') else if (value is number) format(value,'json') else string(value)
-pub fn node(owner,id) => dom.query_selector(owner,"#" ++ id)
+pub fn node(owner,id) {
+    let descendant = dom.get_element_by_id(owner,id);
+    // use a direct ID lookup, keeping the selector's descendant scope if the owner matches.
+    if (descendant == owner and descendant != null) dom.query_selector(owner,"#" ++ id) else descendant
+}
 pub pn matching_child(parent,id,key,value) {
     var target = node(parent,id)
     // a restored ID can describe different geometry; retire its previous visual before remounting.

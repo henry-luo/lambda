@@ -184,7 +184,7 @@ typedef enum LoopForm {
 
 
 
-typedef enum AstLiteralType {
+typedef enum AstLiteralType : uint16_t {
     AST_LITERAL_NUMBER,
     AST_LITERAL_STRING,
     AST_LITERAL_BOOLEAN,
@@ -224,104 +224,95 @@ struct NameEntry {
     // A sloppy block function publishes only to this validated Annex-B outer
     // binding; null records a parameter, arguments, or lexical collision.
     NameEntry* annex_b_outer_binding;
-    // This var binding exists only as an Annex-B block-function companion;
-    // an ordinary `var` declaration of the same name clears it.
-    bool is_annex_b_companion;
-    bool is_mutable;
-    // S9.1.4v2: this fn-local binding owns one traced home shared by confined pns.
-    bool lambda_shared_local;
-    bool is_var_param;
-    bool is_parameter;
-    // JS var declarations may reuse a parameter identity but own a separate body cell.
-    bool is_js_body_var;
-    // Type-binder names are lexical type values, not storage bindings.  Their
-    // call-frame slot lives in TypeFunc::binders rather than FnFramePlan.
-    bool is_binder;
-    uint16_t binder_slot;
-    TypeBinder* binder;
-    // CW29/S9.1.3: this plain `pn` parameter's
-    // body writes through it, so both tiers snapshot it at entry -- one
-    // share-mark in the callee prologue; the first write detaches a private
-    // copy. Computed once at FUNCTION_END from the shared body walk.
-    bool cow_param_mutated;
-    // S9.1.3: a plain input may alias a sibling var borrow before its writes.
-    bool cow_param_borrow_snapshot;
-    // A plain `pn` parameter can retain its input past a call boundary by
-    // placing it in another owner, returning it, capturing it, or forwarding
-    // it. Callers retain the COW check on later `var` re-borrows only for this
-    // effect or cow_param_mutated (S9.1.2, S9.1.3).
-    bool cow_param_retained;
-    // LR12-10: the plain parameter's own root (not only a child) may be kept
-    // past the call -- returned, stored or bound (CW29 bare-only scan)
-    bool cow_param_root_retained;
-    // LR12-38: this binding is aliased from a plain `pn` parameter (`var r = o`,
-    // `r = o`) and the body writes through it, so both tiers mark the alias
-    // and its first write detaches instead of reaching the caller's container.
-    bool param_alias_written;
-    // LR12-11: the function result may be this parameter (plain or `var`) or
-    // a part of it, so each direct call site share-marks the result
-    bool cow_param_returned;
-    // Tune29 §19.1: the result may be this parameter's own root, not only a
-    // part of it; only then does the call site share the argument root itself
-    bool cow_param_root_returned;
-    // A `var` parameter needs caller-home transport only when its body can
-    // replace or retain the borrowed binding. Pure in-place writes keep the
-    // caller's descriptor valid (S9.2.1, D4.3.3).
-    bool cow_var_param_may_publish;
-    // CW31/S9.2.4 face 4: when this binding holds a mutable VIEW, the ultimate
-    // base binding it aliases (chased through view-of-view). The call-site
-    // exclusivity check conflicts two `var` args sharing an effective root, so
-    // overlapping subviews of one base are rejected at the same whole-base
-    // granularity face 3 already uses -- no region math in v1.
-    struct NameEntry* view_base;
-    bool has_type_annotation;
     // The explicit source annotation, when present.  `node->type` is the
     // effective compiler type and historically lost this distinction during
     // declaration construction, which let later boundaries guess from TypeId.
     Type* declared_type;
-    InterpBoundaryPlan* interp_boundary;  // immutable full-contract classification
-    // S7.5.1v6/S7.7.2v2/S7.7.4v2: a stored error remains an outcome fact,
-    // including when deferred admission or an any join hides it in the type.
-    bool admission_may_fail;
-    bool type_widened;
-    bool is_lexical;
-    // loop-head bindings need a distinct capture-analysis fact; this used to
-    // be recovered from parser structure at the binding node.
-    bool is_for_in_head;
-    bool is_const;
-    // Named function expressions own an immutable self binding, but unlike a
-    // lexical const binding a sloppy write is ignored rather than rejected.
-    bool is_function_name_binding;
-    bool tdz_active;
-    bool is_exported;
+    // When this name was hung into the scope by an import, the module that
+    // actually declares it. `slot` is then an index into *that* module's slab,
+    // not this one's — the two modules' plan passes number their globals
+    // independently (§4.1: const/type/slab lookups go against the declaring
+    // Script, not the current one).
+    Script* import_owner;
     // T0 frame-plan facts (AI5). NameEntry is pool-calloc'd, so zero-init must
     // read as "no plan": slot 0 is a legal frame slot, hence the explicit flag
     // rather than a sentinel index.
     int32_t slot;
     BindingStorage binding_storage;
-    bool storage_assigned;
+    // This var binding exists only as an Annex-B block-function companion;
+    // an ordinary `var` declaration of the same name clears it.
+    bool is_annex_b_companion : 1;
+    bool is_mutable : 1;
+    // S9.1.4v2: this fn-local binding owns one traced home shared by confined pns.
+    bool lambda_shared_local : 1;
+    bool is_var_param : 1;
+    bool is_parameter : 1;
+    // JS var declarations may reuse a parameter identity but own a separate body cell.
+    bool is_js_body_var : 1;
+    // Type-binder names are lexical type values, not storage bindings.  Their
+    // call-frame slot lives in TypeFunc::binders rather than FnFramePlan.
+    bool is_binder : 1;
+    // CW29/S9.1.3: this plain `pn` parameter's
+    // body writes through it, so both tiers snapshot it at entry -- one
+    // share-mark in the callee prologue; the first write detaches a private
+    // copy. Computed once at FUNCTION_END from the shared body walk.
+    bool cow_param_mutated : 1;
+    // S9.1.3: a plain input may alias a sibling var borrow before its writes.
+    bool cow_param_borrow_snapshot : 1;
+    // A plain `pn` parameter can retain its input past a call boundary by
+    // placing it in another owner, returning it, capturing it, or forwarding
+    // it. Callers retain the COW check on later `var` re-borrows only for this
+    // effect or cow_param_mutated (S9.1.2, S9.1.3).
+    bool cow_param_retained : 1;
+    // LR12-10: the plain parameter's own root (not only a child) may be kept
+    // past the call -- returned, stored or bound (CW29 bare-only scan)
+    bool cow_param_root_retained : 1;
+    // LR12-38: this binding is aliased from a plain `pn` parameter (`var r = o`,
+    // `r = o`) and the body writes through it, so both tiers mark the alias
+    // and its first write detaches instead of reaching the caller's container.
+    bool param_alias_written : 1;
+    // LR12-11: the function result may be this parameter (plain or `var`) or
+    // a part of it, so each direct call site share-marks the result
+    bool cow_param_returned : 1;
+    // Tune29 §19.1: the result may be this parameter's own root, not only a
+    // part of it; only then does the call site share the argument root itself
+    bool cow_param_root_returned : 1;
+    // A `var` parameter needs caller-home transport only when its body can
+    // replace or retain the borrowed binding. Pure in-place writes keep the
+    // caller's descriptor valid (S9.2.1, D4.3.3).
+    bool cow_var_param_may_publish : 1;
+    bool has_type_annotation : 1;
+    // S7.5.1v6/S7.7.2v2/S7.7.4v2: a stored error remains an outcome fact,
+    // including when deferred admission or an any join hides it in the type.
+    bool admission_may_fail : 1;
+    bool type_widened : 1;
+    bool is_lexical : 1;
+    // loop-head bindings need a distinct capture-analysis fact; this used to
+    // be recovered from parser structure at the binding node.
+    bool is_for_in_head : 1;
+    bool is_const : 1;
+    // Named function expressions own an immutable self binding, but unlike a
+    // lexical const binding a sloppy write is ignored rather than rejected.
+    bool is_function_name_binding : 1;
+    bool tdz_active : 1;
+    bool is_exported : 1;
+    bool storage_assigned : 1;
     // Whether this binding holds a freshly-produced container, so an alias of
     // it is an ownership boundary that must share the root before a later write
     // (cow_bind_var). Both tiers decide it with the same rule; the JIT keeps the
     // equivalent in its per-function binding plan.
-    bool cow_owned;
+    bool cow_owned : 1;
     // CW24: this binding was initialized from a *place* -- a member/index read
     // rooted at a mutable binding -- so under S9.1.2 it holds a COPY. Writes
     // through it cannot reach the container it was read from. Set at the
     // declaration, consumed at the mutation site, which is where the
     // programmer's expectation actually breaks.
-    bool is_place_copy;
-    // CW24v2 phase 2: counts of ident READS of a place-copy binding vs reads
-    // that were merely a mutation target's own root. reads > target_reads
-    // means the mutated copy is OBSERVED somewhere -- a legitimate deliberate
-    // snapshot under the Swift/R endpoint, so the diagnostic downgrades.
-    uint16_t place_copy_reads;
-    uint16_t place_copy_target_reads;
+    bool is_place_copy : 1;
     // durable "this place copy IS mutated somewhere" fact (pending is cleared
     // at flush). Gates the bind-time mark: an unmutated place copy stays a
     // borrow -- read-and-return helpers (rbt_get) must not share-mark the
     // stored value they hand out.
-    bool place_copy_mutated;
+    bool place_copy_mutated : 1;
     // CW24v3 / D5.4.5: the PLACE may be written while this copy is alive --
     // a write through the root (or a path prefix) between the bind and the
     // copy's last use, a `var` pass of the root in that range, or the copy
@@ -329,49 +320,72 @@ struct NameEntry {
     // bind must share-mark, whether or not the copy itself is ever written.
     // Gating on `place_copy_mutated` alone let `let old = r.kid; r.kid.n = 7`
     // show the write through `old` (S9.1.2). Decided once at FUNCTION_END.
-    bool place_copy_place_written;
-    bool place_copy_range_decided;   // the precise list walk reached this bind
-    // The place's root name, kept only to name it in that diagnostic.
-    String* place_copy_root;
+    bool place_copy_place_written : 1;
+    bool place_copy_range_decided : 1;   // the precise list walk reached this bind
     // Read-modify-WRITE-BACK (`p = w.pkts[i]` ... `w.pkts[i] = p`) is the
     // sanctioned idiom (C4.2e) and is indistinguishable from the lost-update
     // bug at the mutation itself -- only the later store tells them apart. So
     // the mutation is recorded and the diagnostic is deferred to the end of
     // the enclosing function, by which point a write-back has been seen.
-    bool place_copy_written_back;
-    bool place_copy_mutation_pending;
-    SourceSpan place_copy_mutation_span;
-    NameEntry* place_copy_next;   // intrusive link over pending candidates
+    bool place_copy_written_back : 1;
+    bool place_copy_mutation_pending : 1;
     // CW34 (COW §11.11): this mutated place copy is a read-modify-write handle
     // -- bound from `root.path`, written through, stored back to the same path
     // on every exit, never observed alongside the root in between -- so both
     // tiers bind it as a BORROW when the runtime spine is unshared and the
     // store-back skips its capture mark (the handle is dead there). Decided
     // once at FUNCTION_END (lambda_ast_lower_rmw_borrows).
-    bool cow_borrow_lowered;
+    bool cow_borrow_lowered : 1;
     // LR12-12 (S9.3.1): a fresh local whose only use is being stored into a
     // container has no other observer, so that insertion need not capture it
-    bool insertion_moves_value;
+    bool insertion_moves_value : 1;
     // S9.1.2 / S9.1.3: this `var` parameter is used in the body other than as
     // a place-path root or an assignment target (bound, passed, returned,
     // stored), so something besides the borrow may come to observe its root
     // object. Stores that such a use may precede carry
     // AstAssignNode::var_root_unshare. Decided once at script finalize
     // (lambda_ast_note_var_root_sharing); both tiers read it.
-    bool var_root_may_share;
+    bool var_root_may_share : 1;
     // T28-7: a local bound to `fill(N, v)` or an N-item scalar array literal,
     // never rebound, resized (push/splice) or passed where a callee could
     // resize it, holds an array of exactly `fixed_array_length` elements
     // everywhere it is visible. Decided once at script finalize.
-    bool has_fixed_array_length;
-    int64_t fixed_array_length;
-    // When this name was hung into the scope by an import, the module that
-    // actually declares it. `slot` is then an index into *that* module's slab,
-    // not this one's — the two modules' plan passes number their globals
-    // independently (§4.1: const/type/slab lookups go against the declaring
-    // Script, not the current one).
-    Script* import_owner;
+    bool has_fixed_array_length : 1;
+    bool has_lambda_binding_fields : 1;
 };
+
+// Lambda's binder, boundary plan and place analysis facts share the binding's
+// allocation. JS and foreign bindings carry only the common identity.
+struct LambdaNameEntry : NameEntry {
+    TypeBinder* binder;
+    // CW31/S9.2.4 face 4: when this binding holds a mutable VIEW, the ultimate
+    // base binding it aliases (chased through view-of-view). The call-site
+    // exclusivity check conflicts two `var` args sharing an effective root, so
+    // overlapping subviews of one base are rejected at the same whole-base
+    // granularity face 3 already uses -- no region math in v1.
+    struct NameEntry* view_base;
+    InterpBoundaryPlan* interp_boundary;  // immutable full-contract classification
+    // The place's root name, kept only to name it in that diagnostic.
+    String* place_copy_root;
+    NameEntry* place_copy_next;   // intrusive link over pending candidates
+    int64_t fixed_array_length;
+    SourceSpan place_copy_mutation_span;
+    uint16_t binder_slot;
+    // CW24v2 phase 2: counts of ident READS of a place-copy binding vs reads
+    // that were merely a mutation target's own root. reads > target_reads
+    // means the mutated copy is OBSERVED somewhere -- a legitimate deliberate
+    // snapshot under the Swift/R endpoint, so the diagnostic downgrades.
+    uint16_t place_copy_reads;
+    uint16_t place_copy_target_reads;
+};
+
+LambdaNameEntry* lambda_name_entry_alloc(Pool* pool);
+
+static inline const LambdaNameEntry& lambda_binding_fields(const NameEntry* entry) {
+    static constexpr LambdaNameEntry empty = {};
+    return entry && entry->has_lambda_binding_fields
+        ? *static_cast<const LambdaNameEntry*>(entry) : empty;
+}
 
 // Static activation shape for one interpreted function (or module top level).
 // Slot layout: [ params | locals | vargs? | signal | scratch ] — see interp.hpp.
@@ -395,60 +409,61 @@ struct AstBoundTypeUse {
     AstBoundTypeUse* next;
 };
 
-// name_scope
-struct NameScope {
-    AstScopeId scope_id;
-    NameEntry* first;
+// Declaration order starts at NameScope::first. Allocate the append and
+// lookup state only when a scope receives its first binding.
+struct NameScopeDeclarations {
     NameEntry* last;
-    // Declaration order remains in first/last/next. The optional name index
-    // supports identity and spelling queries without changing
-    // declaration order, including names arriving from a linked script.
     NameEntry** name_index;
     uint32_t name_index_capacity;
     uint32_t name_index_count;
     uint32_t entry_count;
-    bool is_proc;
+};
+
+struct NameScope {
+    NameEntry* first;
+    NameScopeDeclarations* declarations;
     // local mutation belongs to this callable, independently of effect colour.
     struct AstFuncNode* lambda_function;
-    bool lambda_comprehension;
     NameScope* parent;
-    ScopeKind kind;
-    bool strict;
-    // Function bodies keep a block environment for top-level lexicals, while
-    // their FunctionDeclarations still belong to the enclosing function scope.
-    bool is_function_body;
-    bool has_implicit_arguments;
-    // JavaScript B.3.5 permits a legacy var redeclaration of a simple catch
-    // BindingIdentifier; JavaScript marks only that handler scope.
-    bool allows_legacy_var_redeclaration;
-    // A JavaScript catch clause's own record. Annex B.3.4 lets direct eval
-    // hoist a var over any catch parameter, simple or destructured.
-    bool is_catch_clause;
-    // A named function expression owns an immutable lexical name record that
-    // sits outside its ordinary Function Environment Record.
-    bool is_function_name_scope;
-    // Switch case clauses share one lexical scope; their declarations never
-    // receive an Annex B outer-var companion.
-    bool is_switch_scope;
-    // Slots are assigned while parameter annotations are reduced left to
-    // right. The completed TypeFunc copies the canonical sites into its table.
-    uint16_t binder_count;
     AstBoundTypeUse* bound_type_uses;
+    // sealed JS activation offsets apply only to this nonescaping function's locals.
+    NameScope* js_activation_owner;
+    AstScopeId scope_id;
+    ScopeKind kind;
     // JavaScript direct-scope construction seals durable lexical-cell slots
     // before an AST is shared by executions (D8.2.4). Lambda frame slots stay
     // on their function plan, so the fact is unused by that profile.
     uint32_t binding_slot_count;
-    bool binding_slots_planned;
-    // sealed JS loop capture fact: 0 = unplanned, 1 = reuse, 2 = fresh cells.
-    // closures/eval can observe iteration identity even without a local read.
-    uint8_t js_iteration_environment;
-    // sealed JS activation offsets apply only to this nonescaping function's locals.
-    NameScope* js_activation_owner;
+    // Parameter annotations assign binder slots in declaration order.
+    uint16_t binder_count;
     uint16_t js_activation_base;
     uint16_t js_activation_slots;
     uint16_t js_activation_scratch;
-    bool js_activation_primitive_only;
-    bool js_activation_has_loop;
+    // 0 = unplanned, 1 = reuse, 2 = fresh cells. Closures and eval can observe
+    // iteration identity even without a local read.
+    uint8_t js_iteration_environment;
+    bool is_proc : 1;
+    bool lambda_comprehension : 1;
+    bool strict : 1;
+    // Function bodies keep a block environment for top-level lexicals, while
+    // their FunctionDeclarations still belong to the enclosing function scope.
+    bool is_function_body : 1;
+    bool has_implicit_arguments : 1;
+    // JavaScript B.3.5 permits a legacy var redeclaration of a simple catch
+    // BindingIdentifier; JavaScript marks only that handler scope.
+    bool allows_legacy_var_redeclaration : 1;
+    // A JavaScript catch clause's own record. Annex B.3.4 lets direct eval
+    // hoist a var over any catch parameter, simple or destructured.
+    bool is_catch_clause : 1;
+    // A named function expression owns an immutable lexical name record that
+    // sits outside its ordinary Function Environment Record.
+    bool is_function_name_scope : 1;
+    // Switch case clauses share one lexical scope; their declarations never
+    // receive an Annex B outer-var companion.
+    bool is_switch_scope : 1;
+    bool binding_slots_planned : 1;
+    bool js_activation_primitive_only : 1;
+    bool js_activation_has_loop : 1;
 };
 
 // What const value, if any, a node carries. The payload always lives in the
@@ -469,24 +484,12 @@ struct AstNode {
     // allocation makes AST_CONST_NONE the default (RC12, D8.2.5).
     AstConstKind const_kind;
     uint32_t const_index;
-    // The direct binder stamps this instead of allocating a per-pass visited
-    // set. A process-wide epoch keeps retained and replayed ASTs disjoint.
-    uint32_t last_bind_epoch;
-    // Lambda's parser builds syntax-only nodes and a separate resolve pass
-    // binds names and assigns types. `syntax_form` records which production
-    // built the node (LambdaSyntaxForm, zero once resolved) and the two
-    // fields beside it carry that production's small syntactic facts. They
-    // occupy what was alignment padding, so AstNode does not grow.
-    uint8_t syntax_form;
-    uint8_t syntax_flags;
-    uint16_t syntax_aux;
     Type *type;
     AstNode* next;
     SourceSpan source_span;
 };
-// the syntax fields must stay inside the padding that precedes `type`
-static_assert(offsetof(AstNode, type) == 16,
-    "AstNode syntax fields must not grow the node header");
+static_assert(sizeof(void*) != 8 || sizeof(AstNode) == 32,
+    "the common AST header fits four 64-bit words");
 
 // Shared sibling-list sizing keeps language profiles from carrying private
 // count walks for the same `next` contract.
@@ -539,15 +542,13 @@ typedef AstIndexProfileSupport (*AstIndexProfileVisitor)(
 
 typedef struct AstIndex {
     AstNode** nodes;
-    AstNode** parents;
+    AstNodeId* parent_ids;
     AstFunctionId* owner_functions;
     // Exclusive structural subtree boundary for each dense node ID.
     AstNodeId* subtree_end;
     // Each indexed node carries the binding edge resolved by the builder;
     // invalid means the node is not a name use or declaration.
     AstBindingId* node_bindings;
-    AstNodeId* first_children;
-    AstNodeId* next_siblings;
     NameScope** scopes;
     NameEntry** bindings;
     // index-owned declaration identities also survive clones of shared ASTs.
@@ -591,8 +592,7 @@ typedef struct AstIndex {
     uint32_t class_count;
     // The index publishes graph facts once the structural tree is available.
     bool graph_published;
-    AstNode** slots;
-    AstNodeId* slot_ids;
+    AstNodeId* slot_ids;  // pointer hash probes compare through nodes[id]
     uint32_t slot_capacity;
     // Nodes below this id have already been const-folded. A retained unit is
     // recompiled through a fresh pass manager and the REPL appends to it, so
@@ -676,7 +676,8 @@ NameEntry* ast_index_binding(const AstIndex* index, AstBindingId id);
 NameEntry* name_scope_lookup_name(const NameScope* scope, const String* name);
 NameEntry* name_scope_lookup_name_bytes(const NameScope* scope, const String* name);
 NameEntry* name_scope_lookup_chain(const NameScope* scope, const String* name);
-bool name_scope_index_add(Pool* pool, NameScope* scope, NameEntry* entry);
+bool name_scope_append(Pool* pool, NameScope* scope, NameEntry* entry);
+void name_scope_restore(NameScope* scope, NameEntry* first, NameEntry* last);
 bool name_scope_plan_binding_slots(NameScope* scope);
 #ifdef __cplusplus
 }
@@ -688,9 +689,13 @@ static inline AstFunctionId ast_index_function_parent(const AstIndex* index,
         ? index->functions[function_id].parent : AST_FUNCTION_ID_INVALID;
 }
 
-static inline AstNode* ast_index_parent(const AstIndex* index, const AstNode* node) {
-    AstNodeId parent_id = ast_index_parent_id(index, ast_index_find(index, node));
+static inline AstNode* ast_index_parent_at(const AstIndex* index, AstNodeId node_id) {
+    AstNodeId parent_id = ast_index_parent_id(index, node_id);
     return index && parent_id < index->count ? index->nodes[parent_id] : NULL;
+}
+
+static inline AstNode* ast_index_parent(const AstIndex* index, const AstNode* node) {
+    return ast_index_parent_at(index, ast_index_find(index, node));
 }
 
 // T29-1 / CW37 (D5.4.4): a record place spelled repeatedly in a `pn` body is
@@ -713,6 +718,10 @@ typedef struct AstFieldNode : AstNode {
     };
     bool computed;
     bool optional;
+    uint32_t js_property_key_slot; // 1-based realm literal slot for a static JS key
+} AstFieldNode;
+
+struct LambdaAstFieldNode : AstFieldNode {
     // S12.3.3v2: a resolved pn method may only appear as a direct call callee.
     bool is_proc_method_reference;
     // T29-1: nonzero when this node spells a synthesized place handle
@@ -720,7 +729,7 @@ typedef struct AstFieldNode : AstNode {
     uint16_t handle_slot;      // 1-based, unique within the function
     bool handle_rooted;        // a read handle retained across a pure call
     InterpFieldPlan* interp_field; // fits the identifier-to-member morph allocation
-} AstFieldNode;
+};
 
 typedef struct AstCallNode : AstNode {
     union {
@@ -731,23 +740,20 @@ typedef struct AstCallNode : AstNode {
         AstNode *argument;
         AstNode *arguments;
     };
-    bool pipe_inject;
-    AstNode* pipe_receiver; // source metadata for the virtual first argument (S10.1.2v4)
-    bool propagate;
-    bool can_raise;
-    bool optional;
-    bool is_proc_method;
-    // Marked by the T0 frame-plan pass when this call is a self-recursive call
-    // in tail position. The walker then rebinds parameter slots and re-enters
-    // the body instead of opening a frame, matching the loop lowering emits
-    // for the same shape (AIO1's self-tail-call slice).
-    bool interp_self_tail_call;
-    // Both AST interpreters retain immutable source argument shape so their
-    // hot walkers do not rescan a stable argument list before every call.
     uint16_t interp_source_argc;
+    bool optional;
     bool interp_has_named_args;
     bool interp_has_spread_args;
     bool interp_call_shape_planned;
+} AstCallNode;
+
+struct LambdaAstCallNode : AstCallNode {
+    bool pipe_inject;
+    bool propagate;
+    bool can_raise;
+    bool is_proc_method;
+    bool interp_self_tail_call; // Lambda T0 reuses the frame for a planned self-tail call
+    AstNode* pipe_receiver; // virtual first argument (S10.1.2v4)
     Type* interp_array_destination; // stable destination metadata; certificates are context-owned
     // S11.4.3 (LR12-25, LR12-36): a system call that rejects an error operand
     // yields that error as its value; set when an argument may be one (its
@@ -771,7 +777,7 @@ typedef struct AstCallNode : AstNode {
     bool input_url_only;        // template input must resolve to HTTP(S)
     // S7.6.3: propagation's early outcome survives success-type narrowing.
     Type* propagated_error_type;
-} AstCallNode;
+};
 
 // D8.2.4: call argument shape belongs to the immutable AST definition. Both
 // profile builders use this one preparation route; runtime dispatch still
@@ -814,7 +820,7 @@ typedef enum StartMode {
 } StartMode;
 
 typedef struct AstStartNode : AstNode {
-    AstCallNode* call;
+    LambdaAstCallNode* call;
     NameScope* owner_scope;
     StartMode mode;
     bool escapes;
@@ -849,7 +855,7 @@ static inline bool ast_is_omitted_argument(const AstNode* node) {
         ((const AstPrimaryNode*)node)->literal_value_kind == AST_PRIMARY_OMITTED_ARGUMENT;
 }
 
-typedef struct AstLiteralNode : AstPrimaryNode {
+typedef struct AstLiteralNode : AstNode {
     AstLiteralType literal_type;
     bool has_decimal;
     bool is_bigint;
@@ -875,13 +881,16 @@ typedef struct AstUnaryNode : AstNode {
 
 typedef struct AstBinaryNode : AstNode {
     AstNode *left, *right;
-    StrView op_str;
     Operator op;
-    uint32_t pipe_effect_guard; // for arbitrary whole-value pipe callables
-    bool interp_int_arithmetic; // predicted operands; runtime tags still guard the kernel
 } AstBinaryNode;
 
-typedef AstBinaryNode AstPipeNode;
+struct LambdaAstBinaryNode : AstBinaryNode {
+    StrView op_str;
+    uint32_t pipe_effect_guard; // for arbitrary whole-value pipe callables
+    bool interp_int_arithmetic; // predicted operands; runtime tags still guard the kernel
+};
+
+typedef LambdaAstBinaryNode AstPipeNode;
 
 // for AST_NODE_KEY_EXPR, AST_NODE_PARAM, and AST_NODE_NAMED_ARG
 typedef struct AstNamedNode : AstNode {
@@ -899,6 +908,9 @@ typedef struct AstNamedNode : AstNode {
 typedef struct AstIdentNode : AstNode {
     String* name;
     NameEntry *entry;
+} AstIdentNode;
+
+struct LambdaAstIdentNode : AstIdentNode {
     // Lambda's frame planner links an occurrence that reads a closure capture
     // to its immutable owning function and dense environment slot. Both are
     // AST facts, never EvalContext-owned runtime values (D8.2.4).
@@ -906,18 +918,13 @@ typedef struct AstIdentNode : AstNode {
     uint16_t interp_capture_slot;
     // The planner proved this occurrence reads a plain frame slot of the
     // function it was planned in (not a capture, import, object field,
-    // binder, type or pattern name). Sits in tail padding: identifiers are
-    // also created by morphing other nodes in place, so the size must not grow.
+    // binder, type or pattern name).
     bool interp_frame_slot_read;
-    // LambdaJS: 1-based slot of a static member name in the script's realm
-    // literal cache, which holds its canonical property key (0 = none). The
-    // parser assigns it like a string literal's slot; the AST stores no
-    // runtime String (D5.6.2). Also in tail padding.
-    uint32_t js_property_key_slot;
-} AstIdentNode;
-// name, entry, capture owner, then slot + flag inside one padded word
-static_assert(sizeof(AstIdentNode) == sizeof(AstNode) + 4 * sizeof(void*),
-    "AstIdentNode must not grow past its pre-existing tail padding");
+    // Lambda can rewrite an identifier to a member and back in place.
+    uint8_t member_rewrite_storage[sizeof(void*) - sizeof(uint16_t)];
+};
+static_assert(sizeof(void*) != 8 || sizeof(LambdaAstIdentNode) == sizeof(LambdaAstFieldNode),
+    "Lambda members and identifiers share the size of an in-place rewrite");
 
 typedef struct AstVarDeclNode : AstNode {
     union {
@@ -1048,13 +1055,16 @@ typedef struct AstPropertyNode : AstNode {
 } AstPropertyNode;
 
 typedef struct AstAssignNode : AstNode {
-    Operator op;
     AstNode *left;
     union {
         AstNode *right;
         AstNode *value; // Lambda statement spelling of the shared RHS
     };
+    Operator op;
     bool lhs_is_parenthesized;
+} AstAssignNode;
+
+struct LambdaAstAssignNode : AstAssignNode {
     // Lambda statement forms carry resolved binding and compound-target
     // metadata on this same assignment record (D8.2.2).
     String* target;
@@ -1072,7 +1082,7 @@ typedef struct AstAssignNode : AstNode {
     bool var_root_unshare;
     bool interp_boundary_proven;
     InterpPlacePlan* interp_place;
-} AstAssignNode;
+};
 
 // One Tier-3 edit (PTH60v3). A `put`/`del` statement is a list of these, in
 // written order; a comma-joined statement records exactly what three separate
@@ -1115,10 +1125,9 @@ typedef struct AstDecomposeNode : AstNode {
     bool is_named;
 } AstDecomposeNode;
 
-// Statement spellings retain aliases while their physical contract is the
-// shared assignment record above; no language-specific layout remains.
-typedef AstAssignNode AstAssignStamNode;
-typedef AstAssignNode AstCompoundAssignNode;
+// Lambda statements use the assignment layout with place and binding facts.
+typedef LambdaAstAssignNode AstAssignStamNode;
+typedef LambdaAstAssignNode AstCompoundAssignNode;
 
 // A vector comparison produces an ArrayNum bool mask, while a source numeric
 // literal may still carry the general ARRAY AST type until it is constructed.
@@ -1380,13 +1389,15 @@ typedef struct AstExprStmtNode : AstNode {
 typedef struct AstDeclaratorNode : AstNode {
     AstNode* id;
     AstNode* init;
-    // Lambda declarations retain binding metadata through the shared layout.
-    String* name;
     NameEntry* entry;
-    bool is_type_definition;
     Type* declared_type;
-    bool interp_boundary_proven;
 } AstDeclaratorNode;
+
+struct LambdaAstDeclaratorNode : AstDeclaratorNode {
+    String* name;
+    bool is_type_definition;
+    bool interp_boundary_proven;
+};
 
 typedef struct AstSpreadNode : AstNode {
     AstNode* argument;
@@ -1405,7 +1416,7 @@ static inline bool ast_definition_denotes_type(const AstNode* definition) {
     case AST_NODE_SYMBOL_PATTERN:
         return true;
     case AST_NODE_VARIABLE_DECLARATOR:
-        return ((const AstDeclaratorNode*)definition)->is_type_definition;
+        return ((const LambdaAstDeclaratorNode*)definition)->is_type_definition;
     default:
         return false;
     }
@@ -1998,7 +2009,7 @@ Type* ast_map_path_leaf_contract(Type* root_contract, const AstCowPath* path,
     AstNode* terminal, bool terminal_is_member, int64_t* index_mask);
 
 struct AstOwnerPermutationPlan {
-    AstDeclaratorNode* temporary;
+    LambdaAstDeclaratorNode* temporary;
     AstNode* last;
     NameEntry* owners[8];
     int count;

@@ -1,14 +1,12 @@
 # Removing DomNodeRecord from production
 
-**Status** — Implementation in progress, 2026-11-21. Release still allocates one 104-byte record per registered node. Scope covers the DOM lifecycle portion of VR7–VR9. View-property sharing, copy-on-write, and retained reflow have independent ownership under VR1–VR6 and VR10. [View reuse design](Radiant_Design_View_Reuse.md)
+**Status** — Implemented 2026-11-21 for VR7–VR9. Production uses structural tree ownership and direct external holds. Node registration allocates zero per-node side records. Precise GC slots exist only for managed backing values, as required by D5.5.2 and D6.3.3. Allocation diagnostics are optional under D5.2.4. [Formal design](../../doc/Lambda_Formal_Design.md) · [View reuse design](Radiant_Design_View_Reuse.md)
 
-**Recommendation** — Make each production reference answer two questions at the point that creates it. Who keeps the target alive, and what ends the reference? An ordinary node should allocate **zero lifecycle side records**. Remove the paged ID index from the proposed design. Keep a small host-owned registry for actual Lambda GC root slots. Keep the full `DomNodeRecord` exclusively in development as a verifier. This is the agreed replacement for the registry-based implementation of VR7–VR9. The lifetime requirements in D5.1.4, D5.5.1–D5.5.3, and D6.3.3 still apply. [Formal design](../../doc/Lambda_Formal_Design.md)
-
-## Baseline before this migration
+## Historical baseline before this migration
 
 `DomDocument::init` initializes the registry with 256 buckets. Factories for elements, text, comments, and attributes register nodes. MarkEditor also registers embedded text when it joins a document. Registration looks up the address, grows the table at 75% occupancy, and normally allocates and links a record in the document pool. Some synthetic layout boxes bypass registration and belong to the view. Release builds link this code unconditionally. The debug assertion on a lifecycle invariant becomes an abort in release. [Build manifest](../../lambda-input/build_targets.json) · [Document initialization and factories](../../lambda-input/lambda/input/css/dom_element.cpp) · [Registry implementation](../../lambda-input/lambda/input/css/dom_lifecycle.cpp)
 
-The existing arm64 release census covers 53 page fixtures and 171 web templates with scripting disabled. Each column sums independent page processes. Sizes are logical record and bucket payloads. Pool overhead and process RSS are separate measurements.
+The original arm64 release census covered 53 page fixtures and 171 web templates with scripting disabled. Each column sums independent page processes. Sizes are logical record and bucket payloads. Pool overhead and process RSS are separate measurements.
 
 | Census | Constructed DOM | After first layout |
 |---|---:|---:|
@@ -34,11 +32,11 @@ Ten pinned nodes tells us little about weak reference use. Layout anchor resolut
 | Forms, manual slots and anchors | A form prop links into its document at creation and unlinks at release or adoption. This reaches never-attached controls before first layout. Manual assignments index only their endpoints. Implicit CSS anchors use the active layout’s membership map before reading a candidate. Scroll snap matches a saved address and generation against live areas during its existing tree walk. |
 | Shared view properties | Canonical inline properties remain borrowed from their view arena with copy-on-write. Retained page generations keep their existing counted leases. These changes require no per-element property retain or release. |
 
-### Release memory and first layout
+### First migration stage, before record removal
 
 Arm64 release builds ran the same 53 page fixtures and 171 web templates, one document per process, without scripting. Both builds used the same CSS compatibility changes from local Input revision `f320e2d`. The pinned Input revision `291f962` lacks two CSS helpers required by Radiant `3fb782a`. The comparison used isolated build trees and preserved both repository pins.
 
-| Summed live bytes across 224 documents | Before migration | Current | Reduction |
+| Summed live bytes across 224 documents | Before migration | After first stage | Reduction |
 |---|---:|---:|---:|
 | Document pool + node arena, after construction | 67.69 MiB | 50.55 MiB | 25.3% |
 | Document pool + node arena, after first layout | 83.19 MiB | 64.08 MiB | 23.0% |
@@ -52,11 +50,47 @@ Five paired first-layout CPU samples per page, after a warm-up, gave a corpus me
 
 Release verification passed 57 focused native lifecycle, storage-owner and view tests, 85 live-range tests, 57 MarkEditor tests, 34 hosted document-ownership tests, and 140 dynamic layout tests. The static fixture loader also passed. Coverage includes the 10,000-removal arena plateau, address reuse, repeated adoption, a failed subtree transfer followed by retry, original-heap GC compaction, never-attached form cleanup, and collection pacing for an adopted JS wrapper. The host state-store test executable still has a duplicate-symbol link failure, and the broader core suite has an intrinsic-sizing assertion that also fails on the control build. Scripted mutation and teardown timings remain unmeasured.
 
-### Remaining release dependencies
+## Production ownership after record removal
 
-The ordinary-node allocation is still present. A saved address and document-local ID still require registry validation in retained view state, paged layout and other callers. Retirement still gets the physical arena from the record, repairs inbound links across all surviving records once per batch, and queues records for deferred recycling. Some durable consumers still use legacy reason pins and old-document aliases. Native ownership now transfers a detached subtree as one batch, including attributes and shadow roots. The host currently detaches the root before this reservation. If reservation fails, all nodes still belong to the source document, but restoring the original attachment and pre-removal effects remains open. These paths must migrate before the old registry can serve as a development-only verifier under D5.2.4.
+- The document owns its published tree, plus roots that are still unpublished or detached. Each root has a one-based slot for constant-time removal. Eight slots fit in the document service. A larger array grows only for simultaneous roots and returns to inline storage once they fit. Publishing an authored child, shadow root, attribute, or generated layout child transfers ownership to its parent. [Node factories and shadow ownership](../../lambda-input/lambda/input/css/dom_element.cpp) · [Generated children](../../radiant/radiant/layout_block.cpp)
+- A factory records the physical recycling arena on the node. Adoption changes the logical document and issues a new document-local ID. Every external pin owns the physical node until its holder releases it. A queued operation checks the current document if its semantics require the original document. A source-document weak reference expires at adoption. No source-document alias allocation is needed. Each document retains its existing precise-root slots on the original GC heap across transfer. [Lifecycle and adoption](../../lambda-input/lambda/input/css/dom_lifecycle.cpp)
+- A weak reference minted from a live node occupies 16 bytes on arm64. Its lifetime stamp uses the four bytes after the ID. The document invalidates the stamp before recycling, transfer, and destruction. Validation of an intact current stamp can read the ID directly. For an expired stamp or a manually constructed address/ID pair, validation compares the address with known live nodes before reading any target memory. A fixed 32-slot cache accelerates repeated address checks. Cache eviction happens before storage reuse. Stamp exhaustion permanently selects structural validation. A cold lookup can take linear time in the owning forest. StateStore keeps the complete weak reference and renews its stamp after validation (D5.5.1). A bulk operation can share a scratch ownership snapshot across cold queries until it exits or a registration or lifetime change invalidates the snapshot. [Weak references](../../lambda-input/lambda/input/css/dom_lifecycle.hpp) · [Validation](../../lambda-input/lambda/input/css/dom_lifecycle.cpp) · [StateStore](../../radiant/radiant/state_store.cpp)
+- At a safe point, retirement walks the detached subtree, including its attributes and shadow root. MarkEditor commits reciprocal links while both sides are live. Repeated Mark values receive independent occurrences. After releasing resources, each retired allocation holds its own deferred-recycle link, arena and exact allocation size. The recycler visits zero unrelated nodes. Development fixtures can explicitly enable per-reason pin counts and check child-link invariants. [MarkEditor](../../lambda-input/lambda/io/mark_editor.cpp) · [Retirement tests](../../test/test_radiant_core_gtest.cpp)
 
-## Three ways to refer to a node
+The native transfer preflights the entire detached subtree. The host still detaches the root before native preflight. If reservation fails at that point, ownership stays with the source document and the host can retry with the detached subtree. Restoring its pre-removal position and effects on host failure remains open.
+
+### Release memory after record removal
+
+Two native arm64 release builds used the same repository pins, Clang optimization flags, 1200 × 800 viewport and local resources. The control retained the 104-byte record. The candidate used the ownership model above. Each of the 53 page fixtures and 171 web templates ran in its own process with scripting disabled. All 224 normalized first-layout trees matched.
+
+| Sum across 224 documents | With 104-byte records | After removal | Saved |
+|---|---:|---:|---:|
+| Document pool + node arena after construction | 50.55 MiB | 32.46 MiB | 35.79% |
+| Document pool + node arena after first layout | 64.08 MiB | 44.10 MiB | 31.18% |
+| All document-tagged allocator bytes after construction | 166.63 MiB | 152.43 MiB | 8.52% |
+| All document-tagged allocator bytes after first layout | 342.07 MiB | 326.00 MiB | 4.70% |
+| Per-node records + address-table buckets after first layout | 20.41 MiB | 0 | 100% |
+
+The broader allocator total includes the Input arena, which often owns the parser-backed node itself. The measurements already include the 16-byte increase in each common node header. On arm64, `DomNode` measures 96 B, `DomElement` 344 B, and `DomText` 136 B. At both snapshots every page used only the inline root array and had zero managed GC slots. Across both lifecycle stages, all document-tagged bytes after first layout fell from 361.18 MiB to 326.00 MiB, a 9.74% reduction. These totals sum live allocations across separate processes. Process RSS and peak memory during mutation are separate measures. The paired per-page measurements and normalized tree digests are in `temp/dom-lifecycle-removal/{old,new}.json`.
+
+### Release CPU and mutation checks
+
+Each page had one warm-up and five timed executions per build in each of two interleaved runs. Combining all ten per-page samples before ranking pages gave the following process CPU times.
+
+| Phase | Median before | Median after | p95 before | p95 after |
+|---|---:|---:|---:|---:|
+| Document load | 7.378 ms | 7.441 ms | 15.071 ms | 15.109 ms |
+| First layout | 23.961 ms | 23.959 ms | 43.609 ms | 44.147 ms |
+
+First-layout median changed by less than 0.01% overall, and p95 increased 1.23%. The first run alone showed a 1.26% median increase. The repeat showed a 0.01% increase. The paired measurements cover static pages with scripting disabled. In a separate native mutation benchmark, a document with 4,096 surviving text siblings performed 5,000 insert, pin, detach, blocked sweep, unpin and successful sweep cycles. Median CPU over nine timed runs went from 84.824 ms to 0.286 ms. The old recycler inspected the 4,096 survivors on every successful sweep. This benchmark isolates retirement cost. It does not measure end-to-end scripted editing.
+
+Release verification passed 53 focused lifecycle, GC and view tests, 85 live-range tests, 57 MarkEditor tests, 34 hosted document-ownership tests, three hosted mutation and resource tests, 140 dynamic layout tests, the static fixture loader and the scene listener retirement regression. One regression adopts a pinned text node, destroys the issuing document and releases the original pin while the physical arena is still live. A native edit that aborts and then commits also exercises string ownership. Removing a text node invalidates its borrowed Mark identity when required, while the node keeps any owned replacement string until reinsertion or retirement. The standalone state-store test runner remains blocked by duplicate symbols from production code and its test stubs, also present on the control.
+
+The full Radiant baseline passed after the text ownership fix. The runner reported 8,176 passes, 296 partial passes and 20 skips, including 201 of 201 hosted document tests, 657 of 657 scene tests and 329 of 329 UI automation tests.
+
+## Design rationale and original acceptance criteria
+
+### Three ways to refer to a node
 
 | What the caller needs | Proposed lifetime | Examples |
 |---|---|---|
@@ -74,15 +108,15 @@ The implemented arm64 layout keeps the count after `layout_height_contribution` 
 
 A wrapper's existing GC weak-slot callback releases its native hold. Preserve the idle-GC behavior for detached trees held only by wrappers. Once total blocked bytes could reach the collection threshold, the host can enumerate its existing weak wrapper caches across the relevant realms and compare wrapper-held references with the total holds in each blocked subtree. Count multiplicity, including an Attr wrapper's hold on its owner. Keep the byte charge on the pending retirement work and end it on reinsertion or retirement. This keeps the nine per-reason counts in the development verifier. Profile this host callback on wrapper-heavy churn. [Wrapper cache](../../lambda/dom/dom_cssom.cpp) · [Wrapper-only retirement regression](../../test/test_radiant_core_gtest.cpp)
 
-## Ownership at detach, adoption, and teardown
+### Ownership at detach, adoption, and teardown
 
-- **Tree edges.** Route MarkEditor relinks and DOM insert, remove, replace, and move operations through one structural commit. Prepare allocations first. While old and new nodes are live, sever obsolete edges in both directions and publish the complete new parent, first/last child, and sibling links. Each presentation occurrence owns its links under D5.5.3. Attr ownership, shadow roots, manual-slot backlinks, and synthetic layout boxes need their corresponding owner hooks. A manual assignment owns the relationship and clears both ends when it changes. The current retirement regression deliberately injects stale links into an unrelated survivor. Keep those assertions in verifier coverage, and add a release regression that reaches the same edits through MarkEditor and proves links are correct **before** sweeping. The verifier should also flag an injected invalid link at the commit that introduced it. Removing the full-document repair depends on every production writer meeting this invariant. [MarkEditor](../../lambda-input/lambda/io/mark_editor.cpp) · [Existing batch repair](../../lambda-input/lambda/input/css/dom_lifecycle.cpp)
+- **Tree edges.** Route MarkEditor relinks and DOM insert, remove, replace, and move operations through one structural commit. Prepare allocations first. While old and new nodes are live, sever obsolete edges in both directions and publish the complete new parent, first/last child, and sibling links. Each presentation occurrence owns its links under D5.5.3. Attr ownership, shadow roots, manual-slot backlinks, and synthetic layout boxes need their corresponding owner hooks. A manual assignment owns the relationship and clears both ends when it changes. The verifier detects deliberately injected stale links. The MarkEditor regression exercises repeated insertion through its normal entry point and checks the links before and after retirement. [MarkEditor](../../lambda-input/lambda/io/mark_editor.cpp) · [Subtree retirement](../../lambda-input/lambda/input/css/dom_lifecycle.cpp)
 - **Detached nodes.** The document owns its attached root and any detached roots still awaiting disposal, including never-attached API-created nodes. Keep pending roots in the actual retirement queue. Schedule once, cancel on reinsertion, and merge overlapping work. At a quiescent point inspect only pending subtrees, including attributes and shadow ownership. Break embedded-document host cycles, release view and form resources in owner order, then recycle bottom-up. A hold on a descendant keeps its detached ancestors and siblings usable. Last release after adoption schedules the *current* document. Traverse attached and detached roots at shutdown so detached forms and forms allocated before the first view receive teardown. Repeated churn must return to a steady allocation level. [Retirement and form teardown](../../lambda-input/lambda/input/css/dom_lifecycle.cpp) · [View shutdown](../../radiant/radiant/ui_context.cpp)
 - **Physical storage.** Factories know whether they constructed an arena node, an embedded Input occurrence, or a view-owned synthetic box. Carry that provenance with the allocation. Derive fixed sizes by type and preserve the original capacity of an inline text allocation even after its string changes. Use the existing element/Attr storage-owner fields for adoption and keep an owned replacement string's physical pool with its text storage. Recycle through `arena_retire(physical_arena, address, exact_size)` under D5.1.4. A Mark import must establish typed embedded provenance or use the source mapping before reading a prefix. Arena address membership alone cannot establish the object's type. [Factories](../../lambda-input/lambda/input/css/dom_element.cpp) · [Storage owners](../../lambda-input/lambda/input/css/dom_element.hpp)
 - **Adoption and external handles.** Carry the logical document with the live node, including detached character data. Retain the physical storage owner across adoption. A strong holder releases against the same live node even if its current document or document-local ID has changed. Preserve script-visible identity via the existing wrapper. Rebind document-specific range, selection, and cache membership at the transfer boundary. Keep the generation check at the host boundary under D5.5.1. A live holder can safely check its identity. Use an immutable origin identity for keys that must survive adoption and keep the destination event-log ID document-local. Release cannot depend on looking up the old ID. Before changing a subtree, preflight all owner transfers including attributes and shadow roots. On failure the source tree, holds, and physical owners must still be usable. The host must keep required storage alive or revoke its outstanding handles before document/realm destruction. Keep allocator retention acyclic on adopt-and-return. [Adoption implementation](../../lambda/dom/dom.cpp) · [GC and adoption regressions](../../test/test_radiant_core_gtest.cpp)
 - **Mark backing and precise GC roots.** Embedded elements, text, and comments already expose their backing. For a distinct Mark source, bind the occurrence's source key at construction and maintain the existing source-to-result mapping required by D5.5.3. Record actual borrowed type/data ownership on that binding and end it on copy-on-write. Removing an older occurrence must preserve the mapping to a newer one. Only a managed value retained beyond the call gets a stable registered root slot, its physical heap owner, and any compaction fixups. Register before publication and unregister on replacement, retirement, or host teardown. Input-owned values incur zero GC root entries. Keep this exception in the host under D5.5.2 and D6.3.3. The native archive remains runtime-independent under D9.1.1v4 and D9.1.3v2. [Source mapping and storage release](../../lambda-input/lambda/input/css/dom_element.cpp) · [Host GC bridge](../../lambda/module/radiant/radiant_dom_bridge.cpp)
 
-## Where reference counting pays for views and properties
+### Where reference counting pays for views and properties
 
 | Object | Recommended ownership |
 |---|---|
@@ -93,7 +127,7 @@ A wrapper's existing GC weak-slot callback releases its native hold. Preserve th
 
 This preserves VR1–VR6 and VR10. A shared descriptor's count protects the memory and resources covered by that descriptor's ownership. It cannot establish the lifetime of a DOM node mentioned by the descriptor. [Canonical prop ownership](Radiant_Design_View_Reuse.md) · [Page generation leases](../../radiant/radiant/view_tree_model.cpp) · [Style payload release](../../lambda-input/lambda/input/css/style_epoch.cpp) · [Shared count primitive](../../lambda-input/lib/ref_count.h)
 
-## Cutover and acceptance
+## Original cutover and acceptance plan
 
 1. Inventory each persistent pointer and address-only ownership probe by producer, consumer, invalidating operation, and teardown. Give each a borrow, an owned snapshot, or an external hold. Start with one weak path (CSS anchor or scroll snap) and one durable path (range endpoints or queued events). A weak-cache miss must rebuild the correct result. A live range or wrapper must retain its observable node across unrelated edits.
 2. Migrate the tree writers, allocation provenance, adoption, and feature-owned teardown. In a development build, run the old registry as an independent observer. Compare actual holds, tree reachability, GC roots, and retirement sizes at mutation boundaries. Have the verifier report dangling edges before the recycler runs. Production correctness must pass with this instrumentation compiled out under D5.2.4.

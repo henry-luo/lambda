@@ -46,8 +46,14 @@ let KEYS = [["W / ↑", "Accelerate"], ["S / ↓", "Brake, then reverse"], ["A D
     ["M", "Start or stop a courier run"], ["O", "Auto drive"], ["R", "Put the car back on the road"], ["J", "Jump to the next place on the open road"],
     ["P / Esc", "Pause"], ["Drag", "Look around"]]
 
+fn stage_scene(st) element {
+    let look = sc.LOOKS[st.look];
+    // the live controls edit these DOM attributes as numeric text.
+    sc.scene(st, {exposure: string(look.exposure), 'environment-intensity': string(look.env_i)})
+}
+
 pub fn page(st) element => <div id: "midtown", class: "drive", 'data-started': "false", 'data-help': "false", 'data-paused': "false", *[
-    <div id: "stage", class: "stage", *[sc.scene(st)]>,
+    <div id: "stage", class: "stage", *[stage_scene(st)]>,
     <header class: "panel location", *[
         <div class: "brand", "MIDTOWN">, <div id: "district", class: "district", *[city.district(st.car.x, st.car.z)]>,
         <div id: "street", class: "street", *[city.street(st.car.x, st.car.z)]>,

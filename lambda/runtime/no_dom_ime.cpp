@@ -16,6 +16,10 @@ bool dom_is_comment_tag(const char* tag_name) {
         strcmp(tag_name, "#comment") == 0 || str_ieq_cstr(tag_name, "!DOCTYPE"));
 }
 
+bool dom_child_links_valid(DomElement*) { return false; }
+void dom_node_cancel_detached(DomDocument*, DomNode*) {}
+DomElement* build_dom_tree_from_element_detached(Element*, DomDocument*, DomElement*) { return nullptr; }
+DomText* DomText::create_detached_copy(DomDocument*, const char*, size_t) { return nullptr; }
 void dom_unlink_from_sibling_chain(DomNode*) {}
 bool dom_node_registry_owns(DomDocument*, DomNode*) { return false; }
 bool dom_node_registry_register(DomDocument*, DomNode*, size_t, bool) { return false; }

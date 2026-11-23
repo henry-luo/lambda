@@ -7,7 +7,7 @@ const puppeteer = require('puppeteer');
 const {pngLibrary} = require('./compare_snapshots.cjs');
 const {parseCsv, serializeCsv} = require('../../utils/online_pages.cjs');
 const {defaultRenderTimeoutMs, selectWork, readLambdaDiagnostics,
-    captureBrowser, hasPng, promoteSnapshot} = require('./capture_snapshots.cjs');
+    captureBrowser, runLambdaRender, parseOptions, hasPng, promoteSnapshot} = require('./capture_snapshots.cjs');
 
 const root = path.resolve(__dirname, '../..');
 fs.mkdirSync(path.join(root, 'temp'), {recursive: true});
@@ -23,6 +23,11 @@ before(async () => {
     server = http.createServer((request, response) => {
         if (request.url === '/denied') {
             response.writeHead(403, {'Set-Cookie': 'private=value', 'Server': 'local-origin'}).end('denied');
+        } else if (request.url === '/http-redirect') {
+            response.writeHead(302, {'Location': '/denied'}).end();
+        } else if (request.url === '/optional-denied') {
+            response.writeHead(200, {'Content-Type': 'text/html'}).end(
+                '<body>loaded<img src="/denied"><iframe src="/denied"></iframe></body>');
         } else if (request.url === '/slow') {
             response.setHeader('Content-Type', 'text/html');
             response.end('<body>waiting<img src="/held-resource"></body>');
@@ -85,6 +90,26 @@ test('an HTTP rejection cannot become a successful page snapshot', async () => {
     assert.equal(diagnostic.document.text, 'denied');
     assert.equal(fs.readFileSync(diagnosticPath, 'utf8').includes('private=value'), false);
 });
+
+for (const [label, route, rejected] of [
+    ['native-denied', '/denied', true],
+    ['native-redirect-denied', '/http-redirect', true],
+    ['native-optional-denied', '/optional-denied', false],
+]) {
+    test('native HTTP response classification: ' + label, async () => {
+        const output = path.join(scratch, label + '.png');
+        const result = await runLambdaRender({label, url: origin + route}, output,
+            parseOptions(['--settle-ms=0'], root), scratch);
+        assert.equal(result.ok, !rejected, result.error);
+        assert.equal(result.loadOk, !rejected);
+        assert.equal(result.exitCode, 0, 'rendering an origin response body remains supported');
+        assert.equal(hasPng(output), true, 'rejected document pixels remain diagnostic output');
+        if (rejected) assert.match(result.error, /HTTP 403 document response/);
+        else assert.match(fs.readFileSync(path.join(scratch, result.log), 'utf8'),
+            /embedded-response: rendering HTTP 403 body/,
+            'the optional frame must actually reach its rejected response');
+    });
+}
 
 test('post-load animation origin excludes resource waits and preserves authored timing', async () => {
     const output = path.join(scratch, 'animation-origin.png');

@@ -290,7 +290,7 @@ struct MirNavigationContext {
 };
 
 // S8.2.5: wildcard members walk items instead of reading a spelled name.
-static inline MIR_reg_t em_wildcard_step(MirEmitter* em, AstFieldNode* node, int wildcard) {
+static inline MIR_reg_t em_wildcard_step(MirEmitter* em, LambdaAstFieldNode* node, int wildcard) {
     MirValue owner = em_require_rep(em,
         em_lower_value(em, node->object, MIR_VALUE_ANY), VALUE_REP_ITEM);
     return em_call_1(em, wildcard == 1 ? "fn_step_items" : "fn_step_closure", MIR_T_I64,

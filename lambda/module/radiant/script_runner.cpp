@@ -2514,7 +2514,7 @@ static bool execute_body_onload_tasks(Runtime* runtime, JsScriptTaskCollection* 
     return true;
 }
 
-static int script_runner_load_block_timeout_ms() {
+static int script_runner_load_block_timeout_ms(NetworkResourceManager* mgr) {
     const char* env = getenv("RADIANT_JS_LOAD_BLOCK_TIMEOUT_MS");
     if (env && env[0]) {
         char* end = nullptr;
@@ -2524,7 +2524,8 @@ static int script_runner_load_block_timeout_ms() {
             return (int)parsed; // INT_CAST_OK: timeout is bounded to a small millisecond count
         }
     }
-    return 250;
+    // required resources use the existing navigation budget, not an optional snapshot grace.
+    return mgr ? mgr->page_load_timeout_ms : 250;
 }
 
 static bool script_runner_find_embedded_navigation(DomNode* node, void* context) {
@@ -2602,6 +2603,7 @@ static bool script_runner_wait_for_load_blockers(Runtime* runtime,
         // load callbacks share bootstrap's mutation batch until the loader commits its cascade.
         RuntimeExecutionScope execution_scope(runtime_get_eval_context(runtime));
         if (mgr) resource_manager_flush_layout_updates(mgr);
+        dom_document_has_pending_work(doc);
         if (scripts_pending()) js_event_loop_pump_nowait();
         if (item_is_error(js_execution_interrupt_status())) return false;
         // element completion precedes window.load; its promise jobs may add another stylesheet.
@@ -2625,7 +2627,7 @@ static bool script_runner_wait_for_load_blockers(Runtime* runtime,
         return true;
     }
 
-    int timeout_ms = script_runner_load_block_timeout_ms();
+    int timeout_ms = script_runner_load_block_timeout_ms(mgr);
     int waited_ms = 0;
     const int poll_ms = 10;
     while (timeout_ms > 0 && waited_ms < timeout_ms) {
@@ -2634,6 +2636,7 @@ static bool script_runner_wait_for_load_blockers(Runtime* runtime,
             doc->fully_loaded = true;
             return true;
         }
+        if (mgr && resource_manager_check_page_timeout(mgr)) break;
 #ifndef _WIN32
         usleep((useconds_t)poll_ms * 1000);
 #endif

@@ -47,11 +47,11 @@ static inline bool mir_descending_sum_pattern(const char* source,
     if (!loop || !plan || !loop->body || loop->body->node_type != AST_NODE_CONTENT) return false;
     AstNode* condition = ast_unwrap_primary(loop->cond);
     if (!condition || condition->node_type != AST_NODE_BINARY) return false;
-    AstBinaryNode* compare = (AstBinaryNode*)condition;
+    LambdaAstBinaryNode* compare = (LambdaAstBinaryNode*)condition;
     AstNode* counter_node = ast_unwrap_primary(compare->left);
     if (compare->op != OPERATOR_GE || !counter_node || counter_node->node_type != AST_NODE_IDENT ||
             !mir_exact_small_number_literal(source, compare->right, 0, allow_float)) return false;
-    NameEntry* counter = ((AstIdentNode*)counter_node)->entry;
+    NameEntry* counter = ((LambdaAstIdentNode*)counter_node)->entry;
     AstNode* first = ((AstListNode*)loop->body)->item;
     AstNode* last = first ? first->next : NULL;
     if (!counter || !first || !last || last->next || first->node_type != AST_NODE_ASSIGN_STAM ||
@@ -64,14 +64,14 @@ static inline bool mir_descending_sum_pattern(const char* source,
     AstNode* sub_node = ast_unwrap_primary(step->value);
     if (!add_node || !sub_node || add_node->node_type != AST_NODE_BINARY ||
             sub_node->node_type != AST_NODE_BINARY) return false;
-    AstBinaryNode* add = (AstBinaryNode*)add_node;
-    AstBinaryNode* sub = (AstBinaryNode*)sub_node;
+    LambdaAstBinaryNode* add = (LambdaAstBinaryNode*)add_node;
+    LambdaAstBinaryNode* sub = (LambdaAstBinaryNode*)sub_node;
     AstNode* reads[] = {ast_unwrap_primary(add->left), ast_unwrap_primary(add->right),
         ast_unwrap_primary(sub->left)};
     NameEntry* expected[] = {sum->target_entry, counter, counter};
     for (int i = 0; i < 3; i++)
         if (!reads[i] || reads[i]->node_type != AST_NODE_IDENT ||
-                ((AstIdentNode*)reads[i])->entry != expected[i]) return false;
+                ((LambdaAstIdentNode*)reads[i])->entry != expected[i]) return false;
     if (add->op != OPERATOR_ADD || sub->op != OPERATOR_SUB ||
             !mir_exact_small_number_literal(source, sub->right, 1, allow_float)) return false;
     *plan = {counter, sum->target_entry};

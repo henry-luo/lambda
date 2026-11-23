@@ -1048,6 +1048,7 @@ TEST_F(RadiantDocumentTest, EditSnapshotsReleaseTheirIndependentNodePins) {
     ASSERT_NE(node, nullptr);
     ASSERT_TRUE(node->is_text());
     ASSERT_NE(radiant_document_ensure_state(document, "edit-history-pin-test"), nullptr);
+    dom_observe_native_pins(document);
     DomNodeRef host_ref = dom_node_ref(host);
     DomNodeRef node_ref = dom_node_ref(node);
     DomEditInvocation invocation = {};
@@ -1216,6 +1217,7 @@ TEST_F(RadiantDocumentTest, NativeMutationRecordPinsAndReleasesItsNodes) {
     ASSERT_NE(target, nullptr);
     ASSERT_NE(radiant_document_ensure_state(document, "native-mutation-record-test"), nullptr);
     dom_js_mutation_records_reset(document);
+    dom_observe_native_pins(document);
     DomNodeRef parent_ref = dom_node_ref(parent);
     DomNodeRef target_ref = dom_node_ref(target);
     radiant_dom_record_mutation_detail(document, DOM_JS_MUTATION_CHILD_INSERT,
@@ -21917,6 +21919,7 @@ TEST_F(RadiantTextLayout, PendingResourceLoadsReleasePinsWithEitherOwner) {
         held.documents[i] = dom_document_create(document->input);
         ASSERT_NE(held.documents[i], nullptr);
         dom_document_borrow_input_resources(held.documents[i]);
+        dom_observe_native_pins(held.documents[i]);
         frames[i] = dom_element_create(held.documents[i], "iframe", nullptr);
         images[i] = dom_element_create(held.documents[i], "img", nullptr);
         ASSERT_NE(frames[i], nullptr); ASSERT_NE(images[i], nullptr);

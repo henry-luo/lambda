@@ -21,7 +21,7 @@ static bool same_function_definition(const AstFuncNode* left,
  * Check if a call expression is a direct recursive call to the given function.
  * Returns true if call_node calls func_node directly (not through a variable).
  */
-bool is_recursive_call(AstCallNode* call_node, AstFuncNode* func_node) {
+bool is_recursive_call(LambdaAstCallNode* call_node, AstFuncNode* func_node) {
     if (!call_node || !func_node || !func_node->name) return false;
 
     AstNode* callee = call_node->function;
@@ -34,7 +34,7 @@ bool is_recursive_call(AstCallNode* call_node, AstFuncNode* func_node) {
 
     // Check if callee is an identifier matching the function name
     if (callee->node_type == AST_NODE_IDENT) {
-        AstIdentNode* ident = (AstIdentNode*)callee;
+        LambdaAstIdentNode* ident = (LambdaAstIdentNode*)callee;
         if (!ident->name || !ident->entry) return false;
 
         // Check if the identifier resolves to our function
@@ -79,7 +79,7 @@ bool has_tail_call(AstNode* expr, AstFuncNode* func_node) {
     switch (expr->node_type) {
     case AST_NODE_CALL_EXPR:
         // Direct call - check if it's recursive
-        return is_recursive_call((AstCallNode*)expr, func_node);
+        return is_recursive_call((LambdaAstCallNode*)expr, func_node);
 
     case AST_NODE_PRIMARY: {
         // Unwrap primary and check inner expression

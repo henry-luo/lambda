@@ -6,7 +6,7 @@
 #include "../type_contract.hpp"
 
 // all incoming-edge proofs use the receiver's formal position (S10.1.2v4).
-static inline int mvp_call_argument_count(AstCallNode* call) {
+static inline int mvp_call_argument_count(LambdaAstCallNode* call) {
     if (!call) return 0;
     AstFuncNode* target = ast_call_has_named_args(call) ? ast_direct_call_function(call) : NULL;
     int supplied = ast_linked_node_count(call->argument) + (call->pipe_inject ? 1 : 0);
@@ -15,7 +15,7 @@ static inline int mvp_call_argument_count(AstCallNode* call) {
     return ((TypeFunc*)target->type)->is_variadic && supplied > fixed ? supplied : fixed;
 }
 
-static inline AstNode* mvp_call_argument(AstCallNode* call, int position) {
+static inline AstNode* mvp_call_argument(LambdaAstCallNode* call, int position) {
     if (!call) return NULL;
     if (ast_call_has_named_args(call)) {
         AstNode* resolved[LAMBDA_MAX_FUNCTION_ARGS] = {};
@@ -73,13 +73,13 @@ static inline bool mvp_direct_callee_node(const AstIndex* index, AstNodeId id) {
     AstNode* consumer = parent < index->count ? index->nodes[parent] : NULL;
     return consumer && consumer->node_type == AST_NODE_CALL_EXPR &&
         !ast_index_call_is_task_launch(index, parent) &&
-        ast_unwrap_primary(((AstCallNode*)consumer)->function) == node;
+        ast_unwrap_primary(((LambdaAstCallNode*)consumer)->function) == node;
 }
 
 static inline AstFuncNode* mvp_function_value_reference(const AstIndex* index, AstNodeId id) {
     AstNode* node = id < index->count ? index->nodes[id] : NULL;
     if (!node || node->node_type != AST_NODE_IDENT) return NULL;
-    NameEntry* entry = ((AstIdentNode*)node)->entry;
+    NameEntry* entry = ((LambdaAstIdentNode*)node)->entry;
     AstNode* definition = entry ? entry->node : NULL;
     if (!definition || !ast_index_node_is_function(definition) || mvp_direct_callee_node(index, id)) return NULL;
     return (AstFuncNode*)definition;
@@ -128,7 +128,7 @@ static inline bool mvp_edit_model_place(MvpFunction* function, AstNode* object) 
     if (!function || !function->handler || !function->view->is_edit) return false;
     object = ast_unwrap_primary_to_leaf(object);
     while (object && (object->node_type == AST_NODE_MEMBER_EXPR || object->node_type == AST_NODE_INDEX_EXPR))
-        object = ast_unwrap_primary_to_leaf(((AstFieldNode*)object)->object);
+        object = ast_unwrap_primary_to_leaf(((LambdaAstFieldNode*)object)->object);
     return object && object->node_type == AST_NODE_CURRENT_ITEM;
 }
 
@@ -322,7 +322,7 @@ struct MvpModuleLocation {
 
 struct MvpHoistedCall {
     MvpHoistedCall* next;
-    AstCallNode* call;
+    LambdaAstCallNode* call;
     MvpBinding* argument;
     const char* helper;
     MirValue result;
@@ -466,7 +466,7 @@ bool mvp_needs_number_home(Type* contract);
 Type* mvp_scalar_success_contract(LambdaMvpModule* module, Type* contract);
 MvpBinding* mvp_null_condition(LambdaMvpModule* module, AstNode* condition,
     Type** present, bool* null_when_true);
-ShapeEntry* mvp_member_field(LambdaMvpModule* module, AstFieldNode* node,
+ShapeEntry* mvp_member_field(LambdaMvpModule* module, LambdaAstFieldNode* node,
     TypeMap** shape = NULL, bool success_only = false);
 Type* mvp_match_type(AstNode* pattern);
 bool mvp_match_arm_covers(Type* subject, AstMatchArm* arm);
@@ -496,17 +496,17 @@ void mvp_refine_guarded_locals(LambdaMvpModule* module, MvpFunction* function);
 bool mvp_native_math(const SysFuncInfo* info, TypeId input);
 Type* mvp_nullable_contract(LambdaMvpModule* module, Type* base);
 Type* mvp_handler_pass_contract(LambdaMvpModule* module, AstHandlerNode* handler, Type* operand);
-AstFieldNode* mvp_string_index(LambdaMvpModule* module, AstNode* node, int depth = 0,
+LambdaAstFieldNode* mvp_string_index(LambdaMvpModule* module, AstNode* node, int depth = 0,
     bool dynamic_key = false);
 struct MvpStringAppendPlan {
-    AstDeclaratorNode* declaration;
+    LambdaAstDeclaratorNode* declaration;
     AstAssignStamNode* assignment;
     MvpBinding* temporary;
     MvpBinding* owner;
     bool transfer;
 };
 bool mvp_string_append_plan(LambdaMvpModule* module, AstNode* first, MvpStringAppendPlan* plan);
-bool mvp_sole_declaration_read(LambdaMvpModule* module, AstDeclaratorNode* declaration, AstNode* read);
+bool mvp_sole_declaration_read(LambdaMvpModule* module, LambdaAstDeclaratorNode* declaration, AstNode* read);
 bool mvp_array_index_present(LambdaMvpModule* module, MvpBinding* binding, AstNode* key);
 MvpBinding* mvp_local_binding(LambdaMvpModule* module, AstNode* node);
 bool mvp_local_storage_stable(LambdaMvpModule* module, MvpBinding* binding, bool writes);
@@ -520,9 +520,9 @@ bool mvp_numeric_region_advance(LambdaMvpModule* module, AstNode* region, MvpNum
 bool mvp_numeric_inline_plan(LambdaMvpModule* module, MvpFunction* function, MvpNumericLoopPlan* plan,
     bool guarded_inputs = false);
 bool mvp_integer_leaf_body(LambdaMvpModule* module, MvpFunction* function, bool allow_calls);
-bool mvp_call_admission_proven(LambdaMvpModule* module, AstCallNode* call,
+bool mvp_call_admission_proven(LambdaMvpModule* module, LambdaAstCallNode* call,
         int depth = 0, bool dense_arrays = false);
-Type* mvp_integer_leaf_result(LambdaMvpModule* module, AstCallNode* call, int depth = 0,
+Type* mvp_integer_leaf_result(LambdaMvpModule* module, LambdaAstCallNode* call, int depth = 0,
         bool dense_arrays = false, uint32_t* expanded_cost = NULL);
 bool mvp_index_loop_plan(LambdaMvpModule* module, AstLoopControlNode* loop, MvpIndexLoopPlan* plan);
 bool mvp_index_function_plan(LambdaMvpModule* module, MvpFunction* function, MvpIndexLoopPlan* plan);

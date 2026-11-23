@@ -39,13 +39,34 @@ fn vertex(k, h) any^ {
     let r = if (city.inside_city(x, z)) null else roads.road_at(x, z);
     {h: carved(h, r), drop: drops(r), road: if (r == null) 99.0 else abs(r.lat)}
 }
-// The corridor index's 32 m cells exclude most vertices. Reuse the natural
-// height there without allocating a per-vertex record.
-let CARVED = [for (k, h in land.NATURAL, let cell = ((k div land.NX) * 10 div 32) * cells.CNX + (k % land.NX) * 10 div 32)
-    if (roads.CELL_HAS_ROAD[cell]) vertex(k, h) else null]
-pub let HEIGHT = [for (k, c in CARVED) if (c == null) land.NATURAL[k] else c.h]
-pub let DROPPED = [for (c in CARVED) if (c == null) false else c.drop]
-pub let ROAD_GAP = [for (c in CARVED) if (c == null) 99.0 else c.road]
+fn first_grid_index(cell: int) int^ => int(ceil(cell * cells.CELL / land.STEP))
+fn carve_grid() any^ {
+    var heights = land.NATURAL
+    var dropped = fill(len(heights), false)^
+    var gaps = fill(len(heights), 99.0)^
+    // visit only the lattice points inside marked corridor cells. The final
+    // row and column are outside road_at's half-open domain.
+    let corridor = [for (cell, has_road in roads.CELL_HAS_ROAD where has_road) cell]
+    let indices = [for (cell in corridor)
+        (let col = cell % cells.CNX, let row = cell div cells.CNX,
+         let rows = first_grid_index(row)^ to min(land.NZ - 2, first_grid_index(row + 1)^ - 1),
+         let cols = first_grid_index(col)^ to min(land.NX - 2, first_grid_index(col + 1)^ - 1),
+         *[for (j in rows, i in cols) j * land.NX + i])]
+    var n = 0
+    while (n < len(indices)) {
+        let k = indices[n]
+        let c = vertex(k, land.NATURAL[k])^
+        heights[k] = c.h
+        dropped[k] = c.drop
+        gaps[k] = c.road
+        n = n + 1
+    };
+    {heights: heights, dropped: dropped, gaps: gaps}
+}
+let CARVED = carve_grid()^
+pub let HEIGHT = CARVED.heights
+pub let DROPPED = CARVED.dropped
+pub let ROAD_GAP = CARVED.gaps
 
 // the terrain height anywhere: carved inside the near grid, natural beyond
 pub fn terrain(x, z) any^ => if (not land.in_near(x, z)) land.natural_at(x, z)

@@ -1,4 +1,46 @@
-const cases=[
+const pathnameCases=[
+ ['pathname writes refresh the serialized URL',`
+ const u=new URL('b','http://a'),p=u.searchParams;u.pathname='c%20d';
+ check(u.pathname==='/c%20d'&&u.href==='http://a/c%20d'&&String(u)===u.href);
+ check(p===u.searchParams);u.pathname='';check(u.href==='http://a/'&&u.pathname==='/');`],
+ ['pathname encodes delimiters and normalizes segments',`
+ const u=new URL('https://example.test:8443/old?q=one#frag');
+ for(const [input,path] of [
+  ['/a b/é?x#y','/a%20b/%C3%A9%3Fx%23y'],
+  ['/a/%2e/%2E%2e/b//','/b//'],
+  ['//new-host/path','//new-host/path'],
+  ['\\\\a\\\\..\\\\b','/b'],
+  ['/tab\\tline\\r\\n/x','/tabline/x'],
+  ['\\t\\r\\n/start','/start'],
+  [String.fromCharCode(94,96,123,125,34,60,62),'/%5E%60%7B%7D%22%3C%3E'],
+  ['/a/%2e-name/.hidden/..x','/a/%2e-name/.hidden/..x']]){
+  u.pathname=input;check(u.pathname===path&&u.href==='https://example.test:8443'+path+'?q=one#frag');
+  check(u.host==='example.test:8443'&&u.search==='?q=one'&&u.hash==='#frag');
+ }
+ const file=new URL('file:///C:/old');file.pathname='/D|/a/../b';check(file.href==='file:///D:/b');`],
+ ['pathname keeps live query ownership',`
+ const u=new URL('https://example.test/old?x=a%20b#frag'),p=u.searchParams;
+ u.pathname='/new';check(p===u.searchParams&&p.get('x')==='a b'&&u.search==='?x=a%20b');
+ p.set('x','next value');check(u.href==='https://example.test/new?x=next+value#frag');
+ Object.freeze(u);u.pathname='/last';check(u.href==='https://example.test/last?x=next+value#frag'&&p===u.searchParams);
+ Object.defineProperty(p,'unrelated',{value:true});check(p.get('x')==='next value');`],
+ ['pathname preserves opaque paths and non-special backslashes',`
+ for(const initial of ['mailto:person@example.test?x=1#frag','data:text/plain,a/b']){
+  const u=new URL(initial),path=u.pathname;u.pathname='/replacement';check(u.href===initial&&u.pathname===path);
+ }
+ const u=new URL('custom:/old/path');u.pathname='next\\\\part?x#y';
+ check(u.pathname==='/next\\\\part%3Fx%23y'&&u.href==='custom:/next\\\\part%3Fx%23y');`],
+ ['pathname conversion retains current URL state through collection',`
+ const u=new URL('https://example.test/old?a=1'),p=u.searchParams;
+ u.pathname={toString(){u.href='https://other.test:8443/current?b=2#frag';if(typeof gc==='function')gc();return '/after';}};
+ check(u.href==='https://other.test:8443/after?b=2#frag'&&p===u.searchParams&&p.get('b')==='2');
+ const before=u.href,marker={};let caught;try{u.pathname={toString(){throw marker}}}catch(error){caught=error}
+ check(caught===marker&&u.href===before);
+ const set=Object.getOwnPropertyDescriptor(URL.prototype,'pathname').set;
+ Object.defineProperty(u,'pathname',{value:'shadow'});set.call(u,'/private');
+ check(u.pathname==='shadow'&&URL.prototype.toString.call(u)==='https://other.test:8443/private?b=2#frag');`],
+];
+const cases=[...pathnameCases,
  ['parameter mutations update their owner',`
  const u=new URL('https://example.test/path?b=2&a=x%20y#frag'),p=u.searchParams;
  check(p===u.searchParams&&p.get('a')==='x y');p.set('config',encodeURIComponent('{"x":"a+b c"}'));
@@ -71,4 +113,4 @@ const cases=[
 function fixtureHtml(source){return `<!doctype html><style>html,body{margin:0}#result{width:30px;height:30px;background:red}</style><div id=result></div><script>
 let okay=true;function check(value){okay=okay&&!!value}try{${source}}catch(error){okay=false;console.log('URL_FIXTURE_ERROR',error.name,error.message)}
 if(okay)document.getElementById('result').style.background='lime';</script>`}
-module.exports={cases,fixtureHtml};
+module.exports={cases,pathnameCases,fixtureHtml};

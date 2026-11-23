@@ -366,7 +366,7 @@ static inline MIR_reg_t em_capture_slot_read(MirEmitter* em, MIR_reg_t environme
 // task entries use boxed functions and a boxed-value argument array (S13.1.1v3).
 // S13.1.3v2: select stages all handles and its named timeout in source order;
 // both MIR frontends use the same rooted variadic-to-array bridge.
-static inline MIR_reg_t em_select_tasks(MirEmitter* em, AstCallNode* call) {
+static inline MIR_reg_t em_select_tasks(MirEmitter* em, LambdaAstCallNode* call) {
     MIR_reg_t handles = em_call_0(em, "array", MIR_T_P, true);
     if (em->root_call_value) em->root_call_value(em->call_owner, handles, JIT_VALUE_RAW_GC_POINTER);
     MIR_reg_t timeout = em_new_reg(em, "select_timeout", MIR_T_I64);
@@ -393,7 +393,7 @@ static inline MIR_reg_t em_select_tasks(MirEmitter* em, AstCallNode* call) {
 
 static inline MIR_reg_t em_start_task(MirEmitter* em, AstStartNode* start,
         MirResultCheck check_arguments) {
-    AstCallNode* call = start->call;
+    LambdaAstCallNode* call = start->call;
     MirValue function = em_require_rep(em,
         em_lower_value(em, call->function, MIR_VALUE_ANY), VALUE_REP_ITEM);
     if (em->root_call_value) em->root_call_value(em->call_owner, function.reg, JIT_VALUE_BOXED_ITEM);

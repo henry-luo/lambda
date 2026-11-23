@@ -601,6 +601,18 @@ static Item js_range_fragment_operation(Item self_v,
 }
 JS_FORWARD_ITEM(js_range_extract_contents, (Item self_v), js_range_fragment_operation, (self_v, dom_range_extract_contents, "extractContents failed", false))
 JS_FORWARD_ITEM(js_range_clone_contents, (Item self_v), js_range_fragment_operation, (self_v, dom_range_clone_contents, "cloneContents failed", false))
+
+extern "C" Item dom_range_create_contextual_fragment(Item self_v, Item markup) {
+    RootFrame roots(3);
+    Rooted<Item> owner(roots, self_v), source(roots, markup), start(roots, ItemNull);
+    if (!range_from(owner.get())) return throw_dom_exception("TypeError", "Range receiver required");
+    source.set(js_to_string(source.get()));
+    JS_RETURN_IF_ERROR(source.get());
+    // DOMString conversion may move the live range; choose its context afterwards.
+    start.set(js_range_get_start_container(owner.get()));
+    return dom_parse_contextual_fragment(start.get(), source.get());
+}
+
 JS_FORWARD_ITEM(js_range_insert_node, (Item self_v, Item node_v), js_range_node_operation, (self_v, node_v, dom_range_insert_node, "insertNode failed"))
 JS_FORWARD_ITEM(js_range_surround_contents, (Item self_v, Item node_v), js_range_node_operation, (self_v, node_v, dom_range_surround_contents, "surroundContents failed"))
 

@@ -940,7 +940,7 @@ JsAstNode* build_js_member_from_children(JsTranspiler* tp, SourceSpan span,
     if (!computed && property->node_type == AST_NODE_IDENT) {
         JsIdentifierNode* name = (JsIdentifierNode*)property;
         if (name->name && name->name->len > 0 && name->name->chars[0] != '#') {
-            name->js_property_key_slot = ++tp->runtime_literal_count;
+            member->js_property_key_slot = ++tp->runtime_literal_count;
         }
     }
     Type* resolved = resolve_js_member_type(member);

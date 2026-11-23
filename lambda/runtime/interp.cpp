@@ -767,7 +767,7 @@ public:
 
 static Item eval_expr(InterpFrame* f, AstNode* node);
 // const-value resolution used by CONST-mode evaluation (RC3.3, RC15)
-static AstDeclaratorNode* interp_const_binding_decl(AstNode* node);
+static LambdaAstDeclaratorNode* interp_const_binding_decl(AstNode* node);
 static bool interp_const_init_value(Transpiler* tp, AstNode* init, Item* out);
 static Item interp_item_at(Item source, int64_t index);
 static Item eval_content(InterpFrame* f, AstListNode* list_node, bool hoist_functions);
@@ -985,7 +985,7 @@ static const InterpMirExport* interp_mir_export_lookup(Script* owner,
     StrBuf* name = strbuf_new_cap(64);
     if (decl->node_type == AST_NODE_VARIABLE_DECLARATOR) {
         // a declarator keeps its name after id/init, not at AstNamedNode's offset
-        const String* var_name = ((const AstDeclaratorNode*)decl)->name;
+        const String* var_name = ((const LambdaAstDeclaratorNode*)decl)->name;
         if (var_name) {
             strbuf_append_str(name, "_gvar_");
             strbuf_append_str_n(name, var_name->chars, var_name->len);
@@ -1151,7 +1151,7 @@ static Item interp_read_binding(InterpFrame* f, NameEntry* entry) {
     return interp_read_binding_at_capture_slot(f, entry, -1);
 }
 
-static Item interp_read_identifier(InterpFrame* f, const AstIdentNode* ident) {
+static Item interp_read_identifier(InterpFrame* f, const LambdaAstIdentNode* ident) {
     int capture_slot = -1;
     if (f && f->fn && ident && ident->interp_capture_owner ==
             (const AstNode*)f->fn) {
@@ -1419,7 +1419,7 @@ static Item interp_coerce_parameter_binding(InterpFrame* f, Item value,
         {"type parameter binding", NULL, NULL, NULL, 0};
     static const LambdaBoundary declared_parameter_label =
         {"declared parameter binding", NULL, NULL, NULL, 0};
-    const InterpBoundaryPlan* plan = parameter->entry ? parameter->entry->interp_boundary : NULL;
+    const InterpBoundaryPlan* plan = parameter->entry ? lambda_binding_fields(parameter->entry).interp_boundary : NULL;
     // a resolved identity action needs neither parameter nor contract classification
     if (interp_boundary_value_proven(value, plan)) return value;
     TypeParam* parameter_type = lambda_type_param(parameter->type);
@@ -1486,7 +1486,7 @@ static bool interp_initialize_binding(InterpFrame* f, NameEntry* entry, Item val
     return true;
 }
 
-static bool interp_bind_declared_value(InterpFrame* f, AstDeclaratorNode* named,
+static bool interp_bind_declared_value(InterpFrame* f, LambdaAstDeclaratorNode* named,
         Item value) {
     if (!named) return false;
     LambdaBoundary boundary = {NULL, interp_format_named_boundary, named->name,
@@ -1494,7 +1494,7 @@ static bool interp_bind_declared_value(InterpFrame* f, AstDeclaratorNode* named,
     interp_locate_boundary(&boundary, f, named);
     Item bound = named->interp_boundary_proven ? value :
         interp_coerce_declared_binding(f, value, named->declared_type,
-            &boundary, named->entry ? named->entry->interp_boundary : NULL);
+            &boundary, named->entry ? lambda_binding_fields(named->entry).interp_boundary : NULL);
     // CW24v2 phase 2: a place-copy binding (`var row = m.rows[i]`) marks the
     // read value so the first write DETACHES -- a real S9.1.2 snapshot --
     // instead of aliasing a child a fresh literal never captured. All T0
@@ -1514,7 +1514,7 @@ static bool interp_bind_declared_value(InterpFrame* f, AstDeclaratorNode* named,
 }
 
 typedef struct InterpStaticMemberNameEntry {
-    const AstIdentNode* source;
+    const LambdaAstIdentNode* source;
     String* runtime_name;
 } InterpStaticMemberNameEntry;
 
@@ -1547,7 +1547,7 @@ static void interp_static_member_names_destroy(InterpState* state) {
 // EvalContext-owned (D5.6.2). Link once per activation instead of storing a
 // foreign NamePool pointer in a reusable AST image.
 static Item interp_static_member_name_item(InterpFrame* frame,
-        const AstIdentNode* source) {
+        const LambdaAstIdentNode* source) {
     if (!frame || !frame->st || !source || !source->name) return ItemError;
     InterpState* state = frame->st;
     if (!state->static_member_names) {
@@ -1579,7 +1579,7 @@ static Item interp_eval_cow_path_key(InterpFrame* f, AstNode* key_node,
     AstNode* key = ast_unwrap_primary(key_node);
     if (is_member && key && key->node_type == AST_NODE_IDENT) {
         // a dotted segment is a literal property key, never a binding read.
-        AstIdentNode* name = (AstIdentNode*)key;
+        LambdaAstIdentNode* name = (LambdaAstIdentNode*)key;
         return interp_static_member_name_item(f, name);
     }
     return eval_expr(f, key_node);
@@ -1590,7 +1590,7 @@ static Item interp_eval_cow_path_key(InterpFrame* f, AstNode* key_node,
 // statements both split a target into (object, key) and must agree on this.
 static Item interp_eval_member_key(InterpFrame* f, AstNode* field) {
     if (field && field->node_type == AST_NODE_IDENT) {
-        return interp_static_member_name_item(f, (AstIdentNode*)field);
+        return interp_static_member_name_item(f, (LambdaAstIdentNode*)field);
     }
     return eval_expr(f, field);
 }
@@ -1719,7 +1719,7 @@ static Item eval_unary(InterpFrame* f, AstUnaryNode* node) {
 static bool interp_fast_int_apply(Operator op, int64_t left, int64_t right,
         int64_t* result);
 
-static Item eval_binary(InterpFrame* f, AstBinaryNode* node) {
+static Item eval_binary(InterpFrame* f, LambdaAstBinaryNode* node) {
     // `and`/`or` short-circuit before the right operand is evaluated (S10.2.3);
     // truthiness is by tag through the shipped helper (S3.1/S3.2).
     if (node->op == OPERATOR_AND || node->op == OPERATOR_OR) {
@@ -1823,7 +1823,7 @@ static Item interp_call_with_borrowed(Function* fn, const Item* args, int argc,
 // receives it at return. Without a channel (no caller home), keep the old
 // in-place behaviour: a replacement could not reach the caller at all.
 static Item interp_read_store_owner(InterpFrame* f, NameEntry* root,
-        const AstAssignNode* store) {
+        const LambdaAstAssignNode* store) {
     Item owner = interp_read_binding(f, root);
     if (!root->is_var_param || !store->var_root_unshare) return owner;
     if (!root->storage_assigned || (uint32_t)root->slot >= 32 ||
@@ -1839,7 +1839,7 @@ static Item interp_read_store_owner(InterpFrame* f, NameEntry* root,
 static void interp_note_var_param_marked(InterpFrame* f, AstNode* source) {
     AstNode* node = ast_cow_value_source(source);
     if (!f || !node || node->node_type != AST_NODE_IDENT) return;
-    NameEntry* entry = ((AstIdentNode*)node)->entry;
+    NameEntry* entry = ((LambdaAstIdentNode*)node)->entry;
     if (!entry || !entry->is_var_param || !entry->storage_assigned ||
             (uint32_t)entry->slot >= 32) return;
     f->var_marked_mask |= 1u << entry->slot;
@@ -1937,7 +1937,7 @@ static bool interp_typed_place_assignment(AstNode* node) {
     AstCowPath path = {};
     if (!ast_collect_cow_path(&path, assignment->object) ||
             !path.root || path.root->node_type != AST_NODE_IDENT) return false;
-    NameEntry* root = ((AstIdentNode*)path.root)->entry;
+    NameEntry* root = ((LambdaAstIdentNode*)path.root)->entry;
     return root && (ast_declared_type_is_map(root->declared_type) ||
         ast_declared_array_element(root->declared_type));
 }
@@ -2021,7 +2021,7 @@ static bool interp_borrow_place_leaf(InterpFrame* f, AstNode* arg, Item* leaf,
             place.root->node_type != AST_NODE_IDENT) {
         return false;
     }
-    NameEntry* root_entry = ((AstIdentNode*)place.root)->entry;
+    NameEntry* root_entry = ((LambdaAstIdentNode*)place.root)->entry;
     if (!root_entry) return false;
     Scratch root_slot(f);
     root_slot.set(interp_read_binding(f, root_entry));
@@ -2056,7 +2056,7 @@ static bool interp_borrow_place_leaf(InterpFrame* f, AstNode* arg, Item* leaf,
 // leaf after its root and spine are prepared. The native receives the home
 // addresses, never rooted as values. Every home is written back on every
 // return, also on an error result, after the kind check (D7.6.4 step 5).
-static Item interp_call_native_var_proc(InterpFrame* f, AstCallNode* node,
+static Item interp_call_native_var_proc(InterpFrame* f, LambdaAstCallNode* node,
         SysFuncInfo* sinfo, int argc, const Item* injected) {
     if (argc > 5) {
         log_error("interp: native var procedure '%s' arity %d exceeds the dispatch table",
@@ -2079,7 +2079,7 @@ static Item interp_call_native_var_proc(InterpFrame* f, AstCallNode* node,
         }
         AstNode* arg = ast_unwrap_primary(a);
         if (arg && arg->node_type == AST_NODE_IDENT) {
-            roots[i] = ((AstIdentNode*)arg)->entry;
+            roots[i] = ((LambdaAstIdentNode*)arg)->entry;
             continue;
         }
         AstCowPath place = {};
@@ -2089,7 +2089,7 @@ static Item interp_call_native_var_proc(InterpFrame* f, AstCallNode* node,
                 sinfo->name, i + 1);
             return ItemError;
         }
-        roots[i] = ((AstIdentNode*)place.root)->entry;
+        roots[i] = ((LambdaAstIdentNode*)place.root)->entry;
         is_place[i] = true;
         Scratch path_slot(f);
         if (!interp_eval_place_keys(f, &place, interp_read_binding(f, roots[i]),
@@ -2174,7 +2174,7 @@ static Item interp_call_native_var_proc(InterpFrame* f, AstCallNode* node,
 // LR03-13: a call through a declared function-type contract crosses that
 // contract's return where it is made, as a declared return does (S7.7.1); the
 // failure is the call's value, like a rejected argument (S7.7.3).
-static Item interp_check_contract_return(InterpFrame* f, AstCallNode* node,
+static Item interp_check_contract_return(InterpFrame* f, LambdaAstCallNode* node,
         Item result, Scratch& callee_slot) {
     Type* contract = ast_call_contract_return(node);
     if (!contract || item_is_error(result) || interp_frame_pending(f)) return result;
@@ -2207,7 +2207,7 @@ static Item interp_call_argument(InterpFrame* f, AstNode* source, bool snapshot)
     return value;
 }
 
-static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
+static Item eval_call(InterpFrame* f, LambdaAstCallNode* node, const Item* injected,
         List* output_destination = nullptr, bool* emitted = nullptr) {
     InterpCallSiteScope call_site(f, node);
     int source_argc = node->interp_call_shape_planned
@@ -2224,8 +2224,8 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
     TypeFunc* direct_signature = direct_fn && ((AstNode*)direct_fn)->type &&
             ((AstNode*)direct_fn)->type->type_id == LMD_TYPE_FUNC
         ? (TypeFunc*)((AstNode*)direct_fn)->type : NULL;
-    AstIdentNode* imported_ident = callee && callee->node_type == AST_NODE_IDENT
-        ? (AstIdentNode*)callee : NULL;
+    LambdaAstIdentNode* imported_ident = callee && callee->node_type == AST_NODE_IDENT
+        ? (LambdaAstIdentNode*)callee : NULL;
     bool cross_lang_js_call = imported_ident && imported_ident->entry &&
         lambda_import_is_js(imported_ident->entry->import);
     if (f->st->mode != EvalMode::RUNTIME) {
@@ -2473,7 +2473,7 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
             return interp_call_native_var_proc(f, node, sinfo, argc, injected);
         AstNode* owner_arg = !injected ? ast_unwrap_primary(node->argument) : NULL;
         NameEntry* owner_entry = owner_arg && owner_arg->node_type == AST_NODE_IDENT
-            ? ((AstIdentNode*)owner_arg)->entry : NULL;
+            ? ((LambdaAstIdentNode*)owner_arg)->entry : NULL;
         if (sinfo && owner_entry && !owner_entry->import &&
                 (sinfo->fn == SYSPROC_PUSH || sinfo->fn == SYSPROC_SPLICE ||
                  sinfo->fn == SYSPROC_VMAP_SET)) {
@@ -2612,18 +2612,18 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
         return sresult;
     }
 
-    AstFieldNode* method_member = callee && callee->node_type == AST_NODE_MEMBER_EXPR
-        ? (AstFieldNode*)callee : NULL;
+    LambdaAstFieldNode* method_member = callee && callee->node_type == AST_NODE_MEMBER_EXPR
+        ? (LambdaAstFieldNode*)callee : NULL;
     AstNode* method_name_node = method_member
         ? ast_unwrap_primary(method_member->field) : NULL;
     AstNode* receiver_node = method_member
         ? ast_unwrap_primary(method_member->object) : NULL;
-    AstIdentNode* method_name = method_name_node &&
+    LambdaAstIdentNode* method_name = method_name_node &&
             method_name_node->node_type == AST_NODE_IDENT
-        ? (AstIdentNode*)method_name_node : NULL;
-    AstIdentNode* receiver_ident = receiver_node &&
+        ? (LambdaAstIdentNode*)method_name_node : NULL;
+    LambdaAstIdentNode* receiver_ident = receiver_node &&
             receiver_node->node_type == AST_NODE_IDENT
-        ? (AstIdentNode*)receiver_node : NULL;
+        ? (LambdaAstIdentNode*)receiver_node : NULL;
     TypeObject* static_receiver_type = method_member && method_member->object &&
             method_member->object->type &&
             type_nominal_record(method_member->object->type) != NULL
@@ -3157,7 +3157,7 @@ static Item eval_array(InterpFrame* f, AstArrayNode* node) {
         // `let` bindings inside an array literal are transparent: they bind but
         // contribute no element.
         if (item->node_type == AST_NODE_VARIABLE_DECLARATOR) {
-            AstDeclaratorNode* named = (AstDeclaratorNode*)item;
+            LambdaAstDeclaratorNode* named = (LambdaAstDeclaratorNode*)item;
             Item bound = eval_expr(f, named->init);
             if (interp_frame_pending(f)) return acc.get();
             if (!interp_bind_declared_value(f, named, bound)) {
@@ -3647,7 +3647,7 @@ static bool interp_pattern_matches(InterpFrame* f, AstNode* pattern, Scratch& sc
 
     // Union patterns (A | B) match if any alternative does.
     if (pattern->node_type == AST_NODE_BINARY_TYPE) {
-        AstBinaryNode* bi = (AstBinaryNode*)pattern;
+        LambdaAstBinaryNode* bi = (LambdaAstBinaryNode*)pattern;
         if (bi->op == OPERATOR_UNION) {
             return interp_pattern_matches(f, bi->left, scrut) ||
                    interp_pattern_matches(f, bi->right, scrut);
@@ -3745,7 +3745,7 @@ static Item interp_iter_val_at(Item source, SymbolKeyList* keys, int64_t index,
 // S10.1.5v3: `x that p` reads x as one item -- a collection is not walked --
 // and answers with x when p is truthy of it, null otherwise. Mirrors
 // emit_that_proviso_value; `~` is bound as a constraint binds its candidate.
-static Item eval_that_proviso(InterpFrame* f, AstBinaryNode* node) {
+static Item eval_that_proviso(InterpFrame* f, LambdaAstBinaryNode* node) {
     Item left_value = eval_expr(f, node->left);
     if (interp_frame_pending(f)) return left_value;
     Scratch subject(f);
@@ -3764,7 +3764,7 @@ static Item eval_that_proviso(InterpFrame* f, AstBinaryNode* node) {
 // Mirrors transpile_pipe: `a |> b` maps b over a's members with `~`/`~#` bound,
 // `a |: b` filters a by b, and a `~`-free `a |> f(x)` injects a as f's first
 // argument. A scalar left operand is lifted to a one-element stream.
-static Item eval_pipe(InterpFrame* f, AstBinaryNode* node) {
+static Item eval_pipe(InterpFrame* f, LambdaAstBinaryNode* node) {
     if (node->op == OPERATOR_THAT) return eval_that_proviso(f, node);
     Item left_value = eval_expr(f, node->left);
     if (interp_frame_pending(f)) return left_value;
@@ -3778,7 +3778,7 @@ static Item eval_pipe(InterpFrame* f, AstBinaryNode* node) {
         AstNode* target = ast_unwrap_primary(node->right);
         Item piped = left.get();
         if (target && target->node_type == AST_NODE_CALL_EXPR) {
-            AstCallNode* call = (AstCallNode*)target;
+            LambdaAstCallNode* call = (LambdaAstCallNode*)target;
             AstNode* callee = ast_unwrap_primary(call->function);
             TypeFunc* signature = lambda_type_func_signature(callee ? callee->type : NULL);
             if ((!callee || callee->node_type != AST_NODE_SYS_FUNC) &&
@@ -3891,7 +3891,7 @@ static bool interp_for_apply_row_clauses(ForCtx* fc, bool* keep) {
     *keep = true;
     for (AstNode* decl = fc->node->let_clause; decl; decl = decl->next) {
         if (decl->node_type == AST_NODE_VARIABLE_DECLARATOR) {
-            AstDeclaratorNode* named = (AstDeclaratorNode*)decl;
+            LambdaAstDeclaratorNode* named = (LambdaAstDeclaratorNode*)decl;
             Item bound = eval_expr(f, named->init);
             if (interp_frame_pending(f)) return false;
             if (!interp_bind_declared_value(f, named, bound)) return false;
@@ -4594,7 +4594,7 @@ static Item eval_element(InterpFrame* f, AstElementNode* node) {
 // same runtime entry serves both tiers (S13.1.3v2).
 #ifndef LAMBDA_NO_TASKS
 static Item eval_start(InterpFrame* f, AstStartNode* start_node) {
-    AstCallNode* call = start_node ? start_node->call : NULL;
+    LambdaAstCallNode* call = start_node ? start_node->call : NULL;
     if (!call) return ItemNull;
     if (start_node->mode != START_MODE_TASK) {
         // Worker modes require a separate isolate launcher; never degrade an
@@ -4892,10 +4892,10 @@ static Item interp_emit_output(InterpFrame* f, AstNode* node, uint64_t* destinat
     RootFrame roots(1);
     Rooted<Item> result(roots, ItemNull);
     AstFuncNode* direct = value->node_type == AST_NODE_CALL_EXPR
-        ? ast_direct_call_function((AstCallNode*)value) : nullptr;
+        ? ast_direct_call_function((LambdaAstCallNode*)value) : nullptr;
     bool emitted = false;
     result.set(ast_output_function(direct)
-        ? eval_call(f, (AstCallNode*)value, nullptr, (List*)(uintptr_t)*destination, &emitted)
+        ? eval_call(f, (LambdaAstCallNode*)value, nullptr, (List*)(uintptr_t)*destination, &emitted)
         : interp_eval_sequence_item(f, node));
     if (interp_frame_pending(f)) return interp_signal_payload(f);
     return emitted ? result.get() : output_content_append((List*)(uintptr_t)*destination, result.get());
@@ -4941,7 +4941,7 @@ static Item interp_snapshot_binding_alias(InterpFrame* f, AstNode* expr,
     if (!source) return value;
     bool captures = ast_expr_insertion_needs_capture(source);
     if (source->node_type == AST_NODE_IDENT) {
-        NameEntry* entry = ((AstIdentNode*)source)->entry;
+        NameEntry* entry = ((LambdaAstIdentNode*)source)->entry;
         captures = entry && entry != alias && (entry->cow_owned ||
             entry->is_var_param || ast_parameter_alias_marks(entry, alias));
     }
@@ -4975,7 +4975,7 @@ static void exec_declaration(InterpFrame* f, AstNode* node) {
                 continue;
             }
             if (decl->node_type != AST_NODE_VARIABLE_DECLARATOR) continue;
-            AstDeclaratorNode* named = (AstDeclaratorNode*)decl;
+            LambdaAstDeclaratorNode* named = (LambdaAstDeclaratorNode*)decl;
             Item value = eval_expr(f, named->init);
             if (interp_frame_pending(f)) return;
             if (named->entry && named->entry->cow_borrow_lowered) {
@@ -4984,7 +4984,7 @@ static void exec_declaration(InterpFrame* f, AstNode* node) {
                 AstCowPath borrow_path = {};
                 if (ast_collect_cow_path(&borrow_path, named->init) &&
                         borrow_path.count >= 1 && borrow_path.count <= 3) {
-                    NameEntry* root_entry = ((AstIdentNode*)borrow_path.root)->entry;
+                    NameEntry* root_entry = ((LambdaAstIdentNode*)borrow_path.root)->entry;
                     Scratch root_slot(f);
                     Scratch value_slot(f);
                     Scratch key1(f);
@@ -5065,13 +5065,13 @@ static bool interp_fast_int_expr_shape(AstNode* node) {
             ? interp_fast_int_expr_shape(((AstPrimaryNode*)node)->expr)
             : node->type && node->type->type_id == LMD_TYPE_INT;
     case AST_NODE_IDENT:
-        return ((AstIdentNode*)node)->entry && node->type &&
+        return ((LambdaAstIdentNode*)node)->entry && node->type &&
             node->type->type_id == LMD_TYPE_INT;
     case AST_NODE_UNARY:
         return ((AstUnaryNode*)node)->op == OPERATOR_NEG &&
             interp_fast_int_expr_shape(((AstUnaryNode*)node)->operand);
     case AST_NODE_BINARY: {
-        AstBinaryNode* binary = (AstBinaryNode*)node;
+        LambdaAstBinaryNode* binary = (LambdaAstBinaryNode*)node;
         switch (binary->op) {
         case OPERATOR_ADD: case OPERATOR_SUB: case OPERATOR_MUL:
         case OPERATOR_MOD: case OPERATOR_EQ: case OPERATOR_NE:
@@ -5083,7 +5083,7 @@ static bool interp_fast_int_expr_shape(AstNode* node) {
         }
     }
     case AST_NODE_CALL_EXPR: {
-        AstCallNode* call = (AstCallNode*)node;
+        LambdaAstCallNode* call = (LambdaAstCallNode*)node;
         AstNode* callee = ast_unwrap_primary(call->function);
         if (!callee || callee->node_type != AST_NODE_SYS_FUNC ||
                 !((AstSysFuncNode*)callee)->fn_info ||
@@ -5111,7 +5111,7 @@ static bool interp_fast_int_stmt_shape(AstNode* node) {
         AstAssignStamNode* assign = (AstAssignStamNode*)node;
         NameEntry* target = assign->target_entry;
         if (!target && assign->left && assign->left->node_type == AST_NODE_IDENT) {
-            target = ((AstIdentNode*)assign->left)->entry;
+            target = ((LambdaAstIdentNode*)assign->left)->entry;
         }
         return target && target->declared_type &&
             target->declared_type->type_id == LMD_TYPE_INT &&
@@ -5145,13 +5145,13 @@ static void interp_fast_int_cache_node(InterpFastIntCache* cache, AstNode* node,
         return;
     }
     if (node->node_type == AST_NODE_BINARY) {
-        AstBinaryNode* binary = (AstBinaryNode*)node;
+        LambdaAstBinaryNode* binary = (LambdaAstBinaryNode*)node;
         interp_fast_int_cache_node(cache, binary->left, owner);
         interp_fast_int_cache_node(cache, binary->right, owner);
     } else if (node->node_type == AST_NODE_UNARY) {
         interp_fast_int_cache_node(cache, ((AstUnaryNode*)node)->operand, owner);
     } else if (node->node_type == AST_NODE_CALL_EXPR) {
-        for (AstNode* arg = ((AstCallNode*)node)->argument; arg; arg = arg->next) {
+        for (AstNode* arg = ((LambdaAstCallNode*)node)->argument; arg; arg = arg->next) {
             interp_fast_int_cache_node(cache, arg, owner);
         }
     } else if (node->node_type == AST_NODE_IF_EXPR) {
@@ -5242,7 +5242,7 @@ static bool interp_fast_int_eval(InterpFrame* frame, AstNode* node,
         return true;
     }
     case AST_NODE_IDENT: {
-        NameEntry* entry = ((AstIdentNode*)node)->entry;
+        NameEntry* entry = ((LambdaAstIdentNode*)node)->entry;
         if (!interp_fast_int_read_binding(frame, entry, &out->value)) return false;
         out->boolean = false;
         return true;
@@ -5256,7 +5256,7 @@ static bool interp_fast_int_eval(InterpFrame* frame, AstNode* node,
         return true;
     }
     case AST_NODE_BINARY: {
-        AstBinaryNode* binary = (AstBinaryNode*)node;
+        LambdaAstBinaryNode* binary = (LambdaAstBinaryNode*)node;
         InterpFastIntValue left, right;
         if (!interp_fast_int_eval(frame, binary->left, cache, &left) ||
                 !interp_fast_int_eval(frame, binary->right, cache, &right) ||
@@ -5277,7 +5277,7 @@ static bool interp_fast_int_eval(InterpFrame* frame, AstNode* node,
         }
     }
     case AST_NODE_CALL_EXPR: {
-        AstCallNode* call = (AstCallNode*)node;
+        LambdaAstCallNode* call = (LambdaAstCallNode*)node;
         AstNode* callee = ast_unwrap_primary(call->function);
         AstNode* first = call->argument;
         AstNode* second = first ? first->next : NULL;
@@ -5318,7 +5318,7 @@ static bool interp_fast_int_collect_targets(AstNode* node, int* slots,
         AstAssignStamNode* assign = (AstAssignStamNode*)node;
         NameEntry* target = assign->target_entry;
         if (!target && assign->left && assign->left->node_type == AST_NODE_IDENT) {
-            target = ((AstIdentNode*)assign->left)->entry;
+            target = ((LambdaAstIdentNode*)assign->left)->entry;
         }
         if (!target || target->binding_storage != BINDING_STORAGE_REGISTER ||
                 target->slot < 0) return false;
@@ -5352,7 +5352,7 @@ static bool interp_fast_int_exec(InterpFrame* frame, AstNode* node,
         AstAssignStamNode* assign = (AstAssignStamNode*)node;
         NameEntry* target = assign->target_entry;
         if (!target && assign->left && assign->left->node_type == AST_NODE_IDENT) {
-            target = ((AstIdentNode*)assign->left)->entry;
+            target = ((LambdaAstIdentNode*)assign->left)->entry;
         }
         InterpFastIntValue value;
         if (!target || !interp_fast_int_eval(frame, assign->value, cache, &value) ||
@@ -5403,7 +5403,7 @@ static bool interp_fast_int_linear_operand(AstNode* node,
     node = ast_unwrap_primary(node);
     if (!node) return false;
     if (node->node_type == AST_NODE_IDENT) {
-        out->entry = ((AstIdentNode*)node)->entry;
+        out->entry = ((LambdaAstIdentNode*)node)->entry;
         out->is_constant = false;
         return out->entry && out->entry->declared_type &&
             out->entry->declared_type->type_id == LMD_TYPE_INT;
@@ -5445,7 +5445,7 @@ static bool interp_fast_int_linear_while(InterpFrame* frame, AstWhileNode* loop,
     if (!frame || !loop || !cache || !result ||
             loop->cond->node_type != AST_NODE_BINARY ||
             loop->body->node_type != AST_NODE_CONTENT) return false;
-    AstBinaryNode* condition = (AstBinaryNode*)loop->cond;
+    LambdaAstBinaryNode* condition = (LambdaAstBinaryNode*)loop->cond;
     switch (condition->op) {
     case OPERATOR_EQ: case OPERATOR_NE: case OPERATOR_LT: case OPERATOR_LE:
     case OPERATOR_GT: case OPERATOR_GE: break;
@@ -5462,12 +5462,12 @@ static bool interp_fast_int_linear_while(InterpFrame* frame, AstWhileNode* loop,
         AstAssignStamNode* assign = (AstAssignStamNode*)item;
         NameEntry* target = assign->target_entry;
         if (!target && assign->left && assign->left->node_type == AST_NODE_IDENT) {
-            target = ((AstIdentNode*)assign->left)->entry;
+            target = ((LambdaAstIdentNode*)assign->left)->entry;
         }
         AstNode* value_node = ast_unwrap_primary(assign->value);
         if (!target || !value_node || value_node->node_type != AST_NODE_BINARY ||
                 !interp_fast_int_linear_binding_ok(frame, target)) return false;
-        AstBinaryNode* value = (AstBinaryNode*)value_node;
+        LambdaAstBinaryNode* value = (LambdaAstBinaryNode*)value_node;
         switch (value->op) {
         case OPERATOR_ADD: case OPERATOR_SUB: case OPERATOR_MUL: case OPERATOR_MOD: break;
         default: return false;
@@ -5814,7 +5814,7 @@ static Item exec_binding_assign(InterpFrame* f, AstAssignStamNode* assign,
         rhs->node_type != AST_NODE_CURRENT_ITEM;
     if (!target) target = assign->target_entry;
     if (!target && assign->left && assign->left->node_type == AST_NODE_IDENT) {
-        target = ((AstIdentNode*)assign->left)->entry;
+        target = ((LambdaAstIdentNode*)assign->left)->entry;
     }
     if (!target) {
         log_error("interp: assignment target has no binding");
@@ -5830,7 +5830,7 @@ static Item exec_binding_assign(InterpFrame* f, AstAssignStamNode* assign,
     }
     if (!assign->interp_boundary_proven)
         value = interp_coerce_declared_binding(f, value, target->declared_type,
-            &boundary, target->interp_boundary);
+            &boundary, lambda_binding_fields(target).interp_boundary);
     // S7.7.4v2: publish the new outcome even when validation failed.
     interp_write_binding(f, target, value);
     AstNode* body = f->fn ? ast_unwrap_primary(f->fn->body) : NULL;
@@ -5857,7 +5857,7 @@ static __attribute__((noinline)) Item exec_place_assign_body(InterpFrame* f, Ast
     bool has_path = ca->interp_place || ast_collect_cow_path(&path, ca->object);
     NameEntry* root = ca->interp_place ? ca->interp_place->root : has_path && path.root &&
             path.root->node_type == AST_NODE_IDENT
-        ? ((AstIdentNode*)path.root)->entry : NULL;
+        ? ((LambdaAstIdentNode*)path.root)->entry : NULL;
     if (!root) {
         log_error("interp: compound assignment target is not a simple binding");
         return ItemError;
@@ -5888,7 +5888,7 @@ static __attribute__((noinline)) Item exec_place_assign_body(InterpFrame* f, Ast
         Scratch owner_slot(f);
         owner_slot.set(interp_read_store_owner(f, root, ca));
         if (item_is_error(owner_slot.get())) return owner_slot.get();
-        const InterpBoundaryPlan* boundary_plan = root->interp_boundary;
+        const InterpBoundaryPlan* boundary_plan = lambda_binding_fields(root).interp_boundary;
         bool typed_map = boundary_plan ? boundary_plan->map_contract != NULL
             : ast_declared_type_is_map(root->declared_type);
         bool typed_array = boundary_plan ? boundary_plan->array.array_contract != NULL
@@ -5984,7 +5984,7 @@ static __attribute__((noinline)) Item exec_place_assign_body(InterpFrame* f, Ast
     // is an INDEX_ASSIGN over a map, and lowering picks the setter by owner
     // type too. Each *_cow entry rejects a mismatched owner itself.
     Item replacement;
-    const InterpBoundaryPlan* boundary_plan = root->interp_boundary;
+    const InterpBoundaryPlan* boundary_plan = lambda_binding_fields(root).interp_boundary;
     Type* array_element = boundary_plan ? boundary_plan->store_element
         : ast_declared_array_element(root->declared_type);
     if (path.count == 0 && array_element &&
@@ -6038,7 +6038,7 @@ static Item exec_place_assign(InterpFrame* f, AstNode* node) {
     AstCowPath path = {};
     if (!ast_collect_cow_path(&path, assignment->object) || !path.root ||
             path.root->node_type != AST_NODE_IDENT) return result;
-    NameEntry* root = ((AstIdentNode*)path.root)->entry;
+    NameEntry* root = ((LambdaAstIdentNode*)path.root)->entry;
     // S7.1.3v3/S7.7.6v2: unannotated stores own the same failure boundary;
     // a procedure without an error return must not discard a rejected write.
     if (!root) return result;
@@ -6059,9 +6059,9 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
     // the plan proves these are this function's own slots, so a surrounding
     // view's state overlay cannot shadow them (D7.2.3 / S12.1.3).
     if (node->node_type == AST_NODE_IDENT && node->const_kind == AST_CONST_NONE &&
-            ((const AstIdentNode*)node)->interp_frame_slot_read &&
+            ((const LambdaAstIdentNode*)node)->interp_frame_slot_read &&
             f->st->mode == EvalMode::RUNTIME) {
-        uint32_t slot = (uint32_t)((const AstIdentNode*)node)->entry->slot;
+        uint32_t slot = (uint32_t)((const LambdaAstIdentNode*)node)->entry->slot;
         if (slot < f->scratch_base) return (Item){.item = f->slots[slot]};
     }
     // Execution reads the settled value instead of re-evaluating the same
@@ -6082,20 +6082,20 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         return eval_literal(f, node);
     }
     case AST_NODE_IDENT: {
-        AstIdentNode* ident = (AstIdentNode*)node;
+        LambdaAstIdentNode* ident = (LambdaAstIdentNode*)node;
         NameEntry* entry = ident->entry;
         // An unresolved identifier is an error value, not null: MIR emits the
         // same ItemError carrier so a surrounding handler can recover it.
         if (!entry) return ItemError;
-        if (entry->is_binder && entry->binder) {
-            if (!f->binder_env || entry->binder_slot >= f->binder_count) {
+        if (entry->is_binder && lambda_binding_fields(entry).binder) {
+            if (!f->binder_env || lambda_binding_fields(entry).binder_slot >= f->binder_count) {
                 log_error("interp-binder: unresolved binder '%.*s'", entry->name
                     ? (int)entry->name->len : 0, entry->name ? entry->name->chars : "");
                 return ItemError;
             }
             // an empty nested binder has no encountered value to select from.
-            Type* selected = f->binder_env[entry->binder_slot];
-            return lambda_type_value_from_contract(selected ? selected : entry->binder->bound);
+            Type* selected = f->binder_env[lambda_binding_fields(entry).binder_slot];
+            return lambda_type_value_from_contract(selected ? selected : lambda_binding_fields(entry).binder->bound);
         }
         // A name bound by `type T = …` is a compile-time binding: it denotes
         // the Type* its declaration built, not a slab slot (which a type
@@ -6103,7 +6103,7 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         // mir_is_type_value_node's IDENT arm.
         AstNode* decl = entry ? entry->node : NULL;
         if (decl && decl->node_type == AST_NODE_VARIABLE_DECLARATOR &&
-                ((AstDeclaratorNode*)decl)->is_type_definition) {
+                ((LambdaAstDeclaratorNode*)decl)->is_type_definition) {
             Type* declared = decl->type;
             TypeId tid = LMD_TYPE_ANY;
             TypeType* singleton = lambda_type_node_singleton(declared, &tid);
@@ -6151,7 +6151,7 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         // comes from its declarator -- which may sit at a *higher* node id than
         // the expression using it, so this cannot wait for a published fact.
         if (f->st->mode == EvalMode::CONST_FOLD && f->st->const_owner) {
-            AstDeclaratorNode* declarator = interp_const_binding_decl(node);
+            LambdaAstDeclaratorNode* declarator = interp_const_binding_decl(node);
             Item bound = ItemNull;
             if (declarator && declarator->init &&
                     interp_const_init_value(f->st->const_owner, declarator->init,
@@ -6174,9 +6174,9 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         return item_position ? seq_spread_item(source) : seq_spread_value(source);
     }
     case AST_NODE_BINARY:
-        return eval_binary(f, (AstBinaryNode*)node);
+        return eval_binary(f, (LambdaAstBinaryNode*)node);
     case AST_NODE_PIPE:
-        return eval_pipe(f, (AstBinaryNode*)node);
+        return eval_pipe(f, (LambdaAstBinaryNode*)node);
     case AST_NODE_PIPE_FILE_STAM: {
 #ifdef LAMBDA_NO_FILE_IO
         log_error("interp-profile: file output is excluded");
@@ -6186,7 +6186,7 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         // contract is still the same boxed source/target call as MIR lowering;
         // evaluate the source first so a target allocation cannot observe a
         // stale unrooted source (D6.3.3).
-        AstBinaryNode* pipe = (AstBinaryNode*)node;
+        LambdaAstBinaryNode* pipe = (LambdaAstBinaryNode*)node;
         Scratch source(f);
         source.set(eval_expr(f, pipe->left));
         if (interp_frame_pending(f)) return source.get();
@@ -6228,7 +6228,7 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         return ItemNull;
     }
     case AST_NODE_CALL_EXPR: {
-        AstCallNode* call = (AstCallNode*)node;
+        LambdaAstCallNode* call = (LambdaAstCallNode*)node;
         Item result = eval_call(f, call, NULL);
         if (call->propagate && !interp_frame_pending(f) && item_is_error(result)) {
             // '^' propagation: the error leaves through the function boundary
@@ -6242,7 +6242,7 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
     case AST_NODE_HANDLER_STAM:
         return eval_handler(f, (AstHandlerNode*)node);
     case AST_NODE_MEMBER_EXPR: {
-        AstFieldNode* field = (AstFieldNode*)node;
+        LambdaAstFieldNode* field = (LambdaAstFieldNode*)node;
         Item object_value = eval_expr(f, field->object);
         Scratch obj(f);
         obj.set(object_value);
@@ -6264,7 +6264,7 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         // authority here, exactly as the JIT's obj_tid check is.
         if (field->field && field->field->node_type == AST_NODE_IDENT &&
                 get_type_id(obj.get()) == LMD_TYPE_PATH) {
-            const char* k = ((AstIdentNode*)field->field)->name->chars;
+            const char* k = ((LambdaAstIdentNode*)field->field)->name->chars;
             if (path_is_property_name(k)) return item_attr(obj.get(), k);
         }
         // null totality (S7.1.1) comes from the helper; both operands are
@@ -6272,7 +6272,7 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         return fn_member(obj.get(), key_slot.get());
     }
     case AST_NODE_INDEX_EXPR: {
-        AstFieldNode* field = (AstFieldNode*)node;
+        LambdaAstFieldNode* field = (LambdaAstFieldNode*)node;
         Item object_value = eval_expr(f, field->object);
         Scratch obj(f);
         obj.set(object_value);
@@ -6427,7 +6427,7 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         return fn ? interp_ptr_item(fn) : ItemError;
     }
     case AST_NODE_VARIABLE_DECLARATOR:
-        return eval_expr(f, ((AstDeclaratorNode*)node)->init);
+        return eval_expr(f, ((LambdaAstDeclaratorNode*)node)->init);
     case AST_NODE_KEY_EXPR:
         return eval_expr(f, ((AstNamedNode*)node)->as);
     case AST_NODE_NAMED_ARG:
@@ -6749,8 +6749,8 @@ static void interp_live_in_visit(AstNode* node, void* opaque) {
         scan->ok = false;   // a nested activation has no continuation contract
         return;
     case AST_NODE_IDENT:
-        if (((AstIdentNode*)node)->entry) {
-            arraylist_append(scan->used, ((AstIdentNode*)node)->entry);
+        if (((LambdaAstIdentNode*)node)->entry) {
+            arraylist_append(scan->used, ((LambdaAstIdentNode*)node)->entry);
         }
         break;
     case AST_NODE_ASSIGN_STAM:
@@ -6759,7 +6759,7 @@ static void interp_live_in_visit(AstNode* node, void* opaque) {
         }
         break;
     case AST_NODE_VARIABLE_DECLARATOR:
-        arraylist_append(scan->inner, ((AstDeclaratorNode*)node)->entry);
+        arraylist_append(scan->inner, ((LambdaAstDeclaratorNode*)node)->entry);
         break;
     case AST_NODE_LIST: case AST_NODE_CONTENT:
         interp_live_in_add_scope(scan->inner, ((AstListNode*)node)->vars);
@@ -6849,10 +6849,10 @@ static const char INTERP_LOOP_AT_NAME[] = "__loop_at";
 // A hidden continuation parameter and the identifier the resumed `for` reads
 // it through; both share one fresh binding entry.
 static AstNamedNode* interp_hidden_loop_param(Pool* pool, const char* spelling,
-        Type* type, const AstNode* at, AstIdentNode** ident_out) {
-    NameEntry* entry = (NameEntry*)pool_calloc(pool, sizeof(NameEntry));
+        Type* type, const AstNode* at, LambdaAstIdentNode** ident_out) {
+    NameEntry* entry = lambda_name_entry_alloc(pool);
     AstNamedNode* param = (AstNamedNode*)pool_calloc(pool, sizeof(AstNamedNode));
-    AstIdentNode* ident = (AstIdentNode*)pool_calloc(pool, sizeof(AstIdentNode));
+    LambdaAstIdentNode* ident = (LambdaAstIdentNode*)pool_calloc(pool, sizeof(LambdaAstIdentNode));
     TypeParam* param_type = alloc_type_param(pool, type);
     String* name = interp_pool_string(pool, spelling, strlen(spelling), "");
     if (!entry || !param || !ident || !param_type || !name) return NULL;
@@ -6949,8 +6949,8 @@ static AstFuncNode* interp_build_loop_continuation(Pool* pool, AstFuncNode* def,
         // that walks the T0 snapshot from the position T0 stopped at. Only the
         // copy and its source clause are new; the body and clauses are shared.
         AstForNode* source_for = (AstForNode*)loop;
-        AstIdentNode* walk = NULL;
-        AstIdentNode* at = NULL;
+        LambdaAstIdentNode* walk = NULL;
+        LambdaAstIdentNode* at = NULL;
         AstNamedNode* walk_param = interp_hidden_loop_param(pool, INTERP_LOOP_WALK_NAME,
             &TYPE_ANY, loop, &walk);
         AstNamedNode* at_param = interp_hidden_loop_param(pool, INTERP_LOOP_AT_NAME,
@@ -8104,9 +8104,9 @@ static bool interp_const_init_value(Transpiler* tp, AstNode* init, Item* out) {
 // RC3: the declarator a name is bound by, when that binding is immutable and
 // so cannot change between the fold and the read. A `var`, a parameter, or a
 // type definition is not a const binding.
-static AstDeclaratorNode* interp_const_binding_decl(AstNode* node) {
+static LambdaAstDeclaratorNode* interp_const_binding_decl(AstNode* node) {
     if (!node || node->node_type != AST_NODE_IDENT) return NULL;
-    NameEntry* entry = ((AstIdentNode*)node)->entry;
+    NameEntry* entry = ((LambdaAstIdentNode*)node)->entry;
     if (!entry || entry->is_mutable || entry->is_parameter) return NULL;
     // LR07-17: an imported name points at the provider's own declaration, whose
     // literal spans and fold handles index the provider's source and constant
@@ -8115,7 +8115,7 @@ static AstDeclaratorNode* interp_const_binding_decl(AstNode* node) {
     if (entry->import) return NULL;
     AstNode* decl = entry->node;
     if (!decl || decl->node_type != AST_NODE_VARIABLE_DECLARATOR) return NULL;
-    AstDeclaratorNode* declarator = (AstDeclaratorNode*)decl;
+    LambdaAstDeclaratorNode* declarator = (LambdaAstDeclaratorNode*)decl;
     return declarator->is_type_definition ? NULL : declarator;
 }
 
@@ -8136,7 +8136,7 @@ static bool interp_const_node_supported_depth(AstNode* node, int depth) {
     case AST_NODE_IDENT: {
         // RC3.3: reading an immutable binding whose initializer is itself const
         // is const. The read is a copy of a settled value, not an evaluation.
-        AstDeclaratorNode* declarator = interp_const_binding_decl(node);
+        LambdaAstDeclaratorNode* declarator = interp_const_binding_decl(node);
         return declarator && declarator->init &&
             interp_const_node_supported_depth(declarator->init, depth + 1);
     }
@@ -8160,7 +8160,7 @@ static bool interp_const_node_supported_depth(AstNode* node, int depth) {
             interp_const_node_supported_depth(((AstUnaryNode*)node)->operand, depth);
     }
     case AST_NODE_BINARY: {
-        AstBinaryNode* binary = (AstBinaryNode*)node;
+        LambdaAstBinaryNode* binary = (LambdaAstBinaryNode*)node;
         switch (binary->op) {
         case OPERATOR_ADD: case OPERATOR_SUB: case OPERATOR_MUL:
         case OPERATOR_DIV: case OPERATOR_IDIV: case OPERATOR_MOD: case OPERATOR_POW:
@@ -8179,7 +8179,7 @@ static bool interp_const_node_supported_depth(AstNode* node, int depth) {
         // `is_proc` and `is_async` callees and names the restricted-mode
         // allowlist. Reuse that judgement rather than keeping a second list
         // that could drift from it.
-        AstCallNode* call = (AstCallNode*)node;
+        LambdaAstCallNode* call = (LambdaAstCallNode*)node;
         AstNode* callee = ast_unwrap_primary(call->function);
         if (!callee || callee->node_type != AST_NODE_SYS_FUNC) return false;
         if (ast_call_has_named_args(call)) return false;
@@ -8285,11 +8285,11 @@ bool interp_const_fold_script(Transpiler* tp) {
             // adds instructions (cube3d's `run_cube` grew one `mov` per repeated
             // local constant). `global_vars` is the module scope itself, which
             // is the exact question -- scope kind alone does not answer it.
-            NameEntry* read = ((AstIdentNode*)node)->entry;
+            NameEntry* read = ((LambdaAstIdentNode*)node)->entry;
             NameScope* module_scope = tp->ast_root
                 ? ((AstScript*)tp->ast_root)->global_vars : NULL;
             if (!read || !module_scope || read->scope != module_scope) continue;
-            AstDeclaratorNode* declarator = interp_const_binding_decl(node);
+            LambdaAstDeclaratorNode* declarator = interp_const_binding_decl(node);
             Item bound = ItemNull;
             if (!declarator || !declarator->init ||
                     !interp_const_init_value(tp, declarator->init, &bound)) {
