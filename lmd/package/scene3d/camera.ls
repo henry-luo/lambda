@@ -111,7 +111,8 @@ pub fn control(camera,action) any^ {
         let direction=if (abs(dot(unit(pitch),unit(camera.up)))>0.9999) yaw else pitch,
         {*:camera,position:add(camera.target,direction)})
         else if (action.type=="pan") (let factor=2*half_height(camera,distance)/camera.height,
-            let shift=add(times(camera.right,0-option(action,"dx",0.0)*factor),times(camera.vertical,option(action,"dy",0.0)*factor)),
+            let vertical=if (action.screen_space==false) cross(unit(camera.up),camera.right) else camera.vertical,
+            let shift=add(times(camera.right,0-option(action,"dx",0.0)*factor),times(vertical,option(action,"dy",0.0)*factor)),
             {*:camera,position:add(camera.position,shift),target:add(camera.target,shift)})
         else if (action.type=="zoom") if (camera.type=="orthographic") {*:camera,view_height:camera.view_height*zoom}
             else {*:camera,position:add(camera.target,times(delta,zoom))}

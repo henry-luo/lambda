@@ -11392,28 +11392,6 @@ static bool click_target_is_disabled_control(DocState* state, View* target) {
 
 
 
-/**
- * Calculate dropdown popup dimensions
- */
-static void calculate_dropdown_dimensions(ViewBlock* select, DocState* state,
-                                           float logical_width) {
-    if (!select || !state || !select->form_storage()) return;
-
-    int option_count = select->form_storage()->option_count;
-    if (option_count <= 0) option_count = 1;
-
-    // Maximum visible options
-    int max_visible = FormDefaults::SELECT_MAX_VISIBLE_OPTIONS;
-    int visible_count = (option_count < max_visible) ? option_count : max_visible;
-
-    // the popup uses the native option row, not an author-sized closed control
-    float option_height = form_select_dropdown_row_height(select->form_storage());
-
-    // Calculate popup dimensions
-    doc_state_set_dropdown_geometry(state, state->dropdown_x, state->dropdown_y,
-        logical_width, visible_count * option_height);
-}
-
 static void select_refresh_dropdown_geometry(UiContext* uicon, DocState* state) {
     if (!uicon || !state || !state->open_dropdown) return;
     View* select_view = state->open_dropdown;
@@ -11426,10 +11404,18 @@ static void select_refresh_dropdown_geometry(UiContext* uicon, DocState* state) 
                            &visual_width, &visual_height);
     RdtLogicalPoint document_offset = view_geometry_document_viewport_offset(
         uicon->document, select->doc, scroll_state_resolve_view_geometry);
+    const FormControlProp* form = select->form_storage();
+    int visible_count = min(max(form->option_count, 1), FormDefaults::SELECT_MAX_VISIBLE_OPTIONS);
+    float preferred = visible_count * form_select_dropdown_row_height(form);
+    float anchor_y = document_offset.y + visual_y;
+    float top = min(max(anchor_y, 0.0f), uicon->viewport_height);
+    float bottom = min(max(anchor_y + visual_height, 0.0f), uicon->viewport_height);
+    float below = uicon->viewport_height - bottom;
+    // open above when it offers more room. A short viewport scrolls the remaining options.
+    bool above = preferred > below && top > below;
+    float height = min(preferred, above ? top : below);
     doc_state_set_dropdown_geometry(state, document_offset.x + visual_x,
-        document_offset.y + visual_y + visual_height, state->dropdown_width,
-        state->dropdown_height);
-    calculate_dropdown_dimensions(select, state, visual_width);
+        above ? top - height : bottom, visual_width, height);
 }
 
 /**

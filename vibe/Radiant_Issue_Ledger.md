@@ -20,6 +20,14 @@ observations still require re-verification. Add new Radiant issues here.
 
 ## Open issues
 
+<a id="ri-196"></a>
+
+### RI-196 — FIXED
+
+Native select popups choose a side with enough room and glyph replay clips
+to the destination surface. See the
+[GLB viewer dropdown crash](<Radiant_Issue_Ledger (fixed).md#ri-196>).
+
 <a id="ri-195"></a>
 
 ### RI-195 — FIXED

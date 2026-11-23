@@ -14,6 +14,27 @@ are unchanged. Full evidence is under `../../lambda/temp/kianhup-style/`.
 
 ## Fixed issues
 
+<a id="ri-196"></a>
+
+### RI-196 — GLB viewer crashes when a select popup extends below the window
+
+**Fixed, 2026-11-23.** Open the Animation menu on the Homer bull GLB in a
+native window with a 1200 × 717 CSS-pixel viewport on macOS. The popup grew
+downward past the viewport, and the composited upper segment replayed glyph
+rows beyond its destination buffer. The crash report and a native replay
+both reached glyph coverage blending with an out-of-bounds destination.
+
+Popup geometry now chooses the side with enough room and scrolls options
+within the available height. The painter intersects option clips with the
+viewport. Radiant clips grayscale and color glyph replay to the actual
+surface, including strip offsets (D9.1.2v2, D9.5.6v2).
+
+The guarded display-list test detected out-of-bounds writes before the fix.
+It passes for both glyph types and both surface origins. The select replay
+covers upward placement, constrained height and selection of the last row.
+Three native runs of the original menu sequence closed normally. A fourth
+run selected and played the bull's Walk animation with GPU compositing.
+
 <a id="ri-195"></a>
 
 ### RI-195 — Headless Scene3D fixtures bypass the device mixer

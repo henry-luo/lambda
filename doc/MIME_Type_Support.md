@@ -120,7 +120,7 @@ The format guide documents parser and writer limits for [markup/data](Markup_For
 | **Mermaid** — `.mmd` (suffix/flavor-selected) | ✅ graph parser | ◐ SVG/HTML rendering | ✅ graph view/render | — |
 | **Structurizr DSL** — `.dsl` (suffix-selected) | ✅ graph parser | ◐ SVG/HTML rendering | ✅ graph view/render | — |
 | **glTF JSON** — `model/gltf+json`; `.gltf` | ✅ | ◐ glTF JSON/GLB export for supported scene constructs | ✅ scene3d load/render | ◐ scene authoring API |
-| **glTF binary (GLB)** — `model/gltf-binary`; `.glb` | ✅ explicit scene asset import | ◐ GLB export for supported scene constructs | ◐ scene3d load/render | ◐ scene authoring API |
+| **glTF binary (GLB)** — `model/gltf-binary`; `.glb` | ✅ explicit scene asset import | ◐ GLB export for supported scene constructs | ◐ direct `lambda view file.glb`; Scene3D load/render | ◐ scene authoring API |
 | **Wavefront OBJ** — `model/obj` | ✅ | — no OBJ writer | ◐ scene3d asset loading | ◐ scene authoring API |
 | **Wavefront MTL** — `model/mtl` | ✅ | — no MTL writer | ◐ scene3d material loading | ◐ scene authoring API |
 | **ASCII Model3D (A3D)** — `text/x-3d-model`; `.a3d` | ✅ | — no A3D writer | ◐ character/scene loading | ◐ character authoring API |
@@ -157,6 +157,13 @@ supports PCM WAV, MP3, and FLAC portably; AAC/M4A decoding uses macOS Core
 Audio. Video playback is local and host-dependent; it is not a general media
 transcoding feature. See [HTML/CSS/SVG support](HTML_CSS_SVG_Support.md),
 [MusicXML and MIDI](Lambda_Music.md), and [media package notes](Lambda_Packages.md#shared-decoded-audio-foundation).
+
+The GLB viewer opens a model directly with `lambda view filename.glb`, frames it
+in a Scene3D window, and provides orbit and zoom controls. It uses the Scene3D
+asset loader (**D9.3.4**); support is bounded by that loader's glTF 2.0 profile.
+For example, files requiring `EXT_mesh_gpu_instancing` are rejected. GLB was
+already counted in the summary above, so the direct viewer adds a display route
+without adding another format profile.
 
 ## 4. Scripting
 

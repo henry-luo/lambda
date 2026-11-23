@@ -9,6 +9,7 @@
 {"MeshAndHeightEditsRetainMotionAndRefreshQueries", "test/scene3d/mesh.html", "test/scene3d/events/MeshAndHeightEditsRetainMotionAndRefreshQueries.json", 17},
 {"ConvexSceneEditsPreserveStateAndQueryWitnesses", "test/scene3d/convex.html", "test/scene3d/events/ConvexSceneEditsPreserveStateAndQueryWitnesses.json", 17},
 {"RuntimeCommandsCoordinateNativeServices", "test/scene3d/runtime.html", "test/scene3d/events/RuntimeCommandsCoordinateNativeServices.json", 23},
+{"GlbViewerControls", "test/scene3d/assets/viewer.glb", "test/scene3d/events/GlbViewerControls.json", 77},
 {"IndexedCubeRendersRealPixelsAndCachesUnchangedFrame", "test/scene3d/events/IndexedCubeRendersRealPixelsAndCachesUnchangedFrame.html", "test/scene3d/events/IndexedCubeRendersRealPixelsAndCachesUnchangedFrame.json", 5},
 {"NativeClipAnimatesTransformAndMaterialWithoutRebuildingGeometry", "test/scene3d/events/NativeClipAnimatesTransformAndMaterialWithoutRebuildingGeometry.html", "test/scene3d/events/NativeClipAnimatesTransformAndMaterialWithoutRebuildingGeometry.json", 21},
 {"NativeClipUsesDocumentSchedulerAndParksAfterClampedFinish", "test/scene3d/events/NativeClipUsesDocumentSchedulerAndParksAfterClampedFinish.html", "test/scene3d/events/NativeClipUsesDocumentSchedulerAndParksAfterClampedFinish.json", 11},
