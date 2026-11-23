@@ -295,7 +295,9 @@ fn check_node(n, all_nodes, by_id) bool^ {
                     else if (kind == 'sprite' and contains(["size","center"],property)) 'vector'
                     else if ((kind == 'points' and property == "size") or (contains(['line','line-segments'],kind) and property == "width")) 'number'
                     else if (property == "quaternion") 'quaternion' else if (property == "visible") 'bool'
-                    else if (property == "name") 'string' else if (property == "color" and contains(['material', 'light'], kind)) 'color'
+                    else if (property == "name") 'string' else if (property == "color" and contains(['material', 'light', 'fog'], kind)) 'color'
+                    else if (kind == 'scene3d' and property == "background") 'color'
+                    else if (kind == 'scene3d' and property == "environment-intensity") 'number'
                     else if (property == "morph-weights" and kind == 'mesh') 'vector'
                     else if ((kind == 'effect' and target.type == 'bloom' and contains(["strength", "threshold", "radius"], property)) or
                         (property == "opacity" and kind == 'material') or (contains(["intensity", "distance", "angle", "penumbra"], property) and kind == 'light') or

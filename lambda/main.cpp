@@ -4392,6 +4392,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("  .tex       LaTeX (converted to HTML)\n");
             printf("  .latex     LaTeX (converted to HTML)\n");
             printf("  .pgf       TikZ/PGF picture fragments\n");
+            printf("  .glb       Binary glTF 3D model\n");
             printf("  .ls        Lambda script (evaluated and rendered)\n");
             printf("  .xml       Extensible Markup Language (CSS styled or source view)\n");
             printf("  .rst       reStructuredText (planned support)\n");
@@ -4589,6 +4590,14 @@ static int lambda_main_impl(int argc, char *argv[]) {
             };
             log_info("VIEW_FILE_TREE: opening directory or archive: %s", filename);
             exit_code = view_lambda_document_transform_with_events(filename, &browser_transform,
+                nullptr, 0, event_file, headless, font_dirs, font_dir_count, event_log, state_dump, launch.fullscreen, launch.microphone);
+        } else if (ext && str_ieq_cstr(ext, ".glb")) {
+            // A model needs a camera and lights before it can be displayed (D9.3.4).
+            static const LambdaDocumentTransformConfig model_transform = {
+                "glb", "lambda.scene3d.document", "render_document_file",
+                LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH, false
+            };
+            exit_code = view_lambda_document_transform_with_events(filename, &model_transform,
                 nullptr, 0, event_file, headless, font_dirs, font_dir_count, event_log, state_dump, launch.fullscreen, launch.microphone);
         } else if (is_graph_file && graph_view_key) {
             const LambdaDocumentTransformConfig* transform =

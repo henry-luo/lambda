@@ -615,7 +615,274 @@ plural-rules.html, plural-rules-native-output.log and plural-browser-result.json
 
 ## 13. Web Platform: DOM, CSSOM, Events & Fetch (JS13)
 
-<a id="js13-l54"></a>
+<a id="js13-l64"></a>
+
+### JS13-L64 — CSSOM notification borrows replaced style storage — **FIXED for CSSOM commits**
+
+**2026-11-23.** Native attribute borrows obey **D5.5.1**; shared CSSOM
+notification remains Lambda-owned under **D8.4.4 / D9.5.6v2**. The CSSOM
+commit path retained the pointer returned by get_attribute("style"), replaced
+that attribute, then passed the pointer to selector invalidation and observer
+record creation. Replacing a synthetic attribute releases its old pool block
+in dom_element_set_synthetic_attribute. The later read therefore exceeded
+the borrow's lifetime even when the allocator left the old bytes intact.
+
+CSSOM now uses the existing DomAttributeOldValue snapshot from the class and
+attribute setters. Its declaration moves to the module header and its
+implementation remains shared in dom.cpp; no duplicate copy helper is added.
+The copy survives both inline-declaration replacement and notification.
+
+Three focused property/cssText/remove controls check exact observer old values
+and ancestor :has() updates on a programmatically created element. They also
+pass on the prior release: this is a source-proven lifetime repair, not a
+claim of a deterministic visible failure. Those controls, seven style-value
+dependency controls and 22 relational/class controls all pass after repair.
+No live-page clearance is attributed to this ownership change. Evidence:
+`test/online/render_style_old_values.test.cjs` and
+`temp/online-visual-round192/`. Baselines are not repeated for this small fix.
+
+<a id="js13-l63"></a>
+
+### JS13-L63 — Static-view script limit also discards normal-load startup — **FIXED for profile selection**
+
+**2026-11-23.** The Lambda-owned scripting adapter follows **D8.4.4 /
+D9.5.6v2**. The 128 KiB pre-layout async/defer guard permanently discarded
+startup scripts under the normal document-load profile, although that profile
+already admits 5 MiB per external script and 20 MiB per document. There was no
+later turn that executed the discarded tasks. Identical blocking scripts ran.
+
+The default pre-layout guard now follows the existing static-headless profile
+selection, as the aggregate budget already does. Static viewers retain their
+128 KiB pre-layout and 512 KiB aggregate limits. Normal loads use the existing
+external and aggregate limits. Explicit pre-layout overrides still apply to
+both profiles. This changes the normal admission default; it does not change
+the selected 1000ms animation frame (**D10.1.7**), force visibility, or add a
+site condition. Admitted scripts can expose further compatibility failures.
+
+The original normal-load defer/async reductions fail on the previous release.
+Twelve profile controls pass, including module scheduling, explicit declines,
+the other budgets, static viewer behavior and its override. Forty dynamic
+script controls pass, including large admitted classic/module sources. Existing
+budget-decline fixtures now select their limit explicitly and retain all
+behavior assertions. Thirty-seven load-boundary, image and preparation
+controls pass. At the milestone, the dynamic layout baseline passes 630/630.
+
+Payload's hidden document and WeTransfer's missing main content are restored
+under the normal profile. WeTransfer's small top navigation remains missing.
+Aircall's consent panel now appears, but the application root is empty after
+startup, so a manual major-omission review keeps it high. Dayos executes its
+main module but retains its loading cover. Neither is cleared by a low metric
+or mere task execution. Evidence: `temp/online-visual-round190/`,
+`test/online/render_script_admission.test.cjs`, and
+[comparison round167](../../test/online/comparison/repairs.html#round-167).
+
+Round191 extends the same qualified release to Overflow and Agiloft. Overflow's
+695,008-byte startup bundle now executes and restores its brand, navigation
+and header actions, resolving the retained manual omission. Agiloft removes
+its startup cover and renders its navigation, large heading, actions and
+consent panel close to Chromium. Its capture succeeds in 100.8 seconds, so
+slow initialization remains recorded separately from visual correctness.
+Current Chromium checks retain small consent/layout differences. No additional
+production change or capture-clock adjustment is made; the prior focused and
+dynamic-baseline qualification applies to the identical release. Evidence:
+`temp/online-visual-round191/selected/` and
+[comparison round168](../../test/online/comparison/repairs.html#round-168).
+
+Aircall's follow-up native trace confirms the application root has no actual
+DOM children, rather than only being omitted by the view serializer. Caught
+URL errors and other feature probes are observed, but their causal role is
+unconfirmed; they do not justify a URL parser patch. A local-origin document
+probe changes request context and is diagnostic only. All temporary traces
+are removed, original production files match their qualified snapshots, and
+clean runtime/adapter archives are rebuilt. Aircall remains high.
+
+<a id="js13-l62"></a>
+
+### JS13-L62 — Class writes lose observer old values and borrow replaced storage — **FIXED for qualified setters**
+
+**2026-11-23.** Shared DOM notification follows **D8.4.4 / D9.5.6v2**;
+old-value bytes obey **D5.5.1**. HTML/SVG class setters and token-list rewrites
+omitted old values from mutation notification. Reading the old pointer before
+replacement is insufficient for synthetic/recorded attributes: their storage
+can release those bytes while setting the new value.
+
+A shared scoped snapshot retains the old bytes through notification. The
+className/classList, SVG baseVal, ordinary setAttribute and namespaced
+setAttribute paths use it. The synthetic-element control exercises className,
+classList.add and setAttributeNS and checks every observer old value alongside
+ancestor selector updates. It fails twice on the old release and passes after
+repair. This qualification does not cover every DOM attribute setter.
+Evidence: `test/online/relational_mutation_fixtures.cjs`,
+`temp/online-visual-round188/combined-before.log` and `qualified-controls.log`.
+
+<a id="js13-l61"></a>
+
+### JS13-L61 — Unrelated class writes force global relational cascade — **FIXED for qualified value projections**
+
+**2026-11-23.** Shared host behavior follows **D8.4.4 / D9.5.6v2**; runtime-free
+input/native helpers retain their owners under **D9.1.1v4 / D9.1.3v2**.
+Every class write was classified as class-sensitive, even when no class or
+attribute leaf in a :has() argument changed membership. Connected setup also
+disabled the inserted-subtree proof in the same batch. The reduced className
+and classList controls each force repeated global cascade before repair.
+
+Mutation begin now accepts the retained old value through an overload that
+preserves the existing symbol. The shared recursive selector walk compares
+actual leaf results under both case policies. Raw class matching shares the
+input DOM cache's token iterator; attribute selectors reuse the input matcher.
+Only proved-stable class writes in documents without shadow roots become
+local. The child-list history check can retain its subtree proof for records
+already classified local. Changed/unknown dependencies, removal history,
+scope, column and shadow handling retain their conservative paths. No runtime
+or provider-state struct change is required.
+
+All 29 focused render controls pass, including stable class writes followed by
+insertion, entering/leaving witnesses, attribute selectors, case flags,
+synthetic old values and existing relational/style controls. An input unit
+checks ten raw values against cached class-selector matching under both case
+policies, plus two null controls. The live Swag retry on the first class
+candidate still reaches the unchanged 150-second limit; no whole-page
+clearance is claimed. The final token-sharing candidate is qualified locally;
+the same live capture and baselines were not repeated. The previous milestone
+has 630 dynamic-layout passes. Evidence: `temp/online-visual-round188/`.
+
+<a id="js13-l60"></a>
+
+### JS13-L60 — Detached setup disables inserted-subtree dependency checks — **FIXED for qualified insertion batches**
+
+**2026-11-23.** Shared mutation behavior follows **D8.4.4 / D9.5.6v2**;
+retained state follows **D5.5.1**. The child-list dependency check discarded
+its subtree proof whenever any attribute record appeared in the batch.
+Preparing a detached subtree before insertion therefore forced broad
+relational-selector cascade. Swag's dynamic script setup exposes this path.
+
+Insertion checks now pass their mutation sequence. Earlier detached setup
+keeps the existing proof; connected writes, same/later writes and removals
+retain the history guard. The existing static-selector/subtree algorithm is
+reused for all element types. The prepared-unrelated regression fails before
+repair and passes afterward. Matching insertion and clearing a removed
+witness's class still update the ancestor-dependent style correctly.
+Evidence: `test/online/relational_mutation_fixtures.cjs` and
+`temp/online-visual-round187/{prepared-insert-before-final,prepared-after}.log`.
+These cases are included in the final 39 passing render controls. Swag still
+times out at the unchanged 150-second limit; no page clearance is claimed.
+The milestone dynamic-layout baseline passes all 630 cases once.
+
+<a id="js13-l59"></a>
+
+### JS13-L59 — Unchanged style-attribute tests force global cascade — **FIXED for qualified retained changes**
+
+**2026-11-23.** Shared CSSOM behavior follows **D8.4.4 / D9.5.6v2**;
+helpers retain their input/native owners under **D9.1.1v4 / D9.1.3v2**.
+Any stylesheet reference to the style attribute, and every container query,
+made inline opacity/transform writes unrestricted attribute mutations.
+Unchanged predicates such as `[style*="writing-mode"]` forced global cascade.
+
+Projection now compares old/new attribute-leaf results using the existing
+matcher under both case policies. Unknown values and ID projections remain
+conservative; subsequent class-value projection is qualified in JS13-L61. Size-query discovery is shared with the input evaluator;
+only flat opacity and an existing nonempty transform can preserve those
+inputs. Scope, attr(), unknown queries and layout changes retain broad
+behavior. The containing-block predicate is shared with paint admission.
+
+Seven render controls pass: stable opacity/transform, changing predicates,
+case flags, empty style, quirks serialization and container-width changes.
+The two stable cases fail before repair. Quirks coverage caught an intermediate
+regression that was never installed. Fifteen classification inputs and five
+existing input query tests pass; the complete focused render batch has 39
+passes, including relational, inline-style and SVG controls. No runtime-state
+or provider-struct ABI change. Evidence:
+`test/online/render_style_attribute_dependencies.test.cjs` and
+`temp/online-visual-round187/`. Reduced controls do not establish full CSS
+invalidation conformance or whole-page clearance.
+The milestone dynamic-layout baseline also passes 630/630 once; no aggregate
+Lambda/Radiant baseline or catalog sweep is repeated.
+
+<a id="js13-l58"></a>
+
+### JS13-L58 — Nested browser timers omit the minimum delay — **FIXED**
+
+**2026-11-23.** Shared timer behavior follows **D8.4.4 / D9.5.6v2**;
+headless selection follows **D10.1.7**. Browser timers tracked deadlines but
+not their task nesting level. A zero-delay timeout chain could keep firing
+while the loading clock was frozen, repeatedly mutating and relaying out the
+document. Intervals instead used an unconditional 1ms minimum, without the
+shared nesting rule.
+
+The callback scope now carries owner-checked task nesting. HTML timeouts,
+intervals and mixed chains apply the 4ms minimum when parent nesting exceeds
+five, as required by [HTML 8.7](https://html.spec.whatwg.org/multipage/timers-and-user-prompts.html#timer-initialisation-steps).
+Intervals reinitialize after each callback and honor cancellation. Microtasks
+and animation-frame callbacks start a separate nesting scope; Node timer
+objects retain their previous scheduling. No runtime-state/provider ABI,
+capture clock, source budget or navigation deadline changes.
+
+The focused regression fails before the repair in all three browser timer
+variants. Afterward the seventh and eighth callbacks occur at virtual 4ms
+and 8ms. Its Node and microtask-boundary controls also pass, along with the
+existing runtime-isolation test. Evidence:
+`test/test_js_script_gtest.cpp` (`JsTimers.*`, `JsAgentState.*`) and
+`temp/online-visual-round184/{timer-before,timer-after}.log`.
+Online-page impact is recorded separately after capture; this unit result
+alone does not clear a high-severity review.
+
+<a id="js13-l57"></a>
+
+### JS13-L57 — Pages without scripts skip required image completion — **FIXED**
+
+**2026-11-23.** Shared host behavior follows **D8.4.4 / D9.5.6v2**; export
+settles the selected frame under **D10.1.7**. The script runner returned before
+the ordinary load boundary when it found no executable scripts or declined
+the document's source budget. Required images then received only the optional
+snapshot grace. A 1600ms CSS-image response rendered white, while the same
+document with a no-op script rendered blue. Eager images also failed.
+
+Those branches now share the existing load wait without creating a JS realm.
+Native image-request records initialize independently of JS event dispatch,
+so the native blocker query can distinguish eager and lazy requests. The wait
+polls all completions but tests the existing native load-blocker predicate and
+pending dynamic scripts, rather than aggregate network/document work that also
+includes speculative, lazy and overridden resources. Navigation deadlines,
+source budgets and virtual-frame selection are unchanged.
+
+Seven focused PNG controls pass: no script, a scripted control, data-only
+scripts, a skipped module, an explicitly declined document budget, eager and
+lazy images. The first, third, fifth and sixth fail before the repair. The
+scripted control confirms the load wait leaves virtual time at zero. All 17
+existing load-boundary controls pass, including detached images, chained
+sources, lazy siblings, hidden/unused/overridden CSS and source replacement.
+Evidence: `test/online/render_static_load.test.cjs` and
+`temp/online-visual-round183/{static-load-final,existing-load-final}.log`.
+
+Azure's fresh matched 1000ms diagnostic has 2.35% mean error, with its body
+and backgrounds present. It remains high: the original HTML has empty
+navigation containers and its 1907515-byte `index-docs.js` is skipped. That
+startup gap remains **JS13-L1**; this repair does not claim complete client
+execution or attribute the full historical score change to the source fix.
+
+<a id="js13-l56"></a>
+
+### JS13-L56 — Computed custom-property reads retain serialization scratch — **FIXED**
+
+**2026-11-23.** Caller-owned serialization follows **D5.5.1**, shared DOM
+behavior follows **D8.4.4 / D9.5.6v2**. The custom-property branch of
+`dom_computed_style_get_property` passed the document pool to the native
+serializer, then copied its output into a GC string. Each read retained the
+formatter, buffer and output until document destruction. Ordinary properties
+already used a temporary pool.
+
+Both branches now share that temporary pool and release it after copying the
+result. Literal custom names, lengths and case, ordinary property conversion,
+and the method-dispatch marker keep their existing behavior. No provider ABI
+or computed-value rule changes.
+
+The real runtime/native-provider regression fails before the fix: 32 warmed
+reads retain 3,584 bytes and 96 allocations in the document pool. It passes
+afterward with no growth. A second focused test covers custom-name case and
+embedded NUL, ordinary values and the method marker; copied strings survive
+forced, poisoned GC. Evidence: `temp/online-visual-round183/` and
+`test/test_js_script_gtest.cpp` (`JsComputedStyleTest.*`, 2/2 passing).
+This fixes allocation lifetime; no online page is cleared by this test alone.
 
 ### JS13-L55 — Webflow immediate initialization fails at a zero clock — **EXTERNAL EDGE CASE**
 
@@ -641,6 +908,8 @@ Evidence: `temp/online-visual-round177/metronome-state.log`,
 `metronome-mq.log`, `overlay-probe.log`, and
 `browser-{normal,zero}-clock-sri/result.json`. The full-page capture and native
 view tree are retained beside the diagnostic; canonical pairs are unchanged.
+
+<a id="js13-l54"></a>
 
 ### JS13-L54 — Adjacent HTML insertion bypasses stylesheet and mutation publication — **FIXED FOR QUALIFIED HTML INSERTION**
 
@@ -1358,6 +1627,17 @@ existing-bug repair. Evidence: `temp/online-visual-round132/webfont.js`,
 `stellar-probe.html`, `stellar-network/result.json` and its `PAGE_PROBE` log.
 The sandboxed `stellar-current` attempt lacks network resources and is not
 qualification evidence. Canonical comparison data remains unchanged.
+
+**2026-11-23: Homerun customers (`saas_landing_696`) has the same gap.**
+Its main Webflow chunks execute, including the 662598-byte shared chunk.
+The saved-source diagnostic retains `wf-loading` and all requested font
+weights' loading classes; authored `.wf-loading * { opacity: 0; }` makes
+the body transparent. The script-free control has body opacity 1 and the
+same 3460.78px content height. Chromium clears the loading state. This is
+not attributed to the separately skipped Wistia or GTM scripts. No visibility
+or capture-time workaround is applied; the page remains high. Evidence:
+`temp/online-visual-round185/homerun-probes.log`, the two probe HTML files,
+and the original/current Chromium DOM captures.
 
 ### JS13-L32 — Null-namespace metadata and reflected inert writes force layout — **FIXED**
 
@@ -2230,7 +2510,27 @@ module and page are retained under `temp/online-visual/`; the module is also in
 the normal resource cache. This does not establish Shadow DOM as the cause of
 every remaining blank page or of that site's remaining theme mismatch.
 
-### JS13-L1 — snapshot script admission can leave the whole document hidden — **OPEN**
+### JS13-L1 — snapshot script admission can leave the whole document hidden — **PARTIAL**
+
+**2026-11-23 update:** [JS13-L63](#js13-l63) fixes the misplaced static-view
+default in normal document loads. Payload and WeTransfer's main content now
+render. The per-script/aggregate admission limits and incomplete application
+APIs remain, so this umbrella issue stays open. Earlier observations below
+describe the profile in use at those review dates; they are not a requirement
+to retain the incorrect normal-load limit.
+
+**2026-11-23 source checks:** Amperos565 changes header `text-black` to
+`text-white` only after client startup. Overflow160 starts with root
+`is-loading`; Chromium replaces it with `has-scroll-init is-loaded`, while
+the 695008-byte site bootstrap is skipped natively. Popcorn473's client
+animation moves the device group from `translateY(72px)` to about 1px and
+rotates the phones; its two main Next chunks are skipped. Original and
+post-script Chromium DOM captures confirm these differences. No native
+color, fixed-position or static-layout defect is established, and no authored
+state is overridden. All three remain high. Evidence:
+`temp/online-visual-round186/{diagnosis.json,current-metrics.json,pairs.png}`
+and its browser source/DOM captures.
+
 
 Round177 (2026-11-22) refines two media/startup diagnoses. Monarch's actual
 hero is a mux-player component; its only ordinary light-DOM videos are hidden

@@ -17,6 +17,127 @@
 > Semantic and design rulings are cited by `S#` / `D#` per CLAUDE.md rule 17;
 > where no formal ruling covers a point, the vibe ledger ID is given.
 
+<a id="lr12-71"></a>
+
+## LR12-71 — The viewer image prepass enters an uninitialized JavaScript realm
+
+**Fixed 2026-11-23.** On `3b23b87dc`, the load pass for documents without
+executable JavaScript called the scripted image completion queue. Nine
+replays exited 139 when that queue tried to allocate a callback without a
+JavaScript Input. The prepass also cached GIF and Lottie surfaces before
+their scheduler existed and held live local navigation until a remote image
+finished downloading (D6.4.1 / D9.5.6v2).
+
+Live script-free documents leave image completion to the viewer. Static
+captures wait for the selected eager network images through native resource
+discovery, and layout registers image animations with the presentation
+scheduler (D9.1.3v2 / D10.1.7). The 11 affected replays and the Radiant
+baseline pass. All 48 focused loading and animation controls pass, as do
+two local static capture probes for delayed eager and lazy images.
+Evidence is in `temp/view-test-regressions/`.
+
+## CSSOM style notification lifetime — fixed 2026-11-23
+
+[JS13-L64](jube/JS_Issue_Ledger.md#js13-l64) retains old style bytes while
+CSSOM replaces synthetic attribute storage and then notifies selector and
+observer consumers (**D5.5.1 / D8.4.4 / D9.5.6v2**). It reuses the existing
+attribute snapshot helper. All 32 focused style/relational controls pass;
+the three new controls also passed before the source-proven lifetime repair.
+No page clearance or baseline rerun is claimed for this independent fix.
+
+## Normal document startup admission — fixed 2026-11-23
+
+Further review on the same qualified release clears **Agiloft and Overflow**:
+the startup cover disappears and the previously absent navigation returns.
+Current Chromium checks support both; Agiloft still takes 100.8 seconds to
+capture. Inventory is **100 high, zero critical, 967 low**. Aircall's empty
+application DOM is directly confirmed, but its cause remains unisolated.
+No new production patch or baseline repetition is claimed for this extension.
+
+[JS13-L63](jube/JS_Issue_Ledger.md#js13-l63) scopes the default 128 KiB
+async/defer limit to the existing static-view profile (**D8.4.4 / D9.5.6v2**).
+Normal loads retain the existing 5 MiB external/20 MiB aggregate limits;
+explicit overrides still apply to both profiles. Payload's document and
+WeTransfer's main content return. Aircall's consent panel returns, but its
+empty application root keeps it high. Dayos still retains its loading cover.
+All 89 focused controls and the 630-case dynamic layout baseline pass. The
+1000ms capture frame is unchanged (**D10.1.7**). This is an admission-profile
+fix, with remaining runtime compatibility unqualified for other large pages.
+
+## Online selector-parser repair — 2026-11-23
+
+Input-owned [LI-105/LI-106](<Lib_Input_Issue_Ledger (fixed).md#li-106>) repair
+valid double-hyphen identifiers and invalid functional-selector recovery
+(**D9.1.1v4 / D9.1.3v2**). Anam's cookie-only hiding rule had broadened to
+all body divs. About now clears major review; Home's gallery returns but its
+headline/actions remain missing. The shared 1000ms frame and admission limits
+are unchanged (**D10.1.7**). All 32 focused render checks and 20 selector-group
+tests pass; the milestone has 630 dynamic passes and 3851 static passes with
+the previously recorded `dom_view_role_nested` failure retained.
+
+## Class mutation invalidation and old-value lifetime — fixed 2026-11-23
+
+[JS13-L61](jube/JS_Issue_Ledger.md#js13-l61) retains local cascade when actual
+relational class/attribute matches stay unchanged, reusing input/native
+matching and preserving history and shadow guards (**D8.4.4 / D9.5.6v2 /
+D9.1.1v4 / D9.1.3v2**). [JS13-L62](jube/JS_Issue_Ledger.md#js13-l62) retains
+replaced class bytes through mutation notification and restores observer old
+values (**D5.5.1**). All 29 focused render checks and the input class-cache
+projection unit pass. The three reduced class/observer controls fail on the
+prior release. Swag still times out on the first candidate; no canonical page
+is cleared. Baselines are not repeated for this focused repair.
+
+## CSS dependency overinvalidation — fixed 2026-11-23
+
+[JS13-L59](jube/JS_Issue_Ledger.md#js13-l59) compares style-attribute predicate
+results before forcing global cascade, reusing input/native helpers
+(**D9.1.1v4 / D9.1.3v2**). [JS13-L60](jube/JS_Issue_Ledger.md#js13-l60)
+preserves the inserted-subtree proof after earlier detached setup; connected
+and later edits and removal history remain guarded (**D8.4.4 / D9.5.6v2 /
+D5.5.1**). All 39 focused render controls, six input tests and 630 dynamic
+layout baseline cases pass. Swag still times out; capture timing and budgets
+remain unchanged (**D10.1.7**).
+
+## Current online article-image review — 2026-11-23
+
+WebKit Blog's current matched-frame recheck clears its missing-large-images
+review after the shared loading repairs. Its article grid, large images and
+text render; smaller header differences remain. New articles and a changed
+leading order are recorded separately as reference maintenance under
+**D10.1.7**. The previous pair and review history remain archived; no complete
+historical improvement is attributed to the timer fix. Inventory is now
+**105 high, zero critical, 962 low**. All 280 JavaScript unit tests pass at
+the three-fix milestone; full Lambda/Radiant baselines were not repeated.
+Evidence: [comparison round163](../test/online/comparison/repairs.html#round-163).
+
+## Nested browser timer scheduling — fixed 2026-11-23
+
+[JS13-L58](jube/JS_Issue_Ledger.md#js13-l58) adds the missing HTML task-nesting
+delay to browser timeouts, intervals and mixed chains (**D8.4.4 / D9.5.6v2**).
+Focused tests cover the 4ms threshold, cancellation, microtask boundaries,
+Node behavior and runtime isolation. Capture timing remains unchanged
+(**D10.1.7**); online impact requires a separate page capture.
+
+## Script-free document image completion — fixed 2026-11-23
+
+[JS13-L57](jube/JS_Issue_Ledger.md#js13-l57) reuses the ordinary load boundary
+for pages without executable scripts, including declined document budgets.
+Native eager/lazy request records no longer depend on a JS realm. The wait
+uses the native load-blocker predicate and retains existing deadlines and
+virtual time (**D8.4.4 / D9.5.6v2 / D10.1.7**). Seven focused PNG controls
+and 17 existing load-boundary cases pass. Azure's body is close in the current
+diagnostic, but its client-created navigation remains absent; no high review
+is cleared by that partial result.
+
+## Computed custom-property serialization lifetime — fixed 2026-11-23
+
+[JS13-L56](jube/JS_Issue_Ledger.md#js13-l56) fixes temporary formatter
+allocations retained by each computed custom-property read. Both property
+branches now release their serialization pool after copying the JS value
+(**D5.5.1 / D8.4.4**). Two focused runtime/native-provider tests pass, including
+zero document-pool growth and forced-GC value checks. This is an allocation
+repair; the 106 high-severity online reviews remain unchanged.
+
 <a id="online-framerauth-layout-timeout"></a>
 ## FramerAuth startup and remaining hero omission
 

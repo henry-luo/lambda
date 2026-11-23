@@ -303,7 +303,7 @@
     {
       "label": "saas_landing_160",
       "url": "https://overflow.io/",
-      "manual_major_remaining": "Entire top navigation and brand remain absent while the main hero is present.",
+      "manual_major_remaining": "",
       "reviewed_at": "2026-11-13T22:41:48.359621+00:00",
       "evidence": "comparison/repairs.html#round-37",
       "rechecks": [
@@ -313,7 +313,12 @@
           "previous_manual_major_remaining": "The large colored hero background is restored by RI-085, making the heading readable. The brand, primary navigation and header actions remain absent. The saved source retains the authored navbar opacity0 loading rule; its live initialization cause is not assigned to this filter repair.",
           "manual_major_remaining": "Entire top navigation and brand remain absent while the main hero is present."
         }
-      ]
+      ],
+      "resolved_previous_manual_major_remaining": "Entire top navigation and brand remain absent while the main hero is present.",
+      "resolved_at": "2026-11-23T09:56:53.301Z",
+      "resolution": "Brand, primary navigation and header actions now render with the existing main hero under the normal-load admission profile; small consent differences remain.",
+      "resolution_evidence": "comparison/repairs.html#round-168",
+      "resolved_capture_settle_ms": 1000
     },
     {
       "label": "python",
@@ -388,7 +393,7 @@
     {
       "label": "webkit_blog",
       "url": "https://webkit.org/blog/",
-      "manual_major_remaining": "Two large article photos remain absent. Their PNG requests are queued correctly, but independent transfers exceed the existing one-second resource window; SVG prefix rejection is repaired separately (RI-133).",
+      "manual_major_remaining": "",
       "reviewed_at": "2026-11-18T02:19:25.047873+00:00",
       "evidence": "comparison/repairs.html#round-79",
       "rechecks": [
@@ -404,7 +409,12 @@
           "previous_manual_major_remaining": "Two large first-column article images are still absent.",
           "manual_major_remaining": "Two large article photos remain absent. Their PNG requests are queued correctly, but independent transfers exceed the existing one-second resource window; SVG prefix rejection is repaired separately (RI-133)."
         }
-      ]
+      ],
+      "resolved_at": "2026-11-23T06:49:14.243Z",
+      "resolution": "Current article grid and large images render; matched-frame visual review clears the major omission. Smaller brand/header differences remain. Reference content changed and is audited separately; the full historical difference is not attributed to the timer fix.",
+      "resolution_evidence": "comparison/repairs.html#round-163",
+      "resolved_previous_manual_major_remaining": "Two large article photos remain absent. Their PNG requests are queued correctly, but independent transfers exceed the existing one-second resource window; SVG prefix rejection is repaired separately (RI-133).",
+      "resolved_capture_settle_ms": 1000
     },
     {
       "label": "saas_landing_426",
@@ -578,6 +588,34 @@
       "url": "https://mode.com/",
       "manual_major_remaining": "The consent dialog and hero heading now render, but the main navigation remains unstyled and large hero photographs and the query illustration remain absent.",
       "evidence": "comparison/repairs.html#round-149"
+    },
+    {
+      "label": "saas_landing_516",
+      "url": "https://anam.ai/",
+      "manual_major_remaining": "Portrait cards and consent panel are restored. The main animated headline, introductory tag and primary signup/demo actions remain absent at the selected frame; retain major review despite the lower coarse score.",
+      "reviewed_at": "2026-11-23T09:09:54.737Z",
+      "evidence": "comparison/repairs.html#round-166"
+    },
+    {
+      "label": "saas_landing_072",
+      "url": "https://aircall.io/",
+      "manual_major_remaining": "Consent panel and backdrop now render, but the main application container is empty after startup. The header, hero image, heading and primary actions remain missing; retain major review despite the lower coarse score.",
+      "reviewed_at": "2026-11-23T09:40:08.365Z",
+      "evidence": "comparison/repairs.html#round-167"
+    },
+    {
+      "label": "saas_landing_343",
+      "url": "https://www.greenhouse.io/",
+      "manual_major_remaining": "Navigation, heading, actions and consent are restored, but the large purple botanical illustration on the right is absent. Script execution reaches the CPU watchdog. Retain major review despite the lower image score.",
+      "reviewed_at": "2026-11-23T10:17:02.237Z",
+      "evidence": "comparison/repairs.html#round-169"
+    },
+    {
+      "label": "saas_landing_091",
+      "url": "https://www.hellogetsafe.com/",
+      "manual_major_remaining": "Main heading and phone photograph render, but the large consent panel/backdrop and prominent trust badges are absent. Retain major review despite the lower image score; currency formatting also remains unsupported.",
+      "reviewed_at": "2026-11-23T10:17:02.237Z",
+      "evidence": "comparison/repairs.html#round-169"
     }
   ]
 }

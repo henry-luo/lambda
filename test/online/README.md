@@ -136,6 +136,9 @@ node --test test/online/render_grid_flow_variable.test.cjs
 node --test test/online/render_abs_percentage_height.test.cjs
 node --test test/online/render_css_resource_discovery.test.cjs
 node --test test/online/render_load_boundary.test.cjs
+node --test test/online/render_static_load.test.cjs
+node --test test/online/render_style_attribute_dependencies.test.cjs
+node --test test/online/render_relational_mutations.test.cjs
 node --test test/online/render_nested_ratio_height.test.cjs
 node --test test/online/render_intrinsic_image_basis.test.cjs
 node --test test/online/render_lab_colors.test.cjs
@@ -3584,3 +3587,118 @@ installed renderers were restored to the qualified release pin afterward.
 The comparison remains **106 high, zero critical, 961 low**; diagnostic
 references with pending images were not promoted. No capture clock, source
 admission budget or expected baseline result changed.
+
+
+Round161 fixes **JS13-L56** (computed custom-property serialization retained
+document allocations) and **JS13-L57** (script-free or declined-script pages
+skipped required image completion). The ordinary load wait now shares native
+eager/lazy request state and the existing load-blocker predicate; deadlines,
+source budgets and virtual time are retained (**D5.5.1 / D8.4.4 / D10.1.7**).
+**Two memory/GC tests and 24 loading controls pass.** Full baselines remain
+deferred for this focused batch. Azure's fresh diagnostic has **2.35% mean
+error**, with its navigation still absent; it remains high. Canonical pairs
+and reviews remain unchanged: **106 high, zero critical, 961 low**.
+[Evidence](comparison/repairs.html#round-161). The goal remains active.
+
+
+Round162 fixes **JS13-L58**, the missing HTML nesting delay for browser
+timeouts, intervals and mixed chains (**D8.4.4 / D9.5.6v2 / D10.1.7**).
+Five timer variants, runtime isolation and nine existing capture-timing controls
+pass. Swag still times out during full-page cascade/layout and remains under
+investigation. Canonical pairs and reviews are preserved: **106 high, zero
+critical, 961 low**. Baselines remain deferred for this focused change.
+[Evidence](comparison/repairs.html#round-162). The goal remains active.
+
+
+Round163 clears WebKit Blog's missing-large-images review after a focused
+matched-frame recheck: **105 high, zero critical, 962 low** remain.
+The current pair has **7.49% mean error /13.52% changed area**. Changed blog
+content is recorded as a separate reference refresh (**D10.1.7**); the old
+pair and review history remain archived. The other **1066 rows** are unchanged.
+All **280 JavaScript unit tests** pass at the three-fix runtime milestone;
+no full Lambda/Radiant baseline or catalog sweep is repeated. Homerun's blank
+state is the known FontFaceSet.load feature gap (**JS13-L33**), not skipped
+Webflow code. Empathy's primary media remains a hydration placeholder.
+[Evidence](comparison/repairs.html#round-163). The goal remains active.
+
+
+Round164 fixes **JS13-L59/L60**: stable style-attribute predicates no longer
+force global cascade, and earlier detached setup preserves the existing
+inserted-subtree proof. Unknown/changed dependencies and removal history keep
+their guards (**D8.4.4 / D9.5.6v2 / D9.1.1v4 / D9.1.3v2 / D5.5.1**).
+**39 render controls, six input tests and 630 dynamic-layout baseline cases
+pass.** The baseline ran once; aggregate Lambda/Radiant suites were not repeated.
+Swag still times out, so no whole-page clearance is claimed. Timing and budgets
+are unchanged (**D10.1.7**). All canonical pairs and reviews remain intact:
+**105 high, zero critical, 962 low**.
+[Evidence](comparison/repairs.html#round-164). The goal remains active.
+
+
+Round165 fixes **JS13-L61/L62**: stable relational class memberships retain
+local cascade, and class/attribute setters retain old bytes through observer
+notification (**D8.4.4 / D9.5.6v2 / D5.5.1 / D9.1.1v4 / D9.1.3v2**).
+**29 focused render checks and the input class-cache projection unit pass.**
+Three reduced controls fail before repair. No baseline is repeated for this
+focused change. Swag still times out on the first candidate; no canonical
+page is cleared. Budgets and clocks remain unchanged (**D10.1.7**).
+Inventory: **105 high, zero critical, 962 low**.
+[Evidence](comparison/repairs.html#round-165). The goal remains active.
+
+
+Round166 fixes input-owned **LI-105/LI-106**: valid double-hyphen class names
+parse correctly, and failed functional selectors reject their compound
+instead of applying a broader prefix (**D9.1.1v4 / D9.1.3v2**).
+**Anam About clears major review.** Anam Home's portrait cards return, but its
+headline/actions remain absent and it stays high through a manual review.
+Inventory: **104 high, zero critical, 963 low**. Exactly two native captures
+are refreshed; all browser references and 1065 other rows remain intact.
+All 32 focused renders and 20 selector-group tests pass. At this milestone,
+baselines run once: **630 dynamic passes; 3851 static passes and one previously
+recorded dom_view_role_nested failure**, six reported static skips, zero errors.
+Capture policy and budgets are unchanged (**D10.1.7**).
+[Evidence and images](comparison/repairs.html#round-166). Goal remains active.
+
+
+Round167 fixes Lambda-owned **JS13-L63**: the static-view 128 KiB
+async/defer limit no longer discards normal document startup scripts
+(**D8.4.4 / D9.5.6v2**). This changes the normal admission default;
+static-view limits, the 5 MiB external/20 MiB total normal limits, explicit
+overrides and the 1000ms frame remain (**D10.1.7**).
+**Payload and WeTransfer clear major review**, with smaller differences retained.
+Aircall's consent returns but its empty application root keeps it high through
+a new manual review. Dayos still shows its startup cover after its module runs.
+Inventory: **102 high, zero critical, 965 low**. Four native captures refresh;
+all browser references and the other 1063 rows remain intact.
+All **89 focused checks** and **630 dynamic layout baseline cases** pass.
+The static layout baseline is not repeated for this adapter-only change.
+[Evidence and images](comparison/repairs.html#round-167). Goal remains active.
+
+
+Round168 extends qualification of **JS13-L63** on the unchanged release:
+**Agiloft and Overflow clear major review**. The prior release reproduces
+their earlier captures on current URLs; the repaired profile removes
+Agiloft's cover and restores Overflow's navigation without a page-specific change.
+Agiloft succeeds in **100.8 seconds**; slow initialization remains recorded.
+Inventory: **100 high, zero critical, 967 low**. Two native captures refresh;
+all browser references, review history and 1065 other rows remain intact.
+Aircall's empty application DOM is confirmed but its cause remains unisolated.
+All temporary diagnostics are removed; the qualified release is unchanged.
+The existing **89 focused passes and 630 dynamic baseline passes** apply;
+baselines are not repeated (**D8.4.4 / D9.5.6v2 / D10.1.7**).
+[Evidence and images](comparison/repairs.html#round-168). Goal remains active.
+
+
+Round169 fixes **JS13-L64**: CSSOM retains old style bytes through synthetic
+attribute replacement and shared mutation notification, reusing the existing
+snapshot helper (**D5.5.1 / D8.4.4 / D9.5.6v2**).
+All **32 focused controls** pass; the three new controls also pass before the
+source-proven lifetime repair. No visual clearance is attributed to it.
+Six pages are re-reviewed. Attentive and Greenhouse regain major content, but
+all six retain substantial omissions. Greenhouse and Getsafe gain manual reviews
+despite lower scores. Inventory remains **100 high, zero critical, 967 low**.
+Six native captures refresh with exact per-capture binary provenance; all
+browser references and 1061 other rows remain intact. Greenhouse's targeted
+post-fix PNG is byte-identical. Both attempts finish in about 135 seconds,
+while their scripts reach the separate CPU watchdog. Baselines are not repeated;
+the 1000ms frame and admission profile remain (**D10.1.7**).
+[Evidence and images](comparison/repairs.html#round-169). Goal remains active.

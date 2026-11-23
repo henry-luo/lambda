@@ -20,6 +20,13 @@ observations still require re-verification. Add new Radiant issues here.
 
 ## Open issues
 
+<a id="ri-220"></a>
+
+### RI-220 — FIXED
+
+Native select popups choose a side with enough room and glyph replay clips
+to the destination surface. See the
+[GLB viewer dropdown crash](<Radiant_Issue_Ledger (fixed).md#ri-220>).
 <a id="ri-219"></a>
 
 - [RI-219 — Transparent video frames blend over uninitialized decoder storage](<Radiant_Issue_Ledger (fixed).md#ri-219>).

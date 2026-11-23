@@ -1,4 +1,4 @@
-// Retained Scene3D camera interactions through the DOM boundary (D9.5.6).
+// Retained Scene3D camera interactions through the DOM boundary (D9.5.6v2).
 import dom
 import camera: .camera
 import scene_dom: .dom
@@ -41,11 +41,46 @@ fn moved(current,action,reset_pose,options={}) map^ {
         min(options.max_distance or home_distance*1.8,distance*(if (action == "in") 0.88 else 1.0/0.88)))/distance})
 }
 
-view <orbit> state current:~.initial,drag:null,mode:"orbit" { ~.rendered }
+pn framed_pose(owner,home,radius) {
+    let box = dom.bounding_box(dom.query_selector(owner,"scene3d"))
+    let width = max(1.0,box.width), height = max(1.0,box.height)
+    if (radius == null) { return camera.prepare(home,width,height) }
+    // Fit the bounding sphere against the shorter side of the current viewport.
+    let half_fov = home.fov*math.pi/360.0
+    let side = math.atan(math.tan(half_fov)*min(1.0,width/height))
+    let distance = radius*1.12/math.sin(side)
+    let direction = camera.unit(camera.subtract(home.position,home.target))
+    return camera.prepare({*:home,position:camera.add(home.target,camera.times(direction,distance))},width,height)
+}
+pn camera_action(owner,current,action,home,options) {
+    if (action == "reset" and options.frame_radius != null) {
+        return framed_pose(owner,home,options.frame_radius)
+    }
+    return moved(current,action,home,options)
+}
+
+view <orbit> state current:~.initial,drag:null,mode:"orbit",fitted:false,screen_pan:true { ~.rendered }
 on render(evt) {
     if (evt.event_phase != 2) { return 'pass' }
     // a retained viewer republishes its own orbit after an enclosing author projection.
     current = publish(evt.target,current)
+    if (~.options.frame_radius != null and not fitted) dom.request_frame_once(evt.target,"camera_fit_initial")
+    'handled'
+}
+on camera_fit_initial(evt) {
+    if (evt.event_phase != 2 or fitted) { return 'pass' }
+    fitted = true
+    current = publish(evt.target,framed_pose(evt.target,~.camera,~.options.frame_radius),"reset")
+    'handled'
+}
+on cameraorbit(evt) {
+    if (evt.event_phase != 2 or drag != null) { return 'pass' }
+    current = publish(owner_of(evt),orbit_move(current,evt.detail,0.0,~.options),"orbit")
+    'handled'
+}
+on camerapanmode(evt) {
+    if (evt.event_phase != 2) { return 'pass' }
+    screen_pan = evt.detail
     'handled'
 }
 on camerarequest(evt) {
@@ -59,7 +94,7 @@ on cameracommand(evt) {
         mode = if (evt.detail == "pan-mode") "pan" else "orbit"
         mode_sync(owner_of(evt),mode)^
         current=publish(owner_of(evt),current,evt.detail)
-    } else { current=publish(owner_of(evt),moved(current,evt.detail,~.camera,~.options),evt.detail) }
+    } else { current=publish(owner_of(evt),camera_action(owner_of(evt),current,evt.detail,~.camera,~.options),evt.detail) }
     'handled'
 }
 on click(evt) {
@@ -72,20 +107,21 @@ on click(evt) {
         return 'handled'
     }
     if (action == "reset") { mode="orbit"; mode_sync(owner_of(evt),mode)^ }
-    current = publish(owner_of(evt),moved(current,action,~.camera,~.options),action)
+    current = publish(owner_of(evt),camera_action(owner_of(evt),current,action,~.camera,~.options),action)
     'handled'
 }
 on pointerdown(evt) {
     let viewport = dom.closest(evt.target,"scene3d")
     if (viewport == null or evt.button != 0) { return 'pass' }
-    drag = {x:evt.clientX,y:evt.clientY,camera:current,pan:mode == "pan" or evt.shiftKey}
+    let pose = if (~.options.frame_radius == null) current else framed_pose(owner_of(evt),current,null)
+    drag = {x:evt.clientX,y:evt.clientY,camera:pose,pan:mode == "pan" or evt.shiftKey}
     dom.focus_set(viewport,false)
     dom.set_pointer_capture(viewport,evt.pointerId)
     'prevent-default'
 }
 on pointermove(evt) {
     if (drag == null) { return 'pass' }
-    let next = if (drag.pan) camera.control(drag.camera,{type:"pan",dx:evt.clientX-drag.x,dy:evt.clientY-drag.y})
+    let next = if (drag.pan) camera.control(drag.camera,{type:"pan",dx:evt.clientX-drag.x,dy:evt.clientY-drag.y,screen_space:screen_pan})
         else orbit_move(drag.camera,(drag.x-evt.clientX)*0.008,(drag.y-evt.clientY)*0.008,~.options)
     current = publish(owner_of(evt),next)
     'prevent-default'
@@ -107,7 +143,7 @@ on keydown(evt) {
     if (pan) {
         let delta = if (evt.key == "ArrowLeft") [-24.0,0.0] else if (evt.key == "ArrowRight") [24.0,0.0]
             else if (evt.key == "ArrowUp") [0.0,-24.0] else [0.0,24.0]
-        current = publish(owner_of(evt),camera.control(current,{type:"pan",dx:delta[0],dy:delta[1]}),"pan")
+        current = publish(owner_of(evt),camera.control(current,{type:"pan",dx:delta[0],dy:delta[1],screen_space:screen_pan}),"pan")
         return 'prevent-default'
     }
     let action = if (evt.key == "ArrowLeft") "left" else if (evt.key == "ArrowRight") "right"
@@ -116,7 +152,7 @@ on keydown(evt) {
         else if (lower(evt.key) == "r") "reset" else null
     if (action == null) { return 'pass' }
     if (action == "reset") { mode="orbit"; mode_sync(owner_of(evt),mode)^ }
-    current = publish(owner_of(evt),moved(current,action,~.camera,~.options),action)
+    current = publish(owner_of(evt),camera_action(owner_of(evt),current,action,~.camera,~.options),action)
     'prevent-default'
 }
 
@@ -124,6 +160,8 @@ on keydown(evt) {
 pub fn controls(labels={}) element =>
     <div class:"camera-toolbar",role:"group",'aria-label':if (labels.controls==null) "3D camera controls" else labels.controls,
         title:labels.help,
+        *(if (labels.modes == true) [for (item in [{id:"orbit-mode",title:"Orbit"},{id:"pan-mode",title:"Pan"}])
+            <button type:"button",id:item.id,'data-camera':item.id,'aria-pressed':string(item.id == "orbit-mode"),item.title>] else []);
         for (item in [{id:"left",title:"Orbit left"},{id:"right",title:"Orbit right"},{id:"in",title:"Zoom +"},
             {id:"out",title:"Zoom −"},{id:"reset",title:"Reset view"}])
             <button type:"button",'data-camera':item.id,if (labels[item.id]==null) item.title else labels[item.id]>>
@@ -168,3 +206,6 @@ pub pn command(owner,id,action) {
     if (not contains(["left","right","up","down","in","out","reset","top","side","pan-mode","orbit-mode"],action)) { raise error("scene viewer: unknown camera action") }
     camera_request(owner,id,"cameracommand",action)
 }
+
+pub pn rotate_camera(owner,id,yaw) { camera_request(owner,id,"cameraorbit",yaw) }
+pub pn set_screen_pan(owner,id,screen) { camera_request(owner,id,"camerapanmode",screen) }

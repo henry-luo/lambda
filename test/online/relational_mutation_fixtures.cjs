@@ -1,5 +1,8 @@
 const relationalMutationCases = ['unrelated', 'attributes', 'witness', 'positions', 'subtree', 'empty', 'siblings',
-    'typed-is', 'typed-where-not', 'internal-siblings', 'leading-siblings', 'leading-wrapped', 'computed-size'];
+    'typed-is', 'typed-where-not', 'internal-siblings', 'leading-siblings', 'leading-wrapped', 'computed-size',
+    'prepared-unrelated', 'prepared-witness', 'unrelated-class', 'unrelated-class-list',
+    'class-witness', 'class-attribute-witness', 'quirks-class-witness', 'synthetic-class-witness',
+    'token-class-witness'];
 
 function exerciseRelationalMutation(kind) {
     const failures = [], paint = document.getElementById('paint');
@@ -12,7 +15,47 @@ function exerciseRelationalMutation(kind) {
     try {
         blue(kind === 'positions' || kind === 'siblings', 'initial match');
         console.log('RELATIONAL_MUTATION_READY');
-        if (kind === 'unrelated' || kind === 'attributes' || kind.startsWith('typed-')) {
+        if (kind.startsWith('unrelated-class') || kind.endsWith('class-witness') || kind === 'class-attribute-witness') {
+            const unrelated = kind.startsWith('unrelated-class');
+            const values = kind === 'token-class-witness' ? ['marker' + String.fromCharCode(12) + 'tail',
+                'marker', 'marker' + String.fromCharCode(11) + 'tail', 'other'] :
+                unrelated ? ['phase-one', 'phase-two', 'phase-three'] :
+                ['marker', 'marker extra', 'other'];
+            const target = kind === 'synthetic-class-witness' ? document.createElement('span') : measure;
+            if (target !== measure) {
+                target.className = 'stable';
+                measure.appendChild(target);
+            }
+            const observer = new MutationObserver(function() {});
+            observer.observe(target, {attributes:true, attributeFilter:['class'], attributeOldValue:true});
+            for (const value of values) {
+                const before = target.getAttribute('class');
+                if (kind === 'unrelated-class-list') target.classList.add(value);
+                else if (kind === 'class-attribute-witness') target.setAttribute('class', value);
+                else if (kind === 'synthetic-class-witness') {
+                    if (value === 'marker') target.className = value;
+                    else if (value === 'marker extra') target.classList.add('extra');
+                    else target.setAttributeNS(null, 'class', value);
+                } else target.className = value;
+                const records = observer.takeRecords();
+                check(records.length === 1 && records[0].oldValue === before, 'old class value survives replacement');
+                // a stable connected write must also preserve a following subtree insertion proof.
+                if (unrelated) measure.appendChild(document.createElement('i'));
+                blue(!unrelated && value !== 'other' && (kind !== 'token-class-witness' || value === 'marker'),
+                    'class membership changes only actual witnesses');
+            }
+        } else if (kind.startsWith('prepared-')) {
+            const script=document.createElement('script');
+            script.type='application/json';script.setAttribute('data-probe','true');
+            script.setAttribute('src','#inert');
+            if(kind==='prepared-witness')script.className='marker';
+            document.head.appendChild(script);
+            blue(kind==='prepared-witness','prepared subtree supplies only its actual classes');
+            script.remove();
+            // a later attribute write must not hide the removed witness from the batch.
+            if(kind==='prepared-witness')script.className='not-marker';
+            blue(false,'removed witness remains visible to invalidation');
+        } else if (kind === 'unrelated' || kind === 'attributes' || kind.startsWith('typed-')) {
             for (const text of ['first measurement', 'second measurement', 'third measurement']) {
                 measure.textContent = text;
                 measure.getBoundingClientRect();
@@ -87,7 +130,9 @@ function exerciseRelationalMutation(kind) {
 }
 
 function relationalMutationHtml(kind) {
-    const argument = kind === 'attributes' || kind === 'witness' ? '[data-flag="active"]' : kind === 'siblings' ? '.before + .after' :
+    const argument = kind === 'quirks-class-witness' ? ':is([class~="MARKER" i])' :
+        kind === 'class-attribute-witness' ? ':where([class~="marker"])' :
+        kind.startsWith('prepared-') || kind.includes('class') ? '.marker' : kind === 'attributes' || kind === 'witness' ? '[data-flag="active"]' : kind === 'siblings' ? '.before + .after' :
         '.gate > .marker:' + (kind === 'empty' ? 'empty' : 'first-child');
     const children = kind === 'internal-siblings' ? '<ul id="list"><li><span>text</span></li></ul>' :
         kind === 'positions' || kind === 'empty' ? '<b class="marker">text</b>' :
@@ -97,13 +142,13 @@ function relationalMutationHtml(kind) {
         (kind === 'leading-wrapped' ? ':is(:has(+ .gate .marker))' : ':has(+ .gate .marker)') + '{width:120px}' :
         kind.startsWith('typed-') || kind === 'internal-siblings' ? '.richtext ' + typed + ':has(>li>span+span){width:120px}' : '';
     const primaryRule = kind === 'internal-siblings' || kind.startsWith('leading-') ? '' :
-        'body:has(' + argument + ') #paint{background:blue}';
-    return '<!doctype html><style>body{margin:0}#probe,#paint{position:fixed;top:0;width:80px;height:80px}' +
+        (kind.startsWith('prepared-')?'html':'body')+':has(' + argument + ') #paint{background:blue}';
+    return (kind.startsWith('quirks-') ? '' : '<!doctype html>') + '<style>body{margin:0}#probe,#paint{position:fixed;top:0;width:80px;height:80px}' +
         '#probe{left:0;background:red}#paint{left:100px;background:red}' +
         primaryRule +
         '#measure{position:absolute;top:100px;width:70px;visibility:hidden}#measure:empty{width:90px;padding:6px;border:2px solid blue}' +
         'ul,ol,.lead{padding:0;margin:0;width:80px}' + siblingRule + '</style>' +
-        '<div id="probe"></div><div id="paint"></div><div class="richtext"><div id="measure">measurement</div>' +
+        '<div id="probe"></div><div id="paint"></div><div class="richtext"><div id="measure" class="stable">measurement</div>' +
         '<div id="lead" class="lead"></div><section id="gate" class="gate">' + children + '</section></div>' +
         '<script>(' + exerciseRelationalMutation.toString() + ')(' + JSON.stringify(kind) + ');</script>';
 }

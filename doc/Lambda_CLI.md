@@ -438,6 +438,14 @@ lazy (**S12.4.1v2/S14.3.1v2**). Members are read directly from the retained
 archive without extraction. Invalid archives and deferred member failures use
 the existing input errors.
 
+**Binary glTF models:** `lambda view model.glb` opens the light Scene3D viewer
+through the bundled `lambda.scene3d` package (D9.3.4, D9.5.6v2). Drag to orbit,
+Shift-drag to pan, scroll to zoom, and press **R** to fit the model. The right
+panel exposes display and lighting settings, with skeleton, point size,
+imported lights, and animation controls available when the model contains them.
+Checked animation clips play and loop together. **Play all** starts every clip
+from its first frame.
+
 **Word documents:** `lambda view report.docx` renders the supported paragraphs,
 headings, text formatting, lists, tables, links, and embedded images through
 `lambda.doc.docx` (D9.3.4). The file browser also previews DOCX when selected;
@@ -470,7 +478,7 @@ See [DocBook support and limitations](Markup_Formats_Support.md#312-docbook).
 
 **Supported formats:**
 
-`.epub`, `.docx`, `.pptx`, `.pdf`, `.html`/`.htm`, `.xhtml`/`.xht`, `.md`/`.markdown`, `.tex`/`.latex`, `.ls`, `.xml`, `.rst`, `.wiki`, `.svg`, `.mmd`, `.d2`, `.dot`/`.gv`, `.structurizr`/`.dsl`, `.png`, `.jpg`/`.jpeg`, `.gif`, `.json`, `.yaml`/`.yml`, `.toml`, `.txt`, `.csv`, `.ini`, `.conf`, `.cfg`, `.log`
+`.epub`, `.docx`, `.pptx`, `.pdf`, `.html`/`.htm`, `.xhtml`/`.xht`, `.md`/`.markdown`, `.tex`/`.latex`, `.ls`, `.xml`, `.rst`, `.wiki`, `.svg`, `.mmd`, `.d2`, `.dot`/`.gv`, `.structurizr`/`.dsl`, `.glb`, `.png`, `.jpg`/`.jpeg`, `.gif`, `.json`, `.yaml`/`.yml`, `.toml`, `.txt`, `.csv`, `.ini`, `.conf`, `.cfg`, `.log`
 
 XHTML uses strict XML parsing and the same HTML DOM/CSS/layout pipeline (**D10.1.4**).
 `.xhtml`/`.xht` files and HTTP `application/xhtml+xml` responses select it.
