@@ -947,8 +947,8 @@ static const size_t JS_EXTERNAL_SCRIPT_BUDGET_BYTES = 5u * 1024u * 1024u;
 static const size_t JS_TOTAL_SCRIPT_BUDGET_BYTES = 20u * 1024u * 1024u;
 // Static snapshot viewers have no interaction turn that can use a page bundle.
 static const size_t JS_STATIC_HEADLESS_TOTAL_SCRIPT_BUDGET_BYTES = 512u * 1024u;
-// Deferred and async scripts are not render-blocking in a browser. Bound their
-// pre-layout work so a large application bundle cannot delay the first window.
+// Static viewers bound pre-layout work to show their first window promptly.
+// Normal document loads must not permanently discard deferred startup scripts.
 static const size_t JS_PRELAYOUT_DEFER_BUDGET_BYTES = 128u * 1024u;
 
 static size_t script_byte_limit_from_env(const char* name, size_t fallback) {
@@ -966,7 +966,8 @@ static size_t script_byte_limit_from_env(const char* name, size_t fallback) {
 
 static size_t script_prelayout_defer_limit_bytes() {
     return script_byte_limit_from_env(
-        "RADIANT_JS_PRELAYOUT_DEFER_BYTES", JS_PRELAYOUT_DEFER_BUDGET_BYTES);
+        "RADIANT_JS_PRELAYOUT_DEFER_BYTES",
+        s_static_headless_snapshot ? JS_PRELAYOUT_DEFER_BUDGET_BYTES : (size_t)-1);
 }
 
 static size_t script_external_compile_limit_bytes() {
@@ -2543,41 +2544,46 @@ static bool script_runner_prepare_image_request(DomNode* node, void*) {
     return true;
 }
 
-static bool script_runner_wait_for_load_blockers(Runtime* runtime,
+static bool script_runner_wait_for_load_blockers(Runtime* runtime, DomDocument* doc,
                                                  JsScriptTaskCollection* collection) {
-    DomDocument* doc = runtime ? (DomDocument*)runtime->dom_doc : nullptr;
     if (!doc) return true;
 
-    bool has_embedded_navigation = false;
-    view_geometry_walk_dom_tree(doc->root, script_runner_find_embedded_navigation,
-        &has_embedded_navigation);
-    if (has_embedded_navigation && runtime->dom_ui_context) {
-        EvalContext* owner = runtime_get_eval_context(runtime);
-        // D6.4.1: child evaluators may switch only after the parent's script frames returned.
-        if (!owner || owner->execution_depth) return false;
-        UiContext* ui = (UiContext*)runtime->dom_ui_context;
-        DomDocument* previous_document = ui->document;
-        ui->document = lam::up(doc);
-        script_runner_suspend_js_watchdog();
-        layout_update_document(ui, doc);
-        script_runner_resume_js_watchdog();
-        ui->document = lam::up(previous_document);
-        if (!radiant_eval_context_switch(owner) || !js_runtime_state_init(owner)) return false;
-        dom_set_document(doc);
-        RuntimeExecutionScope execution_scope(owner);
-        dom_dispatch_pending_resource_loads();
-        js_microtask_flush();
+    if (runtime) {
+        bool has_embedded_navigation = false;
+        view_geometry_walk_dom_tree(doc->root, script_runner_find_embedded_navigation,
+            &has_embedded_navigation);
+        if (has_embedded_navigation && runtime->dom_ui_context) {
+            EvalContext* owner = runtime_get_eval_context(runtime);
+            // D6.4.1: child evaluators may switch only after the parent's script frames returned.
+            if (!owner || owner->execution_depth) return false;
+            UiContext* ui = (UiContext*)runtime->dom_ui_context;
+            DomDocument* previous_document = ui->document;
+            ui->document = lam::up(doc);
+            script_runner_suspend_js_watchdog();
+            layout_update_document(ui, doc);
+            script_runner_resume_js_watchdog();
+            ui->document = lam::up(previous_document);
+            if (!radiant_eval_context_switch(owner) || !js_runtime_state_init(owner)) return false;
+            dom_set_document(doc);
+            RuntimeExecutionScope execution_scope(owner);
+            dom_dispatch_pending_resource_loads();
+            js_microtask_flush();
+        }
+
     }
 
     {
-        RuntimeExecutionScope execution_scope(runtime_get_eval_context(runtime));
-        // parsed images need the same request/completion path as scripted src writes.
+        RuntimeExecutionScope execution_scope(runtime ? runtime_get_eval_context(runtime) : nullptr);
+        // native image request records distinguish eager and lazy blockers even without a JS realm.
         view_geometry_walk_dom_tree(doc->root, script_runner_prepare_image_request, nullptr);
-        dom_dispatch_pending_resource_loads();
-        if (item_is_error(js_microtask_flush_result())) return false;
+        if (runtime) {
+            dom_dispatch_pending_resource_loads();
+            if (item_is_error(js_microtask_flush_result())) return false;
+        }
     }
 
     auto scripts_pending = [&]() -> bool {
+        if (!runtime) return false;
         auto* state = dynamic_script_tasks(doc, false);
         if (!state || !state->pending) return false;
         for (int i = 0; i < state->tasks->length; i++) {
@@ -2586,6 +2592,9 @@ static bool script_runner_wait_for_load_blockers(Runtime* runtime,
         }
         return false;
     };
+    // CSS can establish the first manager even when the document has no executable script.
+    radiant_prefetch_document_stylesheet_resources(doc);
+    radiant_discover_document_resources(doc);
     if (!doc->resource_manager && !scripts_pending()) {
         doc->fully_loaded = true;
         if (collection && collection->load_blocking_scripts > 0) {
@@ -2598,29 +2607,30 @@ static bool script_runner_wait_for_load_blockers(Runtime* runtime,
     NetworkResourceManager* mgr = doc->resource_manager;
     // source mutations admitted during scripts participate in the ordinary load boundary.
     uint64_t source_sequence = doc->js.mutation_sequence;
-    radiant_discover_document_resources(doc);
     auto flush_resource_completions = [&]() -> bool {
         // load callbacks share bootstrap's mutation batch until the loader commits its cascade.
-        RuntimeExecutionScope execution_scope(runtime_get_eval_context(runtime));
+        RuntimeExecutionScope execution_scope(runtime ? runtime_get_eval_context(runtime) : nullptr);
         if (mgr) resource_manager_flush_layout_updates(mgr);
         dom_document_has_pending_work(doc);
-        if (scripts_pending()) js_event_loop_pump_nowait();
-        if (item_is_error(js_execution_interrupt_status())) return false;
-        // element completion precedes window.load; its promise jobs may add another stylesheet.
-        dom_dispatch_pending_resource_loads();
-        if (item_is_error(js_microtask_flush_result())) return false;
+        if (runtime) {
+            if (scripts_pending()) js_event_loop_pump_nowait();
+            if (item_is_error(js_execution_interrupt_status())) return false;
+            // element completion precedes window.load; its promise jobs may add another stylesheet.
+            dom_dispatch_pending_resource_loads();
+            if (item_is_error(js_microtask_flush_result())) return false;
+        }
         if (source_sequence != doc->js.mutation_sequence) {
             source_sequence = doc->js.mutation_sequence;
             radiant_discover_document_resources(doc);
-            view_geometry_walk_dom_tree(doc->root, script_runner_prepare_image_request, nullptr);
+            if (runtime) view_geometry_walk_dom_tree(doc->root, script_runner_prepare_image_request, nullptr);
         }
         mgr = doc->resource_manager;
         return true;
     };
     if (!flush_resource_completions()) return false;
     auto resources_loaded = [&]() -> bool {
-        return (!mgr || resource_manager_is_fully_loaded(mgr)) &&
-            !dom_document_has_pending_work(doc) && !scripts_pending();
+        // completion polling also visits optional work; only modeled load blockers delay window.load.
+        return !radiant_document_has_pending_load_resources(doc) && !scripts_pending();
     };
     if (resources_loaded()) {
         doc->fully_loaded = true;
@@ -2782,7 +2792,7 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
     if (timing) timing->async_scripts_us += time_now_us() - phase_start_us;
 
     phase_start_us = timing ? time_now_us() : 0;
-    if (!script_runner_wait_for_load_blockers(runtime, collection)) {
+    if (!script_runner_wait_for_load_blockers(runtime, executing_document, collection)) {
         any_error = true;
     }
     if (timing) timing->load_blockers_us += time_now_us() - phase_start_us;
@@ -2891,11 +2901,6 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     log_script_task_diagnostics(&script_tasks, "collected");
     if (timing) timing->collect_us += time_now_us() - phase_start_us;
 
-    if (!script_task_collection_has_executable_tasks(&script_tasks)) {
-        log_debug("execute_document_scripts: no scripts found");
-        script_task_collection_free(&script_tasks);
-        return;
-    }
     size_t watchdog_source_len = script_task_collection_source_bytes(&script_tasks);
 
     // log external script loading stats
@@ -2905,12 +2910,17 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     }
 
     size_t browser_js_limit = script_total_compile_limit_bytes();
-    if (browser_js_limit != (size_t)-1 && watchdog_source_len > browser_js_limit) {
+    bool over_source_budget = browser_js_limit != (size_t)-1 && watchdog_source_len > browser_js_limit;
+    if (!script_task_collection_has_executable_tasks(&script_tasks) || over_source_budget) {
         // Large browser-app bundles still exercise unsupported LambdaJS/runtime
         // paths; skip document JS before JIT setup and render the parsed DOM/CSS.
-        log_info("execute_document_scripts: skipping document JS after browser source budget: %zu > %zu",
+        if (over_source_budget) log_info("execute_document_scripts: skipping document JS after browser source budget: %zu > %zu",
                  watchdog_source_len,
                  browser_js_limit);
+        // required images still own the ordinary load boundary; snapshot grace is for optional work.
+        phase_start_us = timing ? time_now_us() : 0;
+        script_runner_wait_for_load_blockers(nullptr, dom_doc, &script_tasks);
+        if (timing) timing->load_blockers_us += time_now_us() - phase_start_us;
         script_task_collection_free(&script_tasks);
         return;
     }

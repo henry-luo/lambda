@@ -1,10 +1,10 @@
 const dynamicScriptCases = ['basic', 'ordered', 'async', 'removed', 'src-change', 'connected-src',
     'connected-attribute', 'failed', 'throw', 'empty-src', 'chain', 'late', 'inert', 'unsupported',
     'adopted', 'async-idl', 'zero-window', 'src-observer', 'stylesheet', 'empty-body',
-    'late-fetch', 'late-fetch-chain', 'late-fetch-immediate'];
+    'late-fetch', 'late-fetch-chain', 'late-fetch-immediate', 'large-admitted'];
 const dynamicScriptBudgetCases = ['large-async', 'large-ordered'];
 const dynamicModuleCases = ['basic', 'ordered', 'async', 'removed', 'connected-src',
-    'failed', 'throw', 'import', 'cached', 'large-async', 'late-timer', 'chain', 'late-chain'];
+    'failed', 'throw', 'import', 'cached', 'large-async', 'late-timer', 'chain', 'late-chain', 'large-admitted'];
 
 function dynamicScriptExpected(mode, module = false) {
     const absent = ['failed', 'empty-src', 'empty-body', 'inert', 'unsupported', 'adopted', 'async-idl', ...dynamicScriptBudgetCases].includes(mode);

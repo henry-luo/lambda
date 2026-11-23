@@ -15,6 +15,7 @@ for (const [module, modes] of [[false, [...dynamicScriptCases, ...dynamicScriptB
     test('dynamic ' + (module ? 'module' : 'classic') + ' script: ' + mode, async () => {
         const {image, log} = await render((module ? 'module-' : '') + mode, dynamicScriptHtml(mode, origin(), module), {
             ...process.env, LAMBDA_POST_LOAD_SETTLE_MS:mode === 'zero-window' ? '0' : '1000',
+            ...(dynamicScriptBudgetCases.includes(mode) ? {RADIANT_JS_PRELAYOUT_DEFER_BYTES:'131072'} : {}),
         });
         const expected = dynamicScriptExpected(mode, module);
         assert.deepEqual(loggedResult(log, 'DYNAMIC_SCRIPT_RESULT'), expected);

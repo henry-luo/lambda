@@ -6,6 +6,65 @@ remain in the [active issue ledger](Lib_Input_Issue_Ledger.md).
 
 ## Fixed issues
 
+<a id="li-106"></a>
+
+### LI-106 — Failed functional selectors retain a broader compound prefix
+
+**Fixed 2026-11-23.** Shared parser ownership follows **D9.1.1v4 /
+D9.1.3v2**. A failed functional pseudo could consume its closing parenthesis.
+The compound parser then retained its valid prefix and the rule parser saw
+an opening brace, accepting the broader selector. For example,
+`.page:has(.marker,:unknown-pseudo)` became `.page` and applied display:none.
+The same recovery path amplified LI-105: Anam's intended cookie-only
+`body > div:has(.--framer-cookie-banner-container)` hid every body div,
+including its entire main content.
+
+Every legal compound terminator is checked before parsing a simple selector.
+Failure at that point now rejects the compound; forgiving :is()/:where()
+argument parsing retains its existing isolated-branch handling. This follows
+[Selectors Level 4 §3.9](https://www.w3.org/TR/selectors-4/#invalid) and
+[§4.5](https://www.w3.org/TR/selectors-4/#relational); invalid :has() and :not()
+arguments cannot silently widen the outer selector.
+
+Three permanent render controls fail before repair and pass afterward,
+covering valid double-hyphen membership, insertion/removal and failed
+:has()/:not() recovery. All 20 selector-group unit tests pass, including
+nine valid identifier shapes and five invalid prefixed functions. All 32
+focused render checks pass. At the milestone, dynamic layout passes 630/630;
+static layout passes 3851/3852, retaining the previously recorded
+`dom_view_role_nested` failure at 44.44% element pass rate. No threshold or
+reference is changed. Evidence: `test/online/render_selector_identifiers.test.cjs`,
+`lambda-input/test/css/test_selector_groups.cpp` and
+`temp/online-visual-round189/`.
+
+Anam About's main gallery and heading return and clear major review. Anam
+Home's portrait cards and consent panel return, but its main animated
+headline/actions remain absent and it retains major review. Its Chromium
+CSSOM still has opacity 0.001 while presentation shows the text; automatic
+animation presentation remains unqualified here. No whole-page clearance
+is inferred from the lower coarse score alone.
+
+<a id="li-105"></a>
+
+### LI-105 — Double-hyphen class identifiers are rejected by selector parsing
+
+**Fixed 2026-11-23.** Input owns the shared CSS grammar under **D9.1.1v4 /
+D9.1.3v2**. The tokenizer's CUSTOM_PROPERTY category remains an identifier
+token in selector grammar, but class parsing accepted IDENT only. Valid
+`.--marker` therefore failed DOM selector queries; inside Anam's :has()
+rule it also exposed LI-106's broader-prefix recovery defect.
+
+A shared identifier predicate now serves class/type selectors, qualified
+names, attribute names and descendant-start detection. It preserves the
+existing tokenizer and escape decoding rather than adding a class-prefix
+exception. [CSS Syntax §4.3.9](https://www.w3.org/TR/css-syntax-3/#would-start-an-ident-sequence)
+and [Selectors §6.6](https://www.w3.org/TR/selectors-4/#class-html) define the
+relevant identifier/class grammar. No runtime, native, vendor or public
+layout data change is required. Qualified input/render evidence and limits
+are recorded under LI-106. This no longer blocks the dependent Anam
+cascade repair; other animation/media gaps remain independent.
+
+
 <a id="li-103"></a>
 
 ### LI-103 — Legacy gap aliases retain independent property identities

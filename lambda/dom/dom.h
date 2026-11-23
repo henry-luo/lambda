@@ -598,4 +598,18 @@ void dom_schedule_animation_frame(Item callback);
 
 #ifdef __cplusplus
 }
+
+struct DomElement;
+
+class DomAttributeOldValue {
+public:
+    explicit DomAttributeOldValue(const char* value);
+    DomAttributeOldValue(DomElement* element, const char* name);
+    ~DomAttributeOldValue();
+    const char* get() const { return value_; }
+    DomAttributeOldValue(const DomAttributeOldValue&) = delete;
+    DomAttributeOldValue& operator=(const DomAttributeOldValue&) = delete;
+private:
+    char* value_;
+};
 #endif

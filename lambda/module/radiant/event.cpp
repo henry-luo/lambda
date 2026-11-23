@@ -5891,7 +5891,8 @@ static void dom_js_mutation_reset_records(DomDocument* doc) {
 static bool dom_js_document_has_structural_css_dependency(DomDocument* doc);
 static bool dom_js_document_has_broad_structural_css_dependency(DomDocument* doc);
 static bool dom_js_document_has_child_list_dependency(DomDocument* doc, DomNode* parent,
-    bool include_structural = false, DomNode* changed_subtree = nullptr);
+    bool include_structural = false, DomNode* changed_subtree = nullptr,
+    uint32_t insertion_sequence = 0);
 
 struct FrameCommitProfile {
     double cascade_ms, layout_ms, repaint_ms;
@@ -6310,8 +6311,27 @@ static bool dom_js_rule_is_scope(CssRule* rule, void*) {
     return rule && rule->type == CSS_RULE_SCOPE;
 }
 
+static bool dom_js_transform_keeps_containing_block(DomElement* element, const CssValue* value) {
+    return value && value->type != CSS_VALUE_TYPE_KEYWORD &&
+        !css_value_contains_pending_substitution(value) &&
+        transform_has_functions(element->transform_prop());
+}
+
+struct AttributeValueDependency {
+    const char* name;
+    const char* before = nullptr;
+    const char* after = nullptr;
+    bool compare_values = false;
+    bool case_sensitive = true;
+    bool preserves_container_size = false;
+};
+
 static bool dom_js_selector_mentions_attribute(CssSelector* selector, void* data) {
-    return radiant_css_selector_mentions_mutation_attribute(selector, (const char*)data);
+    auto* dependency = (AttributeValueDependency*)data;
+    return dependency->compare_values
+        ? radiant_css_selector_attribute_match_changes(selector, dependency->name,
+            dependency->before, dependency->after, dependency->case_sensitive)
+        : radiant_css_selector_mentions_mutation_attribute(selector, dependency->name);
 }
 
 static bool dom_js_rule_has_attribute_value_dependency(CssRule* rule, void* data) {
@@ -6331,9 +6351,12 @@ static bool dom_js_rule_has_attribute_value_dependency(CssRule* rule, void* data
         pool_destroy(scratch);
         return dependency;
     }
-    // scope/container state has dependencies beyond a style rule's selector list.
-    if (rule->type == CSS_RULE_SCOPE || rule->type == CSS_RULE_CONTAINER)
-        return true;
+    // retained opacity/transform paint does not change a size-query input.
+    auto* dependency = (AttributeValueDependency*)data;
+    if (rule->type == CSS_RULE_SCOPE) return true;
+    if (rule->type == CSS_RULE_CONTAINER)
+        return !dependency->preserves_container_size ||
+            !css_container_query_is_size_only(rule->data.conditional_rule.condition);
     if (radiant_css_rule_selector_has_match(rule, dom_js_selector_mentions_attribute, data)) return true;
     if (rule->type != CSS_RULE_STYLE && rule->type != CSS_RULE_NESTING && rule->type != CSS_RULE_NESTED_DECLARATIONS)
         return false;
@@ -6352,21 +6375,50 @@ static bool dom_js_style_has_attribute_value(StyleNode* node, void* data) {
     return true;
 }
 
-bool radiant_attribute_has_css_dependency(DomDocument* doc, DomElement* element, const char* name) {
-    if (!doc || !element || !name) return true;
+static bool attribute_value_has_css_dependency(DomDocument* doc, DomElement* element,
+        AttributeValueDependency* dependency) {
+    if (!doc || !element || !dependency->name) return true;
     // stylesheet owners retain their lifecycle invalidation even for metadata.
     if (dom_js_node_is_stylesheet_related(element) ||
         dom_js_node_is_stylesheet_related(element->parent)) return true;
     bool found = false;
     if (element->specified_style) style_tree_foreach(element->specified_style, dom_js_style_has_attribute_value, &found);
-    return found || radiant_css_document_rule_tree_has_match(doc, dom_js_rule_has_attribute_value_dependency, (void*)name);
+    return found || radiant_css_document_rule_tree_has_match(doc,
+        dom_js_rule_has_attribute_value_dependency, dependency);
+}
+
+bool radiant_attribute_has_css_dependency(DomDocument* doc, DomElement* element, const char* name) {
+    AttributeValueDependency dependency = {name};
+    return attribute_value_has_css_dependency(doc, element, &dependency);
+}
+
+extern "C" bool dom_engine_inline_style_has_css_dependency(DomDocument* doc, DomElement* element,
+        const char* old_value, uint32_t property) {
+    if (!doc || !element) return true;
+    AttributeValueDependency dependency = {"style", old_value, element->get_attribute("style"),
+        true, !dom_element_uses_quirks_css(element)};
+    if (property == CSS_PROPERTY_OPACITY) {
+        // opacity can flatten a preserve-3d subtree; retain its existing layout path.
+        dependency.preserves_container_size = element->transformp()->transform_style != CSS_VALUE_PRESERVE_3D;
+    } else if (property == CSS_PROPERTY_TRANSFORM) {
+        CssRule* block = dom_element_inline_declaration_block(element);
+        for (size_t i = block ? block->data.style_rule.declaration_count : 0; i > 0; i--) {
+            CssDeclaration* declaration = block->data.style_rule.declarations[i - 1];
+            if (declaration && declaration->property_code == CSS_PROPERTY_TRANSFORM) {
+                dependency.preserves_container_size = dom_js_transform_keeps_containing_block(element, declaration->value);
+                break;
+            }
+        }
+    }
+    return attribute_value_has_css_dependency(doc, element, &dependency);
 }
 
 struct CursorAttributeDependency { const char* name; bool found = false; };
 
 static bool dom_js_rule_has_non_cursor_attribute_dependency(CssRule* rule, void* data) {
     auto* dependency = (CursorAttributeDependency*)data;
-    if (!dom_js_rule_has_attribute_value_dependency(rule, (void*)dependency->name)) return false;
+    AttributeValueDependency attribute = {dependency->name};
+    if (!dom_js_rule_has_attribute_value_dependency(rule, &attribute)) return false;
     if (rule->type != CSS_RULE_STYLE || rule->data.style_rule.nested_rule_count) return true;
     dependency->found = true;
     for (size_t i = 0; i < rule->data.style_rule.declaration_count; i++) {
@@ -6687,15 +6739,20 @@ static bool dom_js_rule_has_child_list_dependency(CssRule* rule, void* context) 
 }
 
 static bool dom_js_document_has_child_list_dependency(DomDocument* doc, DomNode* parent,
-        bool include_structural, DomNode* changed_subtree) {
+        bool include_structural, DomNode* changed_subtree, uint32_t insertion_sequence) {
     if (!doc || !parent) return true;
     if (dom_js_document_has_column_css_dependency(doc)) return true;
     DomJsChildListDependency dependency = {};
     dependency.parent = parent;
     dependency.changed_subtree = changed_subtree;
-    // a later attribute edit can hide a formerly matching class/id on a moved node.
+    // detached setup before insertion cannot hide an earlier connected witness.
+    // connected edits, removals and later writes retain the history guard;
+    // proven local attributes cannot change a relational witness.
     for (int i = 0; dependency.changed_subtree && i < doc->js.mutation_record_count; i++) {
-        if (doc->js.mutation_records[i].kind == DOM_JS_MUTATION_ATTRIBUTE)
+        const DomJsMutationRecord& record = doc->js.mutation_records[i];
+        if (record.kind == DOM_JS_MUTATION_ATTRIBUTE &&
+            record.attribute != DOM_JS_MUTATION_ATTRIBUTE_LOCAL &&
+            (!insertion_sequence || record.was_connected || record.sequence >= insertion_sequence))
             dependency.changed_subtree = nullptr;
     }
     dependency.include_structural = include_structural;
@@ -6801,7 +6858,8 @@ static bool dom_js_mutation_can_incremental(DomDocument* doc,
             }
             if (!has_broad_structural_css ||
                 !dom_js_document_has_child_list_dependency(doc, record->parent,
-                    false, record->target)) continue;
+                    false, record->target, record->kind == DOM_JS_MUTATION_CHILD_INSERT
+                        ? record->sequence : 0)) continue;
             // :has() can change matching ancestors outside the child-list
             // subtree. Local sibling and position selectors use the parent as
             // their cascade root above, so they retain incremental layout.
@@ -6810,8 +6868,8 @@ static bool dom_js_mutation_can_incremental(DomDocument* doc,
         }
         if (record->kind == DOM_JS_MUTATION_ATTRIBUTE &&
             record->attribute == DOM_JS_MUTATION_ATTRIBUTE_LOCAL) {
-            // The notifier proved no :has() argument mentions this data/ARIA
-            // name. A later stylesheet mutation still forces the broad path.
+            // the notifier proved no relational attribute match can change.
+            // a later stylesheet mutation still forces the broad path.
             continue;
         }
         if (record->kind == DOM_JS_MUTATION_ATTRIBUTE &&
@@ -7369,11 +7427,8 @@ static DomElement* dom_js_paint_only_target(DomDocument* doc, const DomJsMutatio
         // opacity below one flattens preserve-3d, which changes descendants' containing blocks
         return element->transformp()->transform_style == CSS_VALUE_PRESERVE_3D ? nullptr : element;
     }
-    const CssValue* value = declaration->value;
     // CSS-wide resets and pending substitutions can remove the containing block.
-    bool keeps_transform = value->type != CSS_VALUE_TYPE_KEYWORD &&
-        !css_value_contains_pending_substitution(value);
-    return transform_has_functions(element->transform_prop()) && keeps_transform ? element : nullptr;
+    return dom_js_transform_keeps_containing_block(element, declaration->value) ? element : nullptr;
 }
 
 static bool post_html_handler_paint_only_commit(EventContext* evcon, DomDocument* doc,
