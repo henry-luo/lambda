@@ -1,5 +1,5 @@
 // The converter owns DOCX semantics; this module only presents its result (D9.3.4).
-import docx: lambda.doc.docx
+import reader: .read
 import css: .css
 
 pub fn preview(result) element {
@@ -17,8 +17,8 @@ pub fn preview(result) element {
 }
 
 pub fn render_document_file(source, options = null) element^ {
-    let result = docx.convert(source, {include_empty_paragraphs:true,presentation:"source",
-        *:if (options == null) {} else options})^
+    let result = reader.convert(source, {include_empty_paragraphs:true,presentation:"source",
+        *:if (options == null) {} else options}, false)^
     let title = if (result.metadata.title != null and result.metadata.title != "")
         result.metadata.title else "Word document";
     <html lang:"en",

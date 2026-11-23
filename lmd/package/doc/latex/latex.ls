@@ -25,7 +25,7 @@ import csl: .citeproc.adapter
 import csl_aliases: .citeproc.aliases
 import hyperref: .packages.hyperref
 import amsmath: .packages.amsmath
-import paths: lambda.editor.session
+import paths: lambda.io.path
 import util: .util
 import language_profile: .packages.language
 import tikz: .packages.tikz
@@ -37,6 +37,7 @@ import paragraph: .packages.paragraph
 import footmisc: .packages.footmisc
 import fontspec: .packages.fontspec
 import profiles: .docclass.profiles
+import first_page: lambda.doc.first_page
 
 // ============================================================
 // Public API — HTML string output
@@ -305,12 +306,43 @@ fn cellspace_stylesheet(ast, packages) any^ {
     }
 }
 
+let snapshot_containers = {
+    latex_document:(attrs,kids) => <latex_document *:attrs,*kids>,
+    document:(attrs,kids) => <document *:attrs,*kids>,
+    paragraph:(attrs,kids) => <paragraph *:attrs,*kids>,
+    curly_group:(attrs,kids) => <curly_group *:attrs,*kids>,
+    center:(attrs,kids) => <center *:attrs,*kids>,
+    flushleft:(attrs,kids) => <flushleft *:attrs,*kids>,
+    flushright:(attrs,kids) => <flushright *:attrs,*kids>,
+    quote:(attrs,kids) => <quote *:attrs,*kids>,
+    quotation:(attrs,kids) => <quotation *:attrs,*kids>,
+    verse:(attrs,kids) => <verse *:attrs,*kids>,
+    itemize:(attrs,kids) => <itemize *:attrs,*kids>,
+    enumerate:(attrs,kids) => <enumerate *:attrs,*kids>,
+    description:(attrs,kids) => <description *:attrs,*kids>
+}
+
+fn snapshot_boundary(node) any^ {
+    if (not (node is element)) null else {
+        let tag = string(name(node))
+        let strength = if (tag == "pagebreak") util.find_child(node,"brack_group")^ else null;
+        if (contains(["newpage","clearpage","cleardoublepage"],tag) or
+            (tag == "pagebreak" and (strength == null or trim(util.text_of(strength)) == "4"))) {keep:[]}
+        else if (snapshot_containers[tag] != null) {
+            let next = first_page.cut(content(node)^,(child,index) any^ => snapshot_boundary(child))^;
+            if (next == null) null else {keep:[snapshot_containers[tag](map(node),next.children)^]}
+        } else null
+    }
+}
+
 // Native document-loader entry point keeps standalone output as the view default.
 pub fn render_document(ast, options) any^ {
     let effective = if (options == null) {standalone: true}
         else if (options.standalone == null) {*:options, standalone: true}
         else options
-    render(ast, effective)
+    // TeX expansion precedes this cut. Only the retained material enters the adapters (D10.2.2).
+    let cut = if (effective.snapshot == true) snapshot_boundary(ast)^ else null
+    render(if (cut == null) ast else cut.keep[0], effective)
 }
 
 // Path-source entry for the native document transform (CLI convert, Radiant):

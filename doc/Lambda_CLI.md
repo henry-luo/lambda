@@ -510,6 +510,55 @@ lambda view application.jar
 
 ---
 
+### `preview` — First-page document preview
+
+`lambda preview` shows the first page of a local document. For PDF, this means the first physical page, even if blank. For flowing content such as Markdown, it means the first viewport at normal reading width. The loader lays out a batch of content and reads more if the page has room.
+
+| Mode | Result | Performance target |
+|------|--------|--------------------|
+| `--thumbnail` | Write one still image for a file manager at the requested pixel dimensions. Fit the first page proportionally inside the image and keep animation at its initial frame. | Under 50 ms per local document on paths that do not require a Lambda transformation. |
+| `--snapshot` | Open a Radiant window showing the first page as `view` would display it. Visible first-page animations continue to play. | Under 250 ms to display a usable first page, including for long Markdown, PDF and Word (.docx) documents. |
+
+Thumbnail text detail depends on its size in the output image. Readable text uses the document font. Text too small to read can be drawn as simple marks that preserve word spacing, line lengths and color and skip glyph rasterization.
+
+Choose exactly one mode. Thumbnails require a new PNG output path and default to 256 × 256 pixels. Pass both dimensions to change the size.
+
+```bash
+lambda preview notes.md --thumbnail --width 256 --height 192 -o notes.png
+lambda preview report.pdf --snapshot
+lambda preview app.ls --snapshot
+lambda preview model.glb --thumbnail --width 128 --height 128 -o model.png
+```
+
+HTML, Markdown, MediaWiki, reStructuredText, Org, AsciiDoc and Textile load
+in batches and stop when a laid-out prefix fills the viewport. Markup that
+needs whole-document reference resolution or an embedded transformation
+requires further support.
+
+DOCX stops at a supported page break or when estimated line wrapping and
+block heights fill the page. PPTX opens the first slide and its dependencies.
+LaTeX performs normal TeX expansion and stops conversion at the first supported
+forced page break (D9.3.4, D10.2.2). PDF parses the source before importing page
+one. XSL-FO and Radiant page documents preview the first composed page.
+
+XHTML, XML, EPUB, diagrams, images and text surfaces use their existing
+viewer loaders. Both preview modes display `.ls` files as escaped source text.
+Snapshot runs bundled Lambda transforms in the AST interpreter. It disables
+JIT promotion and fallback for the lifetime of the preview (D8.3.1v3).
+Use `lambda view` to execute a script document and display its result, or to
+browse directories and archives. Preview sources and subresources are local.
+
+GLB previews use the native Scene3D renderer and frame the model's selected
+scene automatically. Thumbnails show the authored pose, limit raster texture
+decoding to the output size, and can omit static parts that project to less
+than half a pixel in both dimensions. Snapshots play the first clip that
+animates the selected scene. GLB rendering requires a build with native
+graphics support (D9.1.1v4, D9.2.1v2).
+
+Source acquisition and rendering follow D9.1.2v2 and D9.1.1v4. Thumbnails use the initial virtual frame under D10.1.7. See the [implementation plan](../vibe/impl/Lambda_Impl_Preview.md) for the latency targets and remaining format work.
+
+---
+
 ### `edit` — Document Editor
 
 Open an existing local document in an editing window with a toolbar at the

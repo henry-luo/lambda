@@ -1,5 +1,5 @@
 // The importer owns Office interpretation; viewing reuses the retained Slides player.
-import pptx: lambda.doc.pptx
+import reader: .read
 import slide: lambda.slide
 import live: lambda.slide.live
 
@@ -27,7 +27,8 @@ pub fn preview(result) element^ {
         }>
 }
 pub fn render_document_file(source,options=null) element^ {
-    let result = pptx.convert(source,options)^
+    // The player consumes the slide model directly. Only conversion builds a handout.
+    let result = reader.read(source,options)^
     let plan = slide.compile(result.document)^;
     live.document_tree(plan,{instance:"pptx"},if (len(result.diagnostics)>0) warnings(result.diagnostics) else null,css)
 }

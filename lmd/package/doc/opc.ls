@@ -13,7 +13,7 @@ fn rels_path(part) any^ {
 fn files(node) array^ => [for (child in content(node)^)
     if (child.kind == 'dir') *files(child)^ else {key:child.entry_path,value:child}]
 
-pub fn xml(parts, path, required, failure, canonical) any^ {
+fn xml_root(parts, path, required, failure) any^ {
     if (parts[path] == null) {
         if (required) raise failure("missing-part","Missing package part " ++ path,path) else null
     } else {
@@ -25,9 +25,12 @@ pub fn xml(parts, path, required, failure, canonical) any^ {
         let roots = [for (node in ((content(parsed)) ^ { [] }) where ((node is element and
             not starts_with(string(name(node)),"?") and not starts_with(string(name(node)),"!")) ^ { false })) node];
         if (len(roots) != 1) raise failure("invalid-xml","Expected one XML root",path)
-        else x.tree(roots[0],{},canonical)
+        else roots[0]
     }
 }
+
+pub fn xml(parts, path, required, failure, canonical) any^ =>
+    x.tree(xml_root(parts,path,required,failure)^,{},canonical)
 
 pub fn relationships(parts, owner, required, failure, canonical) array^ {
     let path = if (owner == "") "_rels/.rels" else rels_path(owner)
@@ -89,7 +92,7 @@ fn metadata(parts, rels, failure, canonical) map^ {
             (node.tag,x.tree_text(node))])
     }
 }
-pub fn capture(source, failure, canonical, label) map^ {
+pub fn capture(source, failure, canonical, label, raw_main = false) map^ {
     let archive = if (source is string) {
         if (contains(source,":") or starts_with(source,"//")) raise failure("invalid-source","A local " ++ label ++ " path is required")
         else input(source,"zip")^
@@ -102,7 +105,8 @@ pub fn capture(source, failure, canonical, label) map^ {
     let main = first(main_rels);
     if (len(main_rels) != 1 or main.external) raise failure("invalid-package","Expected one internal main-document relationship")
     else {parts:parts,types:content_types,main:main.target,
-        root:xml(parts,main.target,true,failure,canonical)^,
+        root:if (raw_main) xml_root(parts,main.target,true,failure)^
+            else xml(parts,main.target,true,failure,canonical)^,
         relationships:relationships(parts,main.target,false,failure,canonical)^,
         metadata:metadata(parts,root_rels,failure,canonical)^}
 }

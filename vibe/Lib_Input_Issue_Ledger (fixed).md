@@ -6,6 +6,20 @@ remain in the [active issue ledger](Lib_Input_Issue_Ledger.md).
 
 ## Fixed issues
 
+<a id="li-104"></a>
+
+### LI-104 — Strict XML text validation rescanned the document suffix
+
+**Fixed 2026-11-23.** Input's strict XML path (D9.1.1v4, D10.1.4) searched
+from each character-data run to source EOF for the forbidden CDATA terminator.
+A large Word body containing many separate text runs paid quadratic scan cost.
+The existing bounded string search now examines the current run only. Strict
+XML still accepts valid CDATA and reports a literal terminator in character data.
+
+The isolated 2.44 MB XML fixture took about 1.82 s before the fix and 19.0 ms
+median after it, including release process startup. The preview workload and
+raw evidence are recorded in [the preview benchmark](impl/Lambda_Impl_Preview.md#6-release-benchmark-at-128--128).
+
 <a id="li-103"></a>
 
 ### LI-103 — Legacy gap aliases retain independent property identities
