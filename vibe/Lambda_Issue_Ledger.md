@@ -256,15 +256,11 @@ Parser-head staging publishes child arrivals to mutation observers. See the
 
 <a id="lr12-70"></a>
 
-## LR12-70 — Two execution-tier parity tests fail in the Lambda baseline
+## LR12-70 — FIXED
 
-**OPEN**, reproduced on 2026-11-22 at Lambda `4c4b96bf1` with Input
-`3ad3293`. `Tune27FixturesHonorTierSupport` loses the JIT batch result.
-`FunctionLocalStateSurvivesCollectionAndPromotion` exits 139 when it runs
-`fn_local_decomposition_capture.ls`. Both outcomes reproduce with the host
-built before RI-214. The cause is unconfirmed. D6.3.3, D8.2.6, and D8.3.3
-cover native roots, demand-driven lowering, and calls into promoted code.
-Runs are recorded in `temp/radiant-ten-under-five/lambda-controls/`.
+Both execution-tier parity tests pass after the JIT declaration optimizer
+checks the AST kind before accessing the binding. See the
+[fixed record](<Lambda_Issue_Ledger (fixed).md#lr12-70>).
 
 <a id="lr12-67"></a>
 
@@ -328,6 +324,11 @@ produced identical mismatched output on the hosts built before and after
 RI-214. The unrestricted Hotwire auto-tier replay also stopped after the
 first server response on both hosts. Evidence is in
 `temp/radiant-ten-under-five/lambda-controls/`.
+
+On 2026-11-24, the two identity fixtures were updated to assert the shared
+`Location` instance and `Node` inheritance from `EventTarget` under
+D8.4.4 and D9.5.4. The [Hotwire implementation record](impl/Lambda_Impl_Hotwire.md)
+tracks the separate fragment insertion regression.
 
 <a id="lr09-35"></a>
 ## LR09-35 — Disk watch can miss the first creation in the Lambda baseline
@@ -1377,24 +1378,21 @@ values (D6.3.1–D6.3.4, D8.2.6). This is a runtime limitation, independent of
 the Script TeX driver's local-loop repair; no claim is made that the language
 specification guarantees unbounded recursion.
 
-## Unattributed DOM media playback stall — 2026-11-15
+## Standalone DOM media playback stalls with offline audio
 
-**Status:** OPEN, cause and owner unconfirmed. The Lambda editor continuation
-baseline timed out in `test_js_gtest`; an isolated rerun of
-`./test/test_js_gtest.exe --gtest_filter='*dom_media_playback*'` reproducibly
-prints the first ten successful assertions and stops at the first
-`await media.play()` after loading `test/media/test_video_audio.mp4`. The
-30-second test timeout omits the remaining assertions and sentinel. The media
-file exists; replacing the tracked relative corpus link temporarily with an
-absolute link did not change the result, and the original link was restored.
-The next full Lambda baseline passes this test with the original link
-(`temp/edit-viewer/columns-lambda.log`), so the stall is intermittent; that
-passing run does not establish its cause.
-Earlier evidence in `impl/Radiant_Scene3d_PBR_Shadows.md` attributed a similar
-stall to that link, but that explanation does not establish this run's cause.
-The native media backend, DOM promise completion and host state remain to be
-distinguished before assigning ownership under D9.1.1v4 / D9.1.3v2. This does
-not block INI property editing. Evidence: `temp/edit-viewer/ini-control-
+**Fixed 2026-11-24** for standalone JS with offline audio. The CLI drained
+decoder polling timers while the shared document submix stayed at time zero.
+The native drain now runs the existing document frame tick between libuv turns
+so the submix advances on the document's monotonic clock (D8.4.4, D9.5.6v2,
+D11.3.1). The real media regression passes with offline output and macOS
+decoder services available. Evidence is in
+`temp/fix-reported-tests/{media-native-runtime,media-after}.log`.
+
+The earlier editor baseline printed the first ten assertions before stalling
+at the first sourced `await media.play()`. An isolated run reproduced the
+stall with either a relative or an absolute corpus link. The following
+baseline passed with the original link (`temp/edit-viewer/columns-lambda.log`).
+Earlier evidence is in `temp/edit-viewer/ini-control-
 {lambda,recheck-test_js_gtest,media-recheck,media-absolute}.log`.
 
 ## Context-owned libuv provider integration — 2026-11-14

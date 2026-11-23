@@ -2005,6 +2005,9 @@ static int js_event_loop_drain_impl(bool keep_intervals) {
             // a later timer, otherwise fetched HTML waits for timeout callbacks.
             do {
                 result = lambda_uv_run_loop(loop, UV_RUN_NOWAIT);
+                // Standalone documents have no window loop to advance their offline audio clock.
+                if (!virtual_clock_enabled)
+                    dom_engine_frame_tick((DomDocument*)dom_get_document(), js_performance_monotonic_now_ms());
                 js_event_loop_render_checkpoint();
                 if (js_animation_frame_has_pending()) {
                     js_animation_frame_drain(64);

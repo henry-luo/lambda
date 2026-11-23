@@ -8304,9 +8304,14 @@ static AstNode* disjoint_conditions(MvpCompiler* c, AstNode* first, AstNode* con
 static AstNode* discharged_declaration(MvpCompiler* c, AstNode* first) {
     if (!c->function->ast || !first || first->node_type != AST_NODE_LET_STAM || !first->next ||
             (first->next->node_type != AST_NODE_LET_STAM && first->next->node_type != AST_NODE_VAR_STAM)) return NULL;
-    LambdaAstDeclaratorNode* source = (LambdaAstDeclaratorNode*)((AstVarDeclNode*)first)->declarations;
-    LambdaAstDeclaratorNode* destination = (LambdaAstDeclaratorNode*)((AstVarDeclNode*)first->next)->declarations;
-    if (!source || source->next || !destination || destination->next) return NULL;
+    AstNode* source_decl = ((AstVarDeclNode*)first)->declarations;
+    AstNode* destination_decl = ((AstVarDeclNode*)first->next)->declarations;
+    // a decomposition can occupy the declaration slot and has no single entry or initializer.
+    if (!source_decl || source_decl->next || source_decl->node_type != AST_NODE_VARIABLE_DECLARATOR ||
+            !destination_decl || destination_decl->next ||
+            destination_decl->node_type != AST_NODE_VARIABLE_DECLARATOR) return NULL;
+    LambdaAstDeclaratorNode* source = (LambdaAstDeclaratorNode*)source_decl;
+    LambdaAstDeclaratorNode* destination = (LambdaAstDeclaratorNode*)destination_decl;
     MvpBinding* from = mvp_binding(c->module, source->entry);
     MvpBinding* to = mvp_binding(c->module, destination->entry);
     AstNode* init = ast_unwrap_primary_to_leaf(destination->init);
