@@ -2545,15 +2545,15 @@ static bool script_runner_prepare_image_request(DomNode* node, void*) {
 }
 
 static bool script_runner_wait_for_load_blockers(Runtime* runtime, DomDocument* doc,
-                                                 JsScriptTaskCollection* collection) {
+                                                  JsScriptTaskCollection* collection) {
     if (!doc) return true;
 
+    EvalContext* owner = runtime ? runtime_get_eval_context(runtime) : nullptr;
     if (runtime) {
         bool has_embedded_navigation = false;
         view_geometry_walk_dom_tree(doc->root, script_runner_find_embedded_navigation,
             &has_embedded_navigation);
         if (has_embedded_navigation && runtime->dom_ui_context) {
-            EvalContext* owner = runtime_get_eval_context(runtime);
             // D6.4.1: child evaluators may switch only after the parent's script frames returned.
             if (!owner || owner->execution_depth) return false;
             UiContext* ui = (UiContext*)runtime->dom_ui_context;
@@ -2570,16 +2570,14 @@ static bool script_runner_wait_for_load_blockers(Runtime* runtime, DomDocument* 
             js_microtask_flush();
         }
 
-    }
-
-    {
-        RuntimeExecutionScope execution_scope(runtime ? runtime_get_eval_context(runtime) : nullptr);
-        // native image request records distinguish eager and lazy blockers even without a JS realm.
+        RuntimeExecutionScope execution_scope(owner);
+        // parsed images share the scripted completion path before window.load.
         view_geometry_walk_dom_tree(doc->root, script_runner_prepare_image_request, nullptr);
-        if (runtime) {
-            dom_dispatch_pending_resource_loads();
-            if (item_is_error(js_microtask_flush_result())) return false;
-        }
+        dom_dispatch_pending_resource_loads();
+        if (item_is_error(js_microtask_flush_result())) return false;
+    } else if (!doc->resource_manager) {
+        // only discover bytes here. Layout owns decoding and animation registration without JS.
+        radiant_prefetch_document_eager_images(doc);
     }
 
     auto scripts_pending = [&]() -> bool {
@@ -2609,7 +2607,7 @@ static bool script_runner_wait_for_load_blockers(Runtime* runtime, DomDocument* 
     uint64_t source_sequence = doc->js.mutation_sequence;
     auto flush_resource_completions = [&]() -> bool {
         // load callbacks share bootstrap's mutation batch until the loader commits its cascade.
-        RuntimeExecutionScope execution_scope(runtime ? runtime_get_eval_context(runtime) : nullptr);
+        RuntimeExecutionScope execution_scope(owner);
         if (mgr) resource_manager_flush_layout_updates(mgr);
         dom_document_has_pending_work(doc);
         if (runtime) {
@@ -2917,10 +2915,13 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
         if (over_source_budget) log_info("execute_document_scripts: skipping document JS after browser source budget: %zu > %zu",
                  watchdog_source_len,
                  browser_js_limit);
-        // required images still own the ordinary load boundary; snapshot grace is for optional work.
-        phase_start_us = timing ? time_now_us() : 0;
-        script_runner_wait_for_load_blockers(nullptr, dom_doc, &script_tasks);
-        if (timing) timing->load_blockers_us += time_now_us() - phase_start_us;
+        // a live document can publish before image bytes arrive when there is no window.load to dispatch.
+        // static captures still need the required bytes before their snapshot grace period.
+        if (!dom_doc->js.host_driven_loop) {
+            phase_start_us = timing ? time_now_us() : 0;
+            script_runner_wait_for_load_blockers(nullptr, dom_doc, &script_tasks);
+            if (timing) timing->load_blockers_us += time_now_us() - phase_start_us;
+        }
         script_task_collection_free(&script_tasks);
         return;
     }

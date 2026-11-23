@@ -17,6 +17,25 @@
 > Semantic and design rulings are cited by `S#` / `D#` per CLAUDE.md rule 17;
 > where no formal ruling covers a point, the vibe ledger ID is given.
 
+<a id="lr12-71"></a>
+
+## LR12-71 — The viewer image prepass enters an uninitialized JavaScript realm
+
+**Fixed 2026-11-23.** On `3b23b87dc`, the load pass for documents without
+executable JavaScript called the scripted image completion queue. Nine
+replays exited 139 when that queue tried to allocate a callback without a
+JavaScript Input. The prepass also cached GIF and Lottie surfaces before
+their scheduler existed and held live local navigation until a remote image
+finished downloading (D6.4.1 / D9.5.6v2).
+
+Live script-free documents leave image completion to the viewer. Static
+captures wait for the selected eager network images through native resource
+discovery, and layout registers image animations with the presentation
+scheduler (D9.1.3v2 / D10.1.7). The 11 affected replays and the Radiant
+baseline pass. All 48 focused loading and animation controls pass, as do
+two local static capture probes for delayed eager and lazy images.
+Evidence is in `temp/view-test-regressions/`.
+
 ## CSSOM style notification lifetime — fixed 2026-11-23
 
 [JS13-L64](jube/JS_Issue_Ledger.md#js13-l64) retains old style bytes while
