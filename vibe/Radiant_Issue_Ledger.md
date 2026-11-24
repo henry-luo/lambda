@@ -20,6 +20,20 @@ observations still require re-verification. Add new Radiant issues here.
 
 ## Open issues
 
+<a id="ri-223"></a>
+
+- [RI-223 — Form control labels truncate at embedded NUL](<Radiant_Issue_Ledger (fixed).md#ri-223>).
+
+<a id="ri-222"></a>
+
+- [RI-222 — Generated content from attribute values truncates at embedded NUL](<Radiant_Issue_Ledger (fixed).md#ri-222>).
+
+<a id="ri-221"></a>
+
+### RI-221 — FIXED
+
+See [plain-text viewing and layout across embedded NUL](<Radiant_Issue_Ledger (fixed).md#ri-221>).
+
 <a id="ri-220"></a>
 
 ### RI-220 — FIXED

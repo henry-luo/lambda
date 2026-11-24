@@ -1,7 +1,7 @@
 # Radiant Source Editor — Implementation Plan and Record
 
 **Date:** 2026-10-06
-**Status:** P0 (`9007c54b3`), P1 Markdown highlighting (`8c477c3a8`), P2 HTML highlighting (`1ca09a3d5`, §6), P3 parity and polish (`c9adc7199`, §7), and P4 (§8, final record `4f7668cb6`) are on master. The physical-keyboard typing repair is recorded in §9 (2026-10-15). OQ15 and OQ16 were decided by the user on 2026-10-07 (§5.5); in P4 the user decided OQ17 (soft wrap stays character wrap) and left OQ18 open (design §14.3).
+**Status:** P0 (`9007c54b3`), P1 Markdown highlighting (`8c477c3a8`), P2 HTML highlighting (`1ca09a3d5`, §6), P3 parity and polish (`c9adc7199`, §7), and P4 (§8, final record `4f7668cb6`) are on master. The physical-keyboard typing repair is recorded in §9 (2026-10-15). OQ15 and OQ16 were decided by the user on 2026-10-07 (§5.5); in P4 the user decided OQ17 (soft wrap stays character wrap). D10.2.6 resolves OQ18 on 2026-11-24 (§10).
 **Design:** [Radiant Source Editor](../radiant/Radiant_Design_Source_Editor.md) (CED11–CED22, CED14v2, CED15v2, CED16v4, CED18v2, CED19v2).
 
 ## 1. What P0 has built
@@ -237,7 +237,7 @@ Corpus fidelity (GTest (b), `test/markdown`, 40-line windows every 17 lines): 1,
 - **`lambda edit` pages had no host UI context.** Every other loader applies `DocumentJsHostConfig`; the transform loader did not, so anything that re-rendered outside a native input dispatch was silently dropped. It also masked the dialog-field bug above.
 - **A template cannot own a frame request on its own result without the rebuild rebind.** Slides got away with it because their template's result is static model content, so the rebuild reuses the element.
 - **The headless simulator ticks frames only after a JSON event's input turns** (`sim_input_turn_drain`), which every keyboard and pointer event marks; assertions retry across host turns, so fixtures see pass 2's result without `advance_time`.
-- **`input(path, 'text')` stops at the first NUL byte** (`input_from_local_path` uses `strlen`); saving such a file from the editor would truncate it. Not fixed: OQ18.
+- **At P4, `input(path, 'text')` stopped at the first NUL byte.** Saving such a file from the editor would have truncated it. The current reader preserves the file's byte length (see §10).
 - **Word-boundary wrap cannot be computed in script**: Radiant's `pre-wrap` breaking follows UAX #14 in full. OQ17: the user kept character wrap.
 - **The worktree sandbox refuses shell loops and long pipelines**; scripts under `temp/` (`run_units.sh`, small Python patchers) work.
 
@@ -262,7 +262,7 @@ Corpus fidelity (GTest (b), `test/markdown`, 40-line windows every 17 lines): 1,
 
 ### 8.5 Not done
 
-- Refusing files with NUL bytes (OQ18) is left open by the user; word-boundary wrapping is not built by decision (OQ17).
+- At P4, the user deferred NUL-byte handling (OQ18, now resolved by D10.2.6). The user chose to keep character wrap (OQ17).
 - Side findings filed as separate tasks: the `edit_md_view_only_keys` crash, a diagnostic for a module-level `let` read before its definition, `parse()` retaining every `Input`, lazy `dom` package loading riding on `mousewheel`, nested template state identity (needs a ruling), and E208 on expression-bodied functions.
 
 ## 9. Physical keyboard typing repair (2026-10-15)
@@ -296,3 +296,11 @@ the original source module for comparison:
   `edit_md_view_only_keys`) have identical assertion counts with the original
   module.
 - Source buffer and highlighting Lambda unit fixtures: 4/4 pass.
+
+## 10. Files with NUL bytes (2026-11-24)
+
+D10.2.6 resolves OQ18. The shared `lmd/package/editor/session.ls` text
+reader already checked for embedded NUL on open and reload. It now reports
+binary classification and explains that binary editing is unavailable.
+The binary editing surface is future work. The current local input path
+passes the exact file length to the text and binary readers.

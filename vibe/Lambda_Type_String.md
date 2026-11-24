@@ -1,8 +1,8 @@
 # Lambda Type: String and Symbol — Design
 
-**Revision:** 2 (2026-10-23) — consolidation of the string design record.
+**Revision:** 4 (2026-11-24) — embedded NUL and XML output.
 **Status:** design record; every point below is either ratified in the formal spec or implemented. Unratified or unbuilt items are listed as such in §8.
-**Formal linkage:** text scalars and the sequence walk S2.5.8, S8.3.1v3; empty and solid values S2.2.1, S2.2.2v2, S2.2.3; truthiness S3.1v2; content normalization S2.6.2, S2.6.4; positional reads S7.1.1v3, S7.1.2, S7.2.1, S7.2.2; the sys-func return contract S7.4.5, S7.10.1v3, S7.10.3; ordering S6.1.1; concatenation S10.6.1; the pipe and filter S10.1.2v4, S10.1.5v3, S10.1.6; the single-quote lexical rule S16.8.7; name keys S8.2.2v6; member-call form S12.3.3v2; the string library S17.1.1, S17.4.1, S17.6.1, S17.7.1, S17.7.2, S17.8.1; representation D2.1.1, D5.6.1, D7.6.1.
+**Formal linkage:** text scalars and the sequence walk S2.5.8, S8.3.1v3; embedded NUL S2.5.9v2; empty and solid values S2.2.1, S2.2.2v2, S2.2.3; truthiness S3.1v2; content normalization S2.6.2, S2.6.4; positional reads S7.1.1v3, S7.1.2, S7.2.1, S7.2.2; the sys-func return contract S7.4.5, S7.10.1v3, S7.10.3; ordering S6.1.1; concatenation S10.6.1; the pipe and filter S10.1.2v4, S10.1.5v3, S10.1.6; the single-quote lexical rule S16.8.7; name keys S8.2.2v6; member-call form S12.3.3v2; the string library S17.1.1, S17.4.1, S17.6.1, S17.7.1, S17.7.2, S17.8.1; representation D2.1.1, D5.6.1, D7.6.1.
 **Scope:** the `string` and `symbol` value types — their model, positional access, the sequence view, operators and the system-function surface — and the design history behind them. String *patterns* (`\( … )`) and the pattern-aware `find`/`replace`/`split` are in [Lambda_Design_String_Pattern.md](Lambda_Design_String_Pattern.md).
 **Consolidates:** `Lambda_Type_String.md` rev 1 (2026-01-24, the original proposal), `Lambda_Type_String2.md` (2026-04-02, native return-type proposal, never adopted) and `Lambda_Type_String_Iterable.md` (2026-02-18, string as indexable-not-iterable, since reversed). Their superseded positions are kept in Appendix S; their implementation detail and examples are not carried.
 **Related:** [Lambda_Semantics_Formal.md §C1](Lambda_Semantics_Formal.md) (the `""` decision), [Lambda_Design_Syntax.md §7.27](Lambda_Design_Syntax.md) kind rulings 16–26 (text as a sequence), [Lambda_String_Func_Tuning.md](Lambda_String_Func_Tuning.md) (performance), user docs `doc/Lambda_Data.md` and `doc/Lambda_Sys_Func.md` §String Functions.
@@ -52,6 +52,20 @@ A character is a one-code-point string (or, from a symbol, a one-code-point symb
 | Byte | Internal for text; observable only through `binary`. |
 
 No operation normalizes implicitly. Key identity uses the characters as written, with no Unicode normalization or case folding (S8.2.2v6); case-insensitive matching folds but does not normalize (S17.7.1); `normalize(s, form)` is the explicit tool (NFC, NFD, NFKC, NFKD).
+
+### 1.5 Embedded NUL
+
+**Ruling S2.5.9v2 (user, 2026-11-24).** A string can contain U+0000 at any
+position. Lambda adopts JavaScript's `"a\u0000b"` spelling. This literal
+has three code points, and `ord` of the middle one is `0`. NUL counts
+toward string length and is distinct from the value `null`. See §7.1 for
+the language precedents.
+
+String storage carries an explicit byte length, so string operations can
+read through NUL. Formats and host APIs have their own rules for admitting
+the character. JSON can escape it. XML formatting returns an error if the
+output would contain the code point (S2.5.9v2). The editor routes a file
+containing a NUL byte to binary editing under D10.2.6.
 
 ## 2. Positional access
 
@@ -120,7 +134,7 @@ String functions are global system functions taking the text as their first argu
 
 These are implementation facts that the design relies on; they are informative, not rulings.
 
-- Strings carry an ASCII flag, so length, indexing and slicing are O(1) for ASCII text; non-ASCII text walks UTF-8. A code-point position cache for non-ASCII hot paths is proposed and not built (§8).
+- The ASCII flag means all payload bytes are below 0x80, including zero under S2.5.9v2. Each byte represents one code point. Length, indexing and slice bounds use stored lengths and direct byte offsets. Indexing and slice bounds walk UTF-8 on the non-ASCII path. C-string consumers require a separate check at their boundary.
 - Single-character ASCII strings are pre-allocated, so a character walk over ASCII text allocates nothing.
 - Public system functions return boxed `Item`s (D7.6.1). That is what lets a string function return an error value instead of a fake string, and it is why the native-pointer return convention of `Lambda_Type_String2.md` was not adopted (Appendix S, S-9).
 
@@ -136,6 +150,22 @@ These are implementation facts that the design relies on; they are informative, 
 | Case mapping | Unicode full, locale-free | same | same (`str.upper`) |
 | Not found | `null` | `-1` | `-1` or exception |
 
+### 7.1 Embedded NUL in other languages
+
+Each of these literals contains `a`, U+0000, and `b`. Lambda's literal
+spelling follows JavaScript (S2.5.9v2).
+
+| Language | String literal | Reference |
+|---|---|---|
+| Python | `"a\x00b"` | [Python Language Reference, hexadecimal escapes](https://docs.python.org/3/reference/lexical_analysis.html#hexadecimal-character) |
+| JavaScript | `"a\u0000b"` | [ECMAScript, string literals](https://tc39.es/ecma262/multipage/ecmascript-language-lexical-grammar.html#sec-literals-string-literals) |
+| Java | `"a\0b"` | [Java Language Specification §3.10.7](https://docs.oracle.com/javase/specs/jls/se25/html/jls-3.html#jls-3.10.7) |
+| C# | `"a\0b"` | [C# specification, string literals](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/language-specification/lexical-structure#6456-string-literals) |
+| Go | `"a\x00b"` | [Go specification, string literals](https://go.dev/ref/spec#String_literals) |
+| Rust | `"a\0b"` | [Rust Reference, string literals](https://doc.rust-lang.org/reference/tokens.html#string-literals) |
+| Swift | `"a\0b"` | [Swift Evolution SE-0200](https://github.com/swiftlang/swift-evolution/blob/main/proposals/0200-raw-string-escaping.md#updated-escape-character-sequences-reference) |
+| Ruby | `"a\u0000b"` | [Ruby syntax reference, strings](https://docs.ruby-lang.org/en/master/syntax/literals_rdoc.html#label-Strings) |
+
 ## 8. Deferred, not built, and open
 
 | Item | State | Home |
@@ -148,7 +178,7 @@ These are implementation facts that the design relies on; they are informative, 
 | `replace_first` / `replace_last` | superseded by `replace`'s `limit` and `last` options (S17.6.1) | — |
 | `split_lines` | not needed: `split` with a pattern | — |
 | UTF-8 position cache and other P5 string tuning | not started | [String_Func_Tuning](Lambda_String_Func_Tuning.md), impl record |
-| `<` accepts symbols and uses a NUL-unsafe compare | conformance gap | S6.1.1 footnote |
+| C-string input adapters | Raw text retains its full byte count under S2.5.9v2. Parsers that consume C-string source reject literal zero bytes at admission. YAML and JSON string escapes carry a code point through parsing and formatting. | [LI-108](<Lib_Input_Issue_Ledger (fixed).md#li-108>) |
 | Formatter size caps drop large text from `format()` | open, needs a decision | [LR09-31](Lambda_Issue_Ledger.md#lr09-31) |
 | Symbol allocator comment and user docs describe NameKey identity | fixed 2026-10-28 | [LR11-7](<Lambda_Issue_Ledger (fixed).md#lr11-7>) |
 | utf8proc buffers cross the allocator boundary | open | [LR05-7](Lambda_Issue_Ledger.md#lr05-7) |

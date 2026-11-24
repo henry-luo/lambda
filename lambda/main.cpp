@@ -1218,7 +1218,7 @@ static ReplEntryStatus repl_run_entry(InterpReplSession* session,
     } else if (!session->declarations_only) {   // S16.7.4: no item, no echo
         StrBuf* output = strbuf_new_cap(256);
         print_root_item(output, result);
-        if (output->length > 0) printf("%s", output->str);
+        if (output->length > 0) fwrite(output->str, 1, output->length, stdout);
         strbuf_free(output);
     }
     if (timed) printf("time: %.3f ms\n", elapsed);
@@ -1464,11 +1464,11 @@ int run_script_file(Runtime *runtime, const char *script_path, bool run_main = f
         if (output_input->root.type_id() == LMD_TYPE_NULL) {
             printf("\n");  // help end any output, otherwise, may see '%' at the end of the line
         } else {
-            printf("%s", output->str);
+            fwrite(output->str, 1, output->length, stdout);
         }
     } else {
         // printf("##### Script '%s' executed: #####\n", script_path);
-        printf("%s", output->str);
+        fwrite(output->str, 1, output->length, stdout);
         log_debug("%s", output->str);
     }
     strbuf_free(output);

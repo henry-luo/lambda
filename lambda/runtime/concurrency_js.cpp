@@ -22,18 +22,21 @@ static Item js_undefined_item(void) {
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
-static Item js_error_message(const char* message) {
+static Item js_error_message_n(const char* message, size_t length) {
     return js_new_error((Item){.item = s2it(heap_strcpy(
-        message, (int64_t)strlen(message)))});
+        message, length))});
+}
+
+static Item js_error_message(const char* message) {
+    return js_error_message_n(message, strlen(message));
 }
 
 static Item lambda_error_to_js(Item result) {
-    const char* message = "Lambda procedure failed";
     LambdaError* error = it2err(result);
     if (error && error->message) {
-        message = error->message;
+        return js_error_message_n(error->message, error->message_length);
     }
-    return js_error_message(message);
+    return js_error_message("Lambda procedure failed");
 }
 
 static Item js_rejection_to_lambda(Item reason) {
@@ -42,12 +45,11 @@ static Item js_rejection_to_lambda(Item reason) {
     if (get_type_id(reason) == LMD_TYPE_ERROR) return reason;
     Item text = js_to_string(reason_root.get());
     Rooted<Item> text_root(roots, text);
-    const char* message = "JavaScript Promise rejected";
     String* string = get_type_id(text) == LMD_TYPE_STRING ? it2s(text) : NULL;
     if (string) {
-        message = string->chars;
+        return err2it(err_create_heap_n(ERR_RUNTIME_ERROR, string->chars, string->len, NULL));
     }
-    return err2it(err_create_heap(ERR_RUNTIME_ERROR, message, NULL));
+    return err2it(err_create_heap(ERR_RUNTIME_ERROR, "JavaScript Promise rejected", NULL));
 }
 
 static void lambda_promise_observer_destroy(void* data) {

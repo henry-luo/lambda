@@ -3751,9 +3751,9 @@ Evidence: `../lambda-input/temp/expl3-script/nul-map-fix/`.
 
 ## CLI result output truncates at embedded NUL — 2026-11-11
 
-**Status:** OPEN — result display truncates. **Full script TeX-port blocker:**
-not for evaluation itself; it prevents reliable CLI inspection and golden
-output when a TeX result contains character code zero.
+**Status:** FIXED 2026-11-24 under S2.5.9v2. The top-level and procedural
+print paths write the stored byte count. `test/test_nul_text.py` checks
+the full stdout byte sequence on the interpreter and JIT.
 
 Run a script containing `"before"; "a" ++ chr(0) ++ "b"; "after"` in either
 interpreter or JIT. The process exits successfully but stdout contains only
@@ -3765,6 +3765,57 @@ which truncates at a NUL; whether the item formatter should escape that NUL in
 the textual representation also needs verification. Evidence:
 `../lambda-input/temp/expl3-script/nul-print-interp.out`, `nul-print-jit.out`,
 and `nul-print-check.out`. This is independent of the TeX engine.
+
+
+## DOM text APIs truncate at embedded NUL — 2026-11-24
+
+**Status:** FIXED 2026-11-24 for Text nodes. Creation, CharacterData
+getters and setters, text content, and the observer's old text retain the
+stored length. A Radiant HTML page script using `"BEFORE\u0000AFTER"`
+reports a JavaScript string length of 12. DOM `textContent` reads back only
+`BEFORE` after `document.createTextNode`, assignment to an element's
+`textContent`, or assignment to a text node's `data`. The resulting text
+runs also contain only `BEFORE`.
+
+`lambda/dom/dom_core.cpp` measures new text nodes with `strlen`.
+`lambda/dom/dom.cpp` passes C strings through text content replacement and
+measures CharacterData replacements with `strlen`. The DOM boundary needs to
+preserve the full string under S2.5.9v2 and D9.5.6v2. This blocks faithful DOM
+text transfer for strings containing NUL. Layout has a separate length loss
+in [RI-221](Radiant_Issue_Ledger.md#ri-221).
+
+Evidence: `./lambda.exe layout temp/radiant-nul-1n3w59gr/probe.html` on
+checkout `0a8291edba`. The layout tree in `temp/radiant-nul-1n3w59gr/view.json`
+records `lengths 12/6/6/6`.
+
+## DOM comments and attributes truncate at embedded NUL — 2026-11-24
+
+**Status:** FIXED 2026-11-24 under S2.5.9v2 and D9.5.6v2.
+`document.createComment("a\u0000b").data.length` and the length of
+`getAttribute("data-nul")` after setting that string both returned 1.
+Comment creation narrowed to a C string before MarkBuilder, and the
+attribute bridge did the same before native storage. The adapters now
+pass byte spans through creation, reads, writes, cloning, and mutation
+records. Node properties still report lengths in UTF-16 code units where
+required. Reflected form properties and option selection also keep the
+full value through the native and JavaScript adapters. DOM HTML serialization
+and the JavaScript `XMLSerializer`
+DOMString also preserve the bytes. Lambda's XML formatter applies the
+S2.5.9v2 format error ruling.
+
+`test/test_nul_text.py` verifies the Lambda and JavaScript boundaries.
+Control evidence is in `temp/nul-support/dom-boundaries.json`. See the
+[native attribute storage fix](<Lib_Input_Issue_Ledger (fixed).md#li-110>) and
+[generated content fix](<Radiant_Issue_Ledger (fixed).md#ri-222>).
+
+## Error messages truncate at embedded NUL — 2026-11-24
+
+**Status:** FIXED under S2.5.9v2 and S7.4.4. An error constructed with
+`error("before\u0000after")` read back only `"before"` via `.message`.
+The owned error record and its runtime copy now carry the message length.
+The plain diagnostic formatter displays the zero byte as `\0` and the
+JSON diagnostic formatter emits `\u0000`. The embedded NUL golden
+checks direct and chained messages on both execution tiers.
 
 
 ## Cloud-sync isolated-host baseline qualification — 2026-11-12

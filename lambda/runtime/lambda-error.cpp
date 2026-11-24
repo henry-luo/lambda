@@ -264,7 +264,7 @@ void err_set_heap_allocator(LambdaErrorHeapAllocFn alloc_fn) {
 }
 
 static LambdaError* err_init(LambdaError* error, LambdaErrorCode code, const char* message,
-                             SourceLocation* location, bool is_heap) {
+                             size_t length, SourceLocation* location, bool is_heap) {
     if (!error) return NULL;
 
     error->type_id = LMD_TYPE_MAP;
@@ -285,7 +285,13 @@ static LambdaError* err_init(LambdaError* error, LambdaErrorCode code, const cha
     error->js_properties_item = 0;
     error->js_class_id = 0;
     error->js_own_flags = 0;
-    error->message = message ? mem_strdup(message, MEM_CAT_SYSTEM) : mem_strdup(err_code_message(code), MEM_CAT_SYSTEM);
+    if (!message) {
+        message = err_code_message(code);
+        length = strlen(message);
+    }
+    // Keep the terminator for diagnostic adapters while retaining the full value.
+    error->message = mem_dup_n(message, length, MEM_CAT_SYSTEM);
+    error->message_length = error->message ? length : 0;
     error->raw_stack_trace = NULL;
 
     if (location) {
@@ -296,17 +302,27 @@ static LambdaError* err_init(LambdaError* error, LambdaErrorCode code, const cha
 }
 
 LambdaError* err_create(LambdaErrorCode code, const char* message, SourceLocation* location) {
+    return err_create_n(code, message, message ? strlen(message) : 0, location);
+}
+
+LambdaError* err_create_n(LambdaErrorCode code, const char* message, size_t length,
+                          SourceLocation* location) {
     LambdaError* error = (LambdaError*)mem_calloc(1, sizeof(LambdaError), MEM_CAT_SYSTEM);
-    return err_init(error, code, message, location, false);
+    return err_init(error, code, message, length, location, false);
 }
 
 LambdaError* err_create_heap(LambdaErrorCode code, const char* message, SourceLocation* location) {
-    if (!g_heap_alloc_fn) return NULL;
-    LambdaError* error = (LambdaError*)g_heap_alloc_fn(sizeof(LambdaError), LMD_TYPE_ERROR);
-    return err_init(error, code, message, location, true);
+    return err_create_heap_n(code, message, message ? strlen(message) : 0, location);
 }
 
-static char* err_format_message(const char* format, va_list args) {
+LambdaError* err_create_heap_n(LambdaErrorCode code, const char* message, size_t length,
+                               SourceLocation* location) {
+    if (!g_heap_alloc_fn) return NULL;
+    LambdaError* error = (LambdaError*)g_heap_alloc_fn(sizeof(LambdaError), LMD_TYPE_ERROR);
+    return err_init(error, code, message, length, location, true);
+}
+
+static char* err_format_message(const char* format, va_list args, size_t* length) {
     if (!format) return NULL;
 
     va_list measure_args;
@@ -328,14 +344,16 @@ static char* err_format_message(const char* format, va_list args) {
         mem_free(message);
         return NULL;
     }
+    *length = (size_t)written;
     return message;
 }
 
 LambdaError* err_createfv(LambdaErrorCode code, SourceLocation* location,
                           const char* format, va_list args) {
-    char* message = err_format_message(format, args);
+    size_t length;
+    char* message = err_format_message(format, args, &length);
     if (!message) return NULL;
-    LambdaError* error = err_create(code, message, location);
+    LambdaError* error = err_create_n(code, message, length, location);
     mem_free(message);
     return error;
 }
@@ -430,6 +448,7 @@ void lambda_fault_record_prepare(LambdaFaultRecord* record,
     // It must never be released as an ordinary heap/system error after OOM.
     record->error.is_static = true;
     record->error.message = (char*)lambda_fault_error_message(reason);
+    record->error.message_length = strlen(record->error.message);
 }
 
 void lambda_fault_record_from_error_allocation_failure(
@@ -860,6 +879,23 @@ void err_ensure_stack_trace(LambdaError* error) {
 // Error Output
 // ============================================================================
 
+static int err_append_message(char* dest, size_t capacity, const LambdaError* error) {
+    const char* message = error->message ? error->message : err_code_message(error->code);
+    size_t length = error->message ? error->message_length : strlen(message);
+    size_t pos = 0;
+    // Human-readable diagnostics have C-string callers; spell zero bytes out.
+    for (size_t i = 0; i < length && pos + 1 < capacity; i++) {
+        if (message[i]) dest[pos++] = message[i];
+        else {
+            if (pos + 2 >= capacity) break;
+            dest[pos++] = '\\';
+            dest[pos++] = '0';
+        }
+    }
+    if (capacity) dest[pos] = '\0';
+    return (int)pos;
+}
+
 char* err_format(LambdaError* error) {
     if (!error) return mem_strdup("(null error)", MEM_CAT_SYSTEM);
     err_ensure_stack_trace(error);
@@ -874,13 +910,14 @@ char* err_format(LambdaError* error) {
             error->location.line,
             error->location.column > 0 ? error->location.column : 1);
     }
+    if ((size_t)pos >= sizeof(buffer) - 1) return mem_strdup(buffer, MEM_CAT_SYSTEM);
     
     // error type and code
     pos += snprintf(buffer + pos, sizeof(buffer) - pos, "error[E%d]: ", error->code);
+    if ((size_t)pos >= sizeof(buffer) - 1) return mem_strdup(buffer, MEM_CAT_SYSTEM);
     
     // message
-    pos += snprintf(buffer + pos, sizeof(buffer) - pos, "%s", 
-        error->message ? error->message : err_code_message(error->code));
+    pos += err_append_message(buffer + pos, sizeof(buffer) - pos, error);
     
     // help text
     if (error->help) {
@@ -918,14 +955,16 @@ char* err_format_with_context_labeled(LambdaError* error, int context_lines,
                 error->location.column > 0 ? error->location.column : 1);
         }
     }
+    if ((size_t)pos >= sizeof(buffer) - 2) return mem_strdup(buffer, MEM_CAT_SYSTEM);
     
     // severity, type and code
     pos += snprintf(buffer + pos, sizeof(buffer) - pos, "%s[E%d]: ",
         severity_label, error->code);
+    if ((size_t)pos >= sizeof(buffer) - 2) return mem_strdup(buffer, MEM_CAT_SYSTEM);
 
     // message
-    pos += snprintf(buffer + pos, sizeof(buffer) - pos, "%s\n",
-        error->message ? error->message : err_code_message(error->code));
+    pos += err_append_message(buffer + pos, sizeof(buffer) - pos - 2, error);
+    pos += snprintf(buffer + pos, sizeof(buffer) - pos, "\n");
     
     // source context (if available)
     if (error->location.source && error->location.line > 0) {
@@ -1068,11 +1107,12 @@ void err_print_stack_trace(StackFrame* trace) {
 // ============================================================================
 
 // helper to escape JSON string
-static void json_escape_string(char* dest, size_t dest_size, const char* src) {
+static void json_escape_string_n(char* dest, size_t dest_size, const char* src, size_t length) {
     if (!src) { dest[0] = '\0'; return; }
     
     size_t di = 0;
-    while (*src && di < dest_size - 2) {
+    const char* end = src + length;
+    while (src < end && di < dest_size - 2) {
         char c = *src++;
         switch (c) {
             case '"':  if (di < dest_size - 3) { dest[di++] = '\\'; dest[di++] = '"'; } break;
@@ -1080,10 +1120,19 @@ static void json_escape_string(char* dest, size_t dest_size, const char* src) {
             case '\n': if (di < dest_size - 3) { dest[di++] = '\\'; dest[di++] = 'n'; } break;
             case '\r': if (di < dest_size - 3) { dest[di++] = '\\'; dest[di++] = 'r'; } break;
             case '\t': if (di < dest_size - 3) { dest[di++] = '\\'; dest[di++] = 't'; } break;
+            case '\0':
+                if (di + 6 >= dest_size) { dest[di] = '\0'; return; }
+                memcpy(dest + di, "\\u0000", 6);
+                di += 6;
+                break;
             default:   dest[di++] = c; break;
         }
     }
     dest[di] = '\0';
+}
+
+static void json_escape_string(char* dest, size_t dest_size, const char* src) {
+    json_escape_string_n(dest, dest_size, src, src ? strlen(src) : 0);
 }
 
 char* err_format_json(LambdaError* error) {
@@ -1098,7 +1147,9 @@ char* err_format_json(LambdaError* error) {
     char escaped_help[512] = {0};
     char escaped_file[256] = {0};
     
-    if (error->message) json_escape_string(escaped_msg, sizeof(escaped_msg), error->message);
+    if (error->message) {
+        json_escape_string_n(escaped_msg, sizeof(escaped_msg), error->message, error->message_length);
+    }
     if (error->help) json_escape_string(escaped_help, sizeof(escaped_help), error->help);
     if (error->location.file) json_escape_string(escaped_file, sizeof(escaped_file), error->location.file);
     
@@ -1217,6 +1268,7 @@ void err_release_payload(LambdaError* error) {
     if (error->cause && !error->cause->is_heap) err_free(error->cause);
 
     error->message = NULL;
+    error->message_length = 0;
     error->help = NULL;
     error->raw_stack_trace = NULL;
     error->stack_trace = NULL;

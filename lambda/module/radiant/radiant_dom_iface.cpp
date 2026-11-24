@@ -991,7 +991,6 @@ extern "C" int radiant_dom_m4d_remove2(Item r, Item* args, int argc, Item* out);
 extern "C" int radiant_dom_m4c_get_checked(Item r, Item* out);
 extern "C" int radiant_dom_m4c_checked_set(Item r, Item v, Item* out);
 extern "C" int radiant_dom_m4c_get_value(Item r, Item* out);
-extern "C" int radiant_dom_m4c_value_set(Item r, Item v, Item* out);
 extern "C" int radiant_dom_m4c_value2_set(Item r, Item v, Item* out);
 extern "C" int radiant_dom_m4c_value3_set(Item r, Item v, Item* out);
 extern "C" int radiant_dom_m4c_value4_set(Item r, Item v, Item* out);
@@ -1014,7 +1013,6 @@ extern "C" int radiant_dom_m4c_length_set(Item r, Item v, Item* out);
 extern "C" int radiant_dom_m4c_get_selected(Item r, Item* out);
 extern "C" int radiant_dom_m4c_selected_set(Item r, Item v, Item* out);
 extern "C" int radiant_dom_m4c_get_text(Item r, Item* out);
-extern "C" int radiant_dom_m4c_text_set(Item r, Item v, Item* out);
 extern "C" int radiant_dom_m4c_get_selectionStart(Item r, Item* out);
 extern "C" int radiant_dom_m4c_selection_start_set(Item r, Item v, Item* out);
 extern "C" int radiant_dom_m4c_get_selectionEnd(Item r, Item* out);
@@ -1056,6 +1054,8 @@ static int radiant_node_property_set(Item receiver, const char* name, Item value
     static int fn(Item receiver, Item* out) { return radiant_node_property(receiver, name, out); }
 #define NATIVE_PROPERTY_SET(fn, name) \
     static int fn(Item receiver, Item value, Item* out) { return radiant_node_property_set(receiver, name, value, out); }
+NATIVE_PROPERTY_SET(radiant_select_value_set, "value")
+NATIVE_PROPERTY_SET(radiant_option_text_set, "text")
 NATIVE_PROPERTY_GET(radiant_element_inner_html, "innerHTML")
 NATIVE_PROPERTY_SET(radiant_element_inner_html_set, "innerHTML")
 NATIVE_PROPERTY_GET(radiant_element_dataset, "dataset")
@@ -1408,7 +1408,7 @@ static const JubeMemberBind radiant_dom_select_element_members[] = {
 #undef DOM_ROW_BIND_select_element
     BIND_FIELD_SET("multiple", radiant_dom_m4b_multiple2_get, radiant_dom_m4b_multiple2_set),
     BIND_FIELD_SET("size", radiant_dom_m4b_size2_get, radiant_dom_m4b_size2_set),
-    BIND_FIELD_SET("value", radiant_dom_m4c_get_value, radiant_dom_m4c_value_set),
+    BIND_FIELD_SET("value", radiant_dom_m4c_get_value, radiant_select_value_set),
     BIND_FIELD_SET_JS("selected_index", "selectedIndex", radiant_dom_m4c_get_selectedIndex, radiant_dom_m4c_selected_index_set),
     BIND_FIELD_SET("length", radiant_dom_m4c_get_length, radiant_dom_m4c_length_set),
     BIND_FIELD("options", radiant_dom_m4c_get_options),
@@ -1435,7 +1435,7 @@ static const JubeMemberBind radiant_dom_option_element_members[] = {
     BIND_FIELD_SET_JS("default_selected", "defaultSelected", radiant_dom_m4b_default_selected_get, radiant_dom_m4b_default_selected_set),
     BIND_FIELD_SET("value", radiant_dom_m4c_get_value, radiant_dom_m4c_value4_set),
     BIND_FIELD_SET("selected", radiant_dom_m4c_get_selected, radiant_dom_m4c_selected_set),
-    BIND_FIELD_SET("text", radiant_dom_m4c_get_text, radiant_dom_m4c_text_set),
+    BIND_FIELD_SET("text", radiant_dom_m4c_get_text, radiant_option_text_set),
     BIND_FIELD("index", radiant_dom_m4c_get_index),
     BIND_FIELD("label", radiant_dom_m4c_get_label),
     BIND_FIELD("form", radiant_dom_m4c_get_form),

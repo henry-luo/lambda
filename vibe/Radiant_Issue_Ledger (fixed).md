@@ -14,6 +14,47 @@ are unchanged. Full evidence is under `../../lambda/temp/kianhup-style/`.
 
 ## Fixed issues
 
+<a id="ri-223"></a>
+
+### RI-223 — Form control labels truncate at embedded NUL
+
+**Fixed 2026-11-24.** A button value, an input or textarea placeholder,
+or a select option label with U+0000 rendered identically to its prefix.
+Radiant now retains the attribute length through measurement and paint
+under S2.5.9v2 and D9.5.6v2. `test/test_nul_text.py` checks each control
+independently in the raster renderer.
+
+<a id="ri-222"></a>
+
+### RI-222 — Generated content from attribute values truncates at embedded NUL
+
+**Fixed 2026-11-24.** Layout and marker paint previously took C-string
+lengths for CSS `content: attr(...)`. A generated label containing
+`FIRST`, U+0000, and `PSEUDOEND` drew only `FIRST`. Pseudo-element layout,
+intrinsic measurement, and marker paint now use the stored byte span
+under S2.5.9v2 and D9.5.6v2. The SVG regression in `test/test_nul_text.py`
+checks that `::before` and `::marker` render the square and suffix.
+
+<a id="ri-221"></a>
+
+### RI-221 — Plain-text viewing and layout truncate at embedded NUL
+
+**Fixed 2026-11-24.** On control checkout `0a8291edba`, `lambda view`
+shows only `BEFORE` for a plain-text file containing `BEFORE`, U+0000,
+and `AFTER`. A Lambda template with the same value also produces a
+six-byte layout run. The viewer now attaches the file span as a text
+node. Layout, whitespace checks, intrinsic measurement, and form text
+painting use explicit lengths.
+
+The paint path uses the font's U+0000 glyph when present and falls back
+to U+25A0. SVG export uses U+25A0 to keep the XML parseable. S2.5.9v2
+defines the source code point. D10.2.6 governs binary admission in the
+source editor. HTML source continues through the HTML tokenizer.
+
+`test/test_nul_text.py` exercises the headless viewer, text runs at
+three NUL positions, and SVG export. Control evidence is in the Lambda
+checkout under `temp/radiant-nul-1n3w59gr/`.
+
 <a id="ri-220"></a>
 
 ### RI-220 — GLB viewer crashes when a select popup extends below the window

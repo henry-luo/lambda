@@ -4488,7 +4488,7 @@ extern "C" Item js_get_key_core(Item object, Item key,
         }
         if (property && property->len == 7 && strncmp(property->chars, "message", 7) == 0) {
             const char* message = error->message ? error->message : "";
-            Item result = (Item){.item = s2it(heap_create_name(message, strlen(message)))};
+            Item result = (Item){.item = s2it(heap_create_name(message, error->message_length))};
             error->js_message_item = result.item;
             return result;
         }

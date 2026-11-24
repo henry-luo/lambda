@@ -36,8 +36,8 @@ static bool editing_remove_child(DomNode* child) {
 }
 
 static void editing_notify(DomJsMutationKind kind, DomNode* target, DomNode* parent,
-                           const char* attribute_name, const char* old_value) {
-    dom_notify_mutation_detail(kind, target, parent, attribute_name, old_value);
+                           const char* attribute_name, const char* old_value, size_t old_value_length) {
+    dom_notify_mutation_detail_n(kind, target, parent, attribute_name, old_value, old_value_length);
 }
 
 bool lambda_editing_dom_host_register() {

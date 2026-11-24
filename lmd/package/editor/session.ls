@@ -51,8 +51,11 @@ pub pn read_text(path) string^ {
     raise error("'" ++ basename(path) ++ "' is a non-text document and cannot be edited")
   }
   let bytes = input(path, 'binary') ^ { raise error("could not read " ++ path, ^) }
-  if (((index_of(source, "\u0000") != null) or (bytes != null and
-       (binary(source)^ != bytes or not utf8.is_valid(bytes)^)))^) {
+  // D10.2.6 classifies embedded NULs as binary for editor routing.
+  if (index_of(source, "\u0000") != null) {
+    raise error("the file contains NUL bytes and is treated as binary. Binary file editing is not yet supported")
+  }
+  if ((bytes != null and (binary(source)^ != bytes or not utf8.is_valid(bytes)^))^) {
     raise error("the file is not safely readable as text")
   }
   return source

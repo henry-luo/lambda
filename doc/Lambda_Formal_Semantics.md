@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 101.0.0 (2026-11-18)
+**Spec version:** 102.0.0 (2026-11-24)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -495,6 +495,12 @@ harnesses.
   `"abc" |> upper(~)` is `"ABC"`, `"abc" |> ~ ++ "-"` is `"a-b-c-"` — and an
   array otherwise: `"abc" |> ord(~)` is `[97, 98, 99]`; an empty result is
   `""`. For `++` and for placement a text value is one item (S10.6.1).
+- **S2.5.9v2** **NUL is a string code point.** A string can contain U+0000 at
+  any position. In a double-quoted string literal, `\u0000` denotes U+0000.
+  `"a\u0000b"` has length 3, with `"\u0000"` at index 1 and `"b"` at
+  index 2. String operations treat U+0000 as an ordinary code point.
+  XML output returns a format error when the text to be serialized contains
+  U+0000. [Lambda_Type_String §1.5, Input_XML §XML Formatter, user 2026-11-24]
 
 ### S2.6 Content
 
@@ -3301,7 +3307,7 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S2.1.1v2, S5.4.2v2, S6.2.2v2, S8.1.2v2, S8.2.1v4, S8.3.1v3 (object arm) | **Shipped state under the superseded v2 rulings (2026-09-03).** `entity` is retired from all three keyword tables (C lexer `base_types`, `grammar.js` `_base_type_kw`, `is_type_keyword`) and the reference grammar is regenerated; `let entity = 1` is now legal, where it was `error[E201]`. Objects carry content (D3.1.1 — `Object` is an alias of `struct Element`) and conform across the whole surface: `len` is attributes + content, `in`/`at` walk attribute values then children, an IntKey subscript selects a child, equality is nominal type + unordered attributes + ordered content, ordering is type name then attributes then content, both clone paths copy content, and printing emits round-trippable `<T a: 1, "child">`. Three pre-existing defects were fixed on the way: `item_keys` had NO object arm, so `for (v in obj)` yielded nothing while `len(obj)` reported the field count; object equality compared attributes only, so two objects of DIFFERENT nominal types with matching fields compared equal; and ordering likewise ignored the type name. Fixture `test/lambda/object_content.ls`; baseline 4083/4083, exact tier parity. |
 | S2.1.3 (v1, shipped state; superseded by S2.1.3v2) | **Partially implemented 2026-09-03.** Content patterns, the `<T attrs, content>` literal on both tiers, content-pattern inheritance, and tag-name output (markup formats emit `<TypeName …>` via the shared element handler; JSON keeps its `"@"` type key and gains the element `"_"` content key) all work. **Not implemented:** schema-driven input — `input(doc, schema: …)` and a document declaring its own schema still yield structural elements, never objects — and object construction from a schema is unverifiable end-to-end today ([LR13-9](../vibe/Lambda_Issue_Ledger.md#lr13-9)). The **content-arity check is no longer missing**: `validate_against_element_type` enforces `content_length` (`validator/validate.cpp`, both the fast verdict and the reporting path), and since the flip a content-bearing nominal type wears `LMD_TYPE_ELEMENT` and so dispatches into it. Validator tests now load, parse type annotations, and register direct-parser type declarators; the `validate` CLI reaches real validation for the shipped `schema_comprehensive.ls` + `test_data_valid.json` pair instead of failing root lookup. That pair currently reports its independent `element`-versus-`map` mismatch. LR13-3's root-*selection* policy remains open, and these targets still sit in `test-lambda-full`, not `test-lambda-baseline`. |
 | S5.1.4v2, S9.1.5v2, S10.4.3v2, S10.5.3v2 | **Ruled 2026-09-03, not implemented.** No container carries a node identity and no `===` exists; the DOM package compares wrappers structurally (`test/lambda/proc/dom_api_core.ls`). The carrier, the id-preserving operation set, and the universal addressing scheme are open (SO39, DO25). |
-| S6.1.1 | `fn_lt` uses `strcmp` (NUL-unsafe) and accepts symbols; two-layer invalid-comparison treatment not landed. |
+| S6.1.1 | String ordering compares the full byte spans, including NUL (S2.5.9v2). The invalid-comparison paths need separate qualification. |
 | S6.2.1 | `sort()` coerces to float (`sort(["b","a","c"])` → `[nan,nan,nan]`); total order not implemented in `sort`/`order by`. |
 | S7.1.1v3, S7.1.3v3 (pre-unification qualification) | Core computed array/map/element reads now return `null` for invalid keys and writes return the hard `ItemError`/`T^` channel; typed-array and mask paths share the same checked key boundary. A broader access-site audit remains for specialized editor/host surfaces. Slice-offset rules (RF3D) landed with regression tests. |
 | S7.2.2–S7.2.4 | `last` keyword, `limit last N`, and `{limit:}/{last:}` options not implemented; ArrayNum negative-index audit outstanding. |
@@ -3530,6 +3536,7 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 |---|---|---|
 | S1 principles | C1–C18 distilled; Features §3.6 | `Lambda_Semantics_Formal.md`, `Lambda_Semantics_Features.md` |
 | S2 value domain | C1, C1.6a, C2, C8.6-R; Design_Syntax §7.23, §7.27–§7.28; PTH1v2, PTH2v3, PTH3–PTH29, PTH81–PTH84 (S2.4.6), PTH85 (S2.4.7); Lambda_Expr_Path §Named context roots (S2.4.8); OB1–OB3, OB7–OB9, OB13–OB18 | `Lambda_Semantics_Formal.md`, `Lambda_Type_Path.md`, `Lambda_Type_Object.md` |
+| S2.5.9v2 | Embedded NUL, the `\u0000` escape, and XML format errors | `Lambda_Type_String.md` §1.5, §7.1, `input/Input_XML.md` §XML Formatter |
 | S2.6.6v2 | PDF raw file and dictionary MVP | `Lambda_Design_PDF_Output.md` §2, §5 |
 | S3 truthiness | C2, C17 | ibid.; `Lambda_Semantics_Formal2.md` |
 | S4 numerics | C3, C13, C14b/c, C16, C17; int v5 | `Lambda_Semantics_Formal2.md`, `Lambda_Semantics_Int_Type.md`, `Lambda_Semantics_Number_Model.md` |

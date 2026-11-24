@@ -15,6 +15,18 @@ Resolved records are in the [fixed issue ledger](<Lib_Input_Issue_Ledger (fixed)
 
 ## Open issues
 
+<a id="li-110"></a>
+
+- [LI-110 — DOM attribute values lose bytes after embedded NUL](<Lib_Input_Issue_Ledger (fixed).md#li-110>).
+
+<a id="li-109"></a>
+
+- [LI-109 — XML formatter emits an invalid zero character reference](<Lib_Input_Issue_Ledger (fixed).md#li-109>).
+
+<a id="li-108"></a>
+
+- [LI-108 — Text adapters truncate at embedded NUL](<Lib_Input_Issue_Ledger (fixed).md#li-108>).
+
 <a id="li-107"></a>
 
 - [LI-107 — Strict XML text validation rescanned the document suffix](<Lib_Input_Issue_Ledger (fixed).md#li-107>).

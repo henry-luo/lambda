@@ -679,7 +679,9 @@ PDF, raster images and other non-text media cannot be edited.
 When a file changes on disk, Reload checks the new content and the selected
 format's round trip before replacing the current edit. If either check fails,
 the unsaved edit stays open.
-Text files must be valid UTF-8 and cannot contain NUL bytes.
+Text files must be valid UTF-8. If a file contains a NUL byte, `lambda edit`
+classifies it as binary and reports that binary editing is unavailable
+(D10.2.6).
 The content checks also identify PDF, GIF and Netpbm headers when the name
 does not identify the format; SVG remains available as source text.
 
