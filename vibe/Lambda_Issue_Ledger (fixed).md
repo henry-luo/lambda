@@ -2948,6 +2948,58 @@ context breaks three reliance sites: `lmd/package/dom/edit_history.ls`
 `test/mir/lambda/tune26_nested_tco_native_result`. Blocked on a ruling for the
 module top level's colour, which no S#/D# point states (see C20.6).
 
+<a id="lr12-27"></a>**LR12-27 · `push` and direct-write failures repaired; caller must acknowledge rejected-store outcomes · FIXED 2026-11-24 (found 2026-09-21; push fixed 2026-09-25; direct writes fixed 2026-11-03)**
+
+**Original report (retained):**
+In a `pn`, `var a = [1, 2, 3]; push(a, 4)` leaves `a` as `[1, 2, 3]` on both
+tiers: the literal is an uncertified `ArrayNum` and `push` returns a soft error
+that nothing surfaces (`collection_runtime.cpp:240`, "an uncertified ArrayNum
+has no append contract"). `int[]`, string, and mixed arrays append correctly.
+Likewise `var b = [1]; b[5] = 2` only logs "index 5 out of bounds"
+(`lambda-eval.cpp:8200`) and the procedure continues with exit 0. Both
+contradict **S7.1.3v2** (writes are checked and raise through the `T^`
+channel).
+
+*Fixed 2026-09-25 (push):* S9.1.1 makes `push(b, v)` mean `b' = b ++ [v]`, and index writes already keep an open packed array's lane or widen it in place. `array_num_push_open` (`lambda-eval.cpp`) does the same for push: it appends in the lane when every item fits and otherwise converts to a generic Array, then spreads a list (D3.3.1); a view or an N-D array refuses, as splice does. `pn_push_cow` no longer checks an open binding against a past admission's certificate (SI3v2): after `pn g(x: int[])` had admitted `u`, `push(u, "s")` had failed. `proc/jit_tail_if_push_error` now fails its push on a matrix, and `proc-ext/list_var_mutation`, green at last, moved to the baseline. Fixture `test/lambda/proc/push_open_packed.ls`.
+*Fixed 2026-11-03 (direct writes, S7.1.3v3 / S7.7.6v2):* the setter already returned a rich E302, but both tiers could discard it in a procedure without a declared error return. T0 now establishes the store boundary for unannotated roots as well. MIR's raw positional fallback arms route the setter's error through that boundary before statement-result discard. The original `pn main() { var b = [1]; b[5] = 2; print("unreachable") }` reports E302, exits one and never prints the marker on interp/jit/auto. Native-result transport no longer blocks this fix (D7.1.3). `proc/ledger_index_write_error` checks recovery, native int/float results, unchanged snapshots, skipped tails and inner-block containment; the original main is a negative regression. See [implementation and qualification](<impl/Lambda_Impl_Ledger_Handler_Write_Followup (done).md>).
+
+*Ruled 2026-11-24 (USER, S7.5.5v2):* when a rejected store can reach the
+caller as an error outcome, the caller must acknowledge it under S7.5,
+including when the `pn` has no declared return type. Statically reject an
+unacknowledged call outcome that would be overwritten. The originating
+store's containment and the existing acknowledgement forms still apply.
+*Implemented 2026-11-24:* the completed AST publishes possible rejected-store
+outcomes from the owning block into the existing procedural result inference
+and acknowledgement check. Calls can be rejected at the caller even when
+the declaration is forward or the result has no explicit error annotation.
+A failure consumed inside the procedure creates a caller obligation only if
+its value reaches the call result. A directly proved in-bounds literal
+store creates no failure outcome. Known clean-call propagation diagnostics
+now run after the outcome solve, so a forward or inferred writer can use
+postfix `^` without a stale warning.
+
+The original caller ran its following statement and exited zero with a
+failed store on interp/JIT/auto. The forward-call regression
+`negative/semantic/store_error_overwritten.ls` rejects it with E228 on all
+three tiers. `proc/ledger_index_write_error.ls` checks capture, recovery,
+propagation, inner containment and a proved clean write. Caller migrations
+retain expected failures as values in fixtures that inspect partial state.
+Other affected callers propagate errors. The array-region emission budget
+records one shared extra root slot and three stores for the observed writer
+outcomes (D6.3.3), with unchanged safepoints and number homes.
+
+Qualification: **12/12** focused executions across interp/JIT/auto with
+normal and forced/poisoned GC. MIR emission **595/595**, forced GC **368/368**,
+ratchet **25/25**, diagnostics **343/343**, and MVP emission units **66/66**.
+The final Lambda baseline passed **6,103/6,125**. Loopback and isolated reruns
+passed 16 of its 22 failures. The remaining six are DOM/Hotwire and
+tier-parity cases covered by LR12-63 and LR12-70. Logs:
+`temp/lr12-27/lambda-baseline-final.log`, `scripts-loopback.log`,
+`serve-loopback.log`, and `mvp-errors-isolated.log` in `temp/lr12-27/`.
+The pinned release host passed Test262 **40,261/40,261** with zero
+regressions and matched the focused procedural golden on all three tiers.
+See `temp/lr12-27/test262-baseline.log` and `test262-release.sha256`.
+
 <a id="lr12-28"></a>**LR12-28 · A list stored in a field or `fill` keeps its list-ness (S2.5.6, S2.5.7) · FIXED 2026-09-23**
 `<e a: (1, 2)>` stores the attribute as a list, so reading `e.a` into an array
 literal spreads it (`[…, e.a]` gains two items); S2.5.6 rules that a

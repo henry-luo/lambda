@@ -967,6 +967,8 @@ typedef struct AstListNode : AstArrayNode {
     bool interp_proc_scanned;
     // Result sequencing belongs to the enclosing callable, not branch scope.
     bool procedural_results;
+    // A store rejected at this declaring block can become its result.
+    bool lambda_store_error_outcome;
 } AstListNode;
 
 static inline bool ast_block_may_carry_defect(AstNode* node,

@@ -1364,7 +1364,7 @@
         "lambda/input/input-latex*.cpp",
         "lambda/input/input-tikz*.cpp",
         "lambda/input/input-pdf*.cpp",
-        "lambda/input/input_http.cpp",
+        "lambda/input/input-http.cpp",
         "lambda/input/input-psd.cpp",
         "lambda/input/input-postscript*.cpp",
         "lambda/input/input-eps*.cpp",

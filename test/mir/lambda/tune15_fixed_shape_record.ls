@@ -9,7 +9,7 @@ pn tune15_record_step(var st: Tune15State) {
 
 pn tune15_record() int {
     var st: Tune15State = {moves: 0}
-    tune15_record_step(st)
+    let step_result = tune15_record_step(st)
     return st.moves
 }
 

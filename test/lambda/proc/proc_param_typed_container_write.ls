@@ -59,7 +59,7 @@ pn main() {
 
     // untyped parameter: already agreed, kept so a fix here cannot regress it
     var c = {cur: "~"}
-    set_untyped_field(c)
+    set_untyped_field(c)^
     print(c.cur)
     print("\n")
 

@@ -118,29 +118,29 @@ pn arr_set(var a: Arr, i0: int, i1: int, val: any) int {
 
 pn nested_handle() {
     var a: Arr = {l0: null2()}
-    arr_set(a, 0, 0, 1)
+    arr_set(a, 0, 0, 1)^
     var h: Holder = {arr: a}
     var b: Arr = h.arr
-    arr_set(a, 0, 1, 2)
+    arr_set(a, 0, 1, 2)^
     print("nested_handle: a=" ++ string(a.l0) ++ " b=" ++ string(b.l0) ++ "\n")
     var holder: Holder = {arr: a}
     var a2: Arr = holder.arr
-    arr_set(a2, 0, 0, 9)
+    arr_set(a2, 0, 0, 9)^
     print("nested_handle: a2=" ++ string(a2.l0) ++ " holder=" ++ string(holder.arr.l0) ++ "\n")
 }
 
 pn main() {
-    arm_detach(true)
-    arm_detach(false)
-    arm_rebind(true)
-    arm_rebind(false)
-    else_after_rebind(true)
-    else_after_rebind(false)
-    match_rebind(1)
-    match_rebind(2)
+    arm_detach(true)^
+    arm_detach(false)^
+    arm_rebind(true)^
+    arm_rebind(false)^
+    else_after_rebind(true)^
+    else_after_rebind(false)^
+    match_rebind(1)^
+    match_rebind(2)^
     while_share()^
     for_share()^
-    break_share()
+    break_share()^
     nested_share()^
     nested_handle()
 }

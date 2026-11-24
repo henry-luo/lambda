@@ -18,7 +18,7 @@ pn dynamic(var node: Node?, value) { change(node, value) }
 pn main() {
     var root: Node? = {value: 1, next: {value: 2, next: null}}
     let snapshot = root
-    change(root, 5)
+    change(root, 5)^
     print([snapshot.value, root.value]); print("\n")
     advance(root, 1)
     print([snapshot.value, root.value]); print("\n")

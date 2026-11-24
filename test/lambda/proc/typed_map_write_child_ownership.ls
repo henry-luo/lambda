@@ -37,21 +37,21 @@ pn write_a(var h: H, v: int) {
 pn main() {
     // no field write before the aliased element write
     var fresh: H = mk()^
-    write_a(fresh, 1)
+    write_a(fresh, 1)^
     print(fresh.a[0]) print(" ") print(fresh.n)
     print("\n")
 
     // one, two and three field replacements: each clones the root again
     var one: H = mk()^
     one.a = fill(4, 0)^
-    write_a(one, 2)
+    write_a(one, 2)^
     print(one.a[0])
     print("\n")
 
     var two: H = mk()^
     two.a = fill(4, 0)^
     two.b = fill(4, 0)^
-    write_a(two, 3)
+    write_a(two, 3)^
     print(two.a[0])
     print("\n")
 
@@ -59,7 +59,7 @@ pn main() {
     three.a = fill(4, 0)^
     three.b = fill(4, 0)^
     three.c = fill(4, 0)^
-    write_a(three, 4)
+    write_a(three, 4)^
     print(three.a[0])
     print("\n")
 
@@ -67,8 +67,8 @@ pn main() {
     var many: H = mk()^
     many.a = fill(4, 0)^
     many.b = fill(4, 0)^
-    write_a(many, 5)
-    write_a(many, 6)
+    write_a(many, 5)^
+    write_a(many, 6)^
     print(many.a[0]) print(" ") print(many.n)
     print("\n")
 
@@ -78,7 +78,7 @@ pn main() {
     let snap = shared
     shared.a = fill(4, 0)^
     shared.b = fill(4, 0)^
-    write_a(shared, 9)
+    write_a(shared, 9)^
     print(snap.a[0]) print(" ") print(shared.a[0])
     print("\n")
 }

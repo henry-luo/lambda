@@ -114,7 +114,7 @@ pn boxed_indices() {
     var h: Holder = holder_new()^
     var i = may_defect_index(h)
     h.slots[i].mark = 11
-    set_slot(h, any_index(0), 12)
+    set_slot(h, any_index(0), 12)^
     let f = set_slot(h, any_index(1), 13) ^ { print("float-index ") }
     let n = set_slot(h, any_index(2), 14) ^ { print("null-index ") }
     let o = set_slot(h, any_index(3), 15) ^ { print("oob-index ") }

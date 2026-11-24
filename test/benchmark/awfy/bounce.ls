@@ -24,10 +24,10 @@ pn benchmark() {
 
     // initialize balls
     for i in 0 to ball_count - 1 {
-        bx[i] = random_next(seed_arr) % 500
-        by[i] = random_next(seed_arr) % 500
-        bxv[i] = (random_next(seed_arr) % 300) - 150
-        byv[i] = (random_next(seed_arr) % 300) - 150
+        bx[i] = random_next(seed_arr)^ % 500
+        by[i] = random_next(seed_arr)^ % 500
+        bxv[i] = (random_next(seed_arr)^ % 300) - 150
+        byv[i] = (random_next(seed_arr)^ % 300) - 150
     }
 
     // simulate 50 frames
@@ -69,7 +69,7 @@ pn benchmark() {
 
 pn main() {
     var __t0 = clock()
-    let result = benchmark()
+    let result = benchmark()^
     var __t1 = clock()
     if (result == 1331) {
         print("Bounce: PASS\n")

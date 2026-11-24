@@ -76,8 +76,8 @@ pn test_array_swap() {
 }
 
 pn main() {
-    test_array_int_set()
+    test_array_int_set()^
     test_array_negative_index()
-    test_array_loop_set()
+    test_array_loop_set()^
     test_array_swap()
 }

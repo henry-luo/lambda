@@ -801,13 +801,13 @@ pn lta_main(numDummyLoops, findLoopIterations, parLoops, pparLoops, ppparLoops) 
     cfg_create_node(cfg, 0)^
     construct_simple_cfg(cfg)^
     var lsg = lsg_new()
-    add_dummy_loops(cfg, lsg, numDummyLoops)
+    add_dummy_loops(cfg, lsg, numDummyLoops)^
     construct_cfg(cfg, parLoops, pparLoops, ppparLoops)^
-    find_loops(cfg, lsg)
+    find_loops(cfg, lsg)^
     var i = 0
     while (i < findLoopIterations) {
         var newLsg = lsg_new()
-        find_loops(cfg, newLsg)
+        find_loops(cfg, newLsg)^
         i = i + 1
     }
     lsg_calc_nesting(lsg)

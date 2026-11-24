@@ -580,7 +580,7 @@ pn handle_new_frame(var stateTree: RbtTable, frame: array) int^ {
         var mp1y = mot.p1y
         var mp2x = mot.p2x
         var mp2y = mot.p2y
-        voxel_hash_xy(mp1x, mp1y, vxy)
+        voxel_hash_xy(mp1x, mp1y, vxy)^
         var vvx = vxy[0]
         var vvy = vxy[1]
         var motSeen = rbt_new()^

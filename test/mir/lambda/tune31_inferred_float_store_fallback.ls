@@ -12,7 +12,7 @@ pn write_oob(var values) any^ {
 
 pn main() {
     var values = [1.0, 2.0]
-    write_null(values)
+    write_null(values)^
     var oob = false
     write_oob(values) ^ { oob = true }
     print(values); print(" "); print(oob); print("\n")

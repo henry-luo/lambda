@@ -7,12 +7,15 @@ pn nested(var a: int[], var b: int[]) {
     store_at(a, 2, 30)
 }
 pn fail_after_write(var a: int[]) int^ {
-    store_at(a, 0, 77)
+    store_at(a, 0, 77)^
     let bad: int = a[8]
     bad^
     return 99
 }
-pn observed(var a: int[], snapshot: int[]) int { store_at(a, 0, 88); return snapshot[0] }
+pn observed(var a: int[], snapshot: int[]) int {
+    let updated = store_at(a, 0, 88)
+    return snapshot[0]
+}
 pn check() {
     var a: int[] = [1, 2]
     var b: int[] = [3, 4]
@@ -24,7 +27,7 @@ pn check() {
     print(a[0]); print(" "); print(saved[0]); print("\n")
     print(observed(a, a)); print(" "); print(a[0]); print("\n")
     let alias: int[] = a
-    store_at(a, 0, 90)
+    store_at(a, 0, 90)^
     print(observed(a, alias)); print(" "); print(alias[0]); print(" "); print(a[0]); print("\n")
 }
 pn main() { check() }

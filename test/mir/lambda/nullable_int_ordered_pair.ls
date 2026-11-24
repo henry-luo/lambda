@@ -58,11 +58,11 @@ pn main() {
     }
     var stored: int[] = [7]
     let snapshot = stored
-    store_poison(stored, 1 div divisor)
+    store_poison(stored, 1 div divisor)^
     print(string([stored[0] is inf, snapshot[0]]) ++ "\n")
-    store_poison(stored, -1 div divisor)
+    store_poison(stored, -1 div divisor)^
     print(string([stored[0] == -inf, snapshot[0]]) ++ "\n")
-    store_poison(stored, 0 div divisor)
+    store_poison(stored, 0 div divisor)^
     print(string([stored[0] is nan, snapshot[0]]) ++ "\n")
     var rejected = false
     store_poison(stored, null) ^ { rejected = true }

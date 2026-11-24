@@ -20,16 +20,16 @@ pn tune32_phase2_admitted_read(values: float[], count: int) float^ {
 pn main() {
     var values: float[] = [1.0, 2.0, 3.0, 4.0]
     let snapshot = values
-    tune32_phase2_admitted_store(values, 4)
+    tune32_phase2_admitted_store(values, 4)^
     print(tune32_phase2_admitted_read(values, 4) == 14.0); print("\n")
     print(tune32_phase2_admitted_read(snapshot, 4) == 10.0); print("\n")
-    tune32_phase2_admitted_store(values, 4)
+    tune32_phase2_admitted_store(values, 4)^
     print(tune32_phase2_admitted_read(values, 4) == 18.0); print("\n")
-    tune32_phase2_admitted_store(values, 0)
-    tune32_phase2_admitted_store(values, -1)
+    tune32_phase2_admitted_store(values, 0)^
+    tune32_phase2_admitted_store(values, -1)^
     print(tune32_phase2_admitted_read(values, 4) == 18.0); print("\n")
     var empty: float[] = fill(0, 0.0)^
-    tune32_phase2_admitted_store(empty, 0)
+    tune32_phase2_admitted_store(empty, 0)^
     print(len(empty)); print("\n")
     print(values[4] == null); print("\n")
 }

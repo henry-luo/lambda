@@ -27,7 +27,7 @@ pn store_bad(var b: Box, v) {
 pn run_hot(var b: Box) {
     var k = 0
     while (k < 400) {
-        bump(b, k % 3)
+        bump(b, k % 3)^
         k = k + 1
     }
 }

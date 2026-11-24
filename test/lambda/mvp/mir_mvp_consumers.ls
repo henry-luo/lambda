@@ -133,8 +133,8 @@ pn main() {
     dynamic_math(-7, 3)
     dynamic_math(1.5, 2.0)
     dynamic_math(null, 2)
-    dynamic_arrays()
-    rotate_arrays(true)
+    dynamic_arrays()^
+    rotate_arrays(true)^
     let fused: string = quoted(marked("a")) ++ ":" ++ twice(marked("b"), marked("c"))
     print(" "); print(fused); print("\n")
     print(checked_inline(ints, 0)); print(" ")

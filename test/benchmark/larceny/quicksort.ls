@@ -35,7 +35,7 @@ pn quicksort(var arr, lo, hi) {
     var p = partition(arr, lo, hi)
     var left_hi = p - 1
     var right_lo = p + 1
-    quicksort(arr, lo, left_hi)
+    quicksort(arr, lo, left_hi)^
     quicksort(arr, right_lo, hi)
     return 0
 }

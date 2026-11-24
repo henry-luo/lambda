@@ -16,6 +16,6 @@ pn test_other_type_keyword_fields() {
 }
 
 pn main() {
-    test_list_field_assignment()
+    test_list_field_assignment()^
     test_other_type_keyword_fields()
 }

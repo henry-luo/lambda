@@ -28,7 +28,7 @@ pn main() {
     push(counted, [10, 20])^
     var counter = {n:0}
     var output = {x:null}
-    output.x = counted[index_once(counter)]
+    output.x = counted[index_once(counter)^]
     counted[0][0] = 30
     print([counter.n, output.x, counted[0]]); print("\n")
     // LR12-34's reassignment half was fixed by the preceding alias pass.

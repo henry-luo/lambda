@@ -97,7 +97,7 @@ if sys.platform == 'darwin':
 INPUT_SOURCES = ("lambda/core/lambda-data.cpp", "lambda/core/lambda-decimal.cpp",
                  "lambda/core/name_pool.cpp", "lambda/core/print.cpp", "lambda/core/utf_string.cpp",
                  "lambda/core/shape_builder.cpp", "lambda/io/collection_io.cpp", "lambda/io/target.cpp",
-                 "lambda/input/input_sysinfo.cpp", "lambda/input/input-utils.cpp",
+                 "lambda/input/input-sysinfo.cpp", "lambda/input/input-utils.cpp",
                  "lambda/input/css/dom_element.cpp", "lambda/input/css/dom_xml_serializer.cpp", "lambda/input/css/dom_blob_url.cpp", "lambda/input/css/dom_lifecycle.cpp", "lib/language_preferences.cpp")
 INPUT_TEST_SOURCES = (
     "test/test_input_dom_native_gtest.cpp", "test/test_input_blob_url_gtest.cpp", "test/test_input_model_gtest.cpp", "test/test_input_roundtrip_gtest.cpp",

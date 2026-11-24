@@ -113,12 +113,12 @@ pn test_large_array_conversion() {
 }
 
 pn main() {
-    test_int_to_float()
-    test_int_to_string()
-    test_float_to_string()
-    test_int_to_null()
-    test_float_accepts_int()
-    test_int_same_type()
-    test_mixed_sequence()
+    test_int_to_float()^
+    test_int_to_string()^
+    test_float_to_string()^
+    test_int_to_null()^
+    test_float_accepts_int()^
+    test_int_same_type()^
+    test_mixed_sequence()^
     test_large_array_conversion()
 }

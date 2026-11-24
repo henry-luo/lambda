@@ -70,9 +70,9 @@ pn bump_first(var b: Box) {
 }
 
 // a re-borrowing callee writes after the copy
-pn chained(var b: Box) int {
+pn chained(var b: Box) int^ {
     var saved = b
-    bump_first(b)
+    bump_first(b)^
     return saved.cells[0].k * 100 + b.cells[0].k
 }
 

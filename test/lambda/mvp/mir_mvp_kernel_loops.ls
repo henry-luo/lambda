@@ -5,7 +5,11 @@ pn add_four(var a: float[], step: float) {
 }
 pn repeat_add(var a: float[], cycles: int) {
     var i: int = 0
-    while (i < cycles) { add_four(a, 0.5); i = i + 1 }
+    while (i < cycles) {
+        // A short owner may retain one write per iteration after rejection.
+        let iteration = add_four(a, 0.5)
+        i = i + 1
+    }
 }
 pn positive_sum(a: float[]) bool^ {
     var total: float = 0.0
@@ -32,10 +36,10 @@ pn replacing(var a: float[]) {
 }
 pn main() {
     var a: float[] = fill(4, 1.0)^
-    repeat_add(a, 3)^
+    repeat_add(a, 3)
     print(a); print(" "); print(count_positive(a)); print("\n")
     let snapshot: float[] = a
-    repeat_add(a, 2)^
+    repeat_add(a, 2)
     print(a); print(" "); print(snapshot); print("\n")
     var short: float[] = [1.0]
     repeat_add(short, 0)

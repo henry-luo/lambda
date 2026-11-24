@@ -22,23 +22,23 @@ pn rot_l(var node: N?) N? {
     right.left = node
     return right
 }
-pn sp(var node: N?, key: float) N? {
+pn sp(var node: N?, key: float) N? | error {
     if (node == null) { return null }
     if (key < node.key) {
         if (node.left == null) { return node }
         var left: N? = node.left
         if (key < left.key) {
             var branch: N? = left.left
-            branch = sp(branch, key)
+            branch = sp(branch, key)^
             left.left = branch
             node.left = left
-            node = rot_r(node)
+            node = rot_r(node)^
         }
         if (key > left.key) {
             var branch: N? = left.right
-            branch = sp(branch, key)
+            branch = sp(branch, key)^
             left.right = branch
-            if (left.right != null) { left = rot_l(left) }
+            if (left.right != null) { left = rot_l(left)^ }
             node.left = left
         }
         if (node.left == null) { return node }
@@ -135,7 +135,7 @@ pn forward_call(var r: R) {
     let before = r.kid
     var h = r.kid
     if (r.v > 0) {
-        later_bump(h)
+        later_bump(h)^
         r.kid = h
     }
     print(before.n) print(r.kid.n)
@@ -146,12 +146,12 @@ pn main() {
     var t: N? = {key: 50.0, left: {key: 30.0, left: {key: 10.0, left: null, right: null},
         right: {key: 40.0, left: null, right: null}}, right: null}
     let before = t
-    t = sp(t, 10.0)
+    t = sp(t, 10.0)^
     print(keys(t))
     print(keys(before))
-    t = sp(t, 40.0)
+    t = sp(t, 40.0)^
     print(keys(t))
-    t = sp(t, 40.0)
+    t = sp(t, 40.0)^
     print(keys(t))
 
     var r1: R = {v: 1, kid: {n: 0}}

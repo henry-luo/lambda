@@ -441,7 +441,7 @@ pn c_inputs_known(var w: World, cid: int, mark: int) int {
     return 1
 }
 
-pn c_recalculate(var w: World, cid: int) int {
+pn c_recalculate(var w: World, cid: int) int^ {
     var k = w.cons[cid].kind
     if (k == K_EDIT) {
         var o = w.cons[cid].out
@@ -479,7 +479,7 @@ pn c_recalculate(var w: World, cid: int) int {
         var ist = w.vars[ihn].stay
         w.vars[out].stay = ist
         if (ist == 1) {
-            c_execute(w, cid)
+            c_execute(w, cid)^
         }
         return 0
     }
@@ -508,7 +508,7 @@ pn c_recalculate(var w: World, cid: int) int {
         if (offst == 0) { stay = 0 }
         w.vars[out2].stay = stay
         if (stay == 1) {
-            c_execute(w, cid)
+            c_execute(w, cid)^
         }
         return 0
     }
@@ -572,7 +572,7 @@ pn c_satisfy(var w: World, cid: int, mark: int) int^ {
     c_choose_method(w, cid, mark)
     var sat = c_is_satisfied(w, cid)
     if ((sat == 1)^) {
-        c_mark_inputs(w, cid, mark)
+        c_mark_inputs(w, cid, mark)^
         var out = c_get_output(w, cid)
         var det = w.vars[out].determinedBy
         var overridden = NO_CON
@@ -716,7 +716,7 @@ pn planner_make_plan(var w: World, var sources: Vec) Vec^ {
         var c = vec_remove_first(todo)
         var out = c_get_output(w, c)
         var om = w.vars[out].mark
-        if (om != mark) {
+        if ((om != mark)^) {
             var ik = c_inputs_known(w, c, mark)
             if ((ik == 1)^) {
                 vec_add(plan, c)^

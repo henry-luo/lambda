@@ -15,6 +15,6 @@ pn main() {
     var values: float[] = [1.0, 2.0, 3.0]
     let before = values
     let source: float[] = [4.0, 5.0, 6.0]
-    calculate(values, source)
+    calculate(values, source)^
     print([before, values, source])
 }

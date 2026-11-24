@@ -284,7 +284,15 @@ Capture, handle, or propagate that outcome. An error-admitting return
 annotation does not acknowledge the non-final call. A final result can be
 acknowledged by its actual return contract. No-result declarations leave the
 preceding result intact, so syntactic statement position alone does not
-decide whether the outcome is overwritten (S12.1.2v3, S7.5.5).
+decide whether the outcome is overwritten (S12.1.2v3, S7.5.5v2).
+
+**LR12-27 (USER, 2026-11-24; S7.5.5v2).** If a rejected element or field
+store can complete a procedure call with an error under S7.7.6v2, include
+that outcome in the caller's acknowledgement check, even when the `pn`
+has no declared return type. A bare call whose result will be overwritten
+is rejected at compile time. Capture, explicit recovery, or propagation to
+an error-admitting return contract satisfies the existing rules. A store
+failure contained within the callee follows the existing store boundary.
 
 This check does not add runtime control flow. It does not restore declaration
 skipping, and it does not diagnose an already captured binding merely because

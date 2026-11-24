@@ -79,7 +79,7 @@ pn main() {
 
     // setter whose body is a bare index-assignment (returns null, must not MIR-crash)
     var g = [0, 0, 0]
-    set_at(g, 1, 42)
+    set_at(g, 1, 42)^
     print("set:" ++ join_ints(g) ++ "\n")
 }
 

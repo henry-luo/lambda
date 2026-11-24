@@ -30,8 +30,8 @@ pn test_2d_mask() {
 }
 
 pn main() {
-    test_scalar_mask()
-    test_float_image_idiom()
-    test_block_values()
+    test_scalar_mask()^
+    test_float_image_idiom()^
+    test_block_values()^
     test_2d_mask()
 }

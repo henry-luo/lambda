@@ -1093,14 +1093,18 @@ System faults retain their separate runtime policy.* [TE-13.2, C14]
   This grants no acknowledgement to nested statements or calls whose errors
   do not reach that receiver. An error produced by a handler body is a fresh
   outcome requiring its own receiving context. [TE-13.2]
-- **S7.5.5** **An unacknowledged fallible result may not be silently
+- **S7.5.5v2** **An unacknowledged fallible result may not be silently
   overwritten in a procedural sequence.** Statically reject a possible ordinary-error
   outcome whose result is replaced without capture, handling, or propagation;
   a later statement or the function's return annotation does not acknowledge
   it. A final outcome is checked against its actual receiving return contract.
   No-result statements do not overwrite it (S12.1.2v3). This static obligation
   adds no runtime early exit. A captured but uninspected outcome remains
-  legal; an unused-fallible-binding lint is a separate question. [TE-13.2]
+  legal; an unused-fallible-binding lint is a separate question. A rejected
+  element or field store that can reach the caller as a procedure's error
+  outcome under S7.7.6v2 requires the same acknowledgement, including for
+  a `pn` with no declared return type. The originating store keeps its
+  existing containment boundary. [TE-13.2; LR12-27, USER, 2026-11-24]
 
 - **S7.5.6** **Explicit error classification acknowledges the tested
   outcome.** `e is (error | null)` evaluates `e` once and tests its value
@@ -3314,6 +3318,7 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S7.3.1 | Strict null propagation + `skip_null` option pending. |
 | S7.4.2v4, S11.4.2v3 | **Implemented and callers qualified 2026-11-03.** Both parsers reject typed carets; ordinary unions alone specify particular errors and `T^` retains its broad union meaning. Both tiers derive error/ABI metadata from the complete outcome. S11.4.6v4 normal conversion, array certification and record reification are qualified, including invocation-selected types. Gates: Lambda **6,456/6,456**, diagnostics **321/321**, focused tier/GC **288/288**, MIR emission **282/282**. [TE-13.3 status](../vibe/Lambda_Design_Type_Error_Handling.md#typed-caret-retirement). |
 | S7.4.1v2–S7.4.2v4, S7.4.5v2–S7.4.6v3, S7.5.1v6, S7.5.3v3–S7.5.5, S7.6.1v9, S7.6.3v3, S7.6.5v4–S7.6.6v6, S7.1.3v3, S11.4.2v3, S12.1.4v4, S12.3.4v2 | **Core implemented and callers qualified 2026-11-03.** Raised and returned ordinary errors cross the same complete contract. Acknowledgement follows receiver admission through composition, joins, callbacks, handlers and callable pipes; overwritten outcomes require acknowledgement. Deferred return checks contribute an ordinary call outcome without weakening the declared target; tail forwarding preserves admission. Gates: Lambda **6,456/6,456**, diagnostics **321/321**, focused tier/GC **288/288**, MIR GC **352/352**. Mutation and system-fault boundaries remain separate. Fn-local explicit control is qualified separately above. [TE-13.2 status](../vibe/Lambda_Design_Type_Error_Handling.md#ordinary-error-unification). |
+| S7.5.5v2 | **Implemented 2026-11-24.** An escaping store error participates in ordinary caller acknowledgement. A forward call whose unacknowledged result would be overwritten fails with E228 on interp/JIT/auto. Confirmed capture, handling, propagation and local containment. [LR12-27](<../vibe/Lambda_Issue_Ledger (fixed).md#lr12-27>). |
 | S7.4.4 | **Partial, updated 2026-10-29 on interp, auto and jit.** Owned error values retain code, message, wrapped `.source` and source coordinates. Deferred boundary failures now retain their admission site ([LR10-15](<../vibe/Lambda_Issue_Ledger (fixed).md#lr10-15>)); legacy sentinels never read ambient `last_error` ([LR10-14](<../vibe/Lambda_Issue_Ledger (fixed).md#lr10-14>)). Integer conversion, formatted runtime producers and parse/format cleanup return owned diagnostics. Residue: opaque compatibility sentinels retain stable generic members rather than operation-specific metadata. Fixtures: `error_members.ls`, `ledger_error_payload.ls`, `ledger_boundary_location.ls`, `negative/runtime/ledger_parameter_site.ls`. |
 | S7.5.6, S7.6.8–S7.6.9; S7.5.1v6, S7.6.1v9–S7.6.2v5, S7.6.5v4–S7.6.6v6; S10.1.7v4, S16.2.2v3, S16.2.6v2, S16.4.3v4 | **Partial, M1 implemented 2026-11-02.** Both parsers and execution tiers implement combined fallback and named/qualified filtered chains with conservative residual types. Selection, laziness, exact caret subjects, fresh chained errors, and GC are qualified. M2/M3 implement ordinary-error acknowledgement, including classification consumers; M8 caller qualification passes Lambda 6,456/6,456 (2026-11-03). Filtered system-fault policy remains open. [M1 qualification](<../vibe/impl/Lambda_Impl_Type_Error_Handling (done).md#m1-handler-outcomes>). |
 | S7.6.1v9 | **M1 implemented 2026-11-02.** Procedure success/recovery values are preserved in bindings and block results; fresh recovery errors remain ordinary outcomes. The retired success arm is removed. Normal, suspending, nested, and forced-GC cases are qualified on interp/jit/auto. [M1 qualification](<../vibe/impl/Lambda_Impl_Type_Error_Handling (done).md#m1-handler-outcomes>). |

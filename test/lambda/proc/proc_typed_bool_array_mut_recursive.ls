@@ -11,11 +11,11 @@ pn read_three(rows, maxs, mins) int {
     return 0
 }
 
-pn recurse(rows: bool[], maxs, mins, depth: int) int {
+pn recurse(rows: bool[], maxs, mins, depth: int) int^ {
     if (depth == 0) {
         return read_three(rows, maxs, mins)
     }
-    set_three(rows, maxs, mins, false)
+    set_three(rows, maxs, mins, false)^
     return recurse(rows, maxs, mins, depth - 1)
 }
 

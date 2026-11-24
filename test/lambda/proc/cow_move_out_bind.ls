@@ -57,7 +57,7 @@ pn main() {
     var t: N? = null
     while (k < 40) {
         var a: N? = make()^
-        t = rotate_typed(a)
+        t = rotate_typed(a)^
         k = k + 1
     }
     print(keys(t))

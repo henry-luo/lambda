@@ -11,6 +11,6 @@ pn accumulate(var values: float[], length: int) {
 pn main() {
     var values: float[] = [0.0, 0.0, 0.0, 0.0]
     let saved = values
-    accumulate(values, 4)
+    accumulate(values, 4)^
     print([values, saved])
 }

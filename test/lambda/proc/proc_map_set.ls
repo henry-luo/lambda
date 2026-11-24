@@ -38,7 +38,7 @@ pn test_map_set_loop() {
 }
 
 pn main() {
-    test_map_set_basic()
-    test_map_set_multiple()
+    test_map_set_basic()^
+    test_map_set_multiple()^
     test_map_set_loop()
 }

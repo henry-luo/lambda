@@ -91,9 +91,9 @@ pn test_out_of_range_write_error() {
 }
 
 pn main() {
-    test_2d_write()
-    test_3d_write()
+    test_2d_write()^
+    test_3d_write()^
     test_negative_index_write()
-    test_float_write()
+    test_float_write()^
     test_out_of_range_write_error()
 }

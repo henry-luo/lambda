@@ -64,7 +64,7 @@ pn main() {
     var u: N? = make()^
     var i = 0
     while (i < 3) {
-        set_left(u)
+        set_left(u)^
         i = i + 1
     }
     print(keys(u))

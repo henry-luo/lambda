@@ -38,8 +38,8 @@ pn test_compact_view_write() {
 }
 
 pn main() {
-    test_subview_snapshot()
-    test_float_view_snapshot()
+    test_subview_snapshot()^
+    test_float_view_snapshot()^
     test_leading_axis_row_write()^
     test_compact_view_write()
 }

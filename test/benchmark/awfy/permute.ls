@@ -15,9 +15,9 @@ pn permute(var st, var v, n) {
         permute(st, v, n1)
         var i = n1
         while (i >= 0) {
-            swap(v, n1, i)
-            permute(st, v, n1)
-            swap(v, n1, i)
+            swap(v, n1, i)^
+            permute(st, v, n1)^
+            swap(v, n1, i)^
             i = i - 1
         }
     }

@@ -26,7 +26,7 @@ pn main() {
     var leaf: Node = {value: bump(trace, 5.0), next: bump(trace, null)}
     var node = build(2, leaf)^
     var snapshot = node
-    update(node)
+    update(node)^
     print([trace[0], node.value, snapshot.value, node.next.value])
     var reordered: Node = {next: leaf, value: 7.0}
     print([reordered.value, reordered.next.value])

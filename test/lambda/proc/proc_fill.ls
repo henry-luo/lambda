@@ -388,11 +388,11 @@ pn test_fill_bool_mixed_write() {
 }
 
 pn main() {
-    test_fill_int_untyped()
-    test_fill_float_untyped()
-    test_fill_bool_untyped()
-    test_fill_string_untyped()
-    test_fill_null_untyped()
+    test_fill_int_untyped()^
+    test_fill_float_untyped()^
+    test_fill_bool_untyped()^
+    test_fill_string_untyped()^
+    test_fill_null_untyped()^
     test_fill_zero()^
     test_fill_int_typed_int()^
     test_fill_float_typed_float()^
@@ -402,10 +402,10 @@ pn main() {
     test_fill_bool_typed_float()^
     test_fill_nonzero_int_typed()^
     test_fill_nonzero_float_typed()^
-    test_fill_wrapper_typed_int()
-    test_fill_wrapper_typed_float()
-    test_fill_wrapper_cross_float()
-    test_fill_wrapper_cross_int()
+    test_fill_wrapper_typed_int()^
+    test_fill_wrapper_typed_float()^
+    test_fill_wrapper_cross_float()^
+    test_fill_wrapper_cross_int()^
     test_fill_large_typed()^
     test_fill_loop_mutation()^
     test_fill_negative_int()^

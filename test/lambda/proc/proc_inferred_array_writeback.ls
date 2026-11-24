@@ -4,7 +4,7 @@ pn bump(var values) {
 
 pn main() {
     var values = [1, 2]
-    bump(values)
+    bump(values)^
     print(values[0])
     print(" ")
     print(values[1])

@@ -10,13 +10,13 @@ pn inspect_array_loop(var x: int[], snapshot: int[]) {
 }
 pn main() {
     var b = {size: 5}
-    inspect(b, b)
+    inspect(b, b)^
     var typed = <Box size: 5>
-    inspect_typed(typed, typed)
+    inspect_typed(typed, typed)^
     var numbers: int[] = [5]
-    inspect_array(numbers, numbers)
+    inspect_array(numbers, numbers)^
     var sequence: int[] = [1, 2, 3]
-    inspect_array_loop(sequence, sequence)
+    inspect_array_loop(sequence, sequence)^
     let source = {arr: [1, 2]}
     var child = source.arr
     child[0] = 10

@@ -11,15 +11,15 @@ pn read_only(m) { m.cur + 1 }
 
 pn main() {
     var m = {cur: 1}
-    set_flat(m)
+    set_flat(m)^
     print(m.cur); print(" ")
 
     var t = {a: [1, 2, 3]}
-    set_nested(t)
+    set_nested(t)^
     print(t.a[1]); print(" ")
 
     var xs = ["a", "b"]
-    set_arr(xs)
+    set_arr(xs)^
     print(xs[0]); print(" ")
 
     // non-mutating callee: no mark, caller value untouched either way

@@ -86,7 +86,7 @@ pn effectful_store(var record: Record?) {
 pn main() {
     var record: Record? = make_record(true)
     let before = record
-    set_optional(record, 9)
+    set_optional(record, 9)^
     var child: Record? = {value: 11, next: null}
     set_link(record, child)^
     print([before.value, record.value, record.extra, record.next.value]); print("\n")

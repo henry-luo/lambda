@@ -393,13 +393,13 @@ pn p_read_escape(var p) {
 
 pn p_read_string_internal(var p) {
     p_read(p)^
-    p_start_capture(p)
+    p_start_capture(p)^
     var cur = (p.cur)
     while (cur != "\"") {
         if (cur == "\\") {
-            p_pause_capture(p)
+            p_pause_capture(p)^
             p_read_escape(p)^
-            p_start_capture(p)
+            p_start_capture(p)^
         }
         if (cur != "\\") {
             p_read(p)^
@@ -452,7 +452,7 @@ pn p_read_exponent(var p) {
 }
 
 pn p_read_number(var p) {
-    p_start_capture(p)
+    p_start_capture(p)^
     var rm = p_read_char(p, "-")
     var cur = (p.cur)
     var rd = p_read_digit(p)

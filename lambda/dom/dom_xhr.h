@@ -1,7 +1,7 @@
 /**
  * XMLHttpRequest implementation for Radiant browser context.
  *
- * Synchronous HTTP via http_fetch() from input_http.cpp.
+ * Synchronous HTTP via http_fetch() from input-http.cpp.
  * XHR objects retain their state index and property values in traced private
  * storage. Methods resolve that native identity through their receiver.
  */

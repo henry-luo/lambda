@@ -128,7 +128,7 @@ pn extend(s: string, n: int) string^ {
 }
 
 pn main() {
-    alias_write()
+    alias_write()^
     print(find_first(100000)); print(" ")
     print(skip_and_stop()); print(" ")
     var squares: int[] = fill(16, 0)^

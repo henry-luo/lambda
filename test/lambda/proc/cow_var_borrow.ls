@@ -6,7 +6,7 @@
 pn bump(var m) { m.n = m.n + 1 }
 
 pn bump_twice(var m) {
-    bump(m)          // re-borrow: single writer chain, no check needed
+    bump(m)^          // re-borrow: single writer chain, no check needed
     bump(m)
 }
 
@@ -23,17 +23,17 @@ pn fill_slot(var xs) { xs[1] = "B" }
 pn main() {
     // basic write-through
     var a = {n: 10}
-    bump(a)
+    bump(a)^
     print(a.n); print(" (borrow: ruled 11)\n")
 
     // re-borrow chain
     var b = {n: 0}
-    bump_twice(b)
+    bump_twice(b)^
     print(b.n); print(" (re-borrow: ruled 2)\n")
 
     // recursion through the borrow
     var c = {n: 0}
-    countdown(c, 4)
+    countdown(c, 4)^
     print(c.n); print(" (recursion: ruled 10)\n")
 
     // CW25 path borrow: the PLACE is borrowed, the spine updated in place
@@ -46,7 +46,7 @@ pn main() {
     // the borrow's mutation begins (C4.2c ordering)
     var xs: any[] = ["A", "old", "C"]
     var snapshot = xs
-    fill_slot(xs)
+    fill_slot(xs)^
     print(xs[1]); print(" "); print(snapshot[1]);
     print(" (ordering: ruled B old)\n")
 }

@@ -24,7 +24,7 @@ pn main() {
     print([type(first([3, 4])) == int, type(first([2.5, 3.5])) == float]); print("\n")
     var changing = [1, 2]
     let before = open_first(changing)
-    replace(changing)
+    replace(changing)^
     print([before == 1, open_first(changing) == "changed"]); print("\n")
     let observed = escaping([2.5])
     let callback = escaping

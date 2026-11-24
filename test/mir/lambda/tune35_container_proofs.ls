@@ -28,7 +28,7 @@ pn main() {
     print([snapshot, source, choose(false, source, [])]); print("\n")
     var record: map = {value: 1}
     let before = record
-    extend(record, "extra", [2])
+    extend(record, "extra", [2])^
     print([before, record]); print("\n")
     let numbers: array = [2, 3]
     let refined: map = {value: 9}

@@ -102,9 +102,9 @@ pn main() {
 
     // Test 7: chain insert with float keys
     var tree6 = {root: null}
-    insert_key(tree6, 0.5, "first")
-    insert_key(tree6, 0.5, "updated")
-    insert_key(tree6, 0.3, "left")
-    insert_key(tree6, 0.7, "right")
+    insert_key(tree6, 0.5, "first")^
+    insert_key(tree6, 0.5, "updated")^
+    insert_key(tree6, 0.3, "left")^
+    insert_key(tree6, 0.7, "right")^
     print("T7:" ++ (tree6.root).value ++ "," ++ ((tree6.root).left).key ++ "," ++ ((tree6.root).right).key)
 }

@@ -124,7 +124,7 @@ pn benchmark() {
     // 36000 steps: the canonical AWFY workload, matching nbody2.ls and
     // nbody2.js (runAWFY('NBody', ..., 36000)) so every engine times the same work
     while (i < 36000) {
-        advance(bx, by, bz, bvx, bvy, bvz, bmass, 0.01)
+        advance(bx, by, bz, bvx, bvy, bvz, bmass, 0.01)^
         i = i + 1
     }
     var r = energy(bx, by, bz, bvx, bvy, bvz, bmass)
