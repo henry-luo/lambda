@@ -15,6 +15,14 @@ Resolved records are in the [fixed issue ledger](<Lib_Input_Issue_Ledger (fixed)
 
 ## Open issues
 
+<a id="li-109"></a>
+
+- [LI-109 — Explicit epoch-zero cookie expiry is stored as a session cookie](<Lib_Input_Issue_Ledger (fixed).md#li-109>).
+
+<a id="li-108"></a>
+
+- [LI-108 — Text-element fragments tokenize their contents as ordinary HTML](<Lib_Input_Issue_Ledger (fixed).md#li-108>).
+
 <a id="li-107"></a>
 
 - [LI-107 — Strict XML text validation rescanned the document suffix](<Lib_Input_Issue_Ledger (fixed).md#li-107>).

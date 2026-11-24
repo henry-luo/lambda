@@ -14,6 +14,214 @@ are unchanged. Full evidence is under `../../lambda/temp/kianhup-style/`.
 
 ## Fixed issues
 
+<a id="ri-227"></a>
+
+### RI-227 — Shadow fragments truncate positioned containing-block and paint walks
+
+**Fixed, 2026-11-24.** Teachable's consent SDK creates its notice inside a
+shadow root. Its authored fixed-position rule matches, but the initial
+containing-block fallback walks raw DOM parents and stops at the fragment.
+The notice consequently sizes against a zero-area root: its outer box is
+48px wide at y=-48 rather than the browser's 960px bottom-aligned box.
+The inner panel has zero content width, producing a long vertical text strip.
+
+Initial-block discovery now uses the existing shadow-including parent helper.
+It reaches the document root without treating top-layer paint boundaries as
+new initial containing blocks. Paint/hit-test offset conversion uses the
+existing formatting-parent helper across shadow roots and slot projection.
+The latter repair is required separately: correcting sizing alone passes
+geometry assertions but still paints the notice at its host's offset.
+No selector, site condition, forced style or capture-clock change is added.
+Native ownership follows **D9.1.1v4 / D9.1.3v2**; exports retain **D10.1.7**.
+
+Seven focused cases cover fixed and absolute fallback, open/closed/nested
+roots, transformed containing blocks, light DOM and top-layer dialogs.
+Four fail before repair. All seven pass geometry and PNG checks afterward,
+as do ten root-reflow and sixteen stacking/overflow controls (**33 total**).
+All seven Chromium geometry controls and layout integer lint pass. The
+unchanged authored-cookie replay expands the notice to 960px and its inner
+panel to 540px. Unsupported `:host` variable styling remains separately open
+under JS13-L2. This does not qualify full Shadow DOM support. Task blocker: no.
+
+The subsequent accumulated milestone passes 630/630 dynamic cases and
+3851/3852 static cases, with six reported static skips and zero errors.
+The sole static failure exactly matches the preceding `dom_view_role_nested`
+record. The live notice now has its correct width and bottom placement, but
+its remaining transparent styling keeps Teachable high. Report 179 clears
+pnpm and Podia through separate preceding-release rechecks; inventory is
+88 high, zero critical, 979 low. No complete online sweep is repeated.
+[Comparison evidence](../test/online/comparison/repairs.html#round-179).
+
+Evidence: `temp/online-visual-round203/`,
+`test/online/{shadow_positioned_fixtures.cjs,render_shadow_positioned.test.cjs}`;
+[CSS Position 3 containing blocks](https://drafts.csswg.org/css-position-3/#def-cb).
+
+<a id="ri-226"></a>
+
+### RI-226 — SVG transition snapshots recompute context for resolved absolute lengths
+
+**Fixed, 2026-11-24.** JS13-L68 restores Metronome's XHR-loaded Lottie animation,
+exposing repeated native SVG transition snapshots. Two candidate captures
+exceed the unchanged 150-second limit. A release-process sample places the
+main thread in SVG descendant layout, transition baseline capture and SVG
+font/viewport ancestry resolution. The shared property parser had already
+converted absolute lengths and unitless numbers to their final scalar, but
+baseline capture discarded that result and walked the SVG context again.
+
+Baseline capture now retains the parser's resolved scalar. Percentages,
+font-relative lengths and unresolved math still use the existing SVG context
+resolver. No SVG node, transition snapshot or animation frame is skipped.
+The final full-page capture completes in **77.9 seconds** with the product
+animation visible; a separate blurred overlay still keeps the page high
+severity. This is a native repair under **D9.1.1v4 / D9.1.3v2**, with unchanged
+capture timing under **D10.1.7**.
+
+All twelve focused SVG controls pass: six mutation/selector/transition cases
+and six baselines covering unitless, px, pt, em, percentage and math values.
+Layout integer lint passes. The preceding milestone already ran both
+baselines; this isolated optimization uses focused checks. Evidence:
+`temp/online-visual-round200/{sampled,optimized,svg-length-focused.log}`;
+`test/online/render_svg_dash_mutation.test.cjs`.
+
+<a id="ri-225"></a>
+
+### RI-225 — A stacking owner's overflow scope clips escaping positioned layers
+
+**Fixed, 2026-11-24.** After RI-224 repairs empty-context culling, a fixed
+descendant still disappears when its stacking owner has `overflow:hidden`.
+Both raster and shared SVG/PDF walkers opened the owner's content clip before
+all signed and zero-level layers. Their existing containing-block-aware
+overflow check handled intervening ancestors but could not undo the owner's
+already active clip and scroll offset. This violates
+[CSS 2.2 §11.1.1](https://www.w3.org/TR/CSS22/visufx.html#overflow-clipping)
+when the positioned child's containing block lies outside that owner.
+
+Normal children now paint within the owner's content scope; positioned layers
+open that scope only when the shared `radiant_stack_overflow_applies` resolver
+requires it. Raster traversal preserves separate owner/content coordinates.
+Each backend reuses shared content-scope helpers, including the intervening
+ancestry path. Positive and negative layers, scrolling, real containment and
+clip paths retain their semantics. No clipping assertion is weakened.
+Ownership follows **D9.1.1v4 / D9.1.3v2**; capture timing follows **D10.1.7**.
+
+The combined RI-224/225 matrix has sixteen controls; ten fail on the preceding
+release and all pass after both repairs, in Chromium and through SVG export
+rasterized independently with librsvg. All **68 focused checks** pass: fifty-two
+PNG checks and sixteen SVG checks. Layout integer lint passes. At the combined
+milestone, dynamic baseline **630/630** and static **3851/3852** retain the exact
+previous `dom_view_role_nested` failure; no reference changes. Evidence:
+`temp/online-visual-round199/`, `test/online/render_stacking_overflow.test.cjs`.
+
+<a id="ri-224"></a>
+
+### RI-224 — Empty stacking contexts cull visible positioned descendants
+
+**Fixed, 2026-11-24.** Maven Central's Osano panel initialized successfully.
+An isolated unchanged SDK had the same visible style, opacity and 400×461
+geometry in Native and Chromium, yet Native painted nothing. Its outer
+stacking context has zero height and owns fixed descendants whose containing
+block is the viewport. Paint culling checked the owner's border and in-flow
+overflow bounds, missing that positioned paint. A non-stacking owner or a
+one-pixel height hid the defect; neither is a valid application workaround.
+
+The shared overflow predicate now accounts for positioned descendants owned
+by a context, using the existing tree query. Viewport culling, dirty culling
+and retained-fragment admission consequently stay conservative when the
+owner's border cannot bound its paint. Real paint containment and subsequent
+clip scopes remain effective. Changes stay native under
+**D9.1.1v4 / D9.1.3v2**; no script or capture-clock override (**D10.1.7**).
+
+The isolated panel and the live Maven consent/preferences panel now render.
+Maven's manual major omission clears; small card spacing and input alignment
+remain. Report175 has **92 high, zero critical, 975 low**. RI-225 addresses the
+additional overflow-owner control found during qualification; all sixteen
+controls and the combined verification described above pass. Native geometry
+and browser references are unchanged. Evidence: `temp/online-visual-round199/`;
+[comparison](../test/online/comparison/repairs.html#round-175).
+
+<a id="ri-223"></a>
+
+### RI-223 — Local inline-style writes retain unrelated relational dependencies
+
+**Fixed, 2026-11-24.** An unrelated CSS `attr()` declaration could promote
+an inline-style write into the generic attribute path. Unlike data/ARIA
+writes, its journal entry was not marked local when no `:has()` selector
+referenced the style attribute. Swag's carousel therefore recascaded the
+whole document for transition, width and transform writes.
+
+The existing attribute dependency query now classifies these writes as local,
+while documents with shadow roots keep the broader path. Style-attribute
+witness selectors, scope/column guards and container-query settling remain
+active. This reuses the existing mutation protocol under **D9.1.1v4 /
+D9.1.3v2 / D9.5.6v2**. A new failing control with an unrelated `attr()` rule
+now passes; existing positive style-witness and size-query controls pass.
+Together with [JS13-L65](jube/JS_Issue_Ledger.md#js13-l65), this removes the
+observed unrelated recascades without suppressing mutations or timers.
+The combined qualification is 65 focused passes and the unchanged milestone
+baseline results. Evidence: `temp/online-visual-round197/` and
+[comparison round 173](../test/online/comparison/repairs.html#round-173).
+
+<a id="ri-222"></a>
+
+### RI-222 — Auto-width SVGs ignore a definite height in flow and flex sizing
+
+**Fixed, 2026-11-24.** A viewBox-only SVG with `height:1em; width:auto` in
+a flex row took the whole available width. Maven Central's check icons
+therefore squeezed card text into a narrow column. The automatic-axis helper
+omitted the natural SVG ratio, and flex intrinsic sizing honored declared
+axes only for bitmap images before applying its available-space fallback.
+
+SVG flow uses the existing opposite-axis ratio transfer before the fallback;
+SVG flex contributions use the existing content-box constraint solver with
+the resolved axes. Zero CSS sizes remain valid. Explicit ratios, width limits,
+border-box edges, column stretching and cyclic percentage viewport cases are
+preserved. The general intrinsic ratio policy is unchanged. Ownership remains
+**D9.1.1v4 / D9.1.3v2**.
+
+Five of nine new rendered cases fail on the prior release. All nine pass in
+Chromium and after repair, as does the new native flow/flex unit test. The
+existing percentage-SVG regression caught an overly broad intermediate
+attempt; that change was removed before qualification. All 65 combined
+focused checks pass. Baselines run once after the fixes: 630/630 dynamic and
+3851/3852 static, retaining the exact earlier `dom_view_role_nested` failure.
+Maven's card text becomes readable; its missing consent panel keeps the page
+high severity. Evidence: `temp/online-visual-round197/` and
+[comparison round 173](../test/online/comparison/repairs.html#round-173).
+
+<a id="ri-221"></a>
+
+### RI-221 — Root-positioned children retain offsets from an earlier layout height
+
+**Fixed, 2026-11-24.** After a geometry read laid out an initially short
+document, script-driven content growth left bottom-positioned children of a
+positioned root at the old viewport-height offset. NVD's absolute footer
+covered the primary content. A script-free replay with the actual stylesheet
+embedded placed it correctly; retained dynamic reflow reproduced the fault.
+
+The root's separate layout path omitted the existing post-flow vertical
+absolute-child resolution used by ordinary blocks. It now calls that helper
+after the root's extent settles and before viewport scrolling clips its box.
+The helper uses the shared absolute-containing-block resolver so fixed
+children and unpositioned roots retain their viewport basis. No page-specific
+branch, layout suppression or timing change is introduced. Native ownership
+remains **D9.1.1v4 / D9.1.3v2**; capture timing remains **D10.1.7**. The behavior
+follows [CSS 2.2 §10.1](https://www.w3.org/TR/CSS22/visudet.html#containing-block-details)
+and §10.6.4.
+
+Five of ten new rendered controls fail on the prior release; all ten pass
+in Chromium and after repair. All **59 focused checks pass**: 45 rendered
+positioning controls and 14 native positioning/containing-block tests. Layout
+integer lint passes. Milestone baselines run once: **630/630 dynamic** and
+**3851/3852 static**, with six static skips. The sole static failure,
+`dom_view_role_nested` at 44.444% element match, exactly equals the previously
+recorded result; it remains visible. NVD's mean image error falls from 38.50%
+to 0.84%, and visual review confirms its content is no longer obscured.
+
+Evidence: `temp/online-visual-round196/{root-positioned-before.log,
+root-positioned-browser.log,positioned-focused.log,native-positioned-focused.log,
+milestone-summary.json,selected/pairs.png}` and
+[comparison round 172](../test/online/comparison/repairs.html#round-172).
+
 <a id="ri-220"></a>
 
 ### RI-220 — GLB viewer crashes when a select popup extends below the window

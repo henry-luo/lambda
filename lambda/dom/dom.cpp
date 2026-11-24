@@ -3337,9 +3337,10 @@ extern "C" Item dom_document_proxy_set_property(Item prop_name, Item value) {
         if (strcmp(prop, "href") == 0 || strcmp(prop, "location") == 0 ||
             strcmp(prop, "hash") == 0 || strcmp(prop, "search") == 0 ||
             strcmp(prop, "pathname") == 0) {
-            // Location writes share the module-owned same-document history
-            // machine; this prevents URL reflection and traversal from diverging.
-            return js_history_set_location(value, strcmp(prop, "hash") == 0);
+            // full URL assignments may replace the document; fragment writes retain its history state.
+            bool navigate_document = strcmp(prop, "href") == 0 || strcmp(prop, "location") == 0;
+            return navigate_document ? dom_location_set_href(value)
+                : js_history_set_location(value, strcmp(prop, "hash") == 0);
         }
         Item* cached = strcmp(prop, "defaultView") == 0 ? &js_document_default_view :
             strcmp(prop, "fonts") == 0 ? &js_document_fonts_value : nullptr;

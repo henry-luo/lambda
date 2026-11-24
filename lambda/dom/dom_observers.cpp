@@ -8,6 +8,7 @@
 #include "dom_realm_hooks.h"
 #include "../js/js_runtime.h"
 #include "../js/js_runtime_state.hpp"
+#include "../js/js_function.hpp"
 #include "../jube/jube.h"
 #include "lambda/input/css/dom_node.hpp"
 #include "lambda/input/css/dom_element.hpp"
@@ -905,22 +906,39 @@ static bool observer_has_principal_box(DomNode* node) {
     return true;
 }
 
-static Item observer_new_intersection_entry(void) {
-    RootFrame roots(4);
-    Rooted<Item> entry_root(roots, js_new_object());
-    Rooted<Item> global_root(roots, dom_realm_global());
-    Rooted<Item> constructor_root(roots, dom_realm_get_name(global_root.get(),
-        "IntersectionObserverEntry"));
-    Rooted<Item> prototype_root(roots, dom_realm_get_name(constructor_root.get(),
-        "prototype"));
-    TypeId prototype_type = get_type_id(prototype_root.get());
-    if (prototype_type == LMD_TYPE_MAP || prototype_type == LMD_TYPE_ARRAY ||
-            prototype_type == LMD_TYPE_FUNC) {
-        // Observer notifications are platform records, so keep their interface
-        // identity rather than exposing them as unrelated plain objects.
-        dom_realm_set_prototype(entry_root.get(), prototype_root.get());
+enum IntersectionEntrySlot {
+    INTERSECTION_TIME, INTERSECTION_ROOT_BOUNDS, INTERSECTION_BOUNDING_RECT,
+    INTERSECTION_RECT, INTERSECTION_IS_INTERSECTING, INTERSECTION_RATIO,
+    INTERSECTION_TARGET, INTERSECTION_FIELD_COUNT
+};
+
+static Item observer_intersection_entry_get(Item callee, Item receiver, Item*, int, uint64_t*) {
+    JS_ASSIGN_OR_RETURN(fields, dom_realm_native_private_array_state(receiver,
+        JS_CLASS_INTERSECTION_OBSERVER_ENTRY, INTERSECTION_FIELD_COUNT,
+        "Illegal IntersectionObserverEntry receiver"));
+    return js_elements_get_int(fields, js_fn_native((JsFunction*)callee.function)->target.bits);
+}
+
+void dom_intersection_entry_install_interface(Item prototype) {
+    static const char* const fields[] = {"time", "rootBounds", "boundingClientRect",
+        "intersectionRect", "isIntersecting", "intersectionRatio", "target"};
+    dom_install_event_payload_getters(prototype, fields, INTERSECTION_FIELD_COUNT,
+        observer_intersection_entry_get);
+}
+
+static Item observer_new_intersection_entry(Item fields) {
+    RootFrame roots(3);
+    Rooted<Item> data(roots, fields), prototype(roots,
+        dom_realm_intrinsic_prototype(JS_CLASS_INTERSECTION_OBSERVER_ENTRY)), key(roots, ItemNull);
+    if (get_type_id(prototype.get()) != LMD_TYPE_MAP) {
+        JS_RETURN_IF_ERROR(dom_realm_ensure_host_global_family("IntersectionObserverEntry"));
+        prototype.set(dom_realm_intrinsic_prototype(JS_CLASS_INTERSECTION_OBSERVER_ENTRY));
     }
-    return entry_root.get();
+    key.set(dom_realm_private_key_for_class(prototype.get(), js_name_item("#IntersectionObserverEntry")));
+    JS_RETURN_IF_ERROR(key.get());
+    // geometry records use private slots, so captured prototype getters cannot be forged by public fields.
+    return dom_realm_native_private_array_object(JS_CLASS_INTERSECTION_OBSERVER_ENTRY,
+        key.get(), data.get(), prototype.get());
 }
 
 static void observer_sample_geometry(void) {
@@ -1012,17 +1030,20 @@ static void observer_sample_geometry(void) {
             target->sampled = true;
             target->last_intersecting = intersecting;
             target->last_ratio = ratio;
-            entry_root.set(observer_new_intersection_entry());
-            dom_realm_set_name(entry_root.get(), "target", target_root.get());
-            dom_realm_set_name(entry_root.get(), "boundingClientRect", rect_root.get());
-            dom_realm_set_name(entry_root.get(), "intersectionRatio", js_make_number(ratio));
-            dom_realm_set_name(entry_root.get(), "isIntersecting", (Item){.item = b2it(intersecting)});
             intersection_root.set(observer_make_rect(left, top,
                 intersection_width, intersection_height));
-            dom_realm_set_name(entry_root.get(), "intersectionRect", intersection_root.get());
-            dom_realm_set_name(entry_root.get(), "rootBounds", observer_make_rect(
-                root_left, root_top, root_right - root_left, root_bottom - root_top));
-            dom_realm_set_name(entry_root.get(), "time", js_make_number(0.0));
+            boxes_root.set(observer_make_rect(root_left, root_top,
+                root_right - root_left, root_bottom - root_top));
+            entry_root.set(js_array_new(INTERSECTION_FIELD_COUNT));
+            js_elements_set_int(entry_root.get(), INTERSECTION_TIME, js_make_number(js_performance_now_ms()));
+            js_elements_set_int(entry_root.get(), INTERSECTION_ROOT_BOUNDS, boxes_root.get());
+            js_elements_set_int(entry_root.get(), INTERSECTION_BOUNDING_RECT, rect_root.get());
+            js_elements_set_int(entry_root.get(), INTERSECTION_RECT, intersection_root.get());
+            js_elements_set_int(entry_root.get(), INTERSECTION_IS_INTERSECTING, (Item){.item = b2it(intersecting)});
+            js_elements_set_int(entry_root.get(), INTERSECTION_RATIO, js_make_number(ratio));
+            js_elements_set_int(entry_root.get(), INTERSECTION_TARGET, target_root.get());
+            entry_root.set(observer_new_intersection_entry(entry_root.get()));
+            if (item_is_error(entry_root.get())) continue;
             observer_queue_record(observer, entry_root.get());
         }
     }

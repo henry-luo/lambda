@@ -171,6 +171,39 @@ requests and frozen after-window/zero-window completion. It uses local HTTP
 resources and native PNG output; `LAMBDA_RENDER_EXE` selects the qualified
 renderer (**D6.4.1 / D6.4.4 / D10.1.7**).
 
+`node --test test/online/render_xhr_json.test.cjs` checks JSON response values,
+UTF-8 BOM/replacement decoding, malformed and empty bodies, MIME independence,
+HTTP errors, cached identity through GC, text-access guards and request reuse.
+It uses loopback HTTP resources and native PNG output (**D8.4.4 / D6.3.3 /
+D9.5.6v2**).
+
+`node --test test/online/render_cookie_expiry.test.cjs` checks HTTP document
+cookie probes, epoch-zero and pre-epoch deletion, session/future retention
+and Max-Age precedence. Input's `HttpInputTest.CookieExpiry*` and
+`ExpiredMissingCookiesDoNotCreateSessionEntries` cover the shared jar directly
+(**D9.1.1v4 / D9.1.3v2**).
+
+`node --test test/online/render_svg_flex_ratio.test.cjs` checks natural SVG
+ratio transfer from definite heights, including borders, explicit ratios,
+zero sizes, limits, stretching and dynamic changes. Native
+`DynamicLayoutTest.SvgNaturalRatioTransfersDefiniteHeightInFlowAndFlex` guards
+the runtime-free flow and flex paths (**D9.1.3v2**).
+
+`node --test test/online/render_shadow_positioned.test.cjs` checks viewport
+fallback and painted offsets across open, closed and nested shadow roots,
+with transformed-host, light-DOM and top-layer controls. It shares browser
+fixture expectations in `shadow_positioned_fixtures.cjs` (Radiant RI-227).
+
+`node --test test/online/render_root_positioned.test.cjs` checks positioned
+root descendants after synchronous and timer-driven growth, shrinkage, removal
+and percentage sizing. Fixed, unpositioned and definite-root controls retain
+their containing-block behavior (**D9.1.3v2 / D9.5.6v2**).
+
+`node --test test/online/render_fragment_text.test.cjs` checks that script
+`innerHTML` preserves literal end tags, embedded markup and references, with
+an executing `textContent` control. Native `HtmlParserTest.TextElementFragmentsUseContextTokenization`
+covers ten text-element contexts in the input owner (**D9.1.1v4 / D9.1.3v2**).
+
 `node --test test/online/render_range_fragments.test.cjs` checks contextual
 Range parsing, document ownership, coercion and inserted-script lifecycle.
 `proc/dom_range_contextual_fragment.ls` exercises the shared body without a

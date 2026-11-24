@@ -74,6 +74,10 @@ bool dom_realm_object_has_class(Item object, int class_id);
 Item dom_realm_native_private_array_state(Item receiver, int brand,
     int expected_length, const char* error_message);
 Item dom_realm_native_private_array_object(int brand, Item key, Item state, Item prototype);
+Item dom_realm_private_key_for_class(Item owner, Item name);
+Item dom_realm_ensure_host_global_family(const char* name);
+Item dom_realm_json_parse(Item source);
+Item dom_realm_decode_utf8_body(Item bytes);
 void dom_realm_install_interface(Item global, const char* name);
 Item dom_realm_new_array_of_class(int length, int class_id);
 Item dom_realm_define_property(Item object, Item name, Item descriptor);

@@ -7,6 +7,7 @@ Item js_install_request(Item global);
 template<typename T> class Rooted;
 // shared BodyInit extraction for constructors and the HTTP transport.
 Item js_fetch_body_bytes(Item body, Rooted<Item>& content_type);
+Item js_body_decode_utf8(Item bytes);
 // Copies transport bytes into precisely traced response storage (D6.3.3).
 Item js_response_from_bytes(const void* bytes, int length, Item headers,
     int status, Item status_text, Item url, bool redirected = false);

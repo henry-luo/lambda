@@ -20,6 +20,34 @@ observations still require re-verification. Add new Radiant issues here.
 
 ## Open issues
 
+<a id="ri-227"></a>
+
+- [RI-227 — Shadow fragments truncate positioned containing-block and paint walks](<Radiant_Issue_Ledger (fixed).md#ri-227>).
+
+<a id="ri-226"></a>
+
+- [RI-226 — SVG transition snapshots recompute context for resolved absolute lengths](<Radiant_Issue_Ledger (fixed).md#ri-226>).
+
+<a id="ri-225"></a>
+
+- [RI-225 — A stacking owner's overflow scope clips escaping positioned layers](<Radiant_Issue_Ledger (fixed).md#ri-225>).
+
+<a id="ri-224"></a>
+
+- [RI-224 — Empty stacking contexts cull visible positioned descendants](<Radiant_Issue_Ledger (fixed).md#ri-224>).
+
+<a id="ri-223"></a>
+
+- [RI-223 — Local inline-style writes retain unrelated relational dependencies](<Radiant_Issue_Ledger (fixed).md#ri-223>).
+
+<a id="ri-222"></a>
+
+- [RI-222 — Auto-width SVGs ignore a definite height in flow and flex sizing](<Radiant_Issue_Ledger (fixed).md#ri-222>).
+
+<a id="ri-221"></a>
+
+- [RI-221 — Root-positioned children retain offsets from an earlier layout height](<Radiant_Issue_Ledger (fixed).md#ri-221>).
+
 <a id="ri-220"></a>
 
 ### RI-220 — FIXED
