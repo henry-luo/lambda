@@ -1,0 +1,5 @@
+{
+  tree_matches: true,
+  text_matches: true,
+  diagnostics_match: true
+}

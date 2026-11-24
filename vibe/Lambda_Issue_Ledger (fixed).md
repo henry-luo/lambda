@@ -16,6 +16,21 @@
 > Semantic and design rulings remain cited by S# / D#; where no formal ruling
 > covers a point, the original vibe ledger ID is retained.
 
+<a id="lr12-72"></a>
+## LR12-72 — DOM and document-preview seams blocked the split build
+
+**Fixed in the working tree, 2026-11-24.** Lambda's DOM caller requires the
+seven-argument mutation interface paired with Radiant `b0a225b`; its document
+preview adapter also requires the later Radiant `ad7fdc8`, which contains that
+interface. The pinned `f0b739b` had neither. The clean Radiant checkout is now
+at `ad7fdc8` and its gitlink remains unstaged. This retains the paired
+relational-style invalidation and preview behavior (D9.1.3v2).
+
+The debug and release split builds pass. The unrestricted Lambda baseline
+passes 6,128/6,128 tests; its sandboxed run failed on 17 local-service cases,
+which all passed in exact unrestricted reruns. Evidence is in
+`temp/latex-port-resume/{lambda-baseline-paired,lambda-baseline-unsandboxed,release-build-paired}.log`.
+
 <a id="lr12-70"></a>
 ## LR12-70 — The JIT declaration optimizer crashes on decomposition
 

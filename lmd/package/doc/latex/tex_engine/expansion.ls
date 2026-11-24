@@ -114,10 +114,15 @@ fn assign_meaning(st: State, name, value, global) State^ =>
         groups: if (global) [for (scope in st.groups)
             {*:scope, definitions: set_definition(scope.definitions, name, value)}] else st.groups}
 
+// native keeps the scanned signature when input ends before the body.
+fn unfinished_signature(input, count, prefix, delimiters, diagnostics) =>
+    {input:input,issue:null,diagnostics:diagnostics,count:count,prefix:prefix,
+        delimiters:delimiters,brace_delim:false,ended:true}
+
 fn signature(input, count, prefix = [], delimiters = [], diagnostics = []) any^ {
     let read = stream.next(input)^;
     let t = read.token;
-    if (t == null) {input: read.stream, issue: "tex-runaway-definition", diagnostics: diagnostics}
+    if (t == null) unfinished_signature(read.stream,count,prefix,delimiters,diagnostics)
     else if (charcat(t, 1)) {input: stream.push(read.stream, [t]), issue: null, diagnostics: diagnostics,
         count: count, prefix: prefix, delimiters: delimiters, brace_delim: false}
     else if (charcat(t, 6)) {
@@ -126,7 +131,7 @@ fn signature(input, count, prefix = [], delimiters = [], diagnostics = []) any^ 
         if (charcat(digit.token, 1))
             {input: stream.push(digit.stream, [digit.token]), issue: null, diagnostics: diagnostics, count: count,
                 prefix: prefix, delimiters: delimiters, brace_delim: true, brace: digit.token}
-        else if (digit.token == null) {input: digit.stream, issue: "tex-param-order", diagnostics: diagnostics}
+        else if (digit.token == null) unfinished_signature(digit.stream,count,prefix,delimiters,diagnostics)
         else if (count >= 9) signature(digit.stream, count, prefix, delimiters,
             [*diagnostics, {input:digit.stream, code:"tex-nine-params", message:"You already have nine parameters"}])
         else if (digit.token.kind != "char" or digit.token.cat != 12 or digit.token.value != expected)
@@ -150,25 +155,60 @@ fn signature_diagnostics(st: State, events, index = 0) State^ {
     }
 }
 
-fn definition_tokens_inner(st, budget, depth = 1, output = [], parameter_scan = false) any^ {
-    let read = expanded_next(st, budget, true);
-    let t = read.token;
-    if (read.state.issue != null) {state: read.state, tokens: output}
-    else if (t == null) {state: fail(read.state, "tex-runaway-definition"), tokens: output}
-    else if (t.direct_toks == true) {
-        let stored = {*:t, noexpand: false, direct_toks: false, trace_internal: false};
-        let token = if (parameter_scan and charcat(t,6)) {*:stored, definition_literal_parameter:true} else stored;
-        definition_tokens_inner(read.state, budget, depth, [*output, token], parameter_scan)
+// scan raw and expanded definition bodies through the same parameter logic.
+fn definition_read(st, budget, xpand) any^ {
+    if (xpand) expanded_next(st, budget, true)
+    else {
+        let read = stream.next(st.input)^;
+        {state:{*:st, input:read.stream}, token:read.token}
     }
-    else if (charcat(t, 2) and depth == 1) {state: read.state, tokens: output}
-    // stored tokens must mark foreign expansion during a later definition.
-    else definition_tokens_inner(read.state, budget,
-        depth + if (charcat(t, 1)) 1 else if (charcat(t, 2)) -1 else 0,
-        [*output, {*:t, noexpand: false, trace_internal: false}], parameter_scan)
 }
 
-fn definition_tokens(st, budget, parameter_scan = false) any^ {
-    let scanned = definition_tokens_inner({*:st, token_text_scan: true}, budget, 1, [], parameter_scan)^;
+fn definition_tokens_inner(st, budget, depth = 1, output = [], parameter_count = null, xpand = true) any^ {
+    let read = definition_read(st, budget, xpand)^;
+    let t = read.token;
+    if (read.state.issue != null) {state: read.state, tokens: output}
+    // general expanded text needs separate source-provenance recovery at EOF.
+    else if (t == null) if (parameter_count == null)
+        {state:fail(read.state,"tex-runaway-definition"),tokens:output}
+        else {state:record_diagnostic(read.state,"tex-runaway","File ended while scanning a text")^,tokens:output}
+    else if (xpand and t.direct_toks == true) {
+        let stored = {*:t, noexpand: false, direct_toks: false, trace_internal: false};
+        definition_tokens_inner(read.state, budget, depth, [*output, stored], parameter_count, xpand)
+    }
+    else if (charcat(t, 2) and depth == 1) {state: read.state, tokens: output}
+    else if (parameter_count != null and charcat(t, 6)) {
+        // expanded definitions expand the following token before classifying #.
+        let next = definition_read({*:read.state, token_text_scan:false}, budget, xpand)^;
+        let current = {*:next.state, token_text_scan:read.state.token_text_scan};
+        let n = next.token;
+        let digit = if (n != null and n.kind == "char" and n.cat == 12) index_of("123456789", n.value) else null;
+        let literal = if (xpand) {*:t,noexpand:false,trace_internal:false} else t;
+        if (current.issue != null) {state:current,tokens:output}
+        // end of input during parameter lookahead stops before appending #.
+        else if (n == null) {state:current,tokens:output}
+        else if (charcat(n,6)) definition_tokens_inner(current,budget,depth,[*output,literal],parameter_count,xpand)
+        else if (digit != null and digit < parameter_count)
+            definition_tokens_inner(current,budget,depth,[*output,parameter_token(digit,t.start,n.end)],parameter_count,xpand)
+        else {
+            // buffered argument tokens use the current reader position for errors.
+            let origin = if (not xpand and n.direct == true and
+                stream.raw_reader(read.state.input,n)^ != null) n else null;
+            let diagnosed=record_diagnostic(current,"tex-illegal-param","Illegal parameter number in definition",origin)^;
+            definition_tokens_inner(put_back(diagnosed,n),budget,depth,[*output,literal],parameter_count,xpand)
+        }
+    }
+    else {
+        // expanded tokens must mark foreign expansion during a later definition.
+        let stored = if (xpand) {*:t, noexpand:false, trace_internal:false} else t;
+        definition_tokens_inner(read.state, budget,
+            depth + if (charcat(t, 1)) 1 else if (charcat(t, 2)) -1 else 0,
+            [*output, stored], parameter_count, xpand)
+    }
+}
+
+fn definition_tokens(st, budget, parameter_count = null, xpand = true) any^ {
+    let scanned = definition_tokens_inner({*:st, token_text_scan: xpand}, budget, 1, [], parameter_count, xpand)^;
     {*:scanned, state: {*:scanned.state, token_text_scan: st.token_text_scan}}
 }
 
@@ -180,34 +220,16 @@ fn define(st: State, global, long_ok, protected_flag, xpand, budget) State^ {
         let checked = if (len(sig.diagnostics) == 0) st else signature_diagnostics(st,sig.diagnostics)^;
         if (sig.issue != null) fail({*:checked,input:sig.input}, sig.issue)
         else {
-            let opening = if (xpand) stream.next(sig.input)^ else null;
-            let scan = if (xpand) definition_tokens({*:checked, input: opening.stream}, budget, true)^ else {
-                let body = stream.argument(sig.input, true)^;
-                {state: if (body.error != null) fail({*:checked, input: body.stream}, body.error)
-                    else {*:checked, input: body.stream}, tokens: body.tokens}
-            };
+            let opening = if (sig.ended) null else stream.next(sig.input)^;
+            let scan = if (sig.ended) {state:{*:checked,input:sig.input},tokens:[]}
+                else definition_tokens({*:checked, input:opening.stream}, budget, sig.count, xpand)^;
             if (scan.state.issue != null) scan.state
             else {
-                let initial = body_params(scan.tokens, sig.count)^;
-                // Expanded bodies need a continuous reader sequence to locate diagnostics.
-                let active = if (xpand and initial.issue != null) stream.active_reader(scan.state.input)^ else null;
-                let continuous = not xpand or (active != null and active.file_id == name.token.file and
-                    opening.token != null and opening.token.seq != null and
-                    active.seq == opening.token.seq + len(scan.tokens) + 1 and
-                    all([for (i,t in scan.tokens) t.seq == opening.token.seq + i + 1]));
-                let direct = initial.issue != null and continuous and name.token.direct == true and
-                    stream.raw_reader(name.stream,name.token)^ != null and
-                    all([for (t in scan.tokens) t.direct == true and t.file == name.token.file]);
-                let parsed = if (direct) body_params(scan.tokens, sig.count, 0, [], "tex")^ else initial;
-                let diagnosed = if (direct) parameter_diagnostics(scan.state,parsed.errors,"tex")^ else scan.state;
-                if (parsed.issue != null) fail(scan.state, parsed.issue)
-                else {
-                    let k = key(name.token);
-                    let value = {kind: "macro", count: sig.count, prefix: sig.prefix, delimiters: sig.delimiters,
-                        brace_delim: sig.brace_delim, long_ok: long_ok, protected_flag: protected_flag,
-                        body: if (sig.brace_delim) [*parsed.tokens, sig.brace] else parsed.tokens};
-                    assign_meaning(diagnosed, k, value, global)
-                }
+                let k = key(name.token);
+                let value = {kind: "macro", count: sig.count, prefix: sig.prefix, delimiters: sig.delimiters,
+                    brace_delim: sig.brace_delim, long_ok: long_ok, protected_flag: protected_flag,
+                    body: if (sig.brace_delim) [*scan.tokens, sig.brace] else scan.tokens};
+                assign_meaning(scan.state, k, value, global)
             }
         }
     }
@@ -444,7 +466,8 @@ fn expand_one(st: State, t, budget) State^ {
                 else if (macro.source_mapping_guard == "tl_tail") {*:st, expl3_tl_tail_seen: true}
                 else if (macro.source_mapping_guard == "exp_args_once") {*:st, expl3_exp_args_once_seen: true}
                 else if (macro.source_mapping_guard == "exp_args_f") {*:st, expl3_exp_args_f_seen: true}
-                else if (macro.source_mapping_guard == "exp_args_value") {*:st, expl3_exp_args_value_seen: true} else st;
+                else if (macro.source_mapping_guard == "exp_args_value") {*:st, expl3_exp_args_value_seen: true}
+                else if (macro.source_mapping_guard == "int_math") {*:st, expl3_int_math_seen: true} else st;
             let traced = if (st.prefix_scan == true) {*:marked, prefixed_macro_seen: true} else marked;
             expand_macro(traced, macro, budget, t)
         }
@@ -789,7 +812,11 @@ fn expression_factor(st, budget, level = "int") any^ {
         let nested = expression_sum(first.state, budget, level)^;
         let close = expanded_nonspace(nested.state, budget)^;
         if (nested.state.issue != null) nested
-        else if (not other(close.token, ")")) {state: fail(put_back(close.state, close.token), "tex-missing-paren"), value: 0}
+        else if (not other(close.token, ")")) {
+            // insert the missing close without consuming the token that ended the expression.
+            let diagnosed=record_diagnostic(close.state,"tex-missing-paren","Missing ) inserted for expression")^;
+            {state:put_back(diagnosed,close.token),value:nested.value}
+        }
         else {state: close.state, value: nested.value}
     }
     else if (level == "dimen") scan_dimen(put_back(first.state, first.token), budget)^
@@ -1628,8 +1655,8 @@ fn assign_toksdef(st: State, global, budget) State^ {
     }
 }
 
-// numeric the-expansion is internal to the current definition trace.
-fn the_text(st, text) map[]^ {
+// generated text is internal to the current definition trace.
+fn internal_text_tokens(st, text) map[]^ {
     let tokens = text_tokens(text)^;
     if (st.token_text_scan) [for (token in tokens) {*:token, trace_internal: true}] else tokens
 }
@@ -1647,7 +1674,7 @@ fn expand_the(st: State, budget, count_expansion = true, capture = false) State^
             let index = if (m.kind == "register") {state: read.state, value: m.index}
                 else scan_register(read.state, budget)^;
             if (index.state.issue != null) index.state
-            else {*:index.state, input: the_push(index.state.input, the_text(st, string(count_value(index.state, index.value))), capture)}
+            else {*:index.state, input: the_push(index.state.input, internal_text_tokens(st, string(count_value(index.state, index.value))), capture)}
         }
         else if (m.kind == "font" or contains(["font", "nullfont", "textfont", "scriptfont", "scriptscriptfont"], primitive(read.state, read.token))) {
             let selected = scan_font_ident(put_back(read.state, read.token), budget)^;
@@ -1661,24 +1688,24 @@ fn expand_the(st: State, budget, count_expansion = true, capture = false) State^
         else if (contains(["hyphenchar", "skewchar"], primitive(read.state, read.token))) {
             let value = font_character(read.state, budget, primitive(read.state, read.token))^;
             if (value.state.issue != null) value.state
-            else {*:value.state, input: the_push(value.state.input, the_text(st, string(value.value)), capture)}
+            else {*:value.state, input: the_push(value.state.input, internal_text_tokens(st, string(value.value)), capture)}
         }
         else if (primitive(read.state, read.token) == "fontdimen") {
             let value = font_dimen(read.state, budget)^;
             if (value.state.issue != null) value.state
-            else {*:value.state, input: the_push(value.state.input, the_text(st, dimension.format(value.value)), capture)}
+            else {*:value.state, input: the_push(value.state.input, internal_text_tokens(st, dimension.format(value.value)), capture)}
         }
         else if (primitive(read.state, read.token) == "dimen" or m.kind == "dimension-register") {
             let index = if (m.kind == "dimension-register") {state: read.state, value: m.index}
                 else scan_register(read.state, budget)^;
             if (index.state.issue != null) index.state
             else {*:index.state, input: the_push(index.state.input,
-                the_text(st, dimension.format(dimen_value(index.state, index.value))), capture)}
+                internal_text_tokens(st, dimension.format(dimen_value(index.state, index.value))), capture)}
         }
         else if (box_dimension_name(primitive(read.state, read.token))) {
             let value = box_dimension(read.state, primitive(read.state, read.token), budget)^;
             if (value.state.issue != null) value.state
-            else {*:value.state, input: the_push(value.state.input, the_text(st, dimension.format(value.value)), capture)}
+            else {*:value.state, input: the_push(value.state.input, internal_text_tokens(st, dimension.format(value.value)), capture)}
         }
         else if (primitive(read.state, read.token) == "skip" or primitive(read.state, read.token) == "muskip" or m.kind == "glue-register") {
             let mu = if (m.kind == "glue-register") m.mu else primitive(read.state, read.token) == "muskip";
@@ -1686,44 +1713,44 @@ fn expand_the(st: State, budget, count_expansion = true, capture = false) State^
                 else scan_register(read.state, budget)^;
             if (index.state.issue != null) index.state
             else {*:index.state, input: the_push(index.state.input,
-                the_text(st, glue.format(glue_value(index.state, index.value, mu), mu)), capture)}
+                internal_text_tokens(st, glue.format(glue_value(index.state, index.value, mu), mu)), capture)}
         }
         else if (primitives.parameter_kind(primitive(read.state, read.token)) == "int")
             {*:read.state, input: the_push(read.state.input,
-                the_text(st, string(parameter_value(read.state, primitive(read.state, read.token)))), capture)}
+                internal_text_tokens(st, string(parameter_value(read.state, primitive(read.state, read.token)))), capture)}
         else if (primitives.parameter_kind(primitive(read.state, read.token)) == "dimen")
             {*:read.state, input: the_push(read.state.input,
-                the_text(st, dimension.format(dimen_value(read.state, "param:" ++ primitive(read.state, read.token)))), capture)}
+                internal_text_tokens(st, dimension.format(dimen_value(read.state, "param:" ++ primitive(read.state, read.token)))), capture)}
         else if (contains(["glue", "mu"], primitives.parameter_kind(primitive(read.state, read.token)))) {
             let name = primitive(read.state, read.token);
             let mu = primitives.parameter_kind(name) == "mu";
-            {*:read.state, input: the_push(read.state.input, the_text(st, glue.format(glue_value(read.state, "param:" ++ name, mu), mu)), capture)}
+            {*:read.state, input: the_push(read.state.input, internal_text_tokens(st, glue.format(glue_value(read.state, "param:" ++ name, mu), mu)), capture)}
         }
         else if (contains(["parshape", "interlinepenalties", "clubpenalties", "widowpenalties", "displaywidowpenalties"], primitive(read.state, read.token))) {
             let value = paragraph_quantity(read.state, primitive(read.state, read.token), budget)^;
             if (value.state.issue != null) value.state
-            else {*:value.state, input: the_push(value.state.input, the_text(st, "0"), capture)}
+            else {*:value.state, input: the_push(value.state.input, internal_text_tokens(st, "0"), capture)}
         }
         else if (primitive(read.state, read.token) == "interactionmode" or page_dimension(primitive(read.state, read.token))) {
             let text = if (primitive(read.state, read.token) == "interactionmode") "1" else "0.0pt";
-            {*:read.state, page_state_quantity_seen: true, input: the_push(read.state.input, the_text(st, text), capture)}
+            {*:read.state, page_state_quantity_seen: true, input: the_push(read.state.input, internal_text_tokens(st, text), capture)}
         }
         else if (contains(["pdfrandomseed", "pdfelapsedtime"], primitive(read.state, read.token))) {
             let value = if (primitive(read.state, read.token) == "pdfrandomseed") read.state.random_seed % 2147483648 else 0;
-            {*:read.state, pdf_random_seen: true, input: the_push(read.state.input, the_text(st, string(value)), capture)}
+            {*:read.state, pdf_random_seen: true, input: the_push(read.state.input, internal_text_tokens(st, string(value)), capture)}
         }
         else if (primitive(read.state, read.token) == "inputlineno")
-            {*:read.state, input: the_push(read.state.input, the_text(st, string(input_line_number(read.state)^)), capture)}
+            {*:read.state, input: the_push(read.state.input, internal_text_tokens(st, string(input_line_number(read.state)^)), capture)}
         // character definitions and engine versions are native integer quantities.
         else if (m.kind == "chardef" or m.kind == "mathchardef" or primitives.engine_version(primitive(read.state, read.token)) != null) {
             let value = if (m.kind == "chardef" or m.kind == "mathchardef") m.value
                 else primitives.engine_version(primitive(read.state, read.token));
-            {*:read.state, input: the_push(read.state.input, the_text(st, string(value)), capture)}
+            {*:read.state, input: the_push(read.state.input, internal_text_tokens(st, string(value)), capture)}
         }
         else if (primitive(read.state, read.token) == "numexpr") {
             let value = scan_expression(read.state, budget)^;
             if (value.state.issue != null) value.state
-            else {*:value.state, input: the_push(value.state.input, the_text(st, string(value.value)), capture)}
+            else {*:value.state, input: the_push(value.state.input, internal_text_tokens(st, string(value.value)), capture)}
         }
         else if (contains(["dimexpr", "glueexpr", "muexpr"], primitive(read.state, read.token))) {
             let name = primitive(read.state, read.token);
@@ -1731,24 +1758,24 @@ fn expand_the(st: State, budget, count_expansion = true, capture = false) State^
             let value = scan_expression(read.state, budget, level)^;
             if (value.state.issue != null) value.state
             else {*:value.state, input: the_push(value.state.input,
-                the_text(st, if (level == "dimen") dimension.format(value.value) else glue.format(value.value, level == "mu")), capture)}
+                internal_text_tokens(st, if (level == "dimen") dimension.format(value.value) else glue.format(value.value, level == "mu")), capture)}
         }
         else if (contains(["gluestretch", "glueshrink", "gluestretchorder", "glueshrinkorder"], primitive(read.state, read.token))) {
             let name = primitive(read.state, read.token);
             let value = glue_quantity(read.state, name, budget)^;
             if (value.state.issue != null) value.state
             else {*:value.state, input: the_push(value.state.input,
-                the_text(st, if (name == "gluestretch" or name == "glueshrink") dimension.format(value.value) else string(value.value)), capture)}
+                internal_text_tokens(st, if (name == "gluestretch" or name == "glueshrink") dimension.format(value.value) else string(value.value)), capture)}
         }
         else if (contains(["currentgrouplevel", "currentiflevel"], primitive(read.state, read.token))) {
             let value = if (primitive(read.state, read.token) == "currentgrouplevel") len(read.state.groups)
                 else len(read.state.conditions);
-            {*:read.state, input: the_push(read.state.input, the_text(st, string(value)), capture)}
+            {*:read.state, input: the_push(read.state.input, internal_text_tokens(st, string(value)), capture)}
         }
         else if (contains(["catcode", "lccode", "uccode", "sfcode", "mathcode", "delcode"], primitive(read.state, read.token))) {
             let code = code_quantity(read.state, primitive(read.state, read.token), budget)^;
             if (code.state.issue != null) code.state
-            else {*:code.state, input: the_push(code.state.input, the_text(st, string(code.value)), capture)}
+            else {*:code.state, input: the_push(code.state.input, internal_text_tokens(st, string(code.value)), capture)}
         }
         else if (primitive(read.state, read.token) == "toks" or primitives.parameter_kind(primitive(read.state, read.token)) == "toks" or m.kind == "token-register") {
             let index = if (primitives.parameter_kind(primitive(read.state, read.token)) == "toks")
@@ -1828,7 +1855,7 @@ fn token_primitive(st: State, name, budget) State^ {
                         sources: [*opening.state.sources, {id: id, name: "\\scantokens", origin: "local", data: scanned}]}
                 }
             } else {
-                let tokens = if (name == "detokenize") text_tokens(token_text(opening.state, text.tokens))
+                let tokens = if (name == "detokenize") internal_text_tokens(opening.state, token_text(opening.state, text.tokens))
                     else if (opening.state.token_text_scan) [for (t in text.tokens)
                         {*:t, noexpand: is_control(t), direct_toks: true}]
                     // native replay stores the scanned list and clears its direct-source flags.
@@ -5071,9 +5098,8 @@ fn latex_raw_group(st: State, token, inline_kind = null) State^ {
             let span = {file: token.file, start: token.start, end: scanned.end,
                 first_seq: token.seq, last_seq: source.reader.seq};
             {*:st, input: input, raw_inline_seen: true,
-                *:if (inline_kind == null) {raw_inline_other_seen:true} else {},
                 output: [*st.output, {*:token, echo_span: span, echo_count: 1,
-                    *:if(inline_kind == null) {} else {raw_inline_kind:inline_kind}}]}
+                    *:if(inline_kind == null) {raw_group_kind:token.value} else {raw_inline_kind:inline_kind}}]}
         }
     }
 }
@@ -5566,6 +5592,8 @@ pub fn enable_script_expl3(st: State) State^ {
         {name: "if_bool:N", kind: "primitive", value: "ifodd"},
         {name: "if_int_compare:w", kind: "primitive", value: "ifnum"},
         {name: "if_int_odd:w", kind: "primitive", value: "ifodd"},
+        {name: "int_value:w", kind: "primitive", value: "number"},
+        {name: "__int_sep:", kind: "primitive", value: "right"},
         {name: "__int_eval:w", kind: "primitive", value: "numexpr"},
         {name: "__int_eval_end:", kind: "primitive", value: "relax"},
         {name: "reverse_if:N", kind: "primitive", value: "unless"},
@@ -5598,6 +5626,13 @@ pub fn enable_script_expl3(st: State) State^ {
     let variants = [for (name in expl3.expanded_argument_names()) {
         source:"\\" ++ name ++ "{\\exp_args:NNx\\" ++ slice(name,0,len(name) - 1)^ ++ "n}", protected_flag:true}];
     let macros = enable_expl_macro_sources(support, [*variants,
+        // bundled helpers evaluate their operands in the surrounding token stream.
+        {source: "\\int_abs:n#1{\\int_value:w\\exp_after:wN\\__int_abs:N\\int_value:w\\__int_eval:w#1\\__int_eval_end:\\exp_stop_f:}", protected_flag: false, source_mapping_guard: "int_math"},
+        {source: "\\__int_abs:N#1{\\if_meaning:w-#1\\else:\\exp_after:wN#1\\fi:}", protected_flag: false},
+        {source: "\\int_max:nn#1#2{\\int_value:w\\exp_after:wN\\__int_maxmin:wwN\\int_value:w\\__int_eval:w#1\\exp_after:wN\\__int_sep:\\int_value:w\\__int_eval:w#2\\__int_sep:>\\exp_stop_f:}", protected_flag: false, source_mapping_guard: "int_math"},
+        {source: "\\int_min:nn#1#2{\\int_value:w\\exp_after:wN\\__int_maxmin:wwN\\int_value:w\\__int_eval:w#1\\exp_after:wN\\__int_sep:\\int_value:w\\__int_eval:w#2\\__int_sep:<\\exp_stop_f:}", protected_flag: false, source_mapping_guard: "int_math"},
+        {source: "\\__int_maxmin:wwN#1\\__int_sep:#2\\__int_sep:#3{\\if_int_compare:w#1#3#2~#1\\else:#2\\fi:}", protected_flag: false},
+        {source: "\\int_div_round:nn#1#2{\\int_value:w\\__int_eval:w(#1)/(#2)\\__int_eval_end:}", protected_flag: false, source_mapping_guard: "int_math"},
         {source: "\\use:x#1{\\cs_set_nopar:Npx\\l__exp_internal_tl{#1}\\l__exp_internal_tl}", protected_flag: true},
         {source: "\\exp_args:NNx#1#2#3{\\use:x{\\exp_not:N#1\\exp_not:N#2{#3}}}", protected_flag: true},
         {source: "\\cs_set_eq:NN#1{\\tex_let:D#1=~}", protected_flag: true},

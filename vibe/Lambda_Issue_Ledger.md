@@ -17,6 +17,42 @@
 > Semantic and design rulings are cited by `S#` / `D#` per CLAUDE.md rule 17;
 > where no formal ruling covers a point, the vibe ledger ID is given.
 
+<a id="formal-semantics-edge-cases-20261124"></a>
+
+## Formal semantics edge cases reproduced on 2026-11-24
+
+**Open.** On the existing Lambda-opus host at checkout `433a458f3`
+(dirty runtime tree, executable SHA-256 `26e6c872e5cab1e50d482fb95e096c3928b21447804d5c4754a4dd399242b97d`),
+focused interpreter and eager-JIT probes reproduced the following cases.
+
+- **Predicate failure changes the rows by tier (S1.6, S3.1v2, S14.1.2v2).**
+  With `let e = error("guard")`, the top-level expression
+  `[for (i in [1, 2, 3] where (if (i == 2) e else true)) i]`
+  gives `[1, 3]` in the interpreter and `[1, 2, 3]` in the JIT, twice
+  each. Replacing `e` with literal false or true gives identical rows
+  across tiers. TE-22 leaves the resulting failure boundary open.
+- **Integer sum loses an in-band result (S4.1.2–S4.1.3, S7.3.1,
+  S13.4.1).** With `m = 9007199254740991`, both tiers return `inf` for
+  `sum([m, 1, -1])`. S4.1.3 gives the exact final sum `m`. S7.3.1's
+  unqualified equivalence to a sequential addition fold gives `inf`.
+- **An empty binary filter publishes a zero-byte binary (S2.2.2v2,
+  S2.5.8, S10.1.6v2).** For `let r = b'\x61' |: ~ != ~`, both tiers
+  return true for `r is binary` and zero for `len(r)`. Filtering one
+  symbol with the same predicate returns an error. A successful empty
+  text result needs a per-kind contract. The earlier [conversion and slice
+  fix](<Lambda_Issue_Ledger (fixed).md#empty-binary-results>) covered other producers.
+  The final release recheck returns `null` for the same binary filter on
+  both interpreter and JIT. See `temp/ruling-free-audit/binary-filter-check.ls`.
+
+Focused sources and tier outputs are under `temp/formal_semantics_audit_20261124/`.
+
+<a id="lr12-72"></a>
+
+## LR12-72 — DOM mutation seam signature blocks the split build
+
+Fixed in the working tree and archived. See the
+[resolution and verification](<Lambda_Issue_Ledger (fixed).md#lr12-72>).
+
 ## LR12-71 — The viewer image prepass enters an uninitialized JavaScript realm
 
 <a id="lr12-71"></a>
