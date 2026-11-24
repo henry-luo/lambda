@@ -34,6 +34,7 @@
 
 #include <cstring>
 #include <cstdlib>
+#include <limits.h>
 
 #define make_js_undef make_js_undefined
 JS_FORWARD_STATIC_ITEM(js_xhr_noop, (void), make_js_undef, ())
@@ -75,6 +76,7 @@ struct XhrState {
     char*   override_mime_type;
     char*   response_text;
     size_t  response_size;
+    bool    json_response_decoded;
     char**  resp_headers;       // raw header strings from the shared transport
     int     resp_header_count;
     Item    js_object;      // back-reference to the JS XHR object
@@ -140,6 +142,7 @@ static void xhr_clear_response(XhrState* xhr) {
     xhr->status_text = nullptr;
     xhr->response_text = nullptr;
     xhr->response_size = 0;
+    xhr->json_response_decoded = false;
     xhr_clear_response_headers(xhr);
 }
 
@@ -327,6 +330,18 @@ static Item xhr_property_getter(Item callee, Item receiver, Item* /*args*/,
         return xhr_state_exception("InvalidStateError", "responseText requires a text responseType");
     if (slot == XHR_RESPONSE && type && *type && strcmp(type, "text") && xhr->ready_state != 4)
         return ItemNull;
+    if (slot == XHR_RESPONSE && type && !strcmp(type, "json") && !xhr->json_response_decoded) {
+        response_type.set(xhr->response_size <= INT_MAX
+            ? js_arraybuffer_from_bytes(xhr->response_text, (int)xhr->response_size) : ItemError);
+        if (!item_is_error(response_type.get()))
+            response_type.set(dom_realm_decode_utf8_body(response_type.get()));
+        if (!item_is_error(response_type.get()))
+            response_type.set(dom_realm_json_parse(response_type.get()));
+        // JSON responses cache one parsed value; malformed bodies yield null rather than a script exception.
+        if (item_is_error(response_type.get())) response_type.set(ItemNull);
+        JS_RETURN_IF_ERROR(dom_realm_set_cstr(fields.get(), "response", response_type.get()));
+        xhr->json_response_decoded = true;
+    }
     return dom_realm_get_cstr(fields.get(), xhr_properties[slot].name);
 }
 
@@ -741,6 +756,7 @@ extern "C" Item js_xhr_new(void) {
     Rooted<Item> object(roots, js_new_object_with_class(JS_CLASS_XML_HTTP_REQUEST));
     Rooted<Item> noop(roots, ItemNull), upload(roots, ItemNull);
     Rooted<Item> fields(roots, js_new_object()), state(roots, js_array_new(0));
+    dom_realm_set_prototype(fields.get(), ItemNull);
     xhr->js_object = object.get();
 
     // private state stays traced and cannot be redirected by public ID shadows.
@@ -864,6 +880,8 @@ extern "C" Item js_xhr_open(Item method_arg, Item url_arg, Item async_arg) {
     xhr->response_size = 0;
 
     xhr->ready_state = 1; // OPENED
+    xhr_set_str(xhr->js_object, "responseText", "");
+    xhr_set_str(xhr->js_object, "response", "");
     xhr_fire_readystatechange(xhr);
 
     log_debug("xhr: open(%s, %s -> %s)", method, url, xhr->url ? xhr->url : "");

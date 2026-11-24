@@ -43,3 +43,10 @@ for(const[mode,dependent,transition=false]of[['attribute',false],['namespace',fa
   else assert.ok(layoutCount(actual.log)>layoutCount(baseline.log),'selectors and transitions retain cascade and layout');
  });
 }
+
+for(const width of ['4','4px','3pt','.25em','2%','calc(2px + 2px)'])test('SVG transition baseline: '+width,async()=>{
+ const html=`<!doctype html><style>body{margin:0;background:white}svg{display:block}#ink{stroke-width:${width};transition:stroke-width 1s linear}</style><svg width=200 height=200 viewBox="0 0 200 200"><g font-size=16><path id=ink d="M20 40H180" stroke=red fill=none /></g></svg><script>var target=document.getElementById('ink');target.getBoundingClientRect();target.style.strokeWidth='12px';</script>`;
+ const {image,log}=await render(width.replace(/[^a-z0-9]/gi,'_'),html);
+ assert.deepEqual(rgb(image,100,41),[255,0,0],log.slice(-1200));
+ assert.deepEqual(rgb(image,100,44),[255,255,255],'transition retains the computed 4px baseline');
+});

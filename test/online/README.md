@@ -115,6 +115,7 @@ node --test test/online/render_flex_percentage.test.cjs
 node --test test/online/render_nested_pseudo.test.cjs
 node --test test/online/render_intrinsic_width_value.test.cjs
 node --test test/online/render_positioned_order.test.cjs
+node --test test/online/render_shadow_positioned.test.cjs
 node --test test/online/render_video_percentage.test.cjs
 node --test test/online/render_video_first_frame.test.cjs
 node --test test/online/render_canvas_transform.test.cjs
@@ -2274,7 +2275,7 @@ occludes the document and has the expected gray backdrop: mean error 25.61% to 0
 The1000ms native capture loads in22.18s. This is a requalification of the
 already tested round92 renderer; no new renderer code or baseline repeat.
 
-Inventory: **123 high, zero critical,944 low**, across1067 historical pairs.
+Inventory: **123 high, zero critical,944 low**, across 1067 historical pairs.
 All1066 other comparison rows, browser references, annotations, URLs,
 thresholds and both audits remain unchanged. Current LOC HTTP403 and blank
 NVD diagnostics are not imported; their historical high pairs remain. Dock's
@@ -2929,7 +2930,7 @@ a local16:9 diagnostic restores geometry. No substitution is shipped.
 Swag's suspected backdrop defect disappears when its400ms fade is frozen
 before navigation: saved-source **3.71% mean /7.74% changed area**.
 
-**Current live Swag remains high** at the shared1000ms post-load window:
+**Current live Swag remains high** at the shared 1000ms post-load window:
 **26.88% mean /49.94% area**. Native lacks client-created consent, region and
 assistant UI; the startup source/API cause is unisolated. No clearance or
 paint fix is claimed. Historical images remain in the frame audit
@@ -3121,7 +3122,7 @@ frames. Both remain high: Jetty lacks navigation/media; Pelago's hero media is
 present but its large consent dialog remains absent. Its new manual review
 prevents a coarse-score false clearance. Current native pixels are identical
 with the prior renderer on both pages, so no live improvement is attributed
-to this repair. **111 high,zero critical,956 low** remain across1067 pairs.
+to this repair. **111 high,zero critical,956 low** remain across 1067 pairs.
 The1065 other rows/captures, all URLs and previous review history are preserved.
 [Repair evidence](comparison/repairs.html#round-136). Goal remains active.
 
@@ -3141,7 +3142,7 @@ It remains blank and high at **67.46% mean error /91.47% area**. Current native
 pixels are identical with the prior renderer. A small body-arrival control
 still differs from Chromium; the broader parser progression gap remains open.
 No whole-page improvement or clearance is claimed. **111 high,zero critical,
-956 low** remain across1067 pairs; the1066 other rows/captures, all URLs and
+956 low** remain across 1067 pairs; the1066 other rows/captures, all URLs and
 review history are preserved. [Repair evidence](comparison/repairs.html#round-137).
 Goal remains active.
 
@@ -3160,7 +3161,7 @@ Sidebar navigation and the browser announcement banner remain absent, so it
 stays high severity at **10.62% mean error /22.60% changed area**. The old
 canonical pair is archived and both current frames are recorded. The1066
 other rows/captures, all URLs, review history and reference-design audit are
-preserved. **111 high,zero critical,956 low** remain across1067 pairs.
+preserved. **111 high,zero critical,956 low** remain across 1067 pairs.
 [Repair evidence](comparison/repairs.html#round-138). Goal remains active.
 
 
@@ -3200,7 +3201,7 @@ at11.14% mean error /24.38% changed area; the prior manual major omission is
 resolved with its history preserved. Both final frames are refreshed and the
 old canonical pair is archived. The1066 other rows/captures, all URLs, other
 reviews and reference-design audit remain intact. **110 high,zero critical,
-957 low** remain across1067 pairs.
+957 low** remain across 1067 pairs.
 [Repair evidence](comparison/repairs.html#round-140). Goal remains active.
 
 
@@ -3702,3 +3703,155 @@ post-fix PNG is byte-identical. Both attempts finish in about 135 seconds,
 while their scripts reach the separate CPU watchdog. Baselines are not repeated;
 the 1000ms frame and admission profile remain (**D10.1.7**).
 [Evidence and images](comparison/repairs.html#round-169). Goal remains active.
+
+
+Round170 fixes **LI-111**: text-element fragments now share the existing
+tag-to-text-mode helper, preserving script innerHTML source bytes
+(**D9.1.1v4 / D9.1.3v2**). Both new regressions fail before repair;
+all **36 focused checks** pass. The existing raw-text script-mode limitation
+remains; broad baselines are not repeated for this bounded change.
+A separate current-release review clears **Infermedica, Wine Investment home
+and FAQ, and Setpoint**, reducing inventory **100 → 96 high**, zero critical,
+971 low. No page clearance is attributed to the independent fragment repair.
+Lokalise retains its missing consent panel; Fable retains a response-variant
+discrepancy with Chromium's unstyled prerender HTML. Six native captures refresh;
+all browser references, URLs, reviews and 1061 other rows remain intact.
+The 1000ms post-load frame is preserved (**D10.1.7**).
+[Evidence and images](comparison/repairs.html#round-170). Goal remains active.
+
+
+Round171 clears **Xolo and Vivid** on the same qualified release, reducing
+inventory **96 → 94 high**, zero critical, 973 low. Both restore their main
+content and consent panels. Azure retains missing top navigation; NVD's footer
+obscures its main content. Remote and Swag exceed the unchanged diagnostic
+deadline; their prior canonical captures are preserved. Swag's short release
+sample points to whole-document recascading, without an isolated mutation
+trigger. Four native captures refresh; all browser references, URLs, reviews
+and 1063 other rows are preserved (**D10.1.7**). No new engine change, build,
+test repetition or baseline run occurs.
+[Evidence and images](comparison/repairs.html#round-171). Goal remains active.
+
+
+Round172 fixes **RI-221**: root-positioned children are recalculated after
+script-driven document growth, using the existing post-flow positioning and
+containing-block helpers (**D9.1.1v4 / D9.1.3v2**). NVD's footer no longer
+obscures its main content; mean error falls **38.50% → 0.84%**. Inventory is
+**93 high, zero critical, 974 low**. All **59 focused checks** and layout
+integer lint pass. At this accumulated milestone, baselines run once:
+**630/630 dynamic**, **3851/3852 static**, with the exact previously recorded
+`dom_view_role_nested` failure retained. Only NVD's native capture refreshes;
+all browser references, URLs, reviews and 1066 other rows remain intact.
+The 1000ms post-load frame is unchanged (**D10.1.7**).
+[Evidence and images](comparison/repairs.html#round-172). Goal remains active.
+
+
+Round173 fixes **JS13-L65 / RI-223** (unrelated sibling and inline-style
+dependencies) and **RI-222** (SVG ratio transfer before available-width fallback).
+Swag now captures in **81.6 seconds**, following an earlier 150-second timeout;
+Maven Central's card text is readable. Both retain major omissions: Swag's AI
+side pane and regional notice, and Maven's consent/preferences panel.
+Inventory remains **93 high, zero critical, 974 low**. Swag gains a manual
+review; Maven's review is refreshed with history preserved. All **65 focused
+checks**, nine Chromium SVG controls and layout integer lint pass. Milestone
+baselines run once: **630/630 dynamic**, **3851/3852 static**, with the exact
+existing `dom_view_role_nested` failure retained. Only two native captures
+refresh; all browser references, URLs and 1065 other rows remain intact.
+No source limit, deadline or capture-clock change (**D10.1.7**).
+[Evidence and images](comparison/repairs.html#round-173). Goal remains active.
+
+
+Round174 fixes **JS13-L66** (standard navigation-origin user timing) and
+**JS13-L67** (branded readonly intersection-entry prototype fields).
+Jetty recovers its heading, navigation, text, button and announcement;
+mean error drops **18.10% → 9.69%**. Its large lazy hero remains absent, so
+a new manual review retains high severity. Metronome still has a blurred
+hero and missing product graphic. Inventory remains **93 high, zero critical,
+974 low**: 62 automated candidates and 31 manual-only omissions.
+All **34 focused checks**, nine Chromium controls and **630/630 dynamic
+baseline cases** pass. The unchanged native renderer retains the round197
+static milestone; no new static sweep. Only two native captures refresh;
+all browser references, URLs and 1065 other rows remain intact. Capture
+timing is unchanged (**D8.4.4 / D6.3.3 / D9.5.6v2 / D10.1.7**).
+[Evidence and images](comparison/repairs.html#round-174). Goal remains active.
+
+
+Round175 fixes **RI-224** (culling of positioned paint outside empty stacking
+contexts) and **RI-225** (owner overflow applied to layers positioned against
+an outside containing block). Maven Central's full consent/preferences panel
+now renders and its major review clears. Inventory becomes **92 high, zero
+critical, 975 low**: 62 automated candidates and 30 manual-only omissions.
+Current Chromium confirms the clearance; small card spacing and input alignment
+remain. All **68 focused native checks**, sixteen Chromium controls and layout
+integer lint pass. Milestone baselines run once each: **630/630 dynamic**,
+**3851/3852 static**, retaining the exact existing `dom_view_role_nested`
+failure. Only Maven's native frame refreshes; all browser references, URLs,
+review history and 1066 other rows remain intact. No site workaround or capture
+clock change (**D9.1.1v4 / D9.1.3v2 / D10.1.7**).
+[Evidence and images](comparison/repairs.html#round-175). Goal remains active.
+
+
+Round176 fixes **JS13-L68** (XHR JSON response decoding/cache) and **RI-226**
+(redundant SVG length-context resolution). Metronome's unchanged Lottie SDK
+now loads its animation data; the full page's product graphic renders in a
+**77.9-second** capture after two intermediate 150-second timeouts. Its blurred
+navigation overlay remains unresolved, so the page stays high severity.
+Mean error drops **21.08% → 18.91%** against the preserved browser reference.
+Inventory remains **92 high, zero critical, 975 low**. All **32 focused native
+controls**, two unchanged SDK reductions, sixteen Chromium parse/lifecycle
+controls and layout integer lint pass. Chromium's seven JSON object-identity
+deviations are recorded separately; native caching follows the XHR standard.
+Baselines are not repeated after the preceding milestone. Only one native
+capture refreshes; browser references, URL catalog, review annotations and
+1066 other rows remain intact. No site workaround, source-limit or capture-clock
+change (**D8.4.4 / D6.3.3 / D9.1.3v2 / D9.5.6v2 / D10.1.7**).
+[Evidence and images](comparison/repairs.html#round-176). Goal remains active.
+
+
+Round177 fixes **LI-112**: explicit epoch-zero and negative cookie expiry no
+longer becomes session storage. The unchanged Cookiebot SDK now completes its
+create/delete probe and requests its banner script. All **seven focused cookie
+unit tests** and **six HTTP DOM controls** pass; the six browser controls also
+pass. No baseline rerun for this isolated input repair. Typelane currently
+fails document loading, so no online consent clearance is claimed. Dayos's
+successful **11.4-second** capture still retains its loading cover. Inventory
+remains **92 high, zero critical, 975 low**. Only Dayos's native frame refreshes;
+all browser references, URLs, review annotations and 1066 other rows remain
+intact. Metronome's overlay matches existing **JS13-L55**; no arbitrary clock
+or framework change is made (**D9.1.1v4 / D9.1.3v2 / D10.1.7**).
+[Evidence and images](comparison/repairs.html#round-177). Goal remains active.
+
+
+Round178 extends visual qualification of the unchanged release. InfluxData's
+main documentation, navigation and cards now render; its main-content omission
+clears. Popcorn's native PNG is unchanged, and current Chromium shows its
+viewport-edge artwork difference is minor; the old major annotation is
+corrected without claiming a new rendering fix. Family restores its heading,
+navigation and artwork but still lacks its primary actions, so a new manual
+review keeps it high. Amperos reaches its own error boundary because Worker
+is missing; deleting Worker in Chromium reproduces it. That major feature
+gap is recorded as **JS13-L69**. Inventory becomes **90 high, zero critical,
+977 low**: 60 automatic and 30 manual-only. Four native captures refresh; browser
+references, URLs, review history and 1063 other rows remain intact. No engine
+code changes or repeated tests/baselines. Source caps and the 1000ms post-load
+frame are unchanged (**D8.4.4 / D9.5.6v2 / D10.1.7**).
+[Evidence and images](comparison/repairs.html#round-178). Goal remains active.
+
+
+Round179 fixes **RI-227**: positioned content inside a shadow root now finds
+the document's initial containing block and converts paint offsets across the
+host boundary. Seven focused shadow cases and 26 existing root/stacking
+controls pass, as do seven Chromium controls and layout integer lint.
+Teachable's consent notice gains its correct width and bottom placement;
+missing `:host` tokens still leave an unreadable transparent overlay, so it
+remains high under **JS13-L2**. Pnpm's navigation and Podia's complete main page
+recover on the preceding qualified release, clearing their major reviews.
+Lokalise, Agora and Modern Life retain their unresolved differences.
+
+The accumulated milestone runs each baseline once: **630/630 dynamic** and
+**3851/3852 static**, six reported static skips, zero errors, and the exact
+previously recorded `dom_view_role_nested` failure. Inventory becomes
+**88 high, zero critical, 979 low** (58 automatic and 30 manual-only). Six native
+frames refresh with their exact capture-release pins; browser references,
+URLs, history and 1061 other rows stay intact. Frame timing and source/deadline
+policies remain unchanged (**D9.1.1v4 / D9.1.3v2 / D10.1.7**).
+[Evidence and images](comparison/repairs.html#round-179). Goal remains active.

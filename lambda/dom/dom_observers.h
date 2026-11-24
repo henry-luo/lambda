@@ -15,6 +15,7 @@ typedef enum JsObserverKind {
 
 const char* dom_observer_interface_name(JsObserverKind kind);
 void dom_observer_install_interface(Item prototype, JsObserverKind kind);
+void dom_intersection_entry_install_interface(Item prototype);
 void dom_install_observer_globals(Item global);
 Item dom_mutation_observer_new(Item callback);
 Item dom_resize_observer_new(Item callback);

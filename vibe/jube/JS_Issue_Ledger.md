@@ -615,6 +615,146 @@ plural-rules.html, plural-rules-native-output.log and plural-browser-result.json
 
 ## 13. Web Platform: DOM, CSSOM, Events & Fetch (JS13)
 
+<a id="js13-l69"></a>
+
+### JS13-L69 — Missing dedicated Worker aborts Amperos client startup — **FEATURE GAP**
+
+**2026-11-24.** The normal-load admission repair JS13-L63 lets Amperos's
+Next application run. It replaces its server-rendered hero with its own
+“This page couldn't load” boundary and reports `ReferenceError: Worker`.
+The Window realm has no dedicated `Worker` constructor or execution path.
+This is separate from the existing ServiceWorkerContainer surface.
+
+A current Chromium control renders the full page. Deleting only its
+`window.Worker` binding before navigation produces the same application error
+boundary and a `Worker is not defined` stack in the site's admitted Next
+chunk. This establishes the startup dependency; a native color or header
+patch would not repair it. Dedicated-worker execution is a major platform
+feature and is deferred within the user's requested bug-fix scope
+(**D8.4.4 / D9.5.6v2**). Amperos stays high severity, and its manual review
+is updated from the older dark-header omission to this confirmed failure.
+
+Evidence: `temp/online-visual-round202/worker-control/`, the normal
+`browser/saas_landing_565/` control and `live/saas_landing_565/after/`.
+
+<a id="js13-l68"></a>
+
+### JS13-L68 — XHR JSON responses return text and stop animation initialization — **FIXED for JSON decoding**
+
+**2026-11-24.** Metronome's unchanged Lottie 5.12.2 bundle requests
+`responseType="json"` and consumes `xhr.response` directly. The native getter
+returned a string in every completed mode. The same animation initializes
+from embedded JSON but fails through the SDK's XHR path. Both SDK reductions
+now build SVG, dispatch `DOMLoaded` and advance frames. Two initial candidate
+captures exceed the normal 150-second budget; RI-226 removes redundant native
+SVG length-context work and the final capture completes in 77.9 seconds with
+the product animation visible. The blurred navigation overlay remains
+unisolated, so this repair does not claim a page-level clearance.
+
+The JSON getter reuses the existing Fetch Body UTF-8 decoder and standard JSON
+parser, caches the result in existing traced private XHR fields, and clears it
+when a request is reopened. Malformed/empty bodies and pre-DONE reads yield
+null. Text modes keep their existing behavior. Sharing the decoder preserves
+BOM handling and replacement of invalid UTF-8 without changing `JSON.parse`.
+Private fields have a null prototype to avoid guest accessors redirecting the
+cache. Ownership and interface behavior follow **D6.3.3 / D8.4.4 / D9.5.6v2**
+and [XMLHttpRequest §3.6.9](https://xhr.spec.whatwg.org/#the-response-attribute).
+Other binary/document response modes remain unqualified.
+
+All sixteen focused native controls and four Fetch Body decoder controls pass.
+Before repair, thirteen of the initial fifteen XHR controls fail; both text
+controls pass. Sixteen Chromium parse/type/lifecycle controls pass. Chromium
+152 reparses objects on consecutive response reads in a separate minimal
+control, producing seven object-identity deviations in this matrix; native
+cached identity follows the standard instead. Existing baselines were run at
+the preceding milestone and are not repeated for this focused change.
+Evidence: `temp/online-visual-round200/`,
+`test/online/render_xhr_json.test.cjs`.
+
+<a id="js13-l67"></a>
+
+### JS13-L67 — Intersection entry fields are absent from the interface prototype — **FIXED for native entry records**
+
+**2026-11-24.** Jetty's observer polyfill checks
+`intersectionRatio in IntersectionObserverEntry.prototype`. Native notifications
+previously stored their fields as writable own properties, leaving that check
+false. In a local reduction, the unchanged bundle polyfill replaces the native
+observer and receives no lazy-image notification. Native inspection confirms
+the real hero has the correct 1200×675 geometry but retains its transparent
+placeholder source. This is an interface defect under **D8.4.4 / D9.5.6v2**.
+
+Notifications now use a branded private array and the shared readonly payload
+accessor installer. All seven fields live on the intrinsic prototype; captured
+getters reject unrelated, inherited and proxy receivers. The constructor is
+illegal, and native records retain their interface after public rebinding.
+Precise ownership follows **D6.3.3**. Sampling records the actual performance
+clock rather than a constant zero. Both interface reductions fail before the
+repair, then pass natively and in Chromium. All thirty focused rendered checks
+pass, including the unchanged polyfill reduction and existing initial/zero-area
+observer controls; three focused runtime checks pass. A separate cold-start
+polyfill control also passes. The live Jetty hero still retains its placeholder,
+so the interface repair does not resolve that remaining image omission. Its
+next cause is unisolated. No observer thresholds, visibility or capture window are overridden
+(**D10.1.7**). Evidence: `temp/online-visual-round198/`,
+`test/online/render_intersection_entry.test.cjs`.
+
+<a id="js13-l66"></a>
+
+### JS13-L66 — User timing treats the navigation origin as a missing mark — **FIXED for navigation-origin conversion**
+
+**2026-11-24.** Next.js hydration calls
+`performance.measure(name, 'navigationStart', 'beforeRender')`. The existing
+timestamp converter searched user marks only, throwing `SyntaxError` from
+that valid call. A direct Jetty capture on the preceding qualified release is
+blank; the repaired release restores its heading, navigation, text, button and
+announcement. Its large lazy hero image remains unresolved at this checkpoint.
+Refrakt's timing exception also disappears, but its frame remains blank; a
+Chromium trace records seventeen automatic Web Animations calls, which the
+existing explicit-seek profile does not implement (JS13-L44).
+
+The shared conversion now recognizes the standard legacy navigation names.
+In a Window realm, `navigationStart` is zero; other legacy timestamps are not
+recorded and report `InvalidAccessError`. Non-Window conversion reports
+`TypeError`, and Window mark construction rejects those reserved names. No
+navigation milestones are fabricated. Ordinary marks and numeric options
+retain their behavior. This follows [User Timing §4](https://www.w3.org/TR/user-timing/#processing)
+and **D8.4.4 / D9.5.6v2** without changing a ruling.
+
+Five of seven render controls fail before repair. All seven pass after it and
+in Chromium; three focused runtime checks and three existing fragment controls
+also pass. No baseline rerun for this isolated change. Evidence:
+`temp/online-visual-round198/{timing-before.log,timing-after.log,core-focused.log}`;
+`test/online/render_user_timing.test.cjs`. Capture timing is unchanged
+(**D10.1.7**).
+
+<a id="js13-l65"></a>
+
+### JS13-L65 — Leading sibling relations bypass their enclosing anchor guards — **FIXED for child-list reconciliation**
+
+**2026-11-24.** A `:has()` argument beginning with `+` or `~` forced a
+whole-document cascade before checking whether its enclosing selector could
+match near the mutation. Swag's form rule
+`.form ul.tabs > li:has(~li.active) > a` consequently made unrelated body
+probes and transient elements expensive. The trace identified the authored
+rule and the unrelated mutations; no site-specific exception is used.
+
+Sibling arguments now reuse the existing static-prefix anchor matcher across
+children of the edited parent's enclosing scopes. This preserves relations
+that reach a sibling of an ancestor, while rejecting impossible outer anchors.
+Wrapped relations retain the same guard. Ownership remains Lambda's shared
+DOM host under **D8.4.4 / D9.5.6v2**; native style-write classification is
+recorded separately as [RI-223](<../Radiant_Issue_Ledger (fixed).md#ri-223>).
+
+The two new unrelated-sibling controls fail before repair; adjacent, general
+and wrapped witness updates still change the expected layout. The combined
+repair passes all **65 focused checks**, 630 dynamic baseline cases and
+3851/3852 static baseline cases, with the exact previously recorded
+`dom_view_role_nested` failure retained. One final release capture of Swag
+finishes in 81.6 seconds after the earlier 150-second timeout; this is capture
+evidence, not a repeatability-qualified performance benchmark. Its missing
+AI side pane retains high severity. Evidence: `temp/online-visual-round197/`
+and [comparison round 173](../../test/online/comparison/repairs.html#round-173).
+
 <a id="js13-l64"></a>
 
 ### JS13-L64 — CSSOM notification borrows replaced style storage — **FIXED for CSSOM commits**
@@ -687,6 +827,22 @@ production change or capture-clock adjustment is made; the prior focused and
 dynamic-baseline qualification applies to the identical release. Evidence:
 `temp/online-visual-round191/selected/` and
 [comparison round168](../../test/online/comparison/repairs.html#round-168).
+
+Round202 rechecks stale captures on the same qualified implementation after
+subsequent focused repairs. InfluxData's main documentation, navigation and
+cards now render; mean error is 5.73% against its retained reference and 0.99%
+against current Chromium. Popcorn's native pixels are unchanged: its device artwork was already at the
+viewport edge. Current Chromium review shows the remaining position/animation
+phase and heading-wrap differences are minor, correcting the earlier overly
+broad omission annotation. Both major reviews clear. Family recovers its
+heading, navigation and artwork, but its primary actions remain absent, so a
+new manual review keeps it high. Amperos instead reaches a confirmed missing
+Worker dependency (JS13-L69). This is selective visual qualification, not a
+claim that script admission completes every application. No additional source
+or clock change, tests or baselines are needed for the unchanged renderer
+(**D8.4.4 / D9.5.6v2 / D10.1.7**). See
+[comparison round178](../../test/online/comparison/repairs.html#round-178).
+
 
 Aircall's follow-up native trace confirms the application root has no actual
 DOM children, rather than only being omitted by the view serializer. Caught
@@ -2469,6 +2625,16 @@ computed style and PNG paint. Selector parent relations stop at the shadow
 fragment boundary. Initial scoped link styles also enter the root cascade.
 Live linked-sheet lifecycle, adopted sheets, shadow name registries, `:host`
 and `::slotted` remain open (**D9.1.1v4 / D9.1.3v2 / D5.5.1**).
+
+The 2026-11-24 Teachable reduction now paints its fixed consent notice at the
+correct document-root width and position after native RI-227. Its remaining
+`:host` custom-property declarations still do not contribute the authored
+background, font size or button tokens. The panel consequently has transparent
+fill and unstyled text overlapping the product interface. The original shadow
+markup/CSS replay confirms this separate styling limitation; it does not
+justify overriding the page styles. Evidence: `temp/online-visual-round203/`
+(`cookie-authored-shadow.html`, `cookie-tree-{before,after}.json`) under
+**D9.1.1v4 / D9.1.3v2**. This remaining scope feature is deferred.
 
 Declarative templates attach in navigation and explicit unsafe HTML parsing
 through the shared DOM root provider (Input LI-081). Root flags, closed

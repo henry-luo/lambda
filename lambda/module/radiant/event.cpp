@@ -6665,8 +6665,8 @@ static bool dom_js_selector_prefix_can_match_anchor(CssSelector* selector, size_
 }
 
 static bool dom_js_child_list_has_anchor(CssSelector* selector, size_t index,
-        DomJsChildListDependency* dependency, bool self) {
-    DomNode* parent = dependency->parent;
+        DomJsChildListDependency* dependency, bool self, DomNode* parent_override = nullptr) {
+    DomNode* parent = parent_override ? parent_override : dependency->parent;
     if (!parent || !parent->is_element()) return true;
     if (self) return dom_js_selector_prefix_can_match_anchor(selector, index,
         parent->as_element(), &dependency->matcher);
@@ -6743,9 +6743,18 @@ static bool dom_js_selector_has_child_list_dependency(CssSelector* selector, voi
                 if (!can_change) continue;
             }
             // only leading siblings escape the anchor's descendants; internal siblings still have an enclosing anchor.
+            bool leading_sibling = false;
             for (size_t f = 0; f < simple->function_selector_count; f++) {
                 if (dom_js_selector_has_combinator_dependency(
-                        simple->function_selectors[f], CSS_COMBINATOR_NEXT_SIBLING, true)) return true;
+                        simple->function_selectors[f], CSS_COMBINATOR_NEXT_SIBLING, true)) leading_sibling = true;
+            }
+            if (leading_sibling) {
+                // sibling witnesses can escape the edited subtree, but still need an enclosing anchor.
+                for (DomNode* parent = dependency->parent; parent; parent = parent->parent) {
+                    if (parent->is_element() && dom_js_child_list_has_anchor(
+                            selector, c, dependency, false, parent)) return true;
+                }
+                continue;
             }
             for (DomNode* node = dependency->parent; node; node = node->parent) {
                 if (node->is_element() && dom_js_selector_prefix_can_match_anchor(

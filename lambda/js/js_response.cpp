@@ -241,6 +241,14 @@ static Item response_getter(Item callee, Item receiver, Item*, int, uint64_t*) {
     return js_elements_get_int(state.get(), slot);
 }
 
+Item js_body_decode_utf8(Item bytes) {
+    RootFrame roots(2);
+    Rooted<Item> input(roots, bytes), decoder(roots,
+        js_text_decoder_new(make_js_undefined(), make_js_undefined()));
+    JS_RETURN_IF_ERROR(decoder.get());
+    return js_text_decoder_decode(decoder.get(), input.get());
+}
+
 static Item response_operation(ResponseMethod operation, Item receiver) {
     RootFrame roots(7);
     Rooted<Item> self(roots, receiver), state(roots, response_state(receiver));
@@ -288,9 +296,7 @@ static Item response_operation(ResponseMethod operation, Item receiver) {
         JS_RETURN_IF_ERROR(js_set_key_cstr(auxiliary.get(), "type", type.get()));
         value.set(js_blob_new(value.get(), auxiliary.get()));
     } else {
-        auxiliary.set(js_text_decoder_new(make_js_undefined(), make_js_undefined()));
-        JS_RETURN_IF_ERROR(auxiliary.get());
-        value.set(js_text_decoder_decode(auxiliary.get(), bytes.get()));
+        value.set(js_body_decode_utf8(bytes.get()));
         if (!item_is_error(value.get()) && operation == RESPONSE_JSON)
             value.set(js_json_parse(value.get()));
     }

@@ -15,6 +15,14 @@ Resolved records are in the [fixed issue ledger](<Lib_Input_Issue_Ledger (fixed)
 
 ## Open issues
 
+<a id="li-112"></a>
+
+- [LI-112 — Explicit epoch-zero cookie expiry is stored as a session cookie](<Lib_Input_Issue_Ledger (fixed).md#li-112>).
+
+<a id="li-111"></a>
+
+- [LI-111 — Text-element fragments tokenize their contents as ordinary HTML](<Lib_Input_Issue_Ledger (fixed).md#li-111>).
+
 <a id="li-110"></a>
 
 - [LI-110 — DOM attribute values lose bytes after embedded NUL](<Lib_Input_Issue_Ledger (fixed).md#li-110>).

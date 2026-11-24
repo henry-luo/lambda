@@ -6,6 +6,67 @@ remain in the [active issue ledger](Lib_Input_Issue_Ledger.md).
 
 ## Fixed issues
 
+<a id="li-112"></a>
+
+### LI-112 — Explicit epoch-zero cookie expiry is stored as a session cookie
+
+**Fixed 2026-11-24.** Cookiebot probes cookie support by writing a temporary
+`-3` cookie and deleting it with `Expires=Thu, 01 Jan 1970 00:00:00 GMT`.
+The jar used zero both for that parsed timestamp and for an absent expiry,
+then required a positive timestamp before deleting an expired entry. The
+probe cookie survived, and the unchanged SDK treated it as an existing
+response instead of requesting its banner script. Negative past timestamps
+also survived the same check.
+
+The private header parser now reports expiry-attribute presence separately
+from its timestamp. The store rejects expired cookies before any session
+entry is retained. Valid Max-Age retains precedence, and the last valid
+Expires value is selected when Max-Age is absent. Public cookie storage and
+profile formats are unchanged. This stays input-owned under
+**D9.1.1v4 / D9.1.3v2** and implements the existing
+[RFC 6265 §5.2–5.3 contract](https://httpwg.org/specs/rfc6265.html#section-5.2).
+
+All three new C++ regressions fail before repair. Seven focused cookie tests
+pass afterward, including four existing hostname, file, HTTP-only and redirect
+controls. Six real-HTTP DOM fixtures pass natively and in Chromium. The
+unchanged Cookiebot SDK now has `hasResponse=false` and requests its `cc.js`
+banner script; its loopback domain is correctly refused by the external
+service. This establishes initialization progress, not a full-page clearance.
+Typelane currently fails document loading in both renderers. Dayos still
+retains its independent loading cover. No site source, profile cookie,
+capture clock or deadline is overridden (**D10.1.7**).
+
+Evidence: `temp/online-visual-round201/{cookie-unit-before.log,cookie-unit-after.log,
+cookie-dom-after.log,browser-cookie-expiry.log,cookiebot-http-before.json,
+cookiebot-http-after.json}`; `test/online/render_cookie_expiry.test.cjs`.
+
+<a id="li-111"></a>
+
+### LI-111 — Text-element fragments tokenize their contents as ordinary HTML
+
+**Fixed 2026-11-24.** Fragment parsing selected a text mode only for enabled
+`noscript`. Setting a script's `innerHTML` therefore stripped literal end tags,
+created elements from embedded markup and decoded character references inside
+JavaScript strings. A reduced script assigning `'</script>'` instead assigned
+an empty string. The browser retained the exact source bytes.
+
+Fragment parsing now shares the existing standalone lexer's tag-to-text-mode
+helper. RCDATA contexts decode references; raw-text and plaintext contexts keep
+them literal. No context start tag has been emitted, so a context end tag stays
+text. The existing document parser's raw-text treatment of scripts is retained;
+the separately declared, unimplemented escaped script-data states are not claimed
+as supported. Input remains runtime-free (**D9.1.1v4 / D9.1.3v2**).
+
+The prior qualified release fails both new script `innerHTML` regressions and
+passes the `textContent` control. All **36 focused checks pass** after repair:
+11 native HTML tests covering ten text contexts, one lexer/tree agreement test,
+and 24 rendered script/Range controls. No baseline repetition or live-page
+clearance is attributed to this bounded repair. Lokalise's earlier inline parse
+exception is absent in the new capture, but its missing consent panel remains
+high severity. Evidence: `temp/online-visual-round194/fragment-before.log`,
+`html-focused-final.log`, `sourcepos-focused.log`, `dom-focused.log`,
+`script-preparation-focused.log` and `selected-network/`.
+
 <a id="li-110"></a>
 
 ### LI-110 — DOM attribute values lose bytes after embedded NUL
