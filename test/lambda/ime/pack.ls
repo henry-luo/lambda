@@ -11,6 +11,7 @@ pn main() {
     let item = p.posting(table,hit,first,false)^
     let bad_manifest = {*:engine.manifest,format_version:2}
     let source = lines.from_bytes(binary("a\nb\n"))^
+    let blank = lines.from_bytes(binary("\n"))^
     // S7.6.1: procedure-call handlers are statements and discard normal arm values.
     var unknown_profile = 0
     var unknown_option = 0
@@ -20,7 +21,7 @@ pn main() {
         table.offsets is u32[],
         source.offsets == [0u32,2u32],
         lines.line_bytes(source,0)^ == binary("a"),
-        lines.line_bytes(source,1)^ == binary("b"),
+        lines.line_bytes(source,1)^ == binary("b") and (lines.line_bytes(blank,0)^ is null),
         p.line_key(table,hit)^ == "2:bei'jing",
         p.equal(table,hit,"2:bei'jing")^,
         not p.equal(table,hit,"2:bei'j")^,

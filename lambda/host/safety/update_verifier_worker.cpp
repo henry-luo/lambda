@@ -186,12 +186,17 @@ static int stage_execute(Runtime* runtime, UpdateWire* wire) {
         }
         if (strcmp(kind, "entry") || !verifier_text(action.get("path").item(), message.path, sizeof(message.path))) return 3;
         Item bytes = action.get("bytes").item(), directory = action.get("directory").item(), executable = action.get("executable").item();
-        if (get_type_id(bytes) != LMD_TYPE_BINARY || bytes.get_len() > UPDATE_WIRE_STAGE_MEMBER_LIMIT ||
+        TypeId byte_type = get_type_id(bytes);
+        if (!action.has("bytes") || (byte_type != LMD_TYPE_BINARY && byte_type != LMD_TYPE_NULL) ||
             get_type_id(directory) != LMD_TYPE_BOOL || get_type_id(executable) != LMD_TYPE_BOOL) return 3;
         message.kind = UPDATE_WIRE_STAGE_ENTRY; message.artifact = directory.bool_val; message.status = executable.bool_val;
         // Send borrows the rooted session's bytes synchronously; never free them
         // through the wire message owner or advance the VM during transfer.
-        message.bytes = (uint8_t*)binary_data(bytes.get_safe_binary()); message.size = (uint32_t)bytes.get_len();
+        if (byte_type == LMD_TYPE_BINARY) {
+            if (bytes.get_len() > UPDATE_WIRE_STAGE_MEMBER_LIMIT) return 3;
+            message.bytes = (uint8_t*)binary_data(bytes.get_safe_binary());
+            message.size = (uint32_t)bytes.get_len();
+        }
         if (!security_update_wire_send(wire, &message)) return 3;
         UpdateWireMessage response = {};
         if (!security_update_wire_receive(wire, update_wire_kind_mask(UPDATE_WIRE_STAGE_ACK), &response)) return 3;

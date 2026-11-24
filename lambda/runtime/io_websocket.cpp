@@ -758,8 +758,7 @@ static Item ws_event(unsigned opcode, const char* bytes, size_t length, int code
     Rooted<Item> type(roots, io_fs_make_string(kind, strlen(kind)));
     Rooted<Item> data(roots, ItemNull);
     if (opcode == 2) {
-        Binary* binary = heap_binary_from_bytes(bytes, (int64_t)length);
-        data.set(binary ? (Item){.item = x2it(binary)} : ItemError);
+        data.set(heap_binary_value_from_bytes(bytes, length));
     } else data.set(io_fs_make_string(bytes, length));
     Rooted<Map*> result(roots, map_alloc_for_type(runtime_result_shape(names, types, 4), 0));
     if (!result.get()) return ItemError;

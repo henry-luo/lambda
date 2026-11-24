@@ -11663,8 +11663,7 @@ static Item clone_mutable_item(Item value, MutableCloneContext* clone_ctx) {
     }
     case LMD_TYPE_BINARY: {
         Binary* src = value.get_safe_binary();
-        Binary* copy = heap_binary_from_bytes((const char*)binary_data(src), binary_length(src));
-        return copy ? (Item){.item = x2it(copy)} : ItemError;
+        return heap_binary_value_from_bytes((const char*)binary_data(src), binary_length(src));
     }
     case LMD_TYPE_DTIME: return push_k(value.get_datetime());
     case LMD_TYPE_DECIMAL: {

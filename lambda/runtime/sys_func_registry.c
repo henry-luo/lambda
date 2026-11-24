@@ -724,7 +724,7 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_SIGN, "sign", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_sign", FPTR(fn_sign), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
-     /* result */ SYS_RESULT_ARGUMENT_NUMERIC},
+     /* result */ SYS_RESULT_REAL_TO_INT},
 
     {SYSFUNC_CLIP, "clip", 3, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_clip", FPTR(fn_clip), NULL, NULL, false, 0},
@@ -1191,9 +1191,7 @@ SysFuncInfo sys_func_defs[] = {
 
     // power/root
     {SYSFUNC_POW_MATH, "math_pow", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_math_pow", FPTR(fn_math_pow), "fn_pow_u", NPTR(fn_pow_u), true, 2,
-     /* is_async */ false, /* success */ NULL, /* may_error */ false,
-     /* result */ SYS_RESULT_REAL_TO_FLOAT},
+     C_RET_ITEM, NULL, "fn_math_pow", FPTR(fn_math_pow), NULL, NULL, false, 0},
 
     {SYSFUNC_CBRT, "math_cbrt", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_math_cbrt", FPTR(fn_math_cbrt), "cbrt", NPTR(cbrt), true, 1,

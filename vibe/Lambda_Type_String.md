@@ -149,7 +149,7 @@ These are implementation facts that the design relies on; they are informative, 
 | `split_lines` | not needed: `split` with a pattern | — |
 | UTF-8 position cache and other P5 string tuning | not started | [String_Func_Tuning](Lambda_String_Func_Tuning.md), impl record |
 | `<` accepts symbols and uses a NUL-unsafe compare | conformance gap | S6.1.1 footnote |
-| Formatter size caps drop large text from `format()` | open, needs a decision | [LR09-31](Lambda_Issue_Ledger.md#lr09-31) |
+| Formatter size caps dropped large text from `format()` | fixed 2026-11-24 (D5.2.1) | [LR09-31](<Lambda_Issue_Ledger (fixed).md#lr09-31>), [LI-109](<Lib_Input_Issue_Ledger (fixed).md#li-109>) |
 | Symbol allocator comment and user docs describe NameKey identity | fixed 2026-10-28 | [LR11-7](<Lambda_Issue_Ledger (fixed).md#lr11-7>) |
 | utf8proc buffers cross the allocator boundary | open | [LR05-7](Lambda_Issue_Ledger.md#lr05-7) |
 

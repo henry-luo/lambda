@@ -21,8 +21,8 @@ fn complete_sequence(bytes, at, count) bool^ =>
     at + count <= len(bytes) and
     all([for (i in ((1 to count-1) ^ { [] })) continuation(bytes[at+i])])
 
-// Check without constructing a second copy of a potentially large document.
-pub fn is_valid(bytes: binary) bool^ {
+// S2.2.2v2: null represents zero input bytes.
+pub fn is_valid(bytes: binary?) bool^ {
     var at = 0
     while ((at < len(bytes))^) {
         let count = scalar_width(bytes[at])^
@@ -52,9 +52,10 @@ fn decode_piece(bytes,at) string^ {
     }
 }
 
-pub fn decode(bytes: binary) string^ {
+pub fn decode(bytes: binary?) string^ {
     // A token's ASCII lane joins characters once instead of allocating per-byte recursive state.
-    if (all([for (b in bytes) b < 128])) join([for (b in bytes) chr(b)],"")
+    if (bytes == null) ""
+    else if (all([for (b in bytes) b < 128])) join([for (b in bytes) chr(b)],"")
     // one join keeps long multilingual responses within a background task's stack (S13.3.1v2).
     else join([for (at in 0 to len(bytes)-1) decode_piece(bytes,at)^],"")
 }

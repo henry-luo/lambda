@@ -12,8 +12,8 @@ pn main() {
     let embedded = "a" ++ "\u0000" ++ "b"
     let nul_result = sqlite.query(db, "SELECT ?1", [embedded])^
     print(nul_result[0][0] == embedded and len(nul_result[0][0]) == 3); print("\n")
-    let empty_binary = sqlite.query(db, "SELECT ?1", [binary("")])^
-    print(empty_binary[0][0] == binary("")); print("\n")
+    let empty_binary = sqlite.query(db, "SELECT zeroblob(0), typeof(zeroblob(0)), ''")^
+    print(empty_binary[0] == [null, "blob", ""]); print("\n")
     let empty = sqlite.query(db, "SELECT id FROM entries WHERE id = ?1", [9])^
     print(len(empty) == 0); print("\n")
     let duplicate_names = sqlite.query(db, "SELECT 1 AS n, 2 AS n")^

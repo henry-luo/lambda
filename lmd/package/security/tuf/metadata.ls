@@ -13,10 +13,9 @@ pub fn hex_valid(text) {
     let chars = split(lower(text), "") ^ { return false };
     len(text) % 2 == 0 and (all([for (c in chars) contains("0123456789abcdef", c)]) ^ { false })
 }
-pub fn unhex(text) binary^ {
+pub fn unhex(text) binary?^ {
     if (not hex_valid(text)) raise invalid("invalid hexadecimal bytes")
-    // S2.2.2v2: binary([]) is null; the wire decoder retains a zero-byte carrier.
-    else if (len(text) == 0) binary("")
+    else if (len(text) == 0) null
     else binary([for (i in 0 to int(len(text) / 2) - 1)
         index_of("0123456789abcdef", lower(slice(text, i * 2, i * 2 + 1))) * 16 +
         index_of("0123456789abcdef", lower(slice(text, i * 2 + 1, i * 2 + 2)))])
@@ -102,7 +101,7 @@ pub fn validate_keys(keys) bool^ {
 fn verifies(metadata, sig, key_node) bool^ {
     let key = public_key(key_node)^
     let encoded = field_text(sig, "sig")^;
-    if (not supported(key) or not hex_valid(encoded)) false
+    if (not supported(key) or len(encoded) == 0 or not hex_valid(encoded)) false
     else {
         verify_signature(binary(key.public), metadata.canonical, unhex(encoded)^, key.scheme)^
     }

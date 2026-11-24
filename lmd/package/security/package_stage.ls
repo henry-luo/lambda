@@ -35,10 +35,9 @@ fn action(session) map^ {
     }
     let node = session.nodes[session.cursor]
     let directory = node.kind == 'dir'
-    let decoded = if (directory) null else parse(node, 'binary')^
-    // S2.2.2v2: empty captured members parse as null; IPC needs an empty carrier.
-    let bytes = if (decoded == null) binary("") else decoded;
-    if (not (bytes is binary) or len(bytes) != (if (directory) 0 else node.size))
+    let bytes = if (directory) null else parse(node, 'binary')^
+    // S2.2.2v2: null carries just the zero-byte case across the value boundary.
+    if ((bytes != null and not (bytes is binary)) or len(bytes) != (if (directory) 0 else node.size))
         raise meta.invalid("package member size")
     return {*: session, action: {kind: 'entry', path: node.entry_path, directory: directory,
         executable: not directory and band(mode(node)^, 73) != 0, bytes: bytes}}

@@ -15,6 +15,10 @@ Resolved records are in the [fixed issue ledger](<Lib_Input_Issue_Ledger (fixed)
 
 ## Open issues
 
+<a id="li-109"></a>
+
+- [LI-109 — Native JSX and LaTeX writers silently omitted large strings](<Lib_Input_Issue_Ledger (fixed).md#li-109>).
+
 <a id="li-107"></a>
 
 - [LI-107 — Strict XML text validation rescanned the document suffix](<Lib_Input_Issue_Ledger (fixed).md#li-107>).

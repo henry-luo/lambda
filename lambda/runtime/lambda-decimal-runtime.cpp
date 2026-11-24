@@ -444,11 +444,18 @@ static Item decimal_unary_rounding(Item a, DecimalMpdUnaryOp operation) {
 
     Decimal* dec_ptr = a.get_decimal();
     if (!decimal_has_payload(dec_ptr)) return ItemError;
+    const mpd_t* value = decimal_mpd(dec_ptr);
+    // integral coefficients need no rounding, even when their exponent is huge.
+    if (mpd_isspecial(value) || value->exp >= 0) return a;
 
     mpd_t* result = mpd_new(dec_ctx);
     if (!result) return ItemError;
 
-    operation(result, decimal_mpd(dec_ptr), dec_ctx);
+    operation(result, value, dec_ctx);
+    if (mpd_isnan(result)) {
+        mpd_del(result);
+        return ItemError;
+    }
     return decimal_push_result(result, is_unlimited);
 }
 
@@ -461,29 +468,7 @@ Item decimal_ceil(Item a) {
 }
 
 Item decimal_round(Item a) {
-    if (!decimal_is_any(a)) return ItemError;
-    bool is_unlimited = decimal_is_unlimited(a);
-    mpd_context_t* dec_ctx = is_unlimited ? decimal_unlimited_context() : decimal_fixed_context();
-
-    Decimal* dec_ptr = a.get_decimal();
-    if (!decimal_has_payload(dec_ptr)) return ItemError;
-
-    // round to nearest integer using quantize with exponent 0
-    mpd_t* one = mpd_new(dec_ctx);
-    if (!one) return ItemError;
-    mpd_set_string(one, "1", dec_ctx);
-
-    mpd_t* result = mpd_new(dec_ctx);
-    if (!result) { mpd_del(one); return ItemError; }
-
-    mpd_quantize(result, decimal_mpd(dec_ptr), one, dec_ctx);
-    mpd_del(one);
-
-    if (mpd_isnan(result)) {
-        mpd_del(result);
-        return ItemError;
-    }
-    return decimal_push_result(result, is_unlimited);
+    return decimal_unary_rounding(a, mpd_round_to_int);
 }
 
 Item decimal_trunc(Item a) {

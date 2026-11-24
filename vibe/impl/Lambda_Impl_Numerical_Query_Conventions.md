@@ -1,6 +1,6 @@
 # Numerical and Query Conventions
 
-## Current checkpoint (2026-11-17)
+## Query migration completion (2026-11-17)
 
 - Scope: migrate all six query functions, nullable return relations and
   error effects under S7.10.7. Numerical changes are ledger work only.
@@ -67,10 +67,17 @@
 - Documentation checks: git diff --check and the generated formal index
   check pass. Query migration is complete; the two unrelated Lambda gate
   failures above remain visible rather than being treated as passing.
-- Numerical changes remain OPEN in the central issue ledger. The staged
-  reader refactor is separate work and is not installed by this migration.
+- The numerical follow-up was completed on 2026-11-24. See the
+  [fixed record](<../Lambda_Issue_Ledger (fixed).md#numerical-domain-outcomes>).
 
 ## Numerical findings
+
+The table records the pre-fix reproductions. The 2026-11-24 follow-up
+implemented S4.2.5 and S7.10.5v3 for these paths and S4.1.2 for the
+integer power overflow case. All focused checks passed on both tiers
+with ordinary and forced garbage collection. The final Lambda baseline
+passes 6,128/6,128. The pinned Test262 repeat reports zero regressions,
+with 40,258 cases fully passing and three passing on isolated retry.
 
 | Operation | Reproduced current result | Required change |
 |---|---|---|

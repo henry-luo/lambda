@@ -1218,7 +1218,7 @@ static ReplEntryStatus repl_run_entry(InterpReplSession* session,
     } else if (!session->declarations_only) {   // S16.7.4: no item, no echo
         StrBuf* output = strbuf_new_cap(256);
         print_root_item(output, result);
-        if (output->length > 0) printf("%s", output->str);
+        fwrite(output->str, 1, output->length, stdout);
         strbuf_free(output);
     }
     if (timed) printf("time: %.3f ms\n", elapsed);
@@ -1458,19 +1458,13 @@ int run_script_file(Runtime *runtime, const char *script_path, bool run_main = f
     StrBuf *output = strbuf_new_cap(256);
     print_root_item(output, output_input->root);
     log_debug("Script '%s' executed ====================", script_path);
-    if (run_main) {
-        // pn main() returns a real value; suppress only null so print-only scripts do not emit "null".
-        log_debug("%s", output->str);
-        if (output_input->root.type_id() == LMD_TYPE_NULL) {
-            printf("\n");  // help end any output, otherwise, may see '%' at the end of the line
-        } else {
-            printf("%s", output->str);
-        }
+    // suppress a null main() result and preserve embedded NULs in every other result.
+    if (run_main && output_input->root.type_id() == LMD_TYPE_NULL) {
+        fputc('\n', stdout);
     } else {
-        // printf("##### Script '%s' executed: #####\n", script_path);
-        printf("%s", output->str);
-        log_debug("%s", output->str);
+        fwrite(output->str, 1, output->length, stdout);
     }
+    log_debug("%s", output->str);
     strbuf_free(output);
 
     // The result itself is rooted in the Runtime heap, so the wrapper Input's

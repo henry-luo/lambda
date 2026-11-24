@@ -269,10 +269,11 @@ extern "C" Item pn_io_rtc_receive(Item handle, Item wait) {
         pthread_mutex_unlock(&s->mutex);
         if (failed) { mem_free(m); return failure("inbound channel budget exceeded"); }
         if (m) {
-            Binary* received=heap_binary_from_bytes(m->bytes,m->size); mem_free(m);
-            if (!received) return ItemError;
-            bytes.set((Item){.item=x2it(received)});
-            static const char* names[] = {"type","data"}; static const TypeId types[] = {LMD_TYPE_STRING,LMD_TYPE_BINARY};
+            bytes.set(heap_binary_value_from_bytes(m->bytes, m->size));
+            mem_free(m);
+            if (item_is_error(bytes.get())) return ItemError;
+            static const char* names[] = {"type","data"};
+            static const TypeId types[] = {LMD_TYPE_STRING,LMD_TYPE_ANY};
             result.set(map_alloc_for_type(runtime_result_shape(names,types,2),0));
             if (!result.get()) return ItemError;
             Item values[] = {io_fs_make_string("binary",6),bytes.get()}; map_fill_items(result.get(),values,2);

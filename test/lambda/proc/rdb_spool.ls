@@ -22,8 +22,8 @@ pn main() {
         rdb.spool_begin(session,directory)^
         let first=rdb.fetch(session,2)^
         let second=rdb.fetch(session,2)^
-        print(first[1]==[[1,"alpha",b'\x00FF'],[2,"",binary("")]] and second[1]==[[3,null,null]]); print("\n")
-        print(rdb.spool_read(session,1,2)^==[[2,"",binary("")],[3,null,null]]); print("\n")
+        print(first[1]==[[1,"alpha",b'\x00FF'],[2,"",null]] and second[1]==[[3,null,null]]); print("\n")
+        print(rdb.spool_read(session,1,2)^==[[2,"",null],[3,null,null]]); print("\n")
         let child=start(read_elsewhere,[session])^
         print(wait(child)^); print("\n")
         rdb.finish(session)^

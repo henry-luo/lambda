@@ -1056,6 +1056,27 @@ Item fn_idiv(Item item_a, Item item_b) {
         -1, vec_idiv, "idiv");
 }
 
+static Item int_pow_nonnegative(int64_t base, uint64_t exponent) {
+    bool negative = base < 0 && (exponent & 1);
+    uint64_t factor = base < 0 ? (uint64_t)-base : (uint64_t)base;
+    uint64_t magnitude = 1;
+    // check each product against the int53 band before multiplying.
+    while (exponent) {
+        if (exponent & 1) {
+            if (factor && magnitude > INT53_MAX / factor)
+                return (Item){.item = lambda_int_box_lane(negative ? INT_LANE_NEG_INF : INT_LANE_INF)};
+            magnitude *= factor;
+        }
+        exponent >>= 1;
+        if (!exponent) break;
+        if (factor && factor > INT53_MAX / factor) {
+            return (Item){.item = lambda_int_box_lane(negative ? INT_LANE_NEG_INF : INT_LANE_INF)};
+        }
+        factor *= factor;
+    }
+    return (Item){.item = i2it(negative ? -(int64_t)magnitude : (int64_t)magnitude)};
+}
+
 Item fn_pow(Item item_a, Item item_b) {
     GUARD_ERROR2(item_a, item_b);
     GUARD_NULL2(item_a, item_b);
@@ -1115,8 +1136,19 @@ Item fn_pow(Item item_a, Item item_b) {
         return decimal_pow(rooted_a.get(), rooted_b.get());
     }
 
-    return push_d(pow(runtime_numeric_as_double(item_a, kind_a),
-                      runtime_numeric_as_double(item_b, kind_b)));
+    double base = runtime_numeric_as_double(item_a, kind_a);
+    double exponent = runtime_numeric_as_double(item_b, kind_b);
+    if (kind_a == LAMBDA_NUM_INT && kind_b == LAMBDA_NUM_INT) {
+        if (isfinite(base) && isfinite(exponent) && exponent >= 0) {
+            return int_pow_nonnegative((int64_t)base, (uint64_t)exponent);
+        }
+        double value = pow(base, exponent);
+        if (!isfinite(value) || value == trunc(value)) {
+            return (Item){.item = lambda_int_box_double(value)};
+        }
+        return push_d(value);
+    }
+    return push_d(pow(base, exponent));
 }
 
 Item fn_mod(Item item_a, Item item_b) {
@@ -1713,15 +1745,14 @@ Item fn_binary(Item item) {
     Rooted<Item> held_argument(argument_roots, item);
     TypeId type_id = get_type_id(item);
     if (type_id == LMD_TYPE_BINARY) {
-        return item;
+        return item.get_len() ? item : ItemNull;
     }
     const char* bytes = nullptr;
     size_t size = 0;
     if (virtual_output_bytes(item, &bytes, &size)) {
         RootFrame roots(1);
         Rooted<Item> source(roots, item);
-        Binary* binary = heap_binary_from_bytes(bytes, size);
-        return binary ? Item{.item = x2it(binary)} : ItemError;
+        return heap_binary_value_from_bytes(bytes, size);
     }
     if (type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_SYMBOL) {
         const char* chars = item.get_chars();
@@ -1730,16 +1761,14 @@ Item fn_binary(Item item) {
             log_debug("fn_binary: cannot convert null text to binary");
             return ItemError;
         }
-        Binary* bin = heap_binary_from_bytes(chars, len);
-        return bin ? (Item){.item = x2it(bin)} : ItemError;
+        return heap_binary_value_from_bytes(chars, len);
     }
     if (type_id == LMD_TYPE_INT || type_id == LMD_TYPE_INT64 ||
         type_id == LMD_TYPE_UINT64 || type_id == LMD_TYPE_FLOAT) {
         char buf[64];
         int len = format_native_numeric_scalar(item, buf, sizeof(buf));
         if (len < 0 || len >= (int)sizeof(buf)) return ItemError;
-        Binary* bin = heap_binary_from_bytes(buf, len);
-        return bin ? (Item){.item = x2it(bin)} : ItemError;
+        return heap_binary_value_from_bytes(buf, (size_t)len);
     }
     if (js_is_typed_array(item)) {
         return binary_from_typed_array(js_get_typed_array_ptr(item.map));
@@ -1765,9 +1794,9 @@ Item fn_binary(Item item) {
             bytes[i] = (char)(uint8_t)byte;
         }
         // copy once after validation; byte arrays never pass through a text encoding.
-        Binary* result = heap_binary_from_bytes(bytes, length);
+        Item result = heap_binary_value_from_bytes(bytes, (size_t)length);
         mem_free(bytes);
-        return result ? (Item){.item = x2it(result)} : ItemError;
+        return result;
     }
     log_debug("fn_binary: cannot convert type %d", type_id);
     return ItemError;
