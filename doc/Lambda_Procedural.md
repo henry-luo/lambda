@@ -20,6 +20,7 @@ This document covers local state and imperative control in `fn` and `pn`, plus e
 7. [Early Return](#early-return)
 8. [File Output Operators](#file-output)
 9. [I/O Module](#io-module)
+    - [Shell pipelines](#shell-pipelines)
 10. [Procedural Functions (`pn`)](#procedural-functions-pn)
 11. [Concurrency](#concurrency)
 12. [Procedural vs Functional](#procedural-vs-functional)
@@ -522,6 +523,27 @@ pn save_report(data) {
 ## I/O Module
 
 Lambda provides a unified I/O system that handles both local files and remote URLs transparently.
+
+### Shell pipelines
+
+**Adopted design, awaiting runtime support.** Use `sh.git("log", "--oneline")` to run Git with two arguments. It is the short form of `sh.cmd("git", ["log", "--oneline"])`. The generic form is useful when the script builds the argument array at runtime.
+
+```lambda
+import sh: lambda.shell
+
+pn main() {
+    sh.git("log", "--oneline") |: contains(~, "fix")
+}
+```
+
+Here `~` is one line of Git's stdout (**S14.3.5**). To send values in the other direction, pipe a list or an array to an external command. These expressions each send the UTF-8 bytes `pear\napple\n` to `sort`.
+
+```lambda
+("pear", "apple") |> sh.sort
+["pear", "apple"] |> sh.sort
+```
+
+Each outer item contributes one trailing LF. A nested array is rendered as a single item (**S14.3.6v2**). [Shell stream semantics](Lambda_Formal_Semantics.md#s143-streams-and-laziness)
 
 ### Pure I/O Functions
 

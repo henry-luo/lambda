@@ -1,10 +1,10 @@
 # Shell pipelines in Lambda
 
-**Status** · Working design, 2026-11-24. The reusable `pn` pipeline, symmetric file endpoints, `sh.stdin()`, binding of live stdout, and failure on an unexpected exit in any stage are adopted. The package, live process runtime and file sink await implementation. The Bash and PowerShell modules are deferred.
+**Status** · Working design, 2026-11-25. The reusable `pn` pipeline, symmetric file endpoints, `sh.stdin()`, per-item stdin encoding, binding and per-line processing of live stdout, and failure on an unexpected exit in any stage are adopted. The package, live process runtime and file sink await implementation. The Bash and PowerShell modules are deferred.
 
 **Scope** · Compose external executables and structured Lambda operations with the existing `|>`. A procedure can produce output that its caller continues to pipe.
 
-**Spec linkage** · **S10.1.2v6** governs pipe application, **S10.1.4v2** defines the file sink, **S12.1.1v5** governs procedural effects, and **S14.3.1v3–S14.3.3** govern streams, one-shot I/O and early termination. **D9.3.4** places shipped packages under `lambda.*`. **D11.1.2** governs process and file access. [Formal semantics](../doc/Lambda_Formal_Semantics.md) · [Formal design](../doc/Lambda_Formal_Design.md)
+**Spec linkage** · **S10.1.2v7** governs pipe application, **S10.1.4v2** defines the file sink, **S12.1.1v5** governs procedural effects, and **S14.3.1v3–S14.3.3** govern streams, one-shot I/O and early termination. **D9.3.4** places shipped packages under `lambda.*`. **D11.1.2** governs process and file access. [Formal semantics](../doc/Lambda_Formal_Semantics.md) · [Formal design](../doc/Lambda_Formal_Design.md)
 
 ## A procedure is a reusable pipeline
 
@@ -29,7 +29,7 @@ pn main() {
 }
 ```
 
-Use **`sh.ls()` at the start**. The empty argument list invokes a source command. It receives empty stdin by default and can begin producing output immediately. Bare `sh.ls` is a reference to the exported procedure. Consequently, `sh.ls |> sh.head(lines: 10)` would pass that procedure as the input to `sh.head`, which expects a byte source. On the right, `input |> sh.sort` already means `sh.sort(input)`. These spellings follow ordinary Lambda calls and whole-value application under **D7.2.1** and **S10.1.2v6**.
+Use **`sh.ls()` at the start**. The empty argument list invokes a source command. It receives empty stdin by default and can begin producing output immediately. Bare `sh.ls` is a reference to the exported procedure. Consequently, `sh.ls |> sh.head(lines: 10)` would pass that procedure as the input to `sh.head`, which expects a byte source. On the right, `input |> sh.sort` already means `sh.sort(input)`. These spellings follow ordinary Lambda calls and whole-value application under **D7.2.1** and **S10.1.2v7**.
 
 To use the Lambda script itself as a command-line filter, take its inherited stdin explicitly. The caller can supply a file, another process, or a terminal.
 
@@ -43,7 +43,9 @@ pn main() {
 
 ### Inputs and command arguments
 
-The first parameter of a filter is its pipeline input. A local path in that position supplies file bytes to stdin. Under **S2.4.1v3** and **S10.1.2v6**, `\.'data.txt' |> sh.sort` and `sh.sort(\.'data.txt')` express the same call. A program that needs a filename *operand* receives it in its argument list. For example, a proposed generic filter `source |> sh.cmd("grep", ["-f", "patterns.txt"])` sends `source` to stdin and lets `grep` open the separate pattern file.
+The first parameter of a filter is its pipeline input. A local path in that position supplies file bytes to stdin. Under **S2.4.1v3** and **S10.1.2v7**, `\.'data.txt' |> sh.sort` and `sh.sort(\.'data.txt')` express the same call. A program that needs a filename *operand* receives it in its argument list. For example, a proposed generic filter `source |> sh.cmd("grep", ["-f", "patterns.txt"])` sends `source` to stdin and lets `grep` open the separate pattern file.
+
+Use `sh.git("log", "--oneline")` as the short form of `sh.cmd("git", ["log", "--oneline"])`. Both launch Git with the same two arguments in the same order. The generic form also accepts a program name and an argument array assembled at runtime. [User guide](../doc/Lambda_Procedural.md#shell-pipelines)
 
 Named wrappers translate documented Lambda arguments to individual executable arguments. For example, `count: true` supplies `-c` to `uniq`, and `lines: 10` supplies `-n` and `10` to `head`. A generic command takes an ordered argument array for other programs, repeated flags and operands. Each argument retains its boundary, including spaces. The host must provide a compatible executable. Importing the package selects neither a command interpreter nor a particular vendor's utilities.
 
@@ -67,7 +69,7 @@ pn main() {
 }
 ```
 
-The destination may also be a variable. With `let dest = \.'output.txt'`, `sh.ls() |> dest` means `output(sh.ls(), dest)`. Dispatch depends on the values at the connection, so live output returned through a procedure behaves like output returned directly by a command. The rule applies only in procedural code, with live process stdout on the left and a local file path on the right. An ordinary record piped to a path, or live stdout piped to a plain filename string, still fails the whole-value callable check under **S10.1.2v6**. A quoted path step keeps the dot in a filename under **S2.4.1v3**.
+The destination may also be a variable. With `let dest = \.'output.txt'`, `sh.ls() |> dest` means `output(sh.ls(), dest)`. Dispatch depends on the values at the connection, so live output returned through a procedure behaves like output returned directly by a command. The rule applies only in procedural code, with live process stdout on the left and a local file path on the right. An ordinary record piped to a path, or live stdout piped to a plain filename string, still fails the whole-value callable check under **S10.1.2v7**. A quoted path step keeps the dot in a filename under **S2.4.1v3**.
 
 Under **S10.1.4v2** the sink has the same result and error behavior as explicit `output`. It drains stdout incrementally, writes its exact bytes regardless of the filename extension, and keeps stderr separate. It waits for cleanup and returns the byte count on a successful write. Use `(sh.ls() |> dest)^` to propagate a write error. A sink failure closes the pipe and reaps upstream children. File writes use the existing I/O policy under **D11.1.2** and **D11.2.2**. [Procedural file output](../doc/Lambda_Procedural.md#file-output)
 
@@ -85,14 +87,47 @@ The original general file write and append operators were retired when `|>` beca
 |---|---|
 | Internal → internal | Lambda values. A record keeps its fields and types, and a sequence can feed the existing mapping and filtering operations. |
 | External → external | An OS pipe connects stdout to the next stdin. Bytes, including NUL and trailing newlines, pass through exactly. Every stage keeps a separate stderr channel and exit status. |
-| External → internal | An explicit decoder frames the bytes as lines or parses a format such as JSON. The following Lambda stage can then select fields or compute on values. |
-| Internal → external | An explicit encoder chooses the byte representation of structured input, such as UTF-8 lines or JSON. A binary source already supplies bytes. |
+| External → internal | Per-item mapping and filtering decode UTF-8 lines. An explicit decoder can instead produce other record types, such as JSON values. |
+| Internal → external | A list, array or stream of Lambda values supplies each item followed by LF (S14.3.6v2). Callers can explicitly encode another format. A binary source already supplies bytes. |
 
 For example, external `sh.ls()` produces the listing format of the installed executable. Code that needs entries with a name, size and type should consume structured directory data. Splitting a display listing on whitespace loses information about filenames.
 
+### Mapping and filtering stdout by line
+
+A per-item stage receives one line at a time from live command stdout. Each example runs independently in a `pn`.
+
+```lambda
+sh.git("log", "--oneline") |: contains(~, "fix")
+sh.git("log", "--oneline") |> upper(~)
+```
+
+The filter emits matching lines. The map emits one transformed value per line. Combining the stages decodes stdout once. A binding or a procedure return carrying the live stdout gets the same behavior. After this boundary, ordinary Lambda stages consume the resulting values. A following external stage receives those values on stdin under S14.3.6v2. Whole-value pipes such as `cmd |> sh.sort` and `cmd |> dest` still transmit exact stdout bytes. [Formal pipe and stream rules, S10.1.2v7, S10.1.6v3 and S14.3.5](../doc/Lambda_Formal_Semantics.md#s143-streams-and-laziness)
+
+The decoder carries partial UTF-8 characters and partial lines across OS reads. It strips LF and CRLF. A lone CR is content. For example, the bytes for `"a\r\n\nlast"` yield three strings, `"a"`, `""` and `"last"`. A single LF yields one empty string. Empty stdout yields zero lines, and a trailing terminator adds no extra line. Invalid UTF-8, including an incomplete character at EOF, raises a decoding error when consumed. [Binary pipeline design, PL2–PL4](Lambda_Design_Pipeline.md#3-semantics-the-re-chunking-license-pl3-and-the-dispatch-rule-pl4)
+
+### Sending Lambda items to stdin
+
+```lambda
+("pear", "apple") |> sh.sort
+["pear", "apple"] |> sh.sort
+```
+
+Each expression sends `pear\napple\n` to stdin. Under **S14.3.6v2**, each outer list or array item contributes its representation followed by one LF. Strings contribute their UTF-8 contents verbatim, including embedded newlines. An empty list or array sends zero bytes, while an empty string item contributes one LF. Other items use the ordinary CLI result rendering. A nested array remains one item, and a rendered map can span several physical lines. A caller needing one machine-readable record per physical line can explicitly format each item as compact JSON. [List content, S2.5.6](../doc/Lambda_Formal_Semantics.md#s25-lists-and-blocks)
+
+The same encoding applies incrementally to values yielded by a Lambda filter or map.
+
+```lambda
+sh.git("log", "--oneline")
+    |: contains(~, "fix")
+    |> upper(~)
+    |> sh.sort
+```
+
+Here `sh.sort` receives each uppercase string followed by LF. Passing through line processing converts CRLF to LF and supplies a final LF for an unterminated input line. A direct external-to-external connection preserves the original bytes. [Shell stream rules, S14.3.5–S14.3.6v2](../doc/Lambda_Formal_Semantics.md#s143-streams-and-laziness)
+
 ### Nushell as prior art
 
-Nushell makes both kinds of pipeline available in one language. Its internal commands exchange values, and user-defined commands can accept and return streaming input. The caret selects an external executable even when a built-in shares the name. In Nu, `^sort data.txt | ^uniq -c` connects two external processes. In `open --raw data.txt | lines | uniq --count`, the built-in counts distinct values across the input and returns rows with `value` and `count` fields. Sorting is optional for that frequency table. Lambda adopts the distinction through an imported `sh` namespace and explicit byte adapters. [Nushell pipelines](https://www.nushell.sh/book/pipelines.html) · [External commands](https://www.nushell.sh/book/running_externals.html) · [Custom commands](https://www.nushell.sh/book/custom_commands.html) · [Built-in uniq](https://www.nushell.sh/commands/docs/uniq.html)
+Nushell makes both kinds of pipeline available in one language. Its internal commands exchange values, and user-defined commands can accept and return streaming input. The caret selects an external executable even when a built-in shares the name. In Nu, `^sort data.txt | ^uniq -c` connects two external processes. In `open --raw data.txt | lines | uniq --count`, the built-in counts distinct values across the input and returns rows with `value` and `count` fields. Sorting is optional for that frequency table. Lambda adopts the distinction through an imported `sh` namespace and UTF-8 lines for per-item stages, with explicit adapters for other formats. [Nushell pipelines](https://www.nushell.sh/book/pipelines.html) · [External commands](https://www.nushell.sh/book/running_externals.html) · [Custom commands](https://www.nushell.sh/book/custom_commands.html) · [Built-in uniq](https://www.nushell.sh/commands/docs/uniq.html)
 
 ## Execution and completion
 
