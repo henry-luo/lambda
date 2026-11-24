@@ -1,4 +1,5 @@
 replacement first: true
 replacement second: true
 extract clears source: true
+fragment insertion record: true
 extract preserves identity: true

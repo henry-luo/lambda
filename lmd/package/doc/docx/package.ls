@@ -1,6 +1,7 @@
 // Word-specific validation builds on the shared OPC capture (D9.3.4/D11.1.2).
 import c: .common
 import opc: lambda.doc.opc
+import x: lambda.doc.xml
 pub fn xml(parts,path,required=false) any^ => opc.xml(parts,path,required,c.fail,c.uri)^
 pub fn relationships(parts,owner,required=false) array^ => opc.relationships(parts,owner,required,c.fail,c.uri)^
 pub fn related(rels,kind) any^ => opc.related(rels,kind)
@@ -57,11 +58,46 @@ fn story_diagnostics(pkg) array^ {
     [for (present in visible where present)
         c.issue("unsupported-story",pkg.main,"Separate document story is outside the v1 profile")]
 }
-pub fn open_package(source) map^ {
-    let pkg = opc.capture(source,c.fail,c.uri,"DOCX")^
-    let document = pkg.root;
+fn word_tag(node, scope) any^ {
+    let tag = x.expanded(name(node),x.bindings(node,scope));
+    if (c.uri(tag.uri)^ == c.W) tag.local else null
+}
+
+pub fn preview_package(source) map^ {
+    let pkg = opc.capture_parts(source,c.fail,c.uri,"DOCX")^;
     if (content_type(pkg,pkg.main) != "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml" or
-        document.uri != c.W or document.tag != "document" or c.child(document,"body") == null)
+        pkg.parts[pkg.main] == null)
         raise c.fail("invalid-package","Expected a DOCX WordprocessingML document",pkg.main)
-    else {*:pkg,body:c.child(document,"body"),stories:stories(pkg)^,diagnostics:story_diagnostics(pkg)^}
+    else {*:pkg,stories:stories(pkg)^,diagnostics:story_diagnostics(pkg)^}
+}
+
+pub fn preview_body(parsed, part) map^ {
+    let document = [for (child in x.elements(parsed)^ where word_tag(child,{})^ == "document") child][0]
+    let scope = x.bindings(document)
+    let body = [for (child in x.elements(document)^ where word_tag(child,scope)^ == "body") child][0];
+    if (body == null) raise c.fail("invalid-package","Expected a DOCX WordprocessingML body",part)
+    else {blocks:x.elements(body),scope:x.bindings(body,scope)}
+}
+
+pub fn open_package(source, snapshot = false) map^ {
+    let pkg = opc.capture(source,c.fail,c.uri,"DOCX",snapshot)^
+    let document = pkg.root
+    let scope = if (snapshot) x.bindings(document) else {}
+    let tag = if (snapshot) word_tag(document,{})^ else if (document.uri == c.W) document.tag else null
+    let body = if (snapshot)
+        [for (child in x.elements(document)^ where word_tag(child,scope)^ == "body") child][0]
+        else c.child(document,"body");
+    if (content_type(pkg,pkg.main) != "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml" or
+        tag != "document" or body == null)
+        raise c.fail("invalid-package","Expected a DOCX WordprocessingML document",pkg.main)
+    else if (snapshot) {
+        let body_scope = x.bindings(body,scope)
+        let blocks = x.elements(body)
+        let section = blocks[last];
+        // The terminal body section supplies page geometry without normalizing the body.
+        {*:pkg,body:body,body_scope:body_scope,raw_blocks:blocks,
+            section:if (section != null and word_tag(section,body_scope)^ == "sectPr")
+                c.xml_node(section,body_scope)^ else null,
+            stories:stories(pkg)^,diagnostics:story_diagnostics(pkg)^}
+    } else {*:pkg,body:body,stories:stories(pkg)^,diagnostics:story_diagnostics(pkg)^}
 }

@@ -33,6 +33,13 @@ EPUB uses existing ZIP/XML/CSS/Radiant facilities and no new ebook decoder.
 
 ## Reader and ownership
 
+**Preview coverage, 2026-11-23.** The release viewer failed to compile because
+`view.ls` applied postfix `^` to `store.restore`, whose contract returns a
+map under S7.5.1v6 and S7.6.3v3. The entry point now uses that map directly.
+Both preview modes pass `persist: false` so the reader opens at the beginning
+with an ephemeral session. Reflowable and fixed EPUB preview timings are in
+the [preview implementation plan](Lambda_Impl_Preview.md#6-release-benchmark-at-128--128).
+
 The CLI `view`, `layout`, and `render` routes recognize EPUB. File-browser
 selection uses the same reader and exposes original OPF source. It retains
 captured publication data and the active projected chapter across controls.

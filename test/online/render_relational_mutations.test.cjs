@@ -11,4 +11,8 @@ for (const kind of relationalMutationCases) test('relational mutation scope: ' +
     if (kind === 'unrelated' || kind === 'attributes' || kind.startsWith('typed-')) {
         assert.doesNotMatch(log, /mutation-fallback: reason=broad-(structural|relational)-css-risk/);
     }
+    if(kind==='prepared-unrelated')assert.equal(/mutation-fallback: reason=broad-(structural|relational)-css-risk/.test(log),false,
+        'attributes prepared before insertion must preserve the inserted subtree proof');
+    if (kind.startsWith('unrelated-class')) assert.doesNotMatch(log,
+        /mutation-fallback: reason=broad-(structural|relational)-css-risk/);
 });

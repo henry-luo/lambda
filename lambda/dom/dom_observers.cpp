@@ -696,6 +696,11 @@ static void observer_set_record_fields(Item record, Item type, Item target,
     dom_realm_set_name(record, "oldValue", old_value);
 }
 
+static Item observer_record_node_list(Item nodes) {
+    // bulk insertion can omit the removed snapshot, but both fields expose NodeLists.
+    return dom_static_node_list_from_array(nodes.item == ITEM_NULL ? js_array_new(0) : nodes);
+}
+
 static void observer_queue_children_record(JsObserverState* observer,
                                         JsObserverTarget* registration,
                                         DomNode* parent,
@@ -709,8 +714,8 @@ static void observer_queue_children_record(JsObserverState* observer,
     Rooted<Item> type_root(roots, ItemNull);
     // transient registration needs the materialized snapshot after NodeList publication.
     node_root.set(removed_root.get());
-    added_root.set(dom_static_node_list_from_array(added_root.get()));
-    removed_root.set(dom_static_node_list_from_array(removed_root.get()));
+    added_root.set(observer_record_node_list(added_root.get()));
+    removed_root.set(observer_record_node_list(removed_root.get()));
     type_root.set(js_make_string("childList"));
     parent_root.set(dom_wrap_element(parent));
     observer_set_record_fields(record_root.get(), type_root.get(),
@@ -792,10 +797,8 @@ extern "C" void dom_observers_mutation_notify(DomJsMutationKind kind,
             // every record field survives later allocations before the pending array owns it (D6.3.3).
             RootFrame roots(7);
             Rooted<Item> record(roots, js_new_object());
-            Rooted<Item> added(roots, js_array_new(0));
-            Rooted<Item> removed(roots, js_array_new(0));
-            added.set(dom_static_node_list_from_array(added.get()));
-            removed.set(dom_static_node_list_from_array(removed.get()));
+            Rooted<Item> added(roots, observer_record_node_list(ItemNull));
+            Rooted<Item> removed(roots, observer_record_node_list(ItemNull));
             Rooted<Item> type(roots, js_make_string(attribute ? "attributes" : "characterData"));
             Rooted<Item> target_item(roots, dom_wrap_element(observed_node));
             Rooted<Item> attribute_item(roots, attribute_name ? js_make_string(attribute_name) : ItemNull);

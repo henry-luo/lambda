@@ -8,6 +8,12 @@ import diagrams: .diagrams
 import metafile: .metafile
 import drawing: .drawing
 import presentation: .presentation
+import first_page: lambda.doc.first_page
+
+pub fn preview_setup(pkg) map^ {
+    let sheet = styles.prepare(pkg)^;
+    {pkg:pkg,sheet:sheet,defaults:styles.paragraph(sheet,null)^}
+}
 
 fn result(nodes = [], diagnostics = []) => {nodes:nodes,diagnostics:diagnostics}
 fn warning(pkg, code, message) map^ => c.issue(code,pkg.main,message)
@@ -260,11 +266,116 @@ fn annotations(blocks, pkg, sheet, options) array^ {
         {*:ref,part:story.part,number:1+len([for (j,prior in unique_refs where j < i and prior.story == ref.story) prior]),
             blocks:contents.nodes,diagnostics:contents.diagnostics}]
 }
+fn snapshot_boundary(node, sheet, at_start = false) any^ {
+    if (node is string or node.uri != c.W) null
+    else if (node.tag == "lastRenderedPageBreak" or
+        (node.tag == "br" and c.attr(node,"type") == "page")) {keep:[]}
+    else if (node.tag == "p") {
+        let props = c.child(node,"pPr")
+        let resolved = styles.paragraph(sheet,props)^
+        let section = c.child(props,"sectPr")
+        let section_type = c.attr(c.child(section,"type"),"val");
+        if (resolved.props.break_before == true and not at_start) {keep:[]}
+        else {
+            let next = first_page.cut(node.children,(child,index) any^ => snapshot_boundary(child,sheet))^;
+            if (next != null) {*:next,keep:[{*:node,children:next.children}]}
+            else if (section != null and (section_type == null or
+                contains(["nextPage","evenPage","oddPage"],section_type))) {keep:[node],section:section}
+            else null
+        }
+    } else if (contains(["r","hyperlink","sdt","sdtContent","fldSimple","ins","del",
+        "customXml","tbl","tr","tc"],node.tag)) {
+        let next = first_page.cut(node.children,(child,index) any^ =>
+            snapshot_boundary(child,sheet,at_start and index == 0))^;
+        if (next != null) {*:next,keep:[{*:node,children:next.children}]} else null
+    } else null
+}
+
+// Use paper and style dimensions before converting runs, drawings or media (D9.3.4).
+fn snapshot_box(section) {
+    let page = presentation.page_geometry(section)
+    let margins = page.spacing;
+    // Defaults match the direct viewer's paper CSS.
+    {width:max(1.0,min(c.get(page.dimensions,"width",816.0),816.0) -
+        c.get(margins,"left",64.0) - c.get(margins,"right",64.0)),
+     height:max(1.0,c.get(page.dimensions,"height",900.0) -
+        c.get(margins,"top",56.0) - c.get(margins,"bottom",56.0))}
+}
+
+fn snapshot_block_height(node, sheet, width) float^ {
+    if (node.uri != c.W) 1.0
+    else if (node.tag == "p") {
+        let style = styles.paragraph(sheet,c.child(node,"pPr"))^
+        let props = style.props
+        let em = c.get(style.run,"font_size",16.0)
+        let available = max(1.0,width-c.get(props,"left",0.0)-c.get(props,"right",0.0))
+        let advance = max(1.0,em*0.5+c.get(style.run,"tracking",0.0))
+        let line = presentation.paragraph_leading(props,style.run)
+        let leading = c.get(line,"pixels",em*c.get(line,"multiple",1.6))
+        let lines = max(1.0,ceil(len(c.text(node)^)*advance/available)) +
+            len(c.descendants(node,"br",c.W))
+        // Anchored drawings sit outside line flow. Inline drawings fit the available width.
+        let drawing_height = max([0.0,*[for (drawing in c.descendants(node,"inline",c.WP),
+            let extent = c.child(drawing,"extent",c.WP),
+            let width_px = c.pixels(c.attr(extent,"cx","")))
+            c.pixels(c.attr(extent,"cy",""))*min(1.0,available/max(1.0,width_px))]]);
+        max(max(1.0,leading)*lines,drawing_height)+c.get(props,"before",0.0)+c.get(props,"after",0.85*em)
+    } else if (node.tag == "tbl") {
+        0.0+sum([for (row in c.children(node,"tr")^,
+            let cells = c.children(row,"tc"),
+            let cell_width=width/max(1,len(cells)))
+            max([1.0,*[for (cell in cells) sum([for (block in c.children(cell,null,null)^)
+                snapshot_block_height(block,sheet,cell_width)^])]])])
+    } else if (contains(["sdt","sdtContent","ins","del","customXml"],node.tag))
+        0.0+sum([for (child in c.children(node,null,null)^) snapshot_block_height(child,sheet,width)^])
+    else 1.0
+}
+
+fn snapshot_prefix(body, scope, sheet, width, remaining, index = 0, kept = []) any^ {
+    if (index >= len(body)) {children:kept} else {
+        let node = c.xml_node(body[index],scope)^
+        let boundary = snapshot_boundary(node,sheet,index == 0)^;
+        if (boundary != null) {*:boundary,children:kept ++ boundary.keep}
+        else {
+            let left = remaining - max(1.0,snapshot_block_height(node,sheet,width)^);
+            if (left <= 0.0) {children:kept ++ [node]}
+            else snapshot_prefix(body,scope,sheet,width,left,index+1,kept ++ [node])^
+        }
+    }
+}
+
 pub fn build(pkg, options) map^ {
     let sheet = styles.prepare(pkg)^
     let defaults = styles.paragraph(sheet,null)^
-    let contents = block_many(c.children(pkg.body,null,null),pkg,sheet,options)^
+    let default_section = if (options.snapshot) pkg.section else c.child(pkg.body,"sectPr")
+    let paper = if (options.snapshot) snapshot_box(default_section) else null
+    let cut = if (paper != null)
+        snapshot_prefix(pkg.raw_blocks,pkg.body_scope,sheet,paper.width,paper.height)^
+        else {children:c.children(pkg.body,null,null)}
+    let contents = block_many(cut.children,pkg,sheet,options)^
+    let section = if (cut.section != null) cut.section else default_section
     let notes = annotations(contents.nodes,pkg,sheet,options)^;
-    {blocks:contents.nodes,annotations:notes,page_style:presentation.page_style(c.child(pkg.body,"sectPr"),defaults.run),
+    {blocks:contents.nodes,annotations:notes,page_style:presentation.page_style(section,defaults.run),
         diagnostics:pkg.diagnostics ++ contents.diagnostics ++ c.collect(notes,"diagnostics")}
+}
+
+pub fn preview_blocks(setup, body, options, at_start) map^ {
+    let nodes = [for (node in body.blocks) c.xml_node(node,body.scope)^]
+    let cut = first_page.cut(nodes,(node,index) any^ =>
+        snapshot_boundary(node,setup.sheet,at_start and index == 0))^
+    let contents = block_many(if (cut == null) nodes else cut.children,setup.pkg,setup.sheet,options)^
+    let tail = nodes[last]
+    let section = if (cut.section != null) cut.section
+        else if (tail.tag == "sectPr" and tail.uri == c.W) tail else null;
+    {blocks:contents.nodes,diagnostics:contents.diagnostics,stop:cut != null,
+        started:not at_start or len(nodes)>0,paper_known:section != null,
+        page_style:presentation.page_style(section,setup.defaults.run)}
+}
+
+pub fn preview_annotations(blocks, setup, options, previous) array^ {
+    let notes = annotations(blocks,setup.pkg,setup.sheet,options)^;
+    previous ++ [for (i,note in notes where not any([for (prior in previous) prior.key == note.key]))
+        {*:note,number:1+len([for (prior in previous where prior.story == note.story) prior])+
+            len([for (j,other in notes where j<i and other.story == note.story and
+                not any([for (prior in previous) prior.key == other.key])) other])}]
 }

@@ -394,6 +394,7 @@ static const LambdaDocumentTransformConfig lambda_document_transforms[] = {
     // the package parses its own source so the engine sees the adapter registry (D10.2.2)
     {"latex", "lambda.doc.latex.latex", "render_document_file", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH, true},
     {"docx", "lambda.doc.docx.view", "render_document_file", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH, true},
+    {"docx-preview", "lambda.doc.docx.view", "preview_setup", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH, true},
     // imported decks retain the same player handlers as authored .slides presentations
     {"pptx", "lambda.doc.pptx.view", "render_document_file", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH, false},
     {"psd", "lambda.doc.image", "render_document_file", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH, true},
@@ -444,7 +445,8 @@ Input* run_lambda_package_module(Runtime* runtime, const char* package_module,
 
 Input* run_lambda_document_transform_with_options(Runtime* runtime,
         const char* input_target, const LambdaDocumentTransformConfig* transform,
-        const LambdaDocumentTransformOption* options, int option_count) {
+        const LambdaDocumentTransformOption* options, int option_count, Script** loaded_package) {
+    if (loaded_package) *loaded_package = nullptr;
     if (!runtime || !input_target || !transform || !transform->input_type ||
             !transform->package_module || !transform->function_name || option_count < 0 ||
             (option_count > 0 && !options)) {
@@ -454,6 +456,7 @@ Input* run_lambda_document_transform_with_options(Runtime* runtime,
     Script* package = NULL;
     Input* output = run_lambda_package_module(runtime, transform->package_module, &package);
     if (!output || !package) return output;
+    if (loaded_package) *loaded_package = package;
 
     EvalContext* eval_context = runtime_get_eval_context(runtime);
     if (!eval_context) {

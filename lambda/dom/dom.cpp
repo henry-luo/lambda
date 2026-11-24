@@ -694,6 +694,16 @@ private:
     DomDocument* document_;
 };
 
+DomAttributeOldValue::DomAttributeOldValue(const char* value) {
+    // synthetic attribute storage can release these bytes on replacement.
+    value_ = value ? mem_strdup(value, MEM_CAT_DOM) : nullptr;
+}
+
+DomAttributeOldValue::DomAttributeOldValue(DomElement* element, const char* name)
+    : DomAttributeOldValue(element->get_attribute(name)) {}
+
+DomAttributeOldValue::~DomAttributeOldValue() { mem_free(value_); }
+
 // Record mutation detail for incremental cascade and layout decisions.
 static inline void dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATION_UNKNOWN,
                                           DomNode* target = nullptr,
@@ -722,7 +732,7 @@ static inline void dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATION_
         return;
     }
 
-    radiant_dom_mutation_begin(doc, kind, target, parent, attribute_name, presentation_property);
+    radiant_dom_mutation_begin(doc, kind, target, parent, attribute_name, presentation_property, old_value);
     // Recheck after invalidating the cascade, before reflow validates focus.
     if (recheck_focus && target) dom_recheck_focus_in(target->as_element());
     // CSSOM retains a narrow rendering kind but still mutates the authored attribute.
@@ -798,8 +808,9 @@ extern "C" void dom_notify_mutation(DomJsMutationKind kind, void* target, void* 
 extern "C" void dom_notify_inline_style_mutation(DomElement* element,
         CssPropertyCode property, const char* old_value) {
     if (!element || !element->doc) return;
-    // Authored style writes can change selectors on other elements; keep that cascade broad.
-    bool dependency = dom_engine_attribute_has_css_dependency(element->doc, element, "style");
+    // only attribute tests whose result can change need the broad selector cascade.
+    bool dependency = dom_engine_inline_style_has_css_dependency(element->doc, element,
+        old_value, (uint32_t)property);
     dom_mutation_notify(dependency ? DOM_JS_MUTATION_ATTRIBUTE : dom_style_mutation_kind(property),
         element, element->parent, "style", old_value, dependency ? CSS_PROPERTY_UNKNOWN : property);
 }
@@ -4675,38 +4686,37 @@ extern "C" Item dom_computed_style_get_property(Item style_item, Item prop_name)
         radiant_sync_mutated_inline_stylesheets(elem->doc);
 
     // Custom names are literal DOM strings: preserve case, length and punctuation before camel-case conversion.
-    if (js_prop[0] == '-' && js_prop[1] == '-' && elem->doc && elem->doc->document_pool) {
-        size_t name_length = get_type_id(prop_name) == LMD_TYPE_STRING ? it2s(prop_name)->len : strlen(js_prop);
-        String* computed = dom_provider_call(dom_style_engine_ops(), &DomStyleEngineOps::serialize_custom_property,
-            elem->doc->document_pool,
-            elem, js_prop, name_length);
-        return computed ? js_make_string_len(computed->chars, computed->len) : js_name_item("");
+    bool custom = js_prop[0] == '-' && js_prop[1] == '-' && elem->doc && elem->doc->document_pool;
+    CssPropertyCode prop_id = CSS_PROPERTY_UNKNOWN;
+    if (!custom) {
+        if (get_type_id(prop_name) == LMD_TYPE_STRING &&
+            memchr(js_prop, '\0', it2s(prop_name)->len)) return js_name_item("");
+
+        // handle getPropertyValue method separately
+        if (strcmp(js_prop, "getPropertyValue") == 0) {
+            // return a function-like marker — handled by method dispatch
+            return ItemNull;
+        }
+
+        char css_prop[128];
+        dom_style_camel_to_css_prop(js_prop, css_prop, sizeof(css_prop));
+        prop_id = css_property_code_from_name(css_prop);
+        if (prop_id == CSS_PROPERTY_UNKNOWN || prop_id == 0) {
+            log_debug("dom_computed_style_get_property: unknown CSS property '%s' (from JS '%s')",
+                      css_prop, js_prop);
+            return js_name_item("");
+        }
     }
 
-    if (get_type_id(prop_name) == LMD_TYPE_STRING &&
-        memchr(js_prop, '\0', it2s(prop_name)->len)) return js_name_item("");
-
-    // handle getPropertyValue method separately
-    if (strcmp(js_prop, "getPropertyValue") == 0) {
-        // return a function-like marker — handled by method dispatch
-        return ItemNull;
-    }
-
-    // convert camelCase JS property to CSS hyphenated property
-    char css_prop[128];
-    dom_style_camel_to_css_prop(js_prop, css_prop, sizeof(css_prop));
-
-    // look up the CSS property ID
-    CssPropertyCode prop_id = css_property_code_from_name(css_prop);
-    if (prop_id == CSS_PROPERTY_UNKNOWN || prop_id == 0) {
-        log_debug("dom_computed_style_get_property: unknown CSS property '%s' (from JS '%s')",
-                  css_prop, js_prop);
-        return js_name_item("");
-    }
-
+    // both serializers return transient bytes; custom reads must not retain formatter scratch in the document.
     Pool* pool = mem_pool_create(nullptr, MEM_ROLE_CSS, "cssom.dom.computed_value");
     if (!pool) return js_name_item("");
-    String* computed = dom_provider_call(dom_style_engine_ops(), &DomStyleEngineOps::serialize_computed_value,
+    String* computed;
+    if (custom) {
+        size_t name_length = get_type_id(prop_name) == LMD_TYPE_STRING ? it2s(prop_name)->len : strlen(js_prop);
+        computed = dom_provider_call(dom_style_engine_ops(), &DomStyleEngineOps::serialize_custom_property,
+            pool, elem, js_prop, name_length);
+    } else computed = dom_provider_call(dom_style_engine_ops(), &DomStyleEngineOps::serialize_computed_value,
         pool, elem, prop_id, pseudo_type);
     // the JS string copies caller-owned output before the native scratch pool ends.
     Item result = computed ? js_make_string_len(computed->chars, computed->len) : js_name_item("");
@@ -12177,9 +12187,10 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
         {
             // set_attribute owns the pooled class cache; writing the class list
             // directly bypasses its persistent-field lifetime bookkeeping.
+            DomAttributeOldValue old_value(elem, "class");
             elem->set_attribute("class", class_str);
             dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent,
-                                "class");
+                                "class", old_value.get());
             log_debug("dom_set_property: set className='%s' on <%s>",
                       class_str, elem->tag_name() ? elem->tag_name() : "?");
         }
@@ -13023,9 +13034,11 @@ static Item dom_svg_class_name_get_base_val(void) {
 static Item dom_svg_class_name_set_base_val(Item value) {
     DomElement* elem = dom_svg_owner_from_value(dom_realm_receiver());
     if (elem) {
-        elem->set_attribute("class", dom_to_attr_cstr(value));
+        const char* class_str = dom_to_attr_cstr(value);
+        DomAttributeOldValue old_value(elem, "class");
+        elem->set_attribute("class", class_str);
         dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent,
-                            "class");
+                            "class", old_value.get());
     }
     return value;
 }
@@ -15403,14 +15416,14 @@ extern "C" Item dom_core_set_attribute(Item n, Item name, Item value) {
     const char* attr_val = dom_to_attr_cstr(value);
     if (!attr_name || !attr_val || dom_is_internal_attr(attr_name)) return ItemNull;
     if (dom_set_non_style_metadata(elem, attr_name, attr_val)) return ItemNull;
-    const char* old_value = elem->get_attribute(attr_name);
+    DomAttributeOldValue old_value(elem, attr_name);
     const char* local = nullptr;
-    const char* uri = old_value ? dom_element_attribute_namespace_uri(elem, attr_name, &local) : "";
+    const char* uri = old_value.get() ? dom_element_attribute_namespace_uri(elem, attr_name, &local) : "";
     if (!elem->set_attribute(attr_name, attr_val)) return ItemNull;
     // an ordinary write changes an existing Attr's value without changing its namespace.
     if ((uri && *uri) || strchr(attr_name, ':'))
         dom_element_record_namespaced_attribute(elem, uri ? uri : "", attr_name, attr_val);
-    dom_attribute_value_did_set(elem, attr_name, attr_val, old_value);
+    dom_attribute_value_did_set(elem, attr_name, attr_val, old_value.get());
     return ItemNull;
 }
 
@@ -15802,15 +15815,15 @@ static Item dom_set_attribute_ns_value(Item n, Item ns, Item qname, Item value_a
     // setAttributeNS preserves the existing Attr's prefix and identity for an expanded name.
     if (!stored_name || replace_name) stored_name = qualified_name;
     const char* local_name = colon ? colon + 1 : qualified_name;
-    const char* old_value = replaced_value ? replaced_value :
-        dom_element_attribute_value_ns(elem, namespace_uri, local_name);
+    DomAttributeOldValue old_value(replaced_value ? replaced_value :
+        dom_element_attribute_value_ns(elem, namespace_uri, local_name));
     // null-namespace writes and reflected properties share ordinary metadata semantics.
     if (!*namespace_uri && !replace_name && !replaced_value &&
         dom_set_non_style_metadata(elem, stored_name, value)) return ItemNull;
     if (!dom_element_set_attribute_ns(elem, namespace_uri, stored_name, value, replace_name)) return ItemNull;
-    if (!*namespace_uri) dom_attribute_value_did_set(elem, stored_name, value, old_value);
+    if (!*namespace_uri) dom_attribute_value_did_set(elem, stored_name, value, old_value.get());
     else dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem,
-        elem->parent, stored_name, old_value);
+        elem->parent, stored_name, old_value.get());
     return ItemNull;
 }
 
@@ -17358,8 +17371,9 @@ static bool dom_token_list_rewrite(DomCollectionVArray* collection,
         if (normalized->length > 0) strbuf_append_char(normalized, ' ');
         strbuf_append_str(normalized, append_token);
     }
+    DomAttributeOldValue old_value(elem, attr_name);
     elem->set_attribute(attr_name, normalized->str ? normalized->str : "");
-    dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent, attr_name);
+    dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent, attr_name, old_value.get());
     strbuf_free(normalized);
     return true;
 }

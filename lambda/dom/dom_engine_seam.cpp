@@ -195,6 +195,11 @@ DOM_ENGINE_WEAK bool dom_engine_attribute_has_relational_css_dependency(DomDocum
 DOM_ENGINE_WEAK bool dom_engine_attribute_has_css_dependency(DomDocument* d, DomElement* e, const char* n) {
     (void)d; (void)e; (void)n; return true;
 }
+DOM_ENGINE_WEAK bool dom_engine_inline_style_has_css_dependency(DomDocument* d, DomElement* e,
+        const char* old_value, uint32_t property) {
+    (void)old_value; (void)property;
+    return dom_engine_attribute_has_css_dependency(d, e, "style");
+}
 DOM_ENGINE_WEAK void dom_engine_publish_metadata_change(DomDocument* d) { (void)d; }
 DOM_ENGINE_WEAK void dom_engine_sync_pseudo_state(void* v, uint32_t f, bool set) {
     (void)v; (void)f; (void)set;

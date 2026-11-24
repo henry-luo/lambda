@@ -16,6 +16,22 @@
 > Semantic and design rulings remain cited by S# / D#; where no formal ruling
 > covers a point, the original vibe ledger ID is retained.
 
+<a id="lr12-70"></a>
+## LR12-70 — The JIT declaration optimizer crashes on decomposition
+
+**Fixed 2026-11-24.** Under S16.8.7 and D8.2.6, the adjacent-declaration
+optimization applies only to single-binding declarators. A comma decomposition
+can occupy the same statement slot. The optimizer read its arity as a
+`NameEntry*`, crashing in `mvp_binding` during compilation. Both declaration
+kinds are now checked before reading their entries, so decomposition uses
+ordinary lowering.
+
+`Tune27FixturesHonorTierSupport` and
+`FunctionLocalStateSurvivesCollectionAndPromotion` both pass across all
+three tiers. The initial failures are recorded in
+`temp/radiant-ten-under-five/lambda-controls/`, and the trace and passing
+rerun are in `temp/fix-reported-tests/{gc-backtrace-full,tier-after}.log`.
+
 <a id="lr12-69"></a>
 ## LR12-69 — Parser-head arrivals trigger an extra load-time cascade
 

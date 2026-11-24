@@ -67,6 +67,13 @@ that remains broken must be recorded honestly with its root cause.
 
 ## Progress and evidence
 
+- **2026-11-24.** Turbo fetched and inserted the frame, then Stimulus threw
+  while converting its mutation record's `removedNodes` to an array. The
+  fragment path supplied an absent removal snapshot. The observer now
+  publishes an empty `NodeList` for that snapshot under D8.4.4 and D9.5.5.
+  The Range fixture checks the fragment insertion record directly. The
+  Serve suite passes 155 cases, including the HTTP replay on all three tiers.
+  Evidence is in `temp/fix-reported-tests/serve-after.log`.
 - Inspected native routing/response APIs and confirmed that generic `serve`
   and `io.http` entry points are placeholders.
 - Added Stimulus **3.2.2**, Turbo **8.0.23**, esbuild **0.28.1**, the npm lockfile,

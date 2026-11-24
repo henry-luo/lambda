@@ -15,6 +15,19 @@ Resolved records are in the [fixed issue ledger](<Lib_Input_Issue_Ledger (fixed)
 
 ## Open issues
 
+<a id="li-107"></a>
+
+- [LI-107 — Strict XML text validation rescanned the document suffix](<Lib_Input_Issue_Ledger (fixed).md#li-107>).
+
+<a id="li-106"></a>
+
+- [LI-106 — Failed functional selectors retain a broader compound prefix](<Lib_Input_Issue_Ledger (fixed).md#li-106>).
+
+<a id="li-105"></a>
+
+- [LI-105 — Double-hyphen class identifiers are rejected by selector parsing](<Lib_Input_Issue_Ledger (fixed).md#li-105>).
+
+
 <a id="li-104"></a>
 
 ### LI-104 — Reactive DOM replacements retain numeric attribute copies

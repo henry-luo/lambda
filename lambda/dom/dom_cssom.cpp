@@ -2124,9 +2124,10 @@ static void cssom_decl_commit(CssomDeclarationView* view, StrView name) {
     if (!text) return;
     CssPropertyCode property = name.str ? cssom_decl_code(name) : CSS_PROPERTY_UNKNOWN;
     dom_provider_call(dom_style_engine_ops(), &DomStyleEngineOps::capture_transition, view->element, property);
-    const char* old_value = view->element->get_attribute("style");
+    // retain replaced bytes through selector invalidation and observer record creation.
+    DomAttributeOldValue old_value(view->element, "style");
     if (dom_element_commit_inline_declarations(view->element, view->rule, text->chars))
-        dom_notify_inline_style_mutation(view->element, property, old_value);
+        dom_notify_inline_style_mutation(view->element, property, old_value.get());
 }
 
 extern "C" const char* dom_cssom_inline_property(void* element, const char* property,

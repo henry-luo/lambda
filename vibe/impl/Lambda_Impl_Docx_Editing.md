@@ -1,5 +1,9 @@
 # DOCX package-preserving editing
 
+The 2026-11-24 DOCX renderer change made serialized output explicit.
+The editor block preview requests HTML because its importer consumes that
+representation (D9.3.4, D10.2.5). All 14 affected editor fixtures pass.
+
 ## Checkpoint — 2026-11-16
 
 - Objective: repair Input LI-063 and add graphical DOCX editing that retains

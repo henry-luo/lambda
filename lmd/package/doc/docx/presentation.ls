@@ -42,9 +42,14 @@ pub fn run_style(props, defaults = false) => declarations({
     ["text-transform"]:if (props.caps == null) null else if (props.caps) "uppercase" else "none",
     ["font-variant"]:if (props.smallCaps == null) null else if (props.smallCaps) "small-caps" else "normal"})
 
+pub fn paragraph_leading(props, run) =>
+    if (props.line == null) null
+    else if (props.line_rule == null or props.line_rule == "auto") {multiple:props.line/240.0}
+    else {pixels:max(props.line/15.0,if (props.line_rule == "atLeast") c.get(run,"font_size",0.0) else 0.0)}
+
 pub fn paragraph_style(props, run, numbering) {
-    let leading = if (props.line == null) null else if (props.line_rule == null or props.line_rule == "auto")
-        string(props.line/240.0) else px(max(props.line/15.0,if (props.line_rule == "atLeast") c.get(run,"font_size",0.0) else 0.0));
+    let line = paragraph_leading(props,run)
+    let leading = if (line == null) null else if (line.multiple != null) string(line.multiple) else px(line.pixels);
     run_style(run,true) ++ declarations({
         ["margin-top"]:px(props.before),["margin-bottom"]:px(props.after),
         ["margin-left"]:px(if (numbering == null) props.left else 0.0),
@@ -103,11 +108,17 @@ pub fn cell_style(table, cell, row, row_count, row_span, column, column_count, c
         ["background-color"]:cell.background,["vertical-align"]:cell.align})
 }
 
-pub fn page_style(section, run) {
+pub fn page_geometry(section) {
     let size = c.child(section,"pgSz")
-    let margins = c.child(section,"pgMar")
-    let dimensions = numeric(size,{width:"w",height:"h"},15.0)
-    let spacing = numeric(margins,{top:"top",right:"right",bottom:"bottom",left:"left"},15.0);
+    let margins = c.child(section,"pgMar");
+    {dimensions:numeric(size,{width:"w",height:"h"},15.0),
+        spacing:numeric(margins,{top:"top",right:"right",bottom:"bottom",left:"left"},15.0)}
+}
+
+pub fn page_style(section, run) {
+    let geometry = page_geometry(section)
+    let dimensions = geometry.dimensions
+    let spacing = geometry.spacing;
     run_style(run,true) ++ declarations({width:px(dimensions.width),["min-height"]:px(dimensions.height),
         *:map([for (side,value in spacing) ("padding-" ++ string(side),px(value))])})
 }

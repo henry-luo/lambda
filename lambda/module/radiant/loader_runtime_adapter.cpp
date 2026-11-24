@@ -5,6 +5,9 @@
 #include "radiant/source_position_host.hpp"
 #include "lambda/input/css/dom_element.hpp"
 #include "lambda/input/input.hpp"
+#include "lambda/input/input-parsers.h"
+#include "lambda/io/fs_node.hpp"
+#include "lambda/core/mark_reader.hpp"
 #include "../../runtime/transpiler.hpp"
 #include "../../runtime/concurrency.h"
 #include "../../runtime/activation.h"
@@ -15,6 +18,7 @@
 #include "../../runtime/runtime-state.h"
 #include "../../runtime/interp.hpp"
 #include "../../runtime/lambda-root-frame.hpp"
+#include "../../runtime/heap_api.h"
 #include "../../js/js_runtime.h"
 #include "../../js/js_runtime_state.hpp"
 #include "../../js/js_event_loop.h"
@@ -26,6 +30,7 @@
 #include "lib/log.h"
 #include "lib/mem.h"
 #include "lib/mem_factory.h"
+#include "lib/shell.h"
 #include "lib/time_util.h"
 #include <stdio.h>
 #include <string.h>
@@ -145,7 +150,105 @@ const char* lambda_document_load_diagnostic(void) {
     return document_load_diagnostic[0] ? document_load_diagnostic : nullptr;
 }
 
+struct DocxPreview {
+    Runtime* runtime;
+    EvalContext* owner;
+    Script* package;
+    Input* result_input;
+    Pool* xml_pool;
+    Input* xml;
+    XmlBodyReader* reader;
+    Item state;
+    bool rooted;
+};
+
+static void loader_docx_preview_close(void* ptr) {
+    auto* preview = (DocxPreview*)ptr;
+    if (preview->rooted)
+        heap_unregister_gc_root_for((Context*)preview->owner, &preview->state.item);
+    xml_body_close(preview->reader);
+    if (preview->xml_pool) pool_destroy(preview->xml_pool);
+    mem_free(preview);
+}
+
+static Element* loader_docx_preview_batch(DocxPreview* preview, bool first, bool* done) {
+    XmlBodyStatus status = xml_body_advance(preview->reader, preview->xml, 4096, 8);
+    if (shell_getenv("LAYOUT_PROFILE"))
+        log_notice("PREVIEW_DOCX: consumed=%zu status=%s", xml_body_consumed(preview->reader),
+            status == XmlBodyStatus::MORE ? "more" : status == XmlBodyStatus::END ? "end" : "error");
+    if (status == XmlBodyStatus::ERROR) {
+        log_error("PREVIEW_DOCX: invalid main-document XML prefix");
+        return nullptr;
+    }
+    RuntimeExecutionScope execution(preview->owner);
+    RootFrame roots(1);
+    Item args[] = {preview->state, preview->xml->root, {.item = b2it(first)},
+        {.item = b2it(status == XmlBodyStatus::END)}};
+    Rooted<Item> result(roots, interp_call_module_export(preview->runtime, preview->package,
+        "preview_batch", args, 4));
+    ItemReader read(result.get().to_const());
+    if (!read.isMap()) {
+        LambdaError* error = it2err(result.get());
+        log_error("PREVIEW_DOCX: %s", error && error->message ? error->message : "conversion failed");
+        return nullptr;
+    }
+    MapReader response = read.asMap();
+    Item document = response.get("document").item();
+    if (get_type_id(document) != LMD_TYPE_ELEMENT) return nullptr;
+    preview->state = response.get("continuation").item();
+    *done = response.get("stop").asBool();
+    if (*done) {
+        xml_body_close(preview->reader);
+        preview->reader = nullptr;
+    }
+    return document.element;
+}
+
+static Element* loader_docx_preview_advance(void* ptr, bool* done) {
+    auto* preview = (DocxPreview*)ptr;
+    EvalContext* previous = context;
+    Context* previous_input = input_context;
+    if ((previous && previous->execution_depth != 0) ||
+        !radiant_eval_context_switch(preview->owner)) return nullptr;
+    runtime_bind_ui_result_input(preview->runtime, preview->result_input);
+    input_context = (Context*)preview->owner;
+    Element* result = loader_docx_preview_batch(preview, false, done);
+    runtime_bind_ui_result_input(preview->runtime, nullptr);
+    if (previous != preview->owner && !radiant_eval_context_switch(previous)) return nullptr;
+    input_context = previous_input;
+    return result;
+}
+
+static bool loader_docx_preview_begin(RadiantScriptDocumentLoad* load, EvalContext* owner, Script* package) {
+    auto* preview = (DocxPreview*)mem_calloc(1, sizeof(DocxPreview), MEM_CAT_LAYOUT);
+    if (!preview) return false;
+    preview->runtime = load->runtime;
+    preview->owner = owner;
+    preview->package = package;
+    preview->result_input = load->result_input;
+    preview->state = load->script_output->root;
+    preview->rooted = heap_register_gc_root_for((Context*)owner, &preview->state.item);
+    if (preview->rooted) {
+        Item member = ItemReader(preview->state.to_const()).asMap().get("member").item();
+        ZipError error = {};
+        preview->reader = xml_body_open(fs_node_open_zip_member(member, &error));
+        preview->xml_pool = mem_pool_create(nullptr, MEM_ROLE_INPUT, "preview.docx.xml");
+        preview->xml = preview->xml_pool ? Input::create(preview->xml_pool, nullptr) : nullptr;
+    }
+    bool finished = false;
+    Element* first = preview->xml && preview->reader
+        ? loader_docx_preview_batch(preview, true, &finished) : nullptr;
+    if (!first) {
+        loader_docx_preview_close(preview);
+        return false;
+    }
+    load->script_output->root = Item{.element = first};
+    load->preview = {preview, loader_docx_preview_advance, loader_docx_preview_close, finished};
+    return true;
+}
+
 static void loader_cancel_script(RadiantScriptDocumentLoad* load, bool runtime_released) {
+    if (load->preview.state) load->preview.close(load->preview.state);
     if (load->shared) loader_runtime_finish(nullptr, load->runtime);
     else if (!runtime_released) release_layout_runtime(load->runtime);
     if (load->result_pool) pool_destroy(load->result_pool);
@@ -192,8 +295,11 @@ static bool loader_begin_script(UiContext* host, Url* url, const char* path,
     }
     // Transforms use the decoded local path; scripts receive their navigation URL separately.
     const char* target = transform ? path : url_get_href(url);
+    bool docx_preview = transform && !strcmp(transform->input_type, "docx-preview");
+    Script* package = nullptr;
     load->script_output = transform
-        ? run_lambda_document_transform_with_options(runtime, target, transform, options, option_count)
+        ? run_lambda_document_transform_with_options(runtime, target, transform, options, option_count,
+            docx_preview ? &package : nullptr)
         : run_script_mir(runtime, nullptr, const_cast<char*>(path), false);
     if (runtime_heap(runtime)) {
         owner->heap = runtime_heap(runtime);
@@ -219,6 +325,10 @@ static bool loader_begin_script(UiContext* host, Url* url, const char* path,
             ? error->message : "the document returned an error";
         snprintf(document_load_diagnostic, sizeof(document_load_diagnostic), "%s", message);
         log_error("document-load: %s", document_load_diagnostic);
+        loader_cancel_script(load, false);
+        return false;
+    }
+    if (docx_preview && (!package || !loader_docx_preview_begin(load, owner, package))) {
         loader_cancel_script(load, false);
         return false;
     }

@@ -24,9 +24,11 @@ fn unique_relations(owners,kind) array^ {
     let rels = [for (owner in owners,let rel=relation(owner,kind)^ where rel!=null) rel];
     [for (i,rel in rels where not any([for (j,prior in rels where j<i) prior.target==rel.target])) rel]
 }
-pub fn open_package(source) map^ {
+pub fn open_package(source, snapshot = false) map^ {
     let pkg = opc.capture(source,c.fail,c.uri,"PPTX")^
-    let ids = c.children(c.child(pkg.root,"sldIdLst"),"sldId")
+    let all_ids = c.children(c.child(pkg.root,"sldIdLst"),"sldId")
+    // Select the first relationship before opening slide, layout, or media parts.
+    let ids = if (snapshot and len(all_ids) > 0) [all_ids[0]] else all_ids
     let size = c.child(pkg.root,"sldSz")
     let width = c.pixels(c.attr(size,"cx"),-1.0)
     let height = c.pixels(c.attr(size,"cy"),-1.0);

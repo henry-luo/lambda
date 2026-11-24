@@ -1315,6 +1315,66 @@ TEST(RadiantViewTest, LoadsMarkdownAsHeadlessView) {
     test_radiant_view_expect_case(6);
 }
 
+TEST(RadiantViewTest, MarkdownThumbnailResumesTheFirstLayout) {
+    RadiantViewLaunch launch = {};
+    launch.label = "markdown_preview_refill";
+    ASSERT_TRUE(test_radiant_view_prepare_launch(&launch));
+    char log[1200], output[1200];
+    snprintf(log, sizeof(log), "%s/temp/preview.log", launch.cwd);
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_HOME", g_radiant_view_home}, {"LAMBDA_LOG_FILE", log},
+        {"LAYOUT_PROFILE", "1"}, {nullptr, nullptr}
+    };
+    const char* blocks[] = {"# Preview heading", "13. First list item\n14. Second list item",
+        "> A quoted paragraph", "The final paragraph."};
+    lam::Temp<char> reference;
+    size_t reference_size = 0;
+    for (bool sparse : {false, true}) {
+        char path[1200];
+        snprintf(path, sizeof(path), "%s/temp/page.md", launch.cwd);
+        StrBuf* source = strbuf_new();
+        ASSERT_NE(source, nullptr);
+        for (const char* block : blocks) {
+            strbuf_append_str(source, block);
+            // blank source consumes multiple batches without adding visual height.
+            for (size_t i = 0; i < (sparse ? 4500u : 2u); ++i)
+                strbuf_append_char(source, '\n');
+        }
+        int written = write_text_file_atomic(path, source->str);
+        strbuf_free(source);
+        ASSERT_EQ(written, 0);
+        snprintf(output, sizeof(output), "%s/temp/%s.png", launch.cwd, sparse ? "sparse" : "compact");
+        remove(log);
+        const char* args[] = {g_radiant_view_executable, "preview", path, "--thumbnail",
+            "--width", "600", "--height", "600", "-o", output, nullptr};
+        ShellOptions options = {};
+        options.env = env;
+        options.cwd = launch.cwd;
+        options.merge_stderr = true;
+        options.timeout_ms = 30000;
+        ShellResult result = shell_exec(g_radiant_view_executable, args, &options);
+        EXPECT_EQ(result.exit_code, 0) << (result.stdout_buf ? result.stdout_buf : "");
+        shell_result_free(&result);
+        size_t size = 0;
+        lam::Temp<char> png(read_binary_file(output, &size));
+        ASSERT_NE(png.get(), nullptr);
+        if (!sparse) {
+            reference.reset(png.release());
+            reference_size = size;
+            continue;
+        }
+        ASSERT_EQ(size, reference_size);
+        EXPECT_EQ(memcmp(reference.get(), png.get(), size), 0);
+        char* trace = test_radiant_view_read_file(log);
+        ASSERT_NE(trace, nullptr);
+        EXPECT_NE(strstr(trace, "PREVIEW_MARKUP: batch=3 "), nullptr);
+        const char* pass = strstr(trace, "[LAYOUT_PROFILE] root_total:");
+        EXPECT_NE(pass, nullptr);
+        if (pass) EXPECT_EQ(strstr(pass + 1, "[LAYOUT_PROFILE] root_total:"), nullptr);
+        free(trace);
+    }
+}
+
 TEST(RadiantViewTest, LoadsMarkdownMathAsHeadlessView) {
     test_radiant_view_expect_case(7);
 }

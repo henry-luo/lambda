@@ -31,6 +31,10 @@
 #include "../lambda/runtime/sys_func_registry.h"
 #include "lambda/input/input-script-cache.h"
 #include "../lambda/dom/dom_events.h"
+#include "../lambda/dom/dom.h"
+#include "../lambda/module/radiant/radiant_runtime_init.hpp"
+#include "../lambda/jube/jube_interface.h"
+#include "lambda/input/css/dom_element.hpp"
 #include "../lambda/runtime/gc/gc_heap.h"
 #include "../lambda/mir/mir.h"
 #include "lib/mem.h"
@@ -83,6 +87,172 @@ static void js_test_expect_no_generated_mir(const JsRuntimeState* state) {
 static Item js_apply_getter_collect(void) {
     heap_gc_collect();
     return make_js_undefined();
+}
+
+struct HtmlTimerNestingProbe {
+    Rooted<Item>* callback;
+    Rooted<Item>* handle;
+    Rooted<Item>* scheduler;
+    double times[8] = {};
+    unsigned count = 0;
+    bool browser = false;
+    bool interval = false;
+    bool switch_to_interval = false;
+    bool microtask_boundary = false;
+};
+static thread_local HtmlTimerNestingProbe* html_timer_nesting_probe;
+
+static Item html_timer_nesting_schedule(void) {
+    auto* probe = html_timer_nesting_probe;
+    probe->handle->set(js_schedule_timer(probe->callback->get(), Item{.item = i2it(0)},
+        ItemNull, false, probe->interval, probe->browser));
+    return make_js_undefined();
+}
+
+static Item html_timer_nesting_tick(void) {
+    auto* probe = html_timer_nesting_probe;
+    if (!probe) return make_js_undefined();
+    if (probe->count >= 8) {
+        ++probe->count;
+        return make_js_undefined();
+    }
+    probe->times[probe->count++] = js_event_loop_virtual_clock_now_ms();
+    if (probe->count == 8) {
+        if (probe->interval) js_clearInterval(probe->handle->get());
+    } else if (!probe->interval) {
+        probe->interval = probe->switch_to_interval && probe->count == 6;
+        if (probe->microtask_boundary && probe->count == 6)
+            js_microtask_enqueue(probe->scheduler->get());
+        else html_timer_nesting_schedule();
+    }
+    return make_js_undefined();
+}
+
+TEST(JsTimers, HtmlNestingClampsTimeoutsAndIntervalsWithoutChangingNodeTimers) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    ASSERT_FALSE(item_is_error(transpile_js_to_mir(&runtime, "0;", "timer-nesting-bootstrap.js", NULL)));
+    js_event_loop_init();
+    const struct { const char* name; bool browser; bool interval; bool mixed; bool microtask; } cases[] = {
+        {"node timeout", false, false, false, false}, {"HTML timeout", true, false, false, false},
+        {"HTML interval", true, true, false, false}, {"HTML mixed", true, false, true, false},
+        {"HTML microtask boundary", true, false, false, true}
+    };
+    for (const auto& entry : cases) {
+        SCOPED_TRACE(entry.name);
+        js_event_loop_set_virtual_clock(true, 0.0);
+        {
+            RootFrame roots(3);
+            Rooted<Item> callback(roots, js_new_native_function(html_timer_nesting_tick));
+            Rooted<Item> handle(roots, ItemNull);
+            Rooted<Item> scheduler(roots, js_new_native_function(html_timer_nesting_schedule));
+            HtmlTimerNestingProbe probe = {&callback, &handle, &scheduler, {}, 0,
+                entry.browser, entry.interval, entry.mixed, entry.microtask};
+            html_timer_nesting_probe = &probe;
+            handle.set(js_schedule_timer(callback.get(), Item{.item = i2it(0)},
+                ItemNull, false, entry.interval, entry.browser));
+            for (unsigned turn = 0; turn < 8; ++turn) js_event_loop_pump_nowait();
+            bool clamped = entry.browser && !entry.microtask;
+            EXPECT_EQ(probe.count, clamped ? 6u : 8u);
+            for (unsigned index = 0; index < (clamped ? 6u : 8u); ++index)
+                EXPECT_DOUBLE_EQ(probe.times[index], 0.0);
+            if (clamped) {
+                js_event_loop_advance_virtual_time(4.0, 0);
+                EXPECT_EQ(probe.count, 7u);
+                EXPECT_DOUBLE_EQ(probe.times[6], 4.0);
+                js_event_loop_advance_virtual_time(4.0, 0);
+                EXPECT_EQ(probe.count, 8u);
+                EXPECT_DOUBLE_EQ(probe.times[7], 8.0);
+            }
+            js_event_loop_advance_virtual_time(4.0, 0);
+            EXPECT_EQ(probe.count, 8u);
+            html_timer_nesting_probe = nullptr;
+        }
+        js_event_loop_shutdown();
+        js_event_loop_init();
+    }
+    runtime_cleanup(&runtime);
+}
+
+class JsComputedStyleTest : public ::testing::Test {
+protected:
+    Runtime runtime = {};
+    Pool* pool = nullptr;
+    Input* input = nullptr;
+    DomDocument* document = nullptr;
+
+    void SetUp() override {
+        runtime_init(&runtime);
+        ASSERT_FALSE(item_is_error(transpile_js_to_mir(&runtime, "0;", "computed-style-bootstrap.js", NULL)));
+        ASSERT_TRUE(radiant_register_dom_engine_providers());
+        dom_engine_bind_host(jube_internal_host_api());
+        pool = pool_create();
+        ASSERT_NE(pool, nullptr);
+        input = Input::create(pool, nullptr);
+        ASSERT_NE(input, nullptr);
+        document = dom_document_create(input);
+        ASSERT_NE(document, nullptr);
+        MarkBuilder builder(input);
+        Item html = builder.element("html").attr("style", "--Sample: 23px; color: red").final();
+        document->root = lam::up(build_dom_tree_from_element(html.element, document, nullptr));
+        ASSERT_NE(document->root, nullptr);
+    }
+
+    void TearDown() override {
+        runtime_cleanup(&runtime);
+        if (document) dom_document_destroy(document);
+        if (input) input_release_auxiliary_resources(input);
+        if (pool) pool_destroy(pool);
+    }
+};
+
+TEST_F(JsComputedStyleTest, RepeatedCustomReadsReleaseSerializationScratch) {
+    RootFrame roots(4);
+    Rooted<Item> element(roots, dom_wrap_element(document->root));
+    Rooted<Item> style(roots, dom_get_computed_style(element.get(), ItemNull));
+    Rooted<Item> name(roots, js_make_string("--Sample"));
+    Rooted<Item> result(roots, dom_computed_style_get_property(style.get(), name.get()));
+    ASSERT_EQ(get_type_id(result.get()), LMD_TYPE_STRING);
+    ASSERT_STREQ(it2s(result.get())->chars, "23px");
+    PoolStats before = {}, after = {};
+    pool_get_detailed_stats(document->document_pool, &before);
+    for (unsigned i = 0; i < 32; ++i) {
+        result.set(dom_computed_style_get_property(style.get(), name.get()));
+        ASSERT_EQ(get_type_id(result.get()), LMD_TYPE_STRING);
+        EXPECT_STREQ(it2s(result.get())->chars, "23px");
+    }
+    pool_get_detailed_stats(document->document_pool, &after);
+    EXPECT_EQ(after.live_bytes, before.live_bytes);
+    EXPECT_EQ(after.allocation_count, before.allocation_count);
+}
+
+TEST_F(JsComputedStyleTest, CopiedValuesSurviveCollectionAndKeepLiteralNames) {
+    RootFrame roots(4);
+    Rooted<Item> element(roots, dom_wrap_element(document->root));
+    Rooted<Item> style(roots, dom_get_computed_style(element.get(), ItemNull));
+    Rooted<Item> name(roots, ItemNull);
+    Rooted<Item> result(roots, ItemNull);
+    const struct { const char* name; const char* value; } cases[] = {
+        {"--Sample", "23px"}, {"--sample", ""},
+        {"color", "rgb(255, 0, 0)"}, {"unknownProperty", ""}
+    };
+    gc_heap_t* gc = runtime.eval_context->heap->gc;
+    gc_set_force_collect_interval(gc, 1);
+    gc_set_poison_freed(gc, 1);
+    for (const auto& entry : cases) {
+        name.set(js_make_string(entry.name));
+        result.set(dom_computed_style_get_property(style.get(), name.get()));
+        heap_gc_collect();
+        ASSERT_EQ(get_type_id(result.get()), LMD_TYPE_STRING);
+        EXPECT_STREQ(it2s(result.get())->chars, entry.value);
+    }
+    name.set(js_make_string_len("--Sample\0trailing", 17));
+    result.set(dom_computed_style_get_property(style.get(), name.get()));
+    EXPECT_STREQ(it2s(result.get())->chars, "");
+    name.set(js_make_string("getPropertyValue"));
+    EXPECT_EQ(dom_computed_style_get_property(style.get(), name.get()).item, ITEM_NULL);
+    gc_set_force_collect_interval(gc, 0);
+    gc_set_poison_freed(gc, 0);
 }
 
 TEST(JsJson, ParsedContainersTraceLaterPropertyAndElementReplacements) {

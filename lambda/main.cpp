@@ -2475,6 +2475,7 @@ static const LambdaCliExcludedCommand LAMBDA_CLI_EXCLUDED_COMMANDS[] = {
     {"layout", "the Radiant layout engine"}, {"render", "the Radiant layout engine"},
     {"render-batch", "the Radiant layout engine"}, {"view", "the Radiant layout engine"},
     {"edit", "the Radiant layout engine"}, {"replay", "the Radiant layout engine"},
+    {"preview", "the Radiant layout engine"},
 #endif
 #ifdef LAMBDA_NO_JS
     {"js", "the JavaScript runtime"}, {"ts", "the JavaScript runtime"},
@@ -2589,6 +2590,68 @@ static const LambdaDemo LAMBDA_DEMOS[] = {
     {"book", "test/demo/book/book.ls"},
     {"dreamhome", "test/demo/dreamhome/dreamhome.ls"},
 };
+
+#ifndef LAMBDA_HEADLESS
+static int exec_preview(int argc, char** argv) {
+    const char* usage =
+        "Usage: lambda preview FILE --thumbnail -o OUTPUT.png [--width N --height N]\n"
+        "       lambda preview FILE --snapshot\n";
+    const char* input = nullptr;
+    const char* output = nullptr;
+    bool thumbnail = false, snapshot = false;
+    int width = 0, height = 0;
+    for (int i = 0; i < argc; i++) {
+        const char* arg = argv[i];
+        if (!strcmp(arg, "--help") || !strcmp(arg, "-h")) {
+            fputs(usage, stdout);
+            return 0;
+        }
+        if (!strcmp(arg, "--thumbnail") && !thumbnail) thumbnail = true;
+        else if (!strcmp(arg, "--snapshot") && !snapshot) snapshot = true;
+        else if ((!strcmp(arg, "-o") || !strcmp(arg, "--output")) && !output && i + 1 < argc) {
+            output = argv[++i];
+        } else if ((!strcmp(arg, "--width") || !strcmp(arg, "--height")) && i + 1 < argc) {
+            int* dimension = !strcmp(arg, "--width") ? &width : &height;
+            const char* value = argv[++i];
+            int64_t n = str_to_int64_default(value, strlen(value), -1);
+            if (*dimension || n <= 0 || n > INT_MAX) {
+                fputs("preview: dimensions must be positive integers given once\n", stderr);
+                return 1;
+            }
+            *dimension = (int)n;
+        } else if (*arg != '-' && !input) input = arg;
+        else {
+            fputs(usage, stderr);
+            return 1;
+        }
+    }
+
+    const char* output_ext = output ? file_path_ext(output) : nullptr;
+    if (!input || thumbnail == snapshot || (width == 0) != (height == 0) ||
+        (thumbnail && (!str_ieq_cstr(output_ext, ".png"))) ||
+        (snapshot && (output || width || height))) {
+        fputs(usage, stderr);
+        return 1;
+    }
+    if (thumbnail) {
+        constexpr int default_size = 256;
+        if (render_document_thumbnail(input, output, width ? width : default_size,
+                height ? height : default_size)) return 0;
+        fputs("preview: could not load the document or create the PNG at a new path\n", stderr);
+        return 1;
+    }
+#ifdef LAMBDA_NO_GUI
+    fputs("preview: --snapshot requires a display window, which this build excludes\n", stderr);
+    return 1;
+#else
+    // Snapshot package transforms use T0 for the lifetime of the viewer (D8.3.1).
+    lambda_tier_set(LAMBDA_TIER_INTERP);
+    if (!view_document_preview(input)) return 0;
+    fputs("preview: could not display the document\n", stderr);
+    return 1;
+#endif
+}
+#endif
 
 static void print_demo_help(FILE* stream) {
     constexpr size_t demo_count = sizeof(LAMBDA_DEMOS) / sizeof(LAMBDA_DEMOS[0]);
@@ -3861,6 +3924,10 @@ static int lambda_main_impl(int argc, char *argv[]) {
     }
 
 #ifndef LAMBDA_HEADLESS
+    if (argc >= 2 && strcmp(argv[1], "preview") == 0) {
+        return lambda_main_finish(exec_preview(argc - 2, argv + 2));
+    }
+
     // Handle render-batch command (shared UiContext for all renders)
     if (argc >= 2 && strcmp(argv[1], "render-batch") == 0) {
         int result = cmd_render_batch(argc - 2, argv + 2);

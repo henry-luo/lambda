@@ -1,7 +1,7 @@
 // graphicx inclusion and sizing policy lives in script (D9.3.1).
 import util: ~~.util
 import pdf: lambda.doc.pdf.pdf
-import paths: lambda.editor.session
+import paths: lambda.io.path
 
 let KEYS = ["width", "height", "scale", "angle", "trim", "clip", "keepaspectratio", "page"]
 

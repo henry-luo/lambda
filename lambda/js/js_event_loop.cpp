@@ -117,13 +117,25 @@ JS_FORWARD_EXPRESSION(int, js_microtask_pending_count, (void),
         runtime_job_queue_size(&microtask_queue)))
 JS_FORWARD_EXPRESSION(bool, js_microtask_is_running, (void), (js_active_runtime_state && microtask_running))
 
+struct JsEventLoopCallbackScope;
+// task nesting is transient and owner-checked across reentrant runtime calls.
+static thread_local JsEventLoopCallbackScope* active_callback_scope;
+
 struct JsEventLoopCallbackScope {
     bool previous;
+    JsRuntimeState* owner;
+    unsigned html_timer_nesting;
+    JsEventLoopCallbackScope* previous_scope;
 
-    JsEventLoopCallbackScope() : previous(js_runtime_state.event_loop->callback_running) {
+    JsEventLoopCallbackScope(unsigned nesting = 0)
+        : previous(js_runtime_state.event_loop->callback_running),
+          owner(js_active_runtime_state), html_timer_nesting(nesting),
+          previous_scope(active_callback_scope) {
+        active_callback_scope = this;
         js_runtime_state.event_loop->callback_running = true;
     }
     ~JsEventLoopCallbackScope() {
+        active_callback_scope = previous_scope;
         js_runtime_state.event_loop->callback_running = previous;
     }
     JsEventLoopCallbackScope(const JsEventLoopCallbackScope&) = delete;
@@ -366,8 +378,9 @@ typedef struct JsTimerHandle {
     Pool*      runtime_pool;
     void*      runtime_doc;
     bool       closing;
+    unsigned   html_nesting;
     double     virtual_due_ms;
-    double     virtual_repeat_ms;
+    uint64_t   repeat_ms;
     bool       virtual_active;
     bool       virtual_refed;
 } JsTimerHandle;
@@ -386,6 +399,15 @@ typedef struct JsTimerHandle {
 
 static void close_all_timer_handles(void);
 static void timer_close_native_handle(JsTimerHandle* th);
+static void timer_start(uv_loop_t* loop, JsTimerHandle* timer,
+    uint64_t timeout_ms, uint64_t repeat_ms);
+
+static unsigned html_timer_next_nesting(unsigned parent, uint64_t& delay_ms) {
+    // browser timers count tasks, including interval repetitions (HTML 8.7);
+    // other jobs start at zero. Saturation preserves the threshold without overflow.
+    if (parent > 5 && delay_ms < 4) delay_ms = 4;
+    return parent < 7 ? parent + 1 : 7;
+}
 
 static JsTimerHandle* timer_handle_at(int index) {
     const RuntimeResourceEntry* entry = runtime_resource_table_entry_at(
@@ -598,7 +620,7 @@ static void timer_fire_cb(uv_timer_t *handle) {
             previous_resource_root, ItemNull,
             previous_domain_root, ItemNull,
             arguments_root, th ? th->job.arguments : ItemNull);
-        JsEventLoopCallbackScope callback_scope;
+        JsEventLoopCallbackScope callback_scope(th->html_nesting);
         previous_resource_root.set(js_async_hooks_enter_resource(th->job.context.resource));
         previous_domain_root.set(js_domain_set_stack(th->job.context.domain));
         if (js_is_callable(th->job.callback)) {
@@ -627,6 +649,13 @@ static void timer_fire_cb(uv_timer_t *handle) {
             // uncaughtException listener handles it, or the refed handle never drains.
             timer_mark_object_destroyed(th);
             timer_close_handle(th);
+        }
+        if (th->is_interval && th->html_nesting && !th->closing) {
+            // browser intervals rerun timer initialization after the handler, so
+            // they share the nesting clamp with timeouts and honor cancellation.
+            uint64_t delay_ms = th->repeat_ms;
+            th->html_nesting = html_timer_next_nesting(th->html_nesting, delay_ms);
+            timer_start(lambda_uv_loop(), th, delay_ms, delay_ms);
         }
     }
     timer_runtime_exit(&scope);
@@ -820,11 +849,11 @@ static JsTimerHandle* find_timer_handle(Item timer_id) {
 static void timer_start(uv_loop_t* loop, JsTimerHandle* timer,
                         uint64_t timeout_ms, uint64_t repeat_ms) {
     if (!loop || !timer) return;
+    timer->repeat_ms = repeat_ms;
     if (virtual_clock_enabled) {
         // A virtual timer stays initialized as a libuv handle for common close
         // cleanup, but readiness is driven exclusively by the headless clock.
         timer->virtual_due_ms = virtual_clock_ms + (double)timeout_ms;
-        timer->virtual_repeat_ms = (double)repeat_ms;
         timer->virtual_active = true;
         timer->virtual_refed = true;
         return;
@@ -835,7 +864,8 @@ static void timer_start(uv_loop_t* loop, JsTimerHandle* timer,
     // A zero-delay timer created by a timer callback needs a new event-loop
     // turn. libuv can otherwise consume an endless chain inside one uv_run().
     if (timeout_ms == 0) timeout_ms = 1;
-    uv_timer_start(&timer->timer, timer_fire_cb, timeout_ms, repeat_ms);
+    uv_timer_start(&timer->timer, timer_fire_cb, timeout_ms,
+        timer->html_nesting ? 0 : repeat_ms);
 }
 
 extern "C" void js_event_loop_set_virtual_clock(bool enabled, double monotonic_ms) {
@@ -881,11 +911,11 @@ static int virtual_timer_fire_due(double target_ms) {
         // a callback deferred across a frame must not rewind the document clock.
         if (timer->virtual_due_ms > virtual_clock_ms) virtual_clock_ms = timer->virtual_due_ms;
         js_performance_virtual_clock_set(true, virtual_clock_ms);
-        if (timer->is_interval) {
+        if (timer->is_interval && !timer->html_nesting) {
             // Publish the next interval deadline before the callback so
             // clearInterval and nested timer creation see browser ordering.
-            timer->virtual_due_ms += timer->virtual_repeat_ms > 0.0
-                ? timer->virtual_repeat_ms : 1.0;
+            timer->virtual_due_ms += timer->repeat_ms > 0
+                ? (double)timer->repeat_ms : 1.0;
         } else {
             timer->virtual_active = false;
         }
@@ -1076,7 +1106,7 @@ extern "C" Item js_schedule_timer(Item callback, Item delay, Item args_array,
     if (!loop) return ItemNull;
 
     uint64_t ms = normalize_timer_delay(delay_root.get());
-    if (is_interval && ms < 1) ms = 1;
+    if (is_interval && !numeric_handle && ms < 1) ms = 1;
 
     JsTimerHandle *th = (JsTimerHandle *)mem_calloc(1, sizeof(JsTimerHandle), MEM_CAT_JS_RUNTIME);
     if (!th) return ItemNull;
@@ -1085,6 +1115,12 @@ extern "C" Item js_schedule_timer(Item callback, Item delay, Item args_array,
     th->job.callback = callback_root.get();
     th->job.kind = RUNTIME_JOB_TIMER;
     th->is_interval = is_interval;
+    if (numeric_handle) {
+        unsigned parent = active_callback_scope &&
+            active_callback_scope->owner == js_active_runtime_state
+            ? active_callback_scope->html_timer_nesting : 0;
+        th->html_nesting = html_timer_next_nesting(parent, ms);
+    }
     th->timer.data = th;
     js_timer_capture_argument_pack(th, arguments_root.get(), has_args);
     return js_timer_finish_create(loop, th, JS_CLASS_TIMEOUT, ms,
@@ -1969,6 +2005,9 @@ static int js_event_loop_drain_impl(bool keep_intervals) {
             // a later timer, otherwise fetched HTML waits for timeout callbacks.
             do {
                 result = lambda_uv_run_loop(loop, UV_RUN_NOWAIT);
+                // Standalone documents have no window loop to advance their offline audio clock.
+                if (!virtual_clock_enabled)
+                    dom_engine_frame_tick((DomDocument*)dom_get_document(), js_performance_monotonic_now_ms());
                 js_event_loop_render_checkpoint();
                 if (js_animation_frame_has_pending()) {
                     js_animation_frame_drain(64);

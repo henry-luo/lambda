@@ -1,6 +1,6 @@
-console.log(document.location === document);
+console.log(document.location === window.location && document.location instanceof Location);
 console.log(Object.getPrototypeOf(Document.prototype) === Node.prototype);
-console.log(Object.getPrototypeOf(Node.prototype) === Object.prototype);
+console.log(Object.getPrototypeOf(Node.prototype) === EventTarget.prototype);
 console.log(typeof Node.prototype.toString);
 console.log(typeof Document.prototype.toString);
 console.log(typeof document.location.toString);

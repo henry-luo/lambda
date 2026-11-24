@@ -42,7 +42,7 @@ console.log(document.documentElement.tagName);
 console.log(document.body.tagName);
 console.log(document.head.tagName);
 console.log(document.title);
-console.log(document.location === document);
+console.log(document.location === window.location && document.location instanceof Location);
 console.log(document.document === document);
 console.log(document.location.href === document.URL);
 console.log(typeof document.location.protocol);

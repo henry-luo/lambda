@@ -74,7 +74,8 @@ fn direct_inline(item) any^ {
 fn block_preview(pkg, block) any^ {
   let one = {*:pkg, diagnostics:[], body:{*:pkg.body, children:[block]}}
   let converted = model.build(one, options)^
-  let result = render.render(converted, options)^
+  // The HTML importer consumes the serialized block preview.
+  let result = render.render(converted, options, true)^
   let loaded = html.import_text(result.html)^
   let article = loaded.doc.content[0]
   let linear = len(converted.blocks) == 1 and converted.blocks[0].kind == "paragraph" and
