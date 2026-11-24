@@ -14,17 +14,17 @@ pn fill(var r: map, n: int, tag: int) {
 pn main() {
     // same sequence of adds: one shared type, independent values
     var a = {}
-    fill(a, 3, 0)
+    fill(a, 3, 0)^
     var b = {}
-    fill(b, 3, 10)
+    fill(b, 3, 10)^
     print("shared: " ++ format(a, 'json') ++ " " ++ format(b, 'json') ++ "\n")
 
     // a retype on one map leaves its siblings on the shared type
     var c = {}
-    fill(c, 3, 0)
+    fill(c, 3, 0)^
     c["k1"] = "text"
     var d = {}
-    fill(d, 3, 0)
+    fill(d, 3, 0)^
     print("retype: " ++ format(c, 'json') ++ " " ++ format(d, 'json') ++ "\n")
 
     // a null field takes a value, then a sibling grows past it
@@ -40,7 +40,7 @@ pn main() {
 
     // a copy grows apart from its source
     var g = {}
-    fill(g, 2, 0)
+    fill(g, 2, 0)^
     var h = g
     h["extra"] = true
     g["k0"] = 99
@@ -48,7 +48,7 @@ pn main() {
 
     // insertion order, overwrite and lookups across many keys
     var big = {}
-    fill(big, 300, 0)
+    fill(big, 300, 0)^
     big["k150"] = -1
     var sum = 0
     for (k, v at big) { sum = sum + v }
@@ -56,7 +56,7 @@ pn main() {
         " k150=" ++ string(big["k150"]) ++ " k299=" ++ string(big["k299"]) ++
         " sum=" ++ string(sum) ++ "\n")
     var small = {}
-    fill(small, 4, 0)
+    fill(small, 4, 0)^
     var keys = ""
     for (k, v at small) { keys = keys ++ string(k) ++ " " }
     print("order: " ++ keys ++ "\n")
@@ -65,16 +65,16 @@ pn main() {
     // shared target, then grow on independently; a field that flips between
     // kinds keeps every value, and its neighbours keep theirs
     var r1 = {}
-    fill(r1, 3, 0)
+    fill(r1, 3, 0)^
     var r2 = {}
-    fill(r2, 3, 100)
+    fill(r2, 3, 100)^
     r1["k1"] = "one"
     r2["k1"] = "uno"
     r1["extra"] = 1.5
     r2["extra"] = 2.5
     print("retyped: " ++ format(r1, 'json') ++ " " ++ format(r2, 'json') ++ "\n")
     var flip = {}
-    fill(flip, 3, 0)
+    fill(flip, 3, 0)^
     flip["k1"] = "s"
     flip["k1"] = 7
     flip["k1"] = [1, 2]

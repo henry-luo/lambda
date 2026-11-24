@@ -1,4 +1,4 @@
-[true, 302, false]
+[true, 302, 302, 302, false]
 [true, 302, true, 302, false, [1], [1]]
 [true, 302, false, [2], [2]]
 [false, true]

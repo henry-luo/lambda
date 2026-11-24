@@ -130,16 +130,16 @@ pn test_u32_to_int_map_assignment() {
 }
 
 pn main() {
-    test_int_to_string()
-    test_int_to_float()
-    test_string_to_int()
-    test_null_to_array()
-    test_array_to_null()
-    test_multiple_type_changes()
-    test_preserves_fields()
-    test_type_change_in_loop()
-    test_null_to_int()
-    test_bool_to_string()
-    test_preserves_number_contract()
+    test_int_to_string()^
+    test_int_to_float()^
+    test_string_to_int()^
+    test_null_to_array()^
+    test_array_to_null()^
+    test_multiple_type_changes()^
+    test_preserves_fields()^
+    test_type_change_in_loop()^
+    test_null_to_int()^
+    test_bool_to_string()^
+    test_preserves_number_contract()^
     test_u32_to_int_map_assignment()
 }

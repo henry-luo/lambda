@@ -29,6 +29,6 @@ pn replace_inputs() {
 
 pn main() {
     print(carry(7)); print(" "); print(carry("word")); print("\n")
-    replace_inputs()
+    replace_inputs()^
     print("\n")
 }

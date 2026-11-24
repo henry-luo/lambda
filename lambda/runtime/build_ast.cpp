@@ -7749,6 +7749,17 @@ static bool outcome_requires_acknowledgment(Transpiler* tp, AstNode* node) {
     }
 }
 
+static void diagnose_clean_propagation(Transpiler* tp, SourceSpan span, Type* contract) {
+    if (contract && !lambda_type_accepts_error(contract)) {
+        record_semantic_error_span(tp, span, ERR_SEMANTIC_ERROR,
+            "postfix `^` used on an expression whose explicit contract excludes error");
+    } else {
+        // S7.6.3v3: defensive propagation may outlive an inference proof.
+        record_semantic_warning_span(tp, span, ERR_SEMANTIC_ERROR,
+            "defensive postfix `^` on an expression inferred not to return errors");
+    }
+}
+
 static void validate_enforcing_calls_in_expression(Transpiler* tp, AstNode* node,
         bool immediate_acknowledgment, bool return_acknowledgment) {
     node = ast_unwrap_primary_to_leaf(node);
@@ -7776,6 +7787,14 @@ static void validate_enforcing_calls_in_expression(Transpiler* tp, AstNode* node
     case AST_NODE_CALL_EXPR: {
         LambdaAstCallNode* call = (LambdaAstCallNode*)node;
         if (call->propagate) {
+            // The source-order resolver has not yet seen every call outcome,
+            // including S7.5.5v2 store exits and forward definitions.
+            if (!call->can_raise && !call->parameter_admission_may_fail &&
+                    !call->propagated_error_type) {
+                TypeFunc* signature = call_function_signature(call);
+                diagnose_clean_propagation(tp, call->source_span,
+                    signature && signature->has_explicit_return_contract ? signature->return_contract : NULL);
+            }
             if (!return_acknowledgment) {
                 record_semantic_error_span(tp, call->source_span, ERR_UNHANDLED_ERROR,
                     "propagation requires an enclosing return contract that admits error");
@@ -8527,10 +8546,14 @@ static bool procedural_body_exits(AstNode* node) {
     case AST_NODE_BREAK_STAM:
     case AST_NODE_CONTINUE_STAM:
         return true;
-    case AST_NODE_CONTENT:
-        for (AstNode* item = ((AstListNode*)node)->item; item; item = item->next)
+    case AST_NODE_CONTENT: {
+        AstListNode* block = (AstListNode*)node;
+        // A store failing at this inner block can skip its explicit return.
+        if (block->lambda_store_error_outcome) return false;
+        for (AstNode* item = block->item; item; item = item->next)
             if (procedural_body_exits(item)) return true;
         return false;
+    }
     case AST_NODE_IF_EXPR: {
         AstIfNode* branch = (AstIfNode*)node;
         return branch->otherwise && procedural_body_exits(branch->then) &&
@@ -8543,7 +8566,7 @@ static bool procedural_body_exits(AstNode* node) {
 
 static Type* infer_procedural_return_type(Transpiler* tp, AstFuncNode* fn,
         bool may_exit = true) {
-    ProcReturnTypeScan scan = {tp, NULL, false};
+    ProcReturnTypeScan scan = {tp, NULL, fn->lambda_store_error_exit};
     // A pn keeps an Item ABI, but a terminal return proves its caller-visible
     // value set. Keep that inference separate from its ABI return carrier.
     if (may_exit) walk_lambda_ast(fn->body, collect_procedural_return_type, &scan, false);
@@ -8650,6 +8673,7 @@ static bool ordinary_outcome_has_error(Transpiler* tp, AstNode* node, int depth)
     case AST_NODE_CONTENT:
     case AST_NODE_LIST: {
         AstListNode* block = (AstListNode*)node;
+        if (block->lambda_store_error_outcome) return true;
         int values = 0, declarations = 0, statements = 0;
         AstNode* last = ast_proc_block_last_value(block->item, &values, &declarations, &statements);
         if (!block->procedural_results && values > 1) return false;
@@ -16529,7 +16553,90 @@ static void refresh_loop_outcomes(Transpiler* tp, AstNode* loop) {
     } while (facts.changed && !tp->error_count);
 }
 
+static AstFuncNode* indexed_procedure(const AstFunctionIndexEntry& entry) {
+    AstNode* node = entry.node;
+    if (!node || (node->node_type != AST_NODE_PROC && node->node_type != AST_NODE_FUNC_EXPR))
+        return NULL;
+    return lambda_type_func_is_proc(node->type) ? (AstFuncNode*)node : NULL;
+}
+
+static bool bare_scalar_literal(Transpiler* tp, AstNode* node) {
+    node = ast_unwrap_primary_to_leaf(node);
+    Item value;
+    return node && node->node_type == AST_NODE_PRIMARY &&
+        ast_static_literal_item(tp, node, &value) && !item_is_error(value);
+}
+
+static bool fresh_literal_store_is_proven(Transpiler* tp, AstCompoundAssignNode* store,
+        const AstCowPath& path, NameEntry* root) {
+    if (store->node_type != AST_NODE_INDEX_ASSIGN_STAM || path.count || root->declared_type ||
+            !root->node || root->node->node_type != AST_NODE_VARIABLE_DECLARATOR ||
+            !store->key || store->key->next) return false;
+    AstNode* declaration = ast_index_parent(&tp->ast_index, root->node);
+    // At its next statement a single fresh var still has the literal's
+    // length. A literal RHS cannot run a call that changes the owner.
+    if (!declaration || declaration->node_type != AST_NODE_VAR_STAM ||
+            declaration->next != store || root->node->next) return false;
+    AstNode* init = ast_unwrap_primary_to_leaf(((LambdaAstDeclaratorNode*)root->node)->init);
+    int64_t position = 0;
+    if (!init || init->node_type != AST_NODE_ARRAY ||
+            !bare_scalar_literal(tp, store->key) ||
+            !ast_constant_integer_value(tp, store->key, &position) || position < 0 ||
+            !bare_scalar_literal(tp, store->value)) return false;
+    for (AstNode* item = ((AstArrayNode*)init)->item; item; item = item->next) {
+        // Literal items occupy a single slot. An arbitrary expression can
+        // produce a spreadable list or end the initializer early.
+        if (!bare_scalar_literal(tp, item)) return false;
+        if (position-- == 0) return true;
+    }
+    return false;
+}
+
+static void complete_store_outcomes(Transpiler* tp) {
+    AstIndex* index = &tp->ast_index;
+    for (AstNodeId id = 0; id < index->count; id++) {
+        AstNode* node = index->nodes[id];
+        if (node->node_type != AST_NODE_INDEX_ASSIGN_STAM &&
+                node->node_type != AST_NODE_MEMBER_ASSIGN_STAM) continue;
+        AstFunctionId owner = index->owner_functions[id];
+        if (owner >= index->function_count) continue;
+        AstFuncNode* fn = indexed_procedure(index->functions[owner]);
+        if (!fn) continue;
+        AstCompoundAssignNode* store = (AstCompoundAssignNode*)node;
+        AstCowPath path = {};
+        if (!ast_collect_cow_path(&path, store->object)) continue;
+        NameEntry* root = ph_path_root(&path);
+        if (!root || fresh_literal_store_is_proven(tp, store, path, root)) continue;
+        AstListNode* block = ast_binding_scope_block(index, root);
+        AstNodeId block_id = ast_index_find(index, block);
+        // S7.7.6v2: inner same-frame blocks consume the skip as their own
+        // result. A parameter, captured owner or body-local store exits the call.
+        if (block_id < index->count && index->owner_functions[block_id] == owner &&
+                block != ast_unwrap_primary_to_leaf(fn->body)) {
+            block->lambda_store_error_outcome = true;
+            fn->lambda_has_inner_store_outcome = true;
+        } else {
+            fn->lambda_store_error_exit = true;
+        }
+    }
+    for (AstFunctionId id = 0; id < index->function_count; id++) {
+        AstFuncNode* fn = indexed_procedure(index->functions[id]);
+        if (!fn) continue;
+        TypeFunc* signature = lambda_type_func_signature(fn->type);
+        if (!signature || signature->may_return_error) continue;
+        if (fn->lambda_store_error_exit) signature->may_return_error = true;
+        else if (fn->lambda_has_inner_store_outcome) {
+            // An inner block can still feed a tail or an explicit return.
+            signature->inferred_return = infer_procedural_return_type(tp, fn,
+                !fn->lambda_no_explicit_return);
+        }
+    }
+}
+
 static bool complete_outcome_facts(Transpiler* tp, AstScript* script) {
+    // Seed the ordinary outcome before the existing call fixed point visits
+    // forward and indirect references through the completed signature.
+    complete_store_outcomes(tp);
     ArrayList* changed_calls = arraylist_new(8);
     bool changed;
     do {
@@ -16722,26 +16829,15 @@ static void resolve_propagate(Transpiler* tp, AstUnaryNode* node) {
         LambdaAstCallNode* call = (LambdaAstCallNode*)effective;
         call->propagate = true;
         retain_call_propagation_errors(tp, call);
-        may_error = may_error || call->can_raise;
         TypeFunc* signature = call->function
             ? lambda_type_func_signature(call->function->type) : NULL;
-        if (signature && signature->has_explicit_return_contract)
-            explicit_contract = signature->return_contract;
         if (call->can_raise && signature) {
             Type* success = function_success_result_type(signature);
             if (success) call->type = success;
         }
     }
-    if (!may_error) {
-        if (explicit_contract && !lambda_type_accepts_error(explicit_contract)) {
-            record_semantic_error_span(tp, span, ERR_SEMANTIC_ERROR,
-                "postfix `^` used on an expression whose explicit contract excludes error");
-        } else {
-            // S7.6.3v3: defensive propagation may outlive an inference proof.
-            record_semantic_warning_span(tp, span, ERR_SEMANTIC_ERROR,
-                "defensive postfix `^` on an expression inferred not to return errors");
-        }
-    }
+    if (!may_error && (!effective || effective->node_type != AST_NODE_CALL_EXPR))
+        diagnose_clean_propagation(tp, span, explicit_contract);
     Type* success = operand && operand->type
         ? lambda_type_remove_error(tp->pool, operand->type) : NULL;
     if (!success) success = set_type_any(tp, ANY_ERROR_RECOVERY);

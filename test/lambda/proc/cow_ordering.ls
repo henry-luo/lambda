@@ -14,7 +14,7 @@ pn move_first(var values: any[]) {
 pn main() {
     var original: any[] = [1]
     var changed: any[] = original
-    changed[0] = replace_first(changed)
+    changed[0] = replace_first(changed)^
     print(original[0] ++ " " ++ changed[0] ++ "\n")
 
     var source: any[] = [[1], [2]]

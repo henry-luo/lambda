@@ -44,9 +44,9 @@ pn bump_all(var b: Box) {
 }
 
 // the root handed to a `var` callee
-pn root_to_var(var b: Box, i: int) int {
+pn root_to_var(var b: Box, i: int) int^ {
     var before = b.cells[i].k
-    bump_all(b)
+    bump_all(b)^
     return before * 10000 + b.cells[i].k
 }
 

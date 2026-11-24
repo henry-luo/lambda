@@ -8,7 +8,7 @@ pn make_list(n: int) {
     }
     var e = {val: 0, next: null, tag: null}
     e.val = n
-    e.next = make_list(n - 1)
+    e.next = make_list(n - 1)^
     e.tag = [n, n]
     return e
 }

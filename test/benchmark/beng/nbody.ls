@@ -144,12 +144,12 @@ pn main() {
         4.36624404335156298e-05 * SOLAR_MASS,
         5.15138902046611451e-05 * SOLAR_MASS]
 
-    offset_momentum(bvx, bvy, bvz, bmass)
+    offset_momentum(bvx, bvy, bvz, bmass)^
     print(format9(energy(bx, by, bz, bvx, bvy, bvz, bmass)) ++ "\n")
 
     var i: int = 0
     while (i < N) {
-        advance(bx, by, bz, bvx, bvy, bvz, bmass, 0.01)
+        advance(bx, by, bz, bvx, bvy, bvz, bmass, 0.01)^
         i = i + 1
     }
     print(format9(energy(bx, by, bz, bvx, bvy, bvz, bmass)) ++ "\n")

@@ -79,7 +79,7 @@ pn main() {
     print("\n")
     var named: IntRecord = {value: 10}
     let named_snapshot = named
-    piped_borrow(amount: 3, value: named)
+    piped_borrow(amount: 3, value: named)^
     print([named.value, named_snapshot.value])
     print("\n")
 }

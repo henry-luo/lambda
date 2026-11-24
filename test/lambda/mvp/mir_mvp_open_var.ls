@@ -9,7 +9,7 @@ pn observe(var box, snapshot) {
 
 pn main() {
     var box = {value: 1}
-    increment(box)
+    increment(box)^
     print(box.value); print("\n")
     print(observe(box, box)); print(" "); print(box.value); print("\n")
     forward(box)

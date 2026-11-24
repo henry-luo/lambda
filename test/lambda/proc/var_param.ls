@@ -6,6 +6,6 @@ pn bump_first(var xs: any[]) {
 
 pn main() {
     var xs: any[] = [1, 2, 3]
-    bump_first(xs)
+    bump_first(xs)^
     print((xs[0]) ++ " " ++ (xs[1]) ++ "\n")
 }

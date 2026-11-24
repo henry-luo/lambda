@@ -74,10 +74,10 @@ pn t_void_body() {
 
 pn main() {
     t_sum()
-    t_num_array()
-    t_var_bound(5)
+    t_num_array()^
+    t_var_bound(5)^
     t_float_array()^
-    t_generic_array()
-    t_nested()
+    t_generic_array()^
+    t_nested()^
     t_void_body()
 }

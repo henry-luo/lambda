@@ -15,7 +15,7 @@ pn direct_write(var r: N) {
 pn bump(var r: N) { r.kid.n = r.kid.n + 10 }
 pn var_pass(var r: N) {
     let old = r.kid
-    bump(r)
+    bump(r)^
     print(old.n) print(r.kid.n)
 }
 pn rmw_alias(var r: N) {

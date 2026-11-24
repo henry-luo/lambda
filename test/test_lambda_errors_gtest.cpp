@@ -3212,6 +3212,11 @@ TEST_F(NegativeScriptTest, ReturnedErrorNeedsAcknowledgment) {
     ExpectErrorMessage("test/lambda/negative/semantic/returned_error_unhandled.ls", "error[E228]");
 }
 
+TEST_F(NegativeScriptTest, RejectedStoreOutcomeCannotBeOverwritten) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/store_error_overwritten.ls", true,
+        "error[E228]: error from 'write_local' must be handled");
+}
+
 TEST_F(NegativeScriptTest, ConversionPreservesItsErrorObligation) {
     ExpectErrorMessage("test/lambda/negative/semantic/conversion_error_unhandled.ls", "error[E228]");
 }

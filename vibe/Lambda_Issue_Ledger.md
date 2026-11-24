@@ -1683,8 +1683,8 @@ both tiers. The original out-of-range write reports E302 and exits one;
 recoverable calls retain their error payload and container snapshots.
 **LR10-13 / LR10-18** already conform to **S7.6.1v9 / S7.6.7v5** and moved to
 the fixed ledger after rechecking. The caller policy for a discarded plain
-procedure call remains an LR12-27 ruling question. LR09-31 still needs its
-separate ruling.
+procedure call was ruled and fixed later under [S7.5.5v2](#lr12-27).
+LR09-31 still needs its separate ruling.
 
 Qualification: **56/56** focused tier/promotion/GC runs; baseline
 **8,700/8,708**, with all eight sandbox-denied listener cases passing their
@@ -3102,22 +3102,7 @@ registry row.
 ---
 
 
-<a id="lr12-27"></a>**LR12-27 · `push` and direct-write failures repaired; plain-call error policy pending · PARTIAL (found 2026-09-21; push fixed 2026-09-25; direct writes fixed 2026-11-03)**
-
-**Original report (retained):**
-In a `pn`, `var a = [1, 2, 3]; push(a, 4)` leaves `a` as `[1, 2, 3]` on both
-tiers: the literal is an uncertified `ArrayNum` and `push` returns a soft error
-that nothing surfaces (`collection_runtime.cpp:240`, "an uncertified ArrayNum
-has no append contract"). `int[]`, string, and mixed arrays append correctly.
-Likewise `var b = [1]; b[5] = 2` only logs "index 5 out of bounds"
-(`lambda-eval.cpp:8200`) and the procedure continues with exit 0. Both
-contradict **S7.1.3v2** (writes are checked and raise through the `T^`
-channel).
-
-*Fixed 2026-09-25 (push):* S9.1.1 makes `push(b, v)` mean `b' = b ++ [v]`, and index writes already keep an open packed array's lane or widen it in place. `array_num_push_open` (`lambda-eval.cpp`) does the same for push: it appends in the lane when every item fits and otherwise converts to a generic Array, then spreads a list (D3.3.1); a view or an N-D array refuses, as splice does. `pn_push_cow` no longer checks an open binding against a past admission's certificate (SI3v2): after `pn g(x: int[])` had admitted `u`, `push(u, "s")` had failed. `proc/jit_tail_if_push_error` now fails its push on a matrix, and `proc-ext/list_var_mutation`, green at last, moved to the baseline. Fixture `test/lambda/proc/push_open_packed.ls`.
-*Fixed 2026-11-03 (direct writes, S7.1.3v3 / S7.7.6v2):* the setter already returned a rich E302, but both tiers could discard it in a procedure without a declared error return. T0 now establishes the store boundary for unannotated roots as well. MIR's raw positional fallback arms route the setter's error through that boundary before statement-result discard. The original `pn main() { var b = [1]; b[5] = 2; print("unreachable") }` reports E302, exits one and never prints the marker on interp/jit/auto. Native-result transport no longer blocks this fix (D7.1.3). `proc/ledger_index_write_error` checks recovery, native int/float results, unchanged snapshots, skipped tails and inner-block containment; the original main is a negative regression. See [implementation and qualification](<impl/Lambda_Impl_Ledger_Handler_Write_Followup (done).md>).
-
-*Remaining (needs a ruling):* whether a write error from a plain `pn` must escape a **discarded statement-position call in its caller**, rather than being available as the call's result. This separate caller-boundary policy is not decided by repairing the originating store.
+<a id="lr12-27"></a>LR12-27 is [resolved and archived](<Lambda_Issue_Ledger (fixed).md#lr12-27>).
 
 
 ## 13. Schema validator (LR13)

@@ -18,10 +18,10 @@ pn place(var rows, var taken, c) {
     while (r < 4) {
         if (is_free(rows, r) == 1) {
             taken[c] = r
-            set_row(rows, r, false)
+            set_row(rows, r, false)^
             if (c == 3) { return 1 }
-            if (place(rows, taken, c + 1) == 1) { return 1 }
-            set_row(rows, r, true)
+            if (place(rows, taken, c + 1)^ == 1) { return 1 }
+            set_row(rows, r, true)^
         }
         r = r + 1
     }

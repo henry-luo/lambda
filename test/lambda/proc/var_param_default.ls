@@ -10,11 +10,11 @@ pn grow(var m, extra = {k: 1}) {
 
 pn main() {
     var m = {n: 0, items: []}
-    bump(m, 2)
-    bump(m)
-    bump(by: 5, m: m)
-    grow(m)
-    grow(m, {k: 7})
+    bump(m, 2)^
+    bump(m)^
+    bump(by: 5, m: m)^
+    grow(m)^
+    grow(m, {k: 7})^
     var d = {inner: {n: 10, items: []}}
     bump(d.inner)^
     bump(d.inner, 4)^

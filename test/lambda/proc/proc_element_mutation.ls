@@ -90,12 +90,12 @@ pn test_attr_in_loop() {
 }
 
 pn main() {
-    test_attr_same_type()
-    test_attr_type_change()
-    test_child_assign()
-    test_attr_null_to_container()
-    test_multiple_attr_updates()
-    test_attr_preserves_children()
-    test_child_preserves_attrs()
+    test_attr_same_type()^
+    test_attr_type_change()^
+    test_child_assign()^
+    test_attr_null_to_container()^
+    test_multiple_attr_updates()^
+    test_attr_preserves_children()^
+    test_child_preserves_attrs()^
     test_attr_in_loop()
 }

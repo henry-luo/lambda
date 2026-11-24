@@ -18,11 +18,11 @@ pn main() {
     print([typed_sum(values, 4), erased_sum(values, 4)]); print("\n")
     print([typed_sum([7], 2) is error, erased_sum([1, "x"], 2) is error]); print("\n")
     let snapshot = values
-    typed_set(values, 1, 9)
-    erased_set(values, 2, 11)
+    typed_set(values, 1, 9)^
+    erased_set(values, 2, 11)^
     print([values[1], snapshot[1], values[2], snapshot[2]]); print("\n")
     var open_values = [1, 2]
     let open_snapshot = open_values
-    erased_set(open_values, 0, "z")
+    erased_set(open_values, 0, "z")^
     print([open_values[0], open_snapshot[0]]); print("\n")
 }

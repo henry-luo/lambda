@@ -16,7 +16,7 @@ pn main() {
     var values = [3.0, 4.0, 5.0]
     var sources = [1.0, 2.0, 3.0]
     let snapshot = values
-    update_values(values, sources, 3)
+    update_values(values, sources, 3)^
     print(values); print(" ")
     print(snapshot); print("\n")
 }

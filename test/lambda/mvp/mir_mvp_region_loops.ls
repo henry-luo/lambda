@@ -168,7 +168,7 @@ pn main() {
     let failed_high = reverse(short, 0, 3); let failed_low = reverse(short, -1, 1)
     print(short); print("\n")
     var floating: float[] = [-0.0, 1.5, 0.0, 0.0 / 0.0]
-    reverse_float(floating, 0, 3)
+    reverse_float(floating, 0, 3)^
     print(floating[0] != floating[0]); print(" "); print(1.0 / floating[3] < 0.0); print(" "); print(floating[2]); print("\n")
     print(classify(1, 1, 1)); print(" "); print(classify(1, 1, 2)); print(" ")
     print(classify(1, 2, 2)); print(" "); print(classify(1, 2, 3)); print(" ")

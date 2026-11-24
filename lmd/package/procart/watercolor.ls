@@ -262,9 +262,9 @@ pn drain(var c: float[], n: int, level: float) {
     }
 }
 pub pn dry(var s: Sheet, level: float = 0.0) {
-    if (level < 0.025) { s.wet_cells = evaporate(s.cells, s.width * s.height, 0.0) }
+    if (level < 0.025) { s.wet_cells = evaporate(s.cells, s.width * s.height, 0.0)^ }
     else {
-        drain(s.cells, s.width * s.height, level)
+        drain(s.cells, s.width * s.height, level)^
         if (level <= 0.04) { s.wet_cells = 0 }
     }
 }
@@ -608,28 +608,28 @@ pub pn step(var s: Sheet, adsorption: float[], settings = SETTINGS) {
         // stencil passes read +-1 cell, so they cover the region's interior; copies pad by one.
         let x0 = imax(1, s.x0), x1 = imin(w - 2, s.x1), y0 = imax(1, s.y0), y1 = imin(h - 2, s.y1)
         let px0 = imax(0, s.x0 - 1), px1 = imin(w - 1, s.x1 + 1), py0 = imax(0, s.y0 - 1), py1 = imin(h - 1, s.y1 + 1)
-        copy_rect(s.cells, n, WET_TMP, WET, w, px0, px1, py0, py1)
-        diffuse_wet(s.cells, n, w, s.wet_diffusion, x0, x1, y0, y1)
+        copy_rect(s.cells, n, WET_TMP, WET, w, px0, px1, py0, py1)^
+        diffuse_wet(s.cells, n, w, s.wet_diffusion, x0, x1, y0, y1)^
         if (settings.edges) {
             let pad = s.edge_kernel_large
-            binarize(s.cells, n, w, imax(0, s.x0 - pad), imin(w - 1, s.x1 + pad), imax(0, s.y0 - pad), imin(h - 1, s.y1 + pad))
-            box_blur(s.cells, n, BLUR, w, h, s.edge_kernel, s.x0, s.x1, s.y0, s.y1)
-            box_blur(s.cells, n, BLUR_LARGE, w, h, s.edge_kernel_large, s.x0, s.x1, s.y0, s.y1)
-            darken_edges(s.cells, n, w, s.x0, s.x1, s.y0, s.y1)
+            binarize(s.cells, n, w, imax(0, s.x0 - pad), imin(w - 1, s.x1 + pad), imax(0, s.y0 - pad), imin(h - 1, s.y1 + pad))^
+            box_blur(s.cells, n, BLUR, w, h, s.edge_kernel, s.x0, s.x1, s.y0, s.y1)^
+            box_blur(s.cells, n, BLUR_LARGE, w, h, s.edge_kernel_large, s.x0, s.x1, s.y0, s.y1)^
+            darken_edges(s.cells, n, w, s.x0, s.x1, s.y0, s.y1)^
         }
         velocity(s.cells, n, w, x0, x1, y0, y1, s.velocity_clamp, float(settings.tilt) * 0.08)^
-        copy_rect(s.cells, n, U, U_NEW, w, x0, x1, y0, y1)
-        copy_rect(s.cells, n, V, V_NEW, w, x0, x1, y0, y1)
-        decay(s.cells, n, PRESSURE, 0.94, w, x0, x1, y0, y1)
+        copy_rect(s.cells, n, U, U_NEW, w, x0, x1, y0, y1)^
+        copy_rect(s.cells, n, V, V_NEW, w, x0, x1, y0, y1)^
+        decay(s.cells, n, PRESSURE, 0.94, w, x0, x1, y0, y1)^
         var p: int = 0
         while (p < 3) {
-            copy_rect(s.cells, n, SCRATCH + p, SUSPENDED + p, w, px0, px1, py0, py1)
+            copy_rect(s.cells, n, SCRATCH + p, SUSPENDED + p, w, px0, px1, py0, py1)^
             p = p + 1
         }
-        advect(s.cells, n, w, 0.42 * 0.7, x0, x1, y0, y1)
+        advect(s.cells, n, w, 0.42 * 0.7, x0, x1, y0, y1)^
         p = 0
         while (p < 3) {
-            spread(s.cells, n, p, w, s.pigment_diffusion, x0, x1, y0, y1, px0, px1, py0, py1)
+            spread(s.cells, n, p, w, s.pigment_diffusion, x0, x1, y0, y1, px0, px1, py0, py1)^
             transfer(s.cells, n, p, w, adsorption[3 * p], adsorption[3 * p + 1], adsorption[3 * p + 2], s.x0, s.x1, s.y0, s.y1)^
             p = p + 1
         }

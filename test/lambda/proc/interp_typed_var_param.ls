@@ -15,7 +15,7 @@ pn scale(var x: float[], f: float) {
 }
 pn fromalias(var x: float[]) {
     let keep = x
-    store_f(x, 1, 100.0)
+    store_f(x, 1, 100.0)^
     print("alias ", keep[1], " ", x[1], "\n")
 }
 pn shared_then_write(var x: float[], i: int) {
@@ -25,7 +25,7 @@ pn shared_then_write(var x: float[], i: int) {
 }
 pn rec(var fs: float[], k: int) {
     if (k < 8) {
-        store_f(fs, k % 4, float(k))
+        store_f(fs, k % 4, float(k))^
         rec(fs, k + 1)
     }
 }
@@ -40,7 +40,7 @@ pn main() {
         store_i(is, k % 4, k * 2)^
         field(r)^
         nested(fs, 2)^
-        scale(lit, 2.0)
+        scale(lit, 2.0)^
         k = k + 1
     }
     print(fs, " ", is, " ", lit, " ", r.pos, " ", r.count, "\n")

@@ -23,7 +23,7 @@ pn widths() {
     h[0] = 1e-40f32
     i[0] = 9223372036854775807i64
     j[0] = 18446744073709551615u64
-    bytes(a, 1, 7i8)
+    bytes(a, 1, 7i8)^
     var rejected = false
     convert(a, 300) ^ { rejected = true }
     return [a, saved, b, c, d, e, f, g, h, i, j, rejected]

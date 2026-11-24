@@ -40,9 +40,9 @@ pn main() {
     print(w.cons); print(" ")
     print(snap.cons); print("\n")
     var a: Arr = {l0: null2()}
-    arr_set(a, 0, 0, 1)
+    arr_set(a, 0, 0, 1)^
     var h: Holder = {arr: a}
-    arr_set(a, 0, 1, 2)
+    arr_set(a, 0, 1, 2)^
     print(a.l0); print(" ")
     print(h.arr.l0); print("\n")
 }

@@ -82,15 +82,15 @@ pn conditional_swap(var a: float[], i: int, j: int, enabled: bool) {
 pn main() {
     var a: float[] = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]
     let saved: float[] = a
-    butterfly(a, 8, 2)
+    butterfly(a, 8, 2)^
     print(a); print(" "); print(saved); print("\n")
     var short: float[] = [1.0]
-    butterfly(short, 2, 2)
+    let short_result = butterfly(short, 2, 2)
     print(short); print("\n")
-    butterfly(short, 1, -1)
+    let negative_stride = butterfly(short, 1, -1)
     print(short); print("\n")
     var b: int[] = [1, 2, 3]
-    changing_index(b)
+    changing_index(b)^
     print(b); print("\n")
     print(scale_end(2, 17, 2)); print(" "); print(scale_end(3, 17, 3)); print(" ")
     print(contract_end(1023)); print(" "); print(contract_end(-1023)); print("\n")
@@ -103,26 +103,26 @@ pn main() {
     print(dispatch(1)); print(" "); print(dispatch(2)); print(" "); print(dispatch(3)); print(" ")
     print(dispatch(4)); print(" "); print(dispatch(int(0.0 / 0.0))); print(" "); print(changing_selector()); print("\n")
     var swapping: float[] = [1.0, 2.0, 3.0]
-    conditional_swap(swapping, 0, 2, true)
+    conditional_swap(swapping, 0, 2, true)^
     print(swapping); print("\n")
     let snapshot: float[] = swapping
-    conditional_swap(swapping, 0, 1, true)
-    conditional_swap(swapping, 0, 9, true)
+    conditional_swap(swapping, 0, 1, true)^
+    let bad_swap = conditional_swap(swapping, 0, 9, true)
     print(swapping); print(" "); print(snapshot); print("\n")
-    conditional_swap(swapping, 0, 0, false)
+    conditional_swap(swapping, 0, 0, false)^
     print(swapping); print("\n")
     var partial: float[] = [1.0]
-    conditional_swap(partial, 0, 0, false)
+    let partial_swap = conditional_swap(partial, 0, 0, false)
     print(partial); print("\n")
     var lanes: float[] = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]
     let original: float[] = lanes
     print(stride_rows(lanes, original, 0, 8, 3)); print(" "); print(lanes); print("\n")
     print(stride_rows(lanes, original, 0, 6, 4)); print(" "); print(lanes); print("\n")
     print(stride_rows(lanes, original, 5, 2, 1)); print(" "); print(original); print("\n")
-    moving_limit(lanes, 7)
+    moving_limit(lanes, 7)^
     print(lanes); print("\n")
-    stride_rows(lanes, original, -1, 1, 1)
-    stride_rows(lanes, partial, 0, 3, 1)
+    let negative_row = stride_rows(lanes, original, -1, 1, 1)
+    let partial_row = stride_rows(lanes, partial, 0, 3, 1)
     print(stride_rows(lanes, original, 3, 1, 0)); print(" "); print(lanes); print("\n")
     print(text_matches("abc", "axc", 0, 3)); print(" ")
     print(text_matches("éλz", "éμz", 0, 3)); print(" ")

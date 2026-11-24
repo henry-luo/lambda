@@ -27,8 +27,8 @@ pn main() {
     // evaluation is untouched
     var l1 = {a: 1, b: "x"}
     var l2 = {a: 2, b: "y"}
-    grow(l1, 3, 0)
-    grow(l2, 3, 10)
+    grow(l1, 3, 0)^
+    grow(l2, 3, 10)^
     let l3 = {a: 3, b: "z"}
     print("literal: " ++ format(l1, 'json') ++ " " ++ format(l2, 'json') ++
         " fresh=" ++ string(len(l3)) ++ "\n")
@@ -81,7 +81,7 @@ pn main() {
 
     // the residue case: many keys from a literal start, read back
     var wide = {seed: 0}
-    grow(wide, 300, 0)
+    grow(wide, 300, 0)^
     print("wide: len=" ++ string(len(wide)) ++ " g0=" ++ string(wide.g0) ++
         " g150=" ++ string(wide["g150"]) ++ " g299=" ++ string(wide.g299) ++
         " seed=" ++ string(wide.seed) ++ "\n")

@@ -26,9 +26,9 @@ pn main() {
     print([c.k, c.children[0].k, c.children[0].children[0].k]); print("\n")
     var left = {k:0}
     var right = {k:0}
-    rotate(left, right, 3)
+    rotate(left, right, 3)^
     print([left.k, right.k]); print("\n")
     var counter = {k:0}
-    same_home(counter, 10000)
+    same_home(counter, 10000)^
     print(counter.k); print("\n")
 }

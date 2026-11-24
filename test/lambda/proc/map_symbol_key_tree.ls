@@ -21,9 +21,9 @@ pn fill_str(var r: map, n: int, base: int) {
 
 pn main() {
     var a = {}
-    fill_sym(a, 4, 0)
+    fill_sym(a, 4, 0)^
     var b = {}
-    fill_str(b, 4, 10)
+    fill_str(b, 4, 10)^
     print("sym: " ++ format(a, 'json') ++ "\n")
     print("str: " ++ format(b, 'json') ++ "\n")
 
@@ -54,7 +54,7 @@ pn main() {
 
     // a wide spread, built twice from one source; the source is unchanged
     var wide = {}
-    fill_str(wide, 300, 0)
+    fill_str(wide, 300, 0)^
     let c1 = {*:wide, extra: 1}
     let c2 = {*:wide, extra: 2}
     print("wide: len=" ++ string(len(c1)) ++ " k299=" ++ string(c1["k299"]) ++

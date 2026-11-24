@@ -28,7 +28,7 @@ pn main() {
     print([reversed([0.5], 0, 0.25), relation([0.5], 0, 0.25)]); print("\n")
     let invalid = relation(int("bad"), 0, 0.5)
     print(match invalid { case error: true default: false }); print("\n")
-    change_kind([0.25])
+    change_kind([0.25])^
     print([find_prefix([0.25, 0.75, 1.0], 0.5), find_prefix([nan], 0.5),
         find_prefix([null], 0.5), find_prefix([], 0.5)]); print("\n")
 }

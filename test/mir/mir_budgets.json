@@ -540,7 +540,7 @@
       "name": "lambda_mvp_array_regions",
       "script": "test/mir/lambda/mvp_array_regions.ls",
       "language": "lambda",
-      "description": "D4.3.3/D8.6.1: typed and erased array kernels include native loads/stores, checked misses, COW snapshots and required roots/homes. Reviewed 2026-11-10 (D6.3.2/D8.6.1): staged nullable primitive literals add a packed-construction alternative (+4 instructions, +2 root stores, +1 static safepoint in main). Each arm allocates once; roots and scalar homes stay unchanged. Reviewed final-five optimization fixes, 2026-11-10 (D8.6.1/D6.3.2): +6 typed_sum instructions skip admission on a proved present scalar; +21 main instructions prepare a shared indexed owner before its closed var mutator and refresh native witnesses. The cold preparation adds two root stores and one static safepoint, with unchanged root/home counts. Unique owners skip the helper. Review: temp/mvp_opt_remaining5/review-{typed_sum,main}.diff; exact darwin release caps, no slack. Reviewed 2026-11-10 (D8.6.1): the erased reduction adds 17 instructions to discharge and publish its boxed accumulator across the affine loop; typed_sum shrinks by 4, giving +13 module instructions. Frame/root/home counts do not grow. Review: temp/result54_tuning/size-review/opcode-deltas.json; release candidates 12 and 14 agree, with zero slack.",
+      "description": "D4.3.3/D8.6.1: typed and erased array kernels include native loads/stores, checked misses, COW snapshots and required roots/homes. Reviewed 2026-11-10 (D6.3.2/D8.6.1): staged nullable primitive literals add a packed-construction alternative (+4 instructions, +2 root stores, +1 static safepoint in main). Each arm allocates once; roots and scalar homes stay unchanged. Reviewed final-five optimization fixes, 2026-11-10 (D8.6.1/D6.3.2): +6 typed_sum instructions skip admission on a proved present scalar; +21 main instructions prepare a shared indexed owner before its closed var mutator and refresh native witnesses. The cold preparation adds two root stores and one static safepoint, with unchanged root/home counts. Unique owners skip the helper. Review: temp/mvp_opt_remaining5/review-{typed_sum,main}.diff; exact darwin release caps, no slack. Reviewed 2026-11-10 (D8.6.1): the erased reduction adds 17 instructions to discharge and publish its boxed accumulator across the affine loop; typed_sum shrinks by 4, giving +13 module instructions. Frame/root/home counts do not grow. Review: temp/result54_tuning/size-review/opcode-deltas.json; release candidates 12 and 14 agree, with zero slack. Reviewed 2026-11-24 (S7.5.5v2/D6.3.3): three acknowledged writer calls add three root stores in one reused root slot. Safepoints and scalar homes stay fixed.",
       "budgets": {
         "default": {
           "module_insns": 2692,
@@ -599,8 +599,8 @@
             },
             {
               "name": "mvp_#_main",
-              "roots": 6,
-              "root_stores": 68,
+              "roots": 7,
+              "root_stores": 71,
               "scalar_homes": 7,
               "number_scratch": 0,
               "safepoints": 50

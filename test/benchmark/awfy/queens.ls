@@ -21,14 +21,14 @@ pn place_queen(var free_rows, var free_maxs, var free_mins, var queen_rows, c) {
     for r in 0 to 7 {
         if (get_row_column(free_rows, free_maxs, free_mins, r, c) == 1) {
             queen_rows[r] = c
-            set_row_column(free_rows, free_maxs, free_mins, r, c, false)
+            set_row_column(free_rows, free_maxs, free_mins, r, c, false)^
             if (c == 7) {
                 return 1
             }
-            if (place_queen(free_rows, free_maxs, free_mins, queen_rows, c + 1) == 1) {
+            if (place_queen(free_rows, free_maxs, free_mins, queen_rows, c + 1)^ == 1) {
                 return 1
             }
-            set_row_column(free_rows, free_maxs, free_mins, r, c, true)
+            set_row_column(free_rows, free_maxs, free_mins, r, c, true)^
         }
     }
     return 0

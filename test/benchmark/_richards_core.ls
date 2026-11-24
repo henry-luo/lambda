@@ -137,10 +137,10 @@ pn tcb_run_task(var w, tid) {
         w.tasks[tid].input = msg_link
         var inp2 = w.tasks[tid].input
         if (inp2 == NONE) {
-            tcb_set_running(w, tid)
+            tcb_set_running(w, tid)^
         }
         if (inp2 != NONE) {
-            tcb_set_packet_pending(w, tid)
+            tcb_set_packet_pending(w, tid)^
         }
     }
     // the running task's data record is w.datas[tid]; tid is also w.ct here
@@ -348,7 +348,7 @@ pn benchmark() {
              tasks: fill(6, null), datas: fill(6, null), pkts: fill(8, null)}
 
     // createIdler(IDLER, 0, null, createRunning) — pp=false, tw=false, th=false
-    create_task(w, IDLER, 0, NONE, false, false, false, FN_IDLE)
+    create_task(w, IDLER, 0, NONE, false, false, false, FN_IDLE)^
     w.datas[IDLER] = {control: 1, icount: 1000}
 
     // createWorker(WORKER, 1000, workQ, createWaitingWithPacket)
@@ -372,11 +372,11 @@ pn benchmark() {
     w.datas[HANDLER_B] = {work_in: NONE, device_in: NONE}
 
     // createDevice(DEVICE_A, 4000, null, createWaiting) — pp=false, tw=true, th=false
-    create_task(w, DEVICE_A, 4000, NONE, false, true, false, FN_DEVICE)
+    create_task(w, DEVICE_A, 4000, NONE, false, true, false, FN_DEVICE)^
     w.datas[DEVICE_A] = {pending: NONE}
 
     // createDevice(DEVICE_B, 5000, null, createWaiting)
-    create_task(w, DEVICE_B, 5000, NONE, false, true, false, FN_DEVICE)
+    create_task(w, DEVICE_B, 5000, NONE, false, true, false, FN_DEVICE)^
     w.datas[DEVICE_B] = {pending: NONE}
 
     schedule(w)^

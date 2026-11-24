@@ -412,7 +412,7 @@ pn p_read_string_internal(var p: Parser) string^ {
         }
         cur = (p.cur)
     }
-    var result: string = p_end_capture(p)
+    var result: string = p_end_capture(p)^
     p_read(p)
     return result
 }
@@ -469,7 +469,7 @@ pn p_read_number(var p: Parser) JsonScalar^ {
     }
     p_read_fraction(p)^
     p_read_exponent(p)
-    var s: string = p_end_capture(p)
+    var s: string = p_end_capture(p)^
     var r = jv_number(s)
     return r
 }

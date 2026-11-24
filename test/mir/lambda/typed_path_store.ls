@@ -59,7 +59,7 @@ pn main() {
     print("\n")
     // Keys are evaluated once, including the cold/shared-store arm.
     let before_key = world
-    world.rows[next_index(world)].value = 12
+    world.rows[next_index(world)^].value = 12
     print([before_key.rows[0].value, world.rows[0].value, world.counter])
     print("\n")
     let before_replace = world

@@ -1517,6 +1517,9 @@ typedef struct AstFuncNode : AstNode {
     bool cow_param_effects_final;
     // The resolver saw no explicit return in this source body.
     bool lambda_no_explicit_return;
+    // S7.5.5v2: a store can complete this procedure before its normal result.
+    bool lambda_store_error_exit;
+    bool lambda_has_inner_store_outcome;
     uint32_t declared_effects;  // carried from syntax until TypeFunc is published
     Type* declared_return_type;
 } AstFuncNode;

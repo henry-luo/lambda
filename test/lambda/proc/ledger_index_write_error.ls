@@ -28,12 +28,40 @@ pn write_local_block(var reached) {
     reached[1] = true
 }
 
+pn write_local_tail(index) {
+    if (true) {
+        var xs = [1]
+        xs[index] = 9
+        23
+    }
+}
+
+pn contain_local_write(index) {
+    if (true) {
+        var xs = [1]
+        xs[index] = 9
+    }
+    return 23
+}
+
+pn proven_local_write() {
+    var xs = [1]
+    xs[0] = 9
+    return xs[0]
+}
+
+pn forward_write(index, var reached) int^ {
+    write_local(index, reached)^
+}
+
 pn main() {
     var xs = [1]
     let snapshot = xs
     var reached = [false]
-    let local = write_local(5, reached) ^ { ^ }
-    print([local is error, local.code, reached[0]])
+    let local = write_local(5, reached)
+    let forwarded = forward_write(5, reached) ^ { ^ }
+    let tail = write_local_tail(5) ^ { ^ }
+    print([local is error, local.code, forwarded.code, tail.code, reached[0]])
     print("\n")
     let high = write_at(xs, 5, reached) ^ { ^ }
     let negative = write_at(xs, -1, reached) ^ { ^ }
@@ -49,7 +77,9 @@ pn main() {
 
     // the failed inner store abandons its declaring block, preserving the outer tail.
     var block_reached = [false, false]
-    write_local_block(block_reached)
+    let block_result = write_local_block(block_reached)
+    contain_local_write(5)
+    proven_local_write()
     print(block_reached)
     print("\n")
 
