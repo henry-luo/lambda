@@ -1,4 +1,4 @@
-"""Exercise embedded NUL through local I/O, DOM text, and Radiant layout."""
+"""Exercise embedded NUL through local I/O, the editor, DOM text, and layout."""
 
 import argparse
 import json
@@ -62,6 +62,50 @@ def main():
             assert PAYLOAD.encode() + b'tail' in run(exe, result, backend=backend).replace(
                 b'"', b""
             ).replace(b"\n", b"")
+
+        source_html = root / "source.html"
+        html_bytes = b"<p>BEFORE\x00AFTER</p>\r\n"
+        source_html.write_bytes(html_bytes)
+        editor_events = root / "editor-events.json"
+        editor_report = root / "editor-result.json"
+        editor_events.write_text(json.dumps({"events": [
+            {"type": "assert_count", "target": {"selector": ".src-text"}, "count": 1},
+            {"type": "click", "target": {"text": "AFTER"}},
+            {"type": "key_combo", "key": "s", "mods_str": "super"},
+            {"type": "assert_text", "target": {"selector": ".edit-status"},
+             "contains": "Saved source.html"},
+        ]}), encoding="utf-8")
+        run(exe, "edit", source_html, "--headless", "--event-file", editor_events,
+            "--event-result", editor_report)
+        assert json.loads(editor_report.read_text())["assertions"] == {"passed": 2, "failed": 0}
+        assert source_html.read_bytes() == html_bytes
+
+        invalid = root / "invalid.txt"
+        invalid_bytes = b"before\x00\xffafter"
+        invalid.write_bytes(invalid_bytes)
+        for options in [[], ["--source"]]:
+            rejected = subprocess.run([exe, "edit", invalid, "--headless", *options],
+                                      cwd=ROOT, capture_output=True, timeout=60)
+            assert rejected.returncode and b"not safely readable as UTF-8 text" in rejected.stderr, rejected
+            assert invalid.read_bytes() == invalid_bytes
+
+        reload_probe = root / "reload.ls"
+        reload_probe.write_text(
+            f'''import session: lambda.editor.session
+                import source: lambda.editor.surface.source
+                pn main() {{
+                    let path = {json.dumps(str(invalid))}
+                    let initial = "before\\u0000after"
+                    let loaded = source.descriptor.import_text(initial)^
+                    let opened = session.new_session(path, source.descriptor, initial, loaded)^
+                    let reloaded = session.reload(opened)^
+                    print(reloaded.ok == false and contains(reloaded.status, "UTF-8"))
+                }}''',
+            encoding="utf-8",
+        )
+        for backend in ["interp", "jit"]:
+            assert run(exe, "run", reload_probe, backend=backend).strip() == b"true"
+        assert invalid.read_bytes() == invalid_bytes
 
         page = root / "view.ls"
         page.write_text(

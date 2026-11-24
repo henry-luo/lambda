@@ -540,10 +540,9 @@ fn closed(hist) any^ {
 }
 
 // Apply one delta: the new buffer, selection, and history.
-fn edit_step(st, d) {
+fn edit_step(st, d, head = null) {
   let r = buf.apply_delta(st.b, d)
-  let head = buf.insert_end(d.from, d.insert)
-  let after = caret(head)
+  let after = caret(if (head != null) head else buf.insert_end(d.from, d.insert))
   let entry = {inverses: [r.inverse], before: st.sel, after: after, typing: typed_char(d), at: st.now}
   let undo = if (joins_last(st.hist, d, st.now)) {
                let prev = st.hist.undo[len(st.hist.undo) - 1];
@@ -552,6 +551,22 @@ fn edit_step(st, d) {
              }
              else [*st.hist.undo, entry]
   {b: r.buf, sel: after, hist: {undo: undo, redo: []}, steps: [{delta: d, applied: r}]}
+}
+
+// Move the selected span and the intervening text in one undoable delta.
+fn move_drop(st, drop) any^ {
+  let a = sel_from(st.sel)
+  let z = sel_to(st.sel)
+  let p = sel_from(drop)
+  let earlier = buf.pos_cmp(p, a) < 0
+  if (buf.pos_cmp(a, z) == 0 or (not earlier and buf.pos_cmp(p, z) <= 0)) null
+  else {
+    let moved = buf.text_between(st.b, a, z)
+    let rotated = if (earlier) moved ++ buf.text_between(st.b, p, a)
+                  else buf.text_between(st.b, z, p) ++ moved
+    let d = buf.delta(if (earlier) p else a, if (earlier) z else p, buf.text_lines(rotated))
+    edit_step(st, d, if (earlier) buf.insert_end(p, buf.text_lines(moved)) else null)
+  }
 }
 
 // Undo pops from one stack and pushes its inverse on the other; redo is the
@@ -894,12 +909,18 @@ pub fn source_view(session, text, dirty) {
   {mode: 'source', session: s, doc: current, status: "Source view."}
 }
 
+pub fn reloaded_view(session, text, status) =>
+  {*: source_view({*: session, disk_text: text}, text, false), status: status}
+
 // The rich view of the buffer, or {status} saying why its format cannot keep
 // the text exactly (the rule that refuses such a file at open,
 // Radiant_Design_Edit_Mode §2).
 pn rich_view(session, b) {
   let format = session.rich_format
   let text = buf.to_text(b)
+  if (sess.needs_nul_source(format, text)^) {
+    return {status: "This document contains NUL characters. Edit it in source view."}
+  }
   let loaded = format.import_text(text) ^ { {error: ^.message} }
   if (not (loaded.error is null)) { return {status: "Cannot show the " ++ format.name ++ " view: " ++ loaded.error} }
   let mismatch = format.check_roundtrip(loaded.doc, loaded.envelope)
@@ -979,9 +1000,12 @@ on editaction(evt) {
   vw = mounted(vw, evt.target, rev)
   let input_type = evt.input_type
   let target = action_selection(b, vw, hs, sel, evt)
+  let drop = if (input_type == "insertFromDrop" and evt.source_target_ranges != null and
+                 len(evt.source_target_ranges) > 0)
+    model_selection(b, vw.top, hs, evt.source_target_ranges[0]) else null
   // The DOM shows only the window's part of the selection, so copy and cut
   // hand Radiant the model's text to put on the clipboard.
-  let copied = clipboard_text(b, target)
+  let copied = if (input_type == "copy" or input_type == "deleteByCut") clipboard_text(b, target) else null
   if (input_type == "copy") {
     return edit_result.with_clipboard_text(
       edit_result.model_applied(false, false, false, "", source_selection_of(b, vw, hs, sel), rev), copied)
@@ -991,8 +1015,9 @@ on editaction(evt) {
   let st = {b: b, sel: target, hist: hist, now: evt.time_stamp}
   let next = if (composing) composition_step(st, comp, input_type, evt.data)
              else if (history) history_step(st, input_type == "historyUndo")
+             else if (drop != null and evt.drag_move == true) move_drop(st, drop)
              else {
-               let d = intent_edit(b, target, input_type, evt.data)
+               let d = intent_edit(b, if (drop != null) drop else target, input_type, evt.data)
                if (d == null) null else edit_step(st, d)
              }
   if ((next == null)^) {

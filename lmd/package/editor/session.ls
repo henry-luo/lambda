@@ -24,45 +24,22 @@ pub let normal_path = paths.normal_path
 // a native save panel opens).
 pub let resolve_path = paths.resolve_path
 
-// Plain Netpbm images can be UTF-8, so inspect their dimensions as well.
-fn is_netpbm(source) any^ {
-  let prefix = slice(source, 0, min(len(source), 4096))^
-  if (not (slice(prefix, 0, min(len(prefix), 2))^ in ["P1", "P2", "P3", "P4", "P5", "P6"])) { return false }
-  let lines = split(prefix, "\n")^
-  let uncommented = join([for (line in lines) {
-    let at = index_of(line, "#")
-    if (at == null) line else slice(line, 0, at)^
-  }], " ")^
-  let words = [for (word in split(replace(replace(uncommented, "\t", " ")^, "\r", " ")^, " ")^ where word != "") word]
-  if (len(words) < 3 or not (words[0] in ["P1", "P2", "P3", "P4", "P5", "P6"])) false
-  else {
-    let width = int(words[1]) ^ { null }
-    let height = int(words[2]) ^ { null }
-    width != null and height != null and width > 0 and height > 0
-  }
-}
-fn is_non_text_content(source) any^ =>
-  starts_with(source, "%PDF-") or starts_with(source, "GIF87a") or starts_with(source, "GIF89a") or is_netpbm(source)^
-
-// Opening and reloading must apply the same byte and content checks.
+// D10.2.6v2 validates and decodes the same byte snapshot on open and reload.
 pub pn read_text(path) string^ {
-  let source = input(path, 'text') ^ { raise error("could not read " ++ path, ^) }
-  if (is_non_text_content(source)^) {
-    raise error("'" ++ basename(path) ++ "' is a non-text document and cannot be edited")
-  }
   let bytes = input(path, 'binary') ^ { raise error("could not read " ++ path, ^) }
-  // D10.2.6 classifies embedded NULs as binary for editor routing.
-  if (index_of(source, "\u0000") != null) {
-    raise error("the file contains NUL bytes and is treated as binary. Binary file editing is not yet supported")
+  // Local input represents a zero-byte file as null.
+  if (bytes == null) { return "" }
+  if (not utf8.is_valid(bytes)^) {
+    raise error("the file is not safely readable as UTF-8 text")
   }
-  if ((bytes != null and (binary(source)^ != bytes or not utf8.is_valid(bytes)^))^) {
-    raise error("the file is not safely readable as text")
-  }
-  return source
+  return parse(bytes, 'text')^
 }
 pub pn read_snapshot(format, path) any^ {
   return if (format.binary == true) input(path, 'binary')^ else read_text(path)^
 }
+
+pub fn needs_nul_source(format, text) any^ =>
+  format.binary != true and format.surface != 'source' and contains(text, "\u0000")
 
 fn same_path(a, b) any^ => normal_path(a) == normal_path(b)
 fn source_suffix(path) any^ {
@@ -168,6 +145,9 @@ pub pn save(session, doc, target, overwrite) {
 pub pn reload(session) {
   let source = read_snapshot(session.format, session.path) ^ { ^ }
   if (source is error) { return {ok: false, status: "Could not reload: " ++ source.message} }
+  if (needs_nul_source(session.format, source)^) {
+    return {ok: true, source_text: source, status: "Reloaded " ++ session.name ++ " in source view."}
+  }
   let loaded = session.format.import_text(source) ^ { {error: ^.message} }
   if (not (loaded.error is null)) {
     return {ok: false, status: "Could not reload: " ++ loaded.error}
@@ -176,5 +156,5 @@ pub pn reload(session) {
   if ((mismatch != null)^) { return {ok: false, status: "Could not reload: " ++ mismatch} }
   // Keep view-switch metadata while replacing the saved checkpoint.
   {ok: true, session: {*: session, disk_text: source, envelope: loaded.envelope, saved_doc: loaded.doc},
-   doc: loaded.doc, status: "Reloaded " ++ session.name ++ " from disk."}
+   doc: loaded.doc, source_text: null, status: "Reloaded " ++ session.name ++ " from disk."}
 }

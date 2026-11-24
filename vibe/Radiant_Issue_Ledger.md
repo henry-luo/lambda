@@ -20,6 +20,10 @@ observations still require re-verification. Add new Radiant issues here.
 
 ## Open issues
 
+<a id="ri-224"></a>
+
+- [RI-224 — Source editor loses bytes after NUL on paste and drag](<Radiant_Issue_Ledger (fixed).md#ri-224>).
+
 <a id="ri-223"></a>
 
 - [RI-223 — Form control labels truncate at embedded NUL](<Radiant_Issue_Ledger (fixed).md#ri-223>).

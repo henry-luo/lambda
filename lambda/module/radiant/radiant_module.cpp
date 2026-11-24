@@ -3304,8 +3304,9 @@ RADIANT_C_API Item fn_radiant_dom_edit_selection_text(Item node_item,
     if (!invocation || !invocation->state) return ItemNull;
     Arena* arena = mem_arena_create(nullptr, MEM_ROLE_TEMP, "edit.selection_text");
     if (!arena) return ItemNull;
-    char* value = state_store_extract_selection_text(invocation->state, arena);
-    Item result = value ? radiant_string_item(value) : ItemNull;
+    size_t length = 0;
+    char* value = state_store_extract_selection_text(invocation->state, arena, &length);
+    Item result = value ? Item{.item = s2it(heap_create_name(value, length))} : ItemNull;
     arena_destroy(arena);
     return result;
 }

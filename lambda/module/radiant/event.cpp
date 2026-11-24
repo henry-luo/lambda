@@ -1165,21 +1165,22 @@ static bool copy_current_selection_to_clipboard(DocState* state, const char* pre
     View* surface_target = canonical_selection_focus_target(state);
 
     Arena* temp_arena = mem_arena_create(NULL, MEM_ROLE_TEMP, "event.arena");
-    char* text = state_store_extract_selection_text(state, temp_arena);
+    size_t text_length = 0;
+    char* text = state_store_extract_selection_text(state, temp_arena, &text_length);
     char* html = state_store_extract_selection_html(state, temp_arena);
     bool copied = false;
     if (html && html[0]) {
-        clipboard_copy_rich(html, text ? text : "");
-        log_debug("%s: copied rich selection html=%zu text=%zu", prefix ? prefix : "copy selection", strlen(html), text ? strlen(text) : 0);
+        clipboard_copy_rich(html, text, text_length);
+        log_debug("%s: copied rich selection html=%zu text=%zu", prefix ? prefix : "copy selection", strlen(html), text_length);
         copied = true;
     } else if (text) {
-        clipboard_copy_text(text);
-        log_debug("%s: copied plain selection text=%zu", prefix ? prefix : "copy selection", strlen(text));
+        clipboard_copy_rich(nullptr, text, text_length);
+        log_debug("%s: copied plain selection text=%zu", prefix ? prefix : "copy selection", text_length);
         copied = true;
     }
     if (copied) {
         log_clipboard_copy(state, surface_target, prefix,
-                           text ? (uint32_t)strlen(text) : 0,
+                           (uint32_t)text_length,
                            html ? (uint32_t)strlen(html) : 0);
     }
     arena_destroy(temp_arena);
@@ -1192,7 +1193,8 @@ static bool copy_current_selection_to_clipboard(DocState* state, const char* pre
 static bool copy_model_payload_to_clipboard(DocState* state, Item result, const char* prefix) {
     char* image = radiant_edit_result_string_copy(result, "clipboard_image");
     char* html = radiant_edit_result_string_copy(result, "clipboard_html");
-    char* text = radiant_edit_result_string_copy(result, "clipboard_text");
+    size_t text_length = 0;
+    char* text = radiant_edit_result_string_copy(result, "clipboard_text", &text_length);
     if (image && clipboard_store_write_image(image, html, text)) {
         mem_free(image);
         mem_free(html);
@@ -1200,16 +1202,11 @@ static bool copy_model_payload_to_clipboard(DocState* state, Item result, const 
         return true;
     }
     mem_free(image);
-    bool copied = (html && html[0]) || (text && text[0]);
-    if (html && html[0]) {
-        // model selections can name rich fragments without an image, including table cells.
-        clipboard_copy_rich(html, text ? text : "");
-    } else if (copied) {
-        clipboard_copy_text(text);
-    }
+    bool copied = (html && html[0]) || text_length;
     if (copied) {
+        clipboard_copy_rich(html, text, text_length);
         log_clipboard_copy(state, canonical_selection_focus_target(state), prefix,
-                           text ? (uint32_t)strlen(text) : 0, html ? (uint32_t)strlen(html) : 0);
+                           (uint32_t)text_length, html ? (uint32_t)strlen(html) : 0);
     }
     mem_free(html);
     mem_free(text);
@@ -1543,9 +1540,11 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
 
     if (intent && intent->type != INPUT_INTENT_NONE) {
         const char* input_type = input_intent_type_name(intent->type);
+        // Both package payloads share a length-delimited snapshot of the text.
+        Item data = intent->data
+            ? Item{.item = s2it(builder.createString(intent->data, intent->text_length()))} : ItemNull;
         mb.put("input_type", input_type);
-        if (intent->data) mb.put("data", intent->data);
-        else mb.putNull("data");
+        mb.put("data", data);
         if (intent->data_mime) mb.put("mime", intent->data_mime);
         else mb.putNull("mime");
         // ES17: an undo/redo hands the template the entry to install — the
@@ -1565,8 +1564,7 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
 
         MapBuilder im = builder.map();
         im.put("input_type", input_type);
-        if (intent->data) im.put("data", intent->data);
-        else im.putNull("data");
+        im.put("data", data);
         if (intent->data_mime) im.put("mime", intent->data_mime);
         else im.putNull("mime");
         if (intent->html_data) {
@@ -2309,11 +2307,16 @@ bool radiant_edit_result_bool(Item result, const char* name) {
     return get_type_id(field) == LMD_TYPE_BOOL && it2b(field);
 }
 
-char* radiant_edit_result_string_copy(Item result, const char* name) {
+char* radiant_edit_result_string_copy(Item result, const char* name, size_t* length) {
     Item field = radiant_edit_result_field(result, name);
+    if (length) *length = 0;
     if (get_type_id(field) == LMD_TYPE_NULL) return nullptr;
     const char* text = fn_to_cstr(field);
-    return text ? mem_strdup(text, MEM_CAT_TEMP) : nullptr;
+    if (!text) return nullptr;
+    size_t size = is_text_type_id(get_type_id(field)) ? field.get_len() : strlen(text);
+    char* copy = mem_dup_n(text, size, MEM_CAT_TEMP);
+    if (copy && length) *length = size;
+    return copy;
 }
 
 static bool apply_edit_result_source_selection(EventContext* evcon,
@@ -14768,9 +14771,9 @@ static void handle_event_impl(UiContext* uicon, DomDocument* doc, RdtEvent* even
                             if (same_rich_surface) {
                                 Arena* drag_arena = mem_arena_create(
                                     NULL, MEM_ROLE_TEMP, "rich.drag.arena");
-                                char* drag_text = state_store_extract_selection_text(
-                                    state, drag_arena);
                                 InputIntent drop_intent;
+                                char* drag_text = state_store_extract_selection_text(
+                                    state, drag_arena, &drop_intent.data_length);
                                 drop_intent.type = INPUT_INTENT_INSERT_FROM_DROP;
                                 drop_intent.data = drag_text ? drag_text : "";
                                 drop_intent.data_mime = "text/plain";

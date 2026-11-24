@@ -14,6 +14,18 @@ are unchanged. Full evidence is under `../../lambda/temp/kianhup-style/`.
 
 ## Fixed issues
 
+<a id="ri-224"></a>
+
+### RI-224 — Source editor loses bytes after NUL on paste and drag
+
+**Fixed 2026-11-24.** Copy and paste of `A`, U+0000, and `B` inserted just
+`A`. The clipboard store and package event adapter now retain the byte length.
+A mouse drag also truncated the selection because the range extractor took a
+C-string copy. The extractor now returns the full span with its length, and
+the source surface applies the drop to the target range with one undo step.
+`edit_src_nul.json` and `edit_src_nul_drag.json` verify the source behavior under
+D10.2.6v2, D10.2.1 and S2.5.9v2.
+
 <a id="ri-223"></a>
 
 ### RI-223 — Form control labels truncate at embedded NUL
@@ -48,7 +60,7 @@ painting use explicit lengths.
 
 The paint path uses the font's U+0000 glyph when present and falls back
 to U+25A0. SVG export uses U+25A0 to keep the XML parseable. S2.5.9v2
-defines the source code point. D10.2.6 governs binary admission in the
+defines the source code point. D10.2.6v2 governs text admission in the
 source editor. HTML source continues through the HTML tokenizer.
 
 `test/test_nul_text.py` exercises the headless viewer, text runs at

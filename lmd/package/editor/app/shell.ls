@@ -428,6 +428,10 @@ on edit_dialog(req) {
   // the file dialogs' actions are shared with the source surface (files.ls)
   let filed = files.dialog_action(action, req.node,
     {session: session, doc: editor.doc, status: status, dialog: dialog, after_save: after_save})^
+  if ((filed.source_text != null)^) {
+    emit("edit_switch", src.reloaded_view(session, filed.source_text, filed.status)^)
+    return
+  }
   if (filed.handled^) {
     session = filed.session
     status = filed.status

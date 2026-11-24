@@ -262,6 +262,10 @@ on edit_dialog(req) {
   }
   let result = files.dialog_action(req.action, req.node,
     {session: session, doc: doc, status: status, dialog: dialog, after_save: after_save})^
+  if ((result.source_text != null)^) {
+    emit("edit_switch", src.reloaded_view(session, result.source_text, result.status)^)
+    return
+  }
   session = result.session
   status = result.status
   dialog = result.dialog

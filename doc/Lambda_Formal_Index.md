@@ -503,7 +503,7 @@ in full — including lines too long for a viewer — run
 | SO46 | 3531 | How an element pattern spells *content must be empty* |
 | SO48 | 3532 | PDF file content: remaining object kinds, decimal encoding, virtual source containers, direct array/scalar … |
 
-## Design — [`Lambda_Formal_Design.md`](Lambda_Formal_Design.md) v70.1.0 (2026-11-24)
+## Design — [`Lambda_Formal_Design.md`](Lambda_Formal_Design.md) v71.0.0 (2026-11-24)
 
 | ID | Line | Title |
 |---|---|---|
@@ -779,20 +779,20 @@ in full — including lines too long for a viewer — run
 | D10.2.3* | 1716 | Document math keeps the layout policy of its notation |
 | D10.2.4 | 1723 | Bundled fonts are shared resources |
 | D10.2.5* | 1727 | Graphical document editing keeps isolated errors read-only |
-| D10.2.6* | 1735 | NUL bytes route a file to binary editing |
-| **§D11** | 1741 | *Security and Capabilities* |
-| **§D11.1** | 1746 | *Trust and IO* |
-| D11.1.1* | 1748 | There are three trust tiers |
-| D11.1.2* | 1756 | One central IO API is the only IO door |
-| **§D11.2** | 1762 | *Apps and scripts* |
-| D11.2.1* | 1764 | Apps and scripts run inside an admitted root |
-| D11.2.2* | 1773 | Create freely; overwrite only with approval |
-| D11.2.3* | 1781 | The trusted host owns the grant settings |
-| D11.2.4* | 1789 | Network access is denied by default; updates are a host service |
-| D11.2.5* | 1798 | Uninstall keeps private app data |
-| **§D11.3** | 1804 | *Media capabilities* |
-| D11.3.1* | 1806 | Audible output depends on the document origin |
-| D11.3.2* | 1818 | The microphone needs explicit acquisition and separate grants |
+| D10.2.6v2 | 1735 | Text editing admits correctly encoded text |
+| **§D11** | 1742 | *Security and Capabilities* |
+| **§D11.1** | 1747 | *Trust and IO* |
+| D11.1.1* | 1749 | There are three trust tiers |
+| D11.1.2* | 1757 | One central IO API is the only IO door |
+| **§D11.2** | 1763 | *Apps and scripts* |
+| D11.2.1* | 1765 | Apps and scripts run inside an admitted root |
+| D11.2.2* | 1774 | Create freely; overwrite only with approval |
+| D11.2.3* | 1782 | The trusted host owns the grant settings |
+| D11.2.4* | 1790 | Network access is denied by default; updates are a host service |
+| D11.2.5* | 1799 | Uninstall keeps private app data |
+| **§D11.3** | 1805 | *Media capabilities* |
+| D11.3.1* | 1807 | Audible output depends on the document origin |
+| D11.3.2* | 1819 | The microphone needs explicit acquisition and separate grants |
 | DO1 | 1910 | Nullable-lane residue: boxed fallback for `any`, `number` and unions; |
 | DO2 | 1914 | Scalar-home audits: result-bearing dispatch helpers, resume-slot reads, exception-peek rematerialization, the … |
 | DO3 | 1917 | Boxing: do union parameters stay boxed? Does the return type take part in unboxed-call selection? What is the … |

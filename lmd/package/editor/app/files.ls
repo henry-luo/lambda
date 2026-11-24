@@ -168,7 +168,8 @@ pub pn save_now(session, doc, node) {
 // after_save}. Returns `st` updated, with `handled` (false for an action that
 // belongs to the surface) and `reloaded` (the document read back from disk,
 // or null).
-pub pn dialog_action(action, node, st) {
+pub pn dialog_action(action, node, before) {
+  let st = {*: before, source_text: null}
   let session = st.session
   let dialog = st.dialog
   if (action == "cancel") {
@@ -184,6 +185,12 @@ pub pn dialog_action(action, node, st) {
   if (action == "reload") {
     let result = sess.reload(session)
     if ((not result.ok)^) { return {*: st, status: result.status, handled: true, reloaded: null} }
+    if ((result.source_text != null)^) {
+      dom.set_close_guard(node, false)
+      dom.set_window_title(node, sess.window_title(session, false)^)
+      return {*: st, status: result.status, dialog: null, handled: true, reloaded: null,
+              source_text: result.source_text}
+    }
     sync_window(node, result.session, result.doc)^
     return {*: st, session: result.session, status: result.status, dialog: null, handled: true,
             reloaded: result.doc}

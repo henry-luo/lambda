@@ -64,8 +64,8 @@ the language precedents.
 String storage carries an explicit byte length, so string operations can
 read through NUL. Formats and host APIs have their own rules for admitting
 the character. JSON can escape it. XML formatting returns an error if the
-output would contain the code point (S2.5.9v2). The editor routes a file
-containing a NUL byte to binary editing under D10.2.6.
+output would contain the code point (S2.5.9v2). The source editor accepts and
+preserves U+0000 in valid UTF-8 under D10.2.6v2.
 
 ## 2. Positional access
 

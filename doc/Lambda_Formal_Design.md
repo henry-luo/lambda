@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 70.1.0 (2026-11-24)
+**Spec version:** 71.0.0 (2026-11-24)
 
 **Status:** normative. This document is the single source of truth for the
 design decisions that implement
@@ -1732,10 +1732,11 @@ loosely.
   source editor. If parsing cannot recover a reliable model, only source editing
   is available. Source-only formats keep their assigned surface.
   [Radiant_Design_Edit_Mode §2.1]
-- **D10.2.6* — NUL bytes route a file to binary editing.** When the editor
-  checks a file for text editing, a NUL byte classifies it as binary. The
-  editor opens it in a binary editing surface when one is available.
-  Otherwise, the editor reports that binary editing is unavailable.
+- **D10.2.6v2 — Text editing admits correctly encoded text.** Open and reload
+  validate the complete file in the supported text encoding. They accept
+  U+0000 as a text code point (S2.5.9v2). Editing and saving preserve U+0000
+  unless an edit changes it. File names and content signatures do not change
+  text admission.
   [Radiant_Design_Source_Editor §14.3]
 
 ## D11 Security and Capabilities
@@ -1892,7 +1893,6 @@ the [implementation history §2](../vibe/impl/Lambda_Impl_Formal_Design_History.
 | D10.2.2 | Partial: expansion is the only front end. The layout-metrics hook is pending. |
 | D10.2.3 | Partial: export and strict input are in place. The MathML box builder is pending. |
 | D10.2.5 | Partial: supported valid documents have graphical surfaces; isolated syntax-error recovery and read-only error spans are pending. |
-| D10.2.6 | Partial (2026-11-24): the editor reports binary classification on open and reload. The binary editing surface is pending. |
 | D11.1.1 | T1 verification layers are staged. T2 and T3 are not built. |
 | D11.1.2 | Partial: the main clients are extracted. The remaining IO surface is incomplete. |
 | D11.2.1–D11.2.4 | Components only (2026-11-02). |

@@ -1,7 +1,7 @@
 # Radiant Source Editor — Implementation Plan and Record
 
 **Date:** 2026-10-06
-**Status:** P0 (`9007c54b3`), P1 Markdown highlighting (`8c477c3a8`), P2 HTML highlighting (`1ca09a3d5`, §6), P3 parity and polish (`c9adc7199`, §7), and P4 (§8, final record `4f7668cb6`) are on master. The physical-keyboard typing repair is recorded in §9 (2026-10-15). OQ15 and OQ16 were decided by the user on 2026-10-07 (§5.5); in P4 the user decided OQ17 (soft wrap stays character wrap). D10.2.6 resolves OQ18 on 2026-11-24 (§10).
+**Status:** P0 (`9007c54b3`), P1 Markdown highlighting (`8c477c3a8`), P2 HTML highlighting (`1ca09a3d5`, §6), P3 parity and polish (`c9adc7199`, §7), and P4 (§8, final record `4f7668cb6`) are on master. The physical-keyboard typing repair is recorded in §9 (2026-10-15). OQ15 and OQ16 were decided by the user on 2026-10-07 (§5.5); in P4 the user decided OQ17 (soft wrap stays character wrap). D10.2.6v2 resolves OQ18 on 2026-11-24 (§10).
 **Design:** [Radiant Source Editor](../radiant/Radiant_Design_Source_Editor.md) (CED11–CED22, CED14v2, CED15v2, CED16v4, CED18v2, CED19v2).
 
 ## 1. What P0 has built
@@ -262,7 +262,7 @@ Corpus fidelity (GTest (b), `test/markdown`, 40-line windows every 17 lines): 1,
 
 ### 8.5 Not done
 
-- At P4, the user deferred NUL-byte handling (OQ18, now resolved by D10.2.6). The user chose to keep character wrap (OQ17).
+- At P4, the user deferred NUL-byte handling (OQ18, now resolved by D10.2.6v2). The user chose to keep character wrap (OQ17).
 - Side findings filed as separate tasks: the `edit_md_view_only_keys` crash, a diagnostic for a module-level `let` read before its definition, `parse()` retaining every `Input`, lazy `dom` package loading riding on `mousewheel`, nested template state identity (needs a ruling), and E208 on expression-bodied functions.
 
 ## 9. Physical keyboard typing repair (2026-10-15)
@@ -299,8 +299,14 @@ the original source module for comparison:
 
 ## 10. Files with NUL bytes (2026-11-24)
 
-D10.2.6 resolves OQ18. The shared `lmd/package/editor/session.ls` text
-reader already checked for embedded NUL on open and reload. It now reports
-binary classification and explains that binary editing is unavailable.
-The binary editing surface is future work. The current local input path
-passes the exact file length to the text and binary readers.
+D10.2.6 originally classified U+0000 as a binary marker. The user revised
+the ruling after S2.5.9v2 was implemented. Under D10.2.6v2 the shared file
+reader validates one UTF-8 byte snapshot and decodes it by length. Open and
+reload select source view for text containing U+0000 so a rich parser cannot
+discard or replace the code point. Normal package routing continues for DOCX.
+
+The source buffer and write-back already preserve U+0000. The edit intent
+and clipboard now carry byte lengths through cut, copy, paste and selection
+drag. The source surface uses the explicit drop range and groups a move as
+one undoable delta. Headless editor fixtures verify caret placement, deletion,
+undo and redo, clipboard, drag, and exact bytes after saving or reloading.
