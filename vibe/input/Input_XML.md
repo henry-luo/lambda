@@ -106,6 +106,17 @@ input->root = {.item = (uint64_t)doc_element};
 
 ### XML Formatter (`format-xml.cpp`)
 
+**S2.5.9v2 (user, 2026-11-24).** XML cannot encode U+0000, even with a
+numeric character reference. `format("a\u0000b", 'xml')` returns a
+format error. The caller retains the Lambda string and can decide
+how to represent its data.
+
+JavaScript's `XMLSerializer.serializeToString()` returns a DOMString with
+well-formedness checks disabled. It preserves an embedded U+0000 along
+with the rest of the DOM text. Lambda's XML formatter and Radiant's SVG
+source export apply the XML output restriction in S2.5.9v2.
+[DOM Parsing and Serialization](https://www.w3.org/TR/DOM-Parsing/#the-xmlserializer-interface)
+
 The XML formatter **unwraps** the virtual `<document>` element during output:
 
 ```cpp

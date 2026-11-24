@@ -5176,7 +5176,7 @@
       "round": 177,
       "lambda_pin": "3f76bf9ac05df9f304d0c0a07dfcb11ef315533f953a9c444d43ebde0550b8a7",
       "evidence": "comparison/repairs.html#round-177",
-      "reason": "LI-109 repairs explicit epoch-zero cookie deletion and the unchanged consent SDK probe. Dayos still retains its loading cover and stays high severity. Only its successful native frame refreshes; browser reference and 1000ms post-load frame are preserved.",
+      "reason": "LI-112 repairs explicit epoch-zero cookie deletion and the unchanged consent SDK probe. Dayos still retains its loading cover and stays high severity. Only its successful native frame refreshes; browser reference and 1000ms post-load frame are preserved.",
       "old_lambda_settle_ms": "1000",
       "lambda_settle_ms": 1000,
       "old_lambda_animation_origin": "post-load",

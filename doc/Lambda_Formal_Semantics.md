@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 102.0.0 (2026-11-24)
+**Spec version:** 103.1.0 (2026-11-24)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -466,7 +466,7 @@ harnesses.
   expression (S2.5.2v2), a block (S2.5.3), content (S2.6), a query (S8.2.4v3) —
   because those compose values and content and must splice where they land.
   Everything that *processes* a sequence returns an array: the mapping pipe
-  and `|:` (S10.1.2v5, S10.1.6v2), `sort`, `reverse`, `unique`, `take`, `drop`,
+  and `|:` (S10.1.2v6, S10.1.6v2), `sort`, `reverse`, `unique`, `take`, `drop`,
   `slice`, the positional selections `[i to j]`, `[mask]` and `[[i, j]]`
   (S8.2.4v3), `zip`, `fill`, `split`, `find`, `varg()`, rest
   parameters, `content(e)`, `keys`/`values`/`names` (S8.4.1v2), and the
@@ -495,6 +495,12 @@ harnesses.
   `"abc" |> upper(~)` is `"ABC"`, `"abc" |> ~ ++ "-"` is `"a-b-c-"` — and an
   array otherwise: `"abc" |> ord(~)` is `[97, 98, 99]`; an empty result is
   `""`. For `++` and for placement a text value is one item (S10.6.1).
+- **S2.5.9v2** **NUL is a string code point.** A string can contain U+0000 at
+  any position. In a double-quoted string literal, `\u0000` denotes U+0000.
+  `"a\u0000b"` has length 3, with `"\u0000"` at index 1 and `"b"` at
+  index 2. String operations treat U+0000 as an ordinary code point.
+  XML output returns a format error when the text to be serialized contains
+  U+0000. [Lambda_Type_String §1.5, Input_XML §XML Formatter, user 2026-11-24]
 
 ### S2.6 Content
 
@@ -1573,7 +1579,7 @@ cardinality, and keep failure on a separate channel.* [RF1–RF6, §7.7 record]
   performs.** Consequences, not separate rules: `len("str")` = 3 (text walks
   by code point, S2.5.8); `len(5)` = **0** — a non-text scalar has no
   content, so `for (i in 5)` iterates nothing, while the mapping pipe and
-  `|:` treat a scalar as one member by their own rule (S10.1.2v5,
+  `|:` treat a scalar as one member by their own rule (S10.1.2v6,
   S10.1.6v2): a placement, not an iteration;
   `len([[1,2],[3]])` = **2** (shallow — the count indexing needs);
   `len({a: null, b: 2})` = 2; `len(null)` = 0 (absence is the empty
@@ -1741,12 +1747,12 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
 ### S10.1 Union, pipe, and filter
 
 - **S10.1.1v5*** **`|`, `&` and `!` are the type operators**: type expressions, match or-patterns, string patterns and value expressions alike (types are first-class); `|>` is the pipe. In type patterns and ordinary expressions, left-associative binary operators bind from tightest to loosest in this order: `to`, `&`, `!`, `|`. Inside a string or symbol pattern (S11.1.2v4) `|` is the only binary operator, as alternation, and `!` is prefix-only and complements a set of single characters. Intersecting or excluding patterns is `&` or `!` between whole patterns, `\(A) & \(B)` or `\(A) ! \(B)`. In a value expression a type operand is itself and any other operand reads as its literal type — a scalar as the singleton of its value, a container as the pattern its literal spells in type position (a range as its range type, S11.1.3) — and the result is always a type: `1 | 2` is the type admitting 1 or 2 (an enum), `1 | 1` is a type too, `int | null` is `int?`, and `1 & 2` is the **empty type** `none` (S11.1.7), which admits nothing — distinct from the null type, which admits `null`. A type operation never collapses to a value, so its result has the same meaning wherever it is written: `type t = 1 & 2`, `let v: 1 & 2` and `let x = 1 & 2` denote the same type, and so do `type T = [1, 2] | 3` and `let t = [1, 2] | 3`. **Binary-schema annotation exception (USER, 2026-10-15):** directly after `: binary` or a binary field's complete logical type, a trailing `& {…}` is physical-layout metadata (S11.5.1v2), not a type intersection. It does not change `&` in another type or value expression; `that` remains a predicate. Set algebra on containers is not an operator: it is the functions `unique(a, b, ...)` (≡ `unique(a ++ b ++ ...)`), `intersect(a, b, ...)` (the first operand's items held by every other) and `except(a, b)` (its items not held by the second), in first-operand order without duplicates, membership by `in` (S8.1.1), returning an array (S2.5.7v4) — text keeps its kind (S2.5.8). *Why: union is the concept Lambda needs everywhere; letting a container turn `|` into a merge made one operator mean "either" or "both" by operand kind, which C6 ruled out.* [C6, C6.4; SP17, SP18, SP20]
-- **S10.1.2v5*** The pipe is dual-mode on a parse-time syntactic test: a body
+- **S10.1.2v6*** The pipe is dual-mode on a parse-time syntactic test: a body
   with a **free current-item or key reference** is a mapping pipe. It binds
   `~` per item and `~key` to its key or index. The context roots in S2.4.8
   do not count as either reference. A body without either reference selects whole-value application
   (`data |> sum` ≡ `sum(data)`; extra args append: `data |> take(3)` ≡
-  `take(data, 3)`). A `~`-free non-callable body is a type error. The mapping
+  `take(data, 3)`). A non-callable whole-value destination is a type error except for the file sink in S10.1.4v2. The mapping
   pipe walks what `for … in` walks — an array or list by item, a map by
   value, an element by attribute values then children (S8.1.2v2), text by
   code point (S2.5.8) — and its result is an **array** for every sequence
@@ -1759,8 +1765,11 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
   constructs shadow, **innermost-wins** — uniformly for pipes, `|:` filters,
   `that` provisos, match arms, and `last` (S7.2.2); reach an outer item via a
   `let`.
-- **S10.1.4** File write/append syntax is deferred; `output(data, file)` is
-  the interim. [C6a]
+- **S10.1.4v2*** In a procedural context, a whole-value pipe from live process stdout to a local file path
+  writes the exact stdout bytes to that file. `live |> dest` is equivalent to `output(live, dest)`,
+  including its byte-count result, write policy and errors. A path literal and a binding holding that
+  path have the same meaning. Other source values and text destinations do not select this sink.
+  Append uses explicit `output` with append mode. [C6a; Shell Piping §Writing stdout to a file]
 - **S10.1.5v3** **`that` is the single-value proviso.** `x that p` is `x`
   when `p` — with `~` bound to `x` — is truthy, and **`null`** otherwise: a
   failed proviso is absence (S7.1), never an error, so `x that p` composes
@@ -1778,19 +1787,19 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
   still legal under the new meaning — the fixture sweep converts every one.
   The filter was spelled `where` before `that` (S10.3.1v3). [Expr_Pipe §F.5]
 - **S10.1.6v2*** **`|:` is the filter stage of the pipe family.** `c |: p` walks
-  exactly what `c |> body` walks (S10.1.2v5) — an array or list by item, a map
+  exactly what `c |> body` walks (S10.1.2v6) — an array or list by item, a map
   by value, an element by attribute values then children (S8.1.2v2), text by
   code point (S2.5.8), a non-sequence scalar as one member — binds `~` to the
   member and `~key` to its key or index (S10.1.3), and keeps the members for
   which `p` is truthy. **Its result kind is the pipe's, by reference**, not a
-  rule of its own: as S10.1.2v5 and S2.5.7v4 give the mapping pipe, `|:`
+  rule of its own: as S10.1.2v6 and S2.5.7v4 give the mapping pipe, `|:`
   returns an **array** of the survivors for every sequence source — a list
   included, so `(1, 2, 3) |: ~ > 2` is `[3]` and never collapses — `[]` when
   none survive (a map's keys are dropped, SO38); text gives its own kind,
   `""` when empty (S2.5.8); a non-sequence scalar gives itself or `null`. **`|:` is single-mode:** a body with no free
-  current-item or key reference (S10.1.2v5) is a compile error — `xs |: is_even` is rejected, the idiom is
+  current-item or key reference (S10.1.2v6) is a compile error — `xs |: is_even` is rejected, the idiom is
   `xs |: is_even(~)` — because `|>` reads a `~`-free body as whole-value
-  application (S10.1.2v5) and the two pipes must not read the same text two
+  application (S10.1.2v6) and the two pipes must not read the same text two
   ways; for the same reason its body never reads a bare name as a field
   (S10.1.7v4). Pipe precedence tier, left-associative: `c |: p |> f |: q` chains left
   to right. The spelling is set-builder "such that" (`{x ∈ S | P(x)}`,
@@ -1829,7 +1838,7 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
 
   A pipe-family body (`|>`, `|:`) reads bare names as ordinary names, even
   nested in one of these bodies. `|>` tells mapping from application by the
-  free `~` its text spells (S10.1.2v5), and `|:` must read that text the
+  free `~` its text spells (S10.1.2v6), and `|:` must read that text the
   same way (S10.1.6v2). A field supplied behind the text would also let a
   misspelled `xs |: is_evne` pass E238 as a silent `[]`. For the same
   reason, a `~` that a nested body binds, spelled or implicit, is never free
@@ -1891,9 +1900,9 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
   [PTH3, PTH5, PTH9]
 - **S10.4.2*** Bare `~~` is exactly `~.~~`: it is valid exactly where `~` is
   bound, selects the innermost current-value context, and counts as a free
-  `~` for the S10.1.2v5 mapping-pipe test. Thus `~~.~~.a` means
+  `~` for the S10.1.2v6 mapping-pipe test. Thus `~~.~~.a` means
   `~.~~.~~.a`; it never denotes a relative path, whose form starts with `\.`.
-  [S10.1.2v5,
+  [S10.1.2v6,
   S10.1.3, PTH6]
 - **S10.4.3v2*** Contextual parent navigation is occurrence-based and
   carries lineage in the evaluation context as a navigation path, cursor, or
@@ -2656,6 +2665,10 @@ ordinary call surface.* Full record: [`Lambda_Design_Concurrency.md`](../vibe/La
   `send_to(h)`); a forced pipeline is an implicit task scope — early
   termination cancels upstream. WHATWG Web Streams are the committed compat
   target; legacy Node streams are best-effort. [K21, K26, K28]
+- **S14.3.4*** **A shell pipeline reports an unexpected failure in any stage at completion.**
+  A successful final stage or file write cannot mask an upstream failure.
+  An upstream broken pipe caused by a successful early consumer is expected.
+  Completion retains the individual stage statuses. [PL8; Shell Piping §Execution and completion]
 
 ---
 
@@ -3285,6 +3298,8 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 
 | Ruling | Status |
 |---|---|
+| S14.3.4 | Shell pipeline completion awaits the live process runtime. [Shell piping](../vibe/Lambda_IO_Shell_Piping.md#execution-and-completion) |
+| S10.1.2v6, S10.1.4v2 | Ruled 2026-11-24. The live process stdout source and file-path sink await implementation. Ordinary file write and append through `output` are available. [Shell piping](../vibe/Lambda_IO_Shell_Piping.md#writing-stdout-to-a-file) |
 | S2.4.8, S10.1.2v5, S10.1.6v2, S17.3.1v2 | The seven context roots and escaped references work on interpreter and JIT. Forced-GC fixtures and the Lambda baseline pass on the host. The no-sysinfo and non-host profiles need further qualification. [Path implementation plan §6](../vibe/impl/Lambda_Impl_Path_Node_Access.md#6-named-context-roots-word). |
 | S2.4.1v3, S2.4.2v6, S2.4.3v4, S2.4.4v2, S2.4.5v6, S2.4.6v2, S2.4.7v2, S8.2.1v5, S10.6.1v3, S16.9.4v2 | Decided 2026-11-18. Concrete local file access, escaped provider references and node-relative path subscripts work on interpreter and MIR. The implementation plan tracks migration and qualification. Earlier path results below cover the previous semantics. [Implementation plan](../vibe/impl/Lambda_Impl_Path_Node_Access.md). |
 | S4.2.5 | **Partially implemented; audited 2026-11-17.** Core scalar domain outcomes already remain numerical. Decimal rounding, NaN-aware reductions, sign, and checked vector input classification still need changes. All 66 focused observations agree between interpreter and JIT; these observations include the defects. [Audit](../vibe/impl/Lambda_Impl_Numerical_Query_Conventions.md). |
@@ -3305,7 +3320,7 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S2.1.1v2, S5.4.2v2, S6.2.2v2, S8.1.2v2, S8.2.1v4, S8.3.1v3 (object arm) | **Shipped state under the superseded v2 rulings (2026-09-03).** `entity` is retired from all three keyword tables (C lexer `base_types`, `grammar.js` `_base_type_kw`, `is_type_keyword`) and the reference grammar is regenerated; `let entity = 1` is now legal, where it was `error[E201]`. Objects carry content (D3.1.1 — `Object` is an alias of `struct Element`) and conform across the whole surface: `len` is attributes + content, `in`/`at` walk attribute values then children, an IntKey subscript selects a child, equality is nominal type + unordered attributes + ordered content, ordering is type name then attributes then content, both clone paths copy content, and printing emits round-trippable `<T a: 1, "child">`. Three pre-existing defects were fixed on the way: `item_keys` had NO object arm, so `for (v in obj)` yielded nothing while `len(obj)` reported the field count; object equality compared attributes only, so two objects of DIFFERENT nominal types with matching fields compared equal; and ordering likewise ignored the type name. Fixture `test/lambda/object_content.ls`; baseline 4083/4083, exact tier parity. |
 | S2.1.3 (v1, shipped state; superseded by S2.1.3v2) | **Partially implemented 2026-09-03.** Content patterns, the `<T attrs, content>` literal on both tiers, content-pattern inheritance, and tag-name output (markup formats emit `<TypeName …>` via the shared element handler; JSON keeps its `"@"` type key and gains the element `"_"` content key) all work. **Not implemented:** schema-driven input — `input(doc, schema: …)` and a document declaring its own schema still yield structural elements, never objects — and object construction from a schema is unverifiable end-to-end today ([LR13-9](../vibe/Lambda_Issue_Ledger.md#lr13-9)). The **content-arity check is no longer missing**: `validate_against_element_type` enforces `content_length` (`validator/validate.cpp`, both the fast verdict and the reporting path), and since the flip a content-bearing nominal type wears `LMD_TYPE_ELEMENT` and so dispatches into it. Validator tests now load, parse type annotations, and register direct-parser type declarators; the `validate` CLI reaches real validation for the shipped `schema_comprehensive.ls` + `test_data_valid.json` pair instead of failing root lookup. That pair currently reports its independent `element`-versus-`map` mismatch. LR13-3's root-*selection* policy remains open, and these targets still sit in `test-lambda-full`, not `test-lambda-baseline`. |
 | S5.1.4v2, S9.1.5v2, S10.4.3v2, S10.5.3v2 | **Ruled 2026-09-03, not implemented.** No container carries a node identity and no `===` exists; the DOM package compares wrappers structurally (`test/lambda/proc/dom_api_core.ls`). The carrier, the id-preserving operation set, and the universal addressing scheme are open (SO39, DO25). |
-| S6.1.1 | `fn_lt` uses `strcmp` (NUL-unsafe) and accepts symbols; two-layer invalid-comparison treatment not landed. |
+| S6.1.1 | String ordering compares the full byte spans, including NUL (S2.5.9v2). The invalid-comparison paths need separate qualification. |
 | S6.2.1 | `sort()` coerces to float (`sort(["b","a","c"])` → `[nan,nan,nan]`); total order not implemented in `sort`/`order by`. |
 | S7.1.1v3, S7.1.3v3 (pre-unification qualification) | Core computed array/map/element reads now return `null` for invalid keys and writes return the hard `ItemError`/`T^` channel; typed-array and mask paths share the same checked key boundary. A broader access-site audit remains for specialized editor/host surfaces. Slice-offset rules (RF3D) landed with regression tests. |
 | S7.2.2–S7.2.4 | `last` keyword, `limit last N`, and `{limit:}/{last:}` options not implemented; ArrayNum negative-index audit outstanding. |
@@ -3482,7 +3497,7 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
   known, or only its colour (`fn`/`pn`). The full signature is the literal
   S4.2.2 reading; it meets S11.1.4v2's pending function-type variance.
   [C20.2]
-- **SO29** File write/append syntax (C6a: `into`/`onto` candidates); string interpolation syntax (note the `$` collision with quote splices); a set type; `assert`/`expect` unification.
+- **SO29** General file write/append syntax beyond the live stdout sink in S10.1.4v2 (C6a: `into`/`onto` candidates); string interpolation syntax (note the `$` collision with quote splices); a set type; `assert`/`expect` unification.
 - **SO31** The `<file>` element shape (name/size/mime, content as child) — pin with file-I/O spec.
 - **SO32** Match extensions: pipe-context shorthand, string-pattern capture binding in arms, range patterns.
 - **SO33** A10 residue: the aspirational generics text, `as` assertion semantics, and open-vs-closed map matching in assignment position — document or delete.
@@ -3535,6 +3550,7 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 |---|---|---|
 | S1 principles | C1–C18 distilled; Features §3.6 | `Lambda_Semantics_Formal.md`, `Lambda_Semantics_Features.md` |
 | S2 value domain | C1, C1.6a, C2, C8.6-R; Design_Syntax §7.23, §7.27–§7.28; PTH1v2, PTH2v3, PTH3–PTH29, PTH81–PTH84 (S2.4.6), PTH85 (S2.4.7); Lambda_Expr_Path §Named context roots (S2.4.8); OB1–OB3, OB7–OB9, OB13–OB18 | `Lambda_Semantics_Formal.md`, `Lambda_Type_Path.md`, `Lambda_Type_Object.md` |
+| S2.5.9v2 | Embedded NUL, the `\u0000` escape, and XML format errors | `Lambda_Type_String.md` §1.5, §7.1, `input/Input_XML.md` §XML Formatter |
 | S2.6.6v2 | PDF raw file and dictionary MVP | `Lambda_Design_PDF_Output.md` §2, §5 |
 | S3 truthiness | C2, C17 | ibid.; `Lambda_Semantics_Formal2.md` |
 | S4 numerics | C3, C13, C14b/c, C16, C17; int v5 | `Lambda_Semantics_Formal2.md`, `Lambda_Semantics_Int_Type.md`, `Lambda_Semantics_Number_Model.md` |
@@ -3551,10 +3567,12 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 | S9 mutability | C4, C4.2a/b/c/e, C4.3, C5.3b, C12; CW16–CW28; RG14; Sys_Func RF7 (S9.1.3v4, S9.2.1v2) | `Lambda_Semantics_Formal.md`, `Lambda_Semantics_Formal2.md`, `Lambda_Design_Runtime_COW.md`, `Lambda_Design_Nested_Mutation.md`, `Lambda_Design_Runtime_Globals.md`, `Lambda_Typed_Array.md` (S9.3.2), `Lambda_Design_Sys_Func.md` (RF7) |
 | S1.4v2, S2.5.3v3, S7.4.6v3, S7.6.1v9; S9.1.3v2–S9.1.4v2, S9.1.7v2; S12.1.2v3–S12.1.3v2; S16.4.3v4, S16.6.5v2, S16.6.7v3–S16.6.9v2 | Local imperative fn; confined shared pn captures (USER, 2026-11-02) | `Lambda_Design_Procedural.md` §2, §4–§6; `Lambda_Design_Syntax.md` §7.31; `Lambda_Design_Type_Error_Handling.md` |
 | S10 operators | C6, C6.2–C6.4, C10; Design_Syntax §7.27; PTH3, PTH5–PTH6, PTH9–PTH10, PTH25–PTH29; Expr_Pipe §F.1–§F.7 (`|:` filter stage, `that` proviso, result kind, implicit fields) | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Syntax.md`, `Lambda_Type_Path.md`, `Lambda_Expr_Pipe.md`, `Lambda_Typed_Array.md` (S10.2.4) |
+| S10.1.2v6, S10.1.4v2 | Symmetric file endpoints for shell pipelines | [Shell piping](../vibe/Lambda_IO_Shell_Piping.md#writing-stdout-to-a-file) |
 | S11 types | C7, C8.5c, C20; TE-1–TE-20, TE-23 (S11.4.12); OB13; Type_Pattern §1.3; Design_Syntax §7.28; SP1–SP21, SP24 | ibid.; `Lambda_Design_Type_Enforcement.md`, `Lambda_Type_Object.md`, `Lambda_Type_Pattern.md`, `Lambda_Design_Syntax.md`, `Lambda_Design_String_Pattern.md` |
 | S11.5 | Physical binary schemas and native references | `Lambda_Type_Binary_Schema.md` §10 |
 | S12 effects/resources | Features §3.5–3.7; Design_Procedural; Function_Arg; C19, C20; OB5–OB6; IO ZIP §2, §5; Reactive_UI §2.7 | `Lambda_Semantics_Formal2.md`, `Lambda_Semantics_Features.md`, `Lambda_Design_Procedural.md`, `Lambda_Design_Function_Arg.md`, `Lambda_Type_Object.md`, `Lambda_IO_Zip.md`, `Lambda_Design_Reactive_UI.md` |
 | S13 concurrency | K11–K32; K30g (S13.3.1v2) | `Lambda_Design_Concurrency.md`, `Lambda_Pkg_Archive.md` (AR-O10) |
+| S14.3.4 | External stage statuses and pipeline completion | [Shell piping](../vibe/Lambda_IO_Shell_Piping.md#execution-and-completion) |
 | S14 data processing | PD9–PD16; FC1–FC11; IO ZIP §5 | `Lambda_Design_Data_Processing.md`, `Lambda_Expr_For_Clauses.md`, `Lambda_IO_Zip.md` |
 | S15 metaprogramming | C9, C9a | `Lambda_Semantics_Formal2.md` |
 | S16 surface syntax | Design_Syntax §3–§7 (39 decided points); RI1–RI3 | `Lambda_Design_Syntax.md`, `Lambda_Design_Repl_Interp.md` |

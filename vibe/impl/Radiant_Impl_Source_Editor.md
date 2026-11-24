@@ -1,7 +1,7 @@
 # Radiant Source Editor — Implementation Plan and Record
 
 **Date:** 2026-10-06
-**Status:** P0 (`9007c54b3`), P1 Markdown highlighting (`8c477c3a8`), P2 HTML highlighting (`1ca09a3d5`, §6), P3 parity and polish (`c9adc7199`, §7), and P4 (§8, final record `4f7668cb6`) are on master. The physical-keyboard typing repair is recorded in §9 (2026-10-15). OQ15 and OQ16 were decided by the user on 2026-10-07 (§5.5); in P4 the user decided OQ17 (soft wrap stays character wrap) and left OQ18 open (design §14.3).
+**Status:** P0 (`9007c54b3`), P1 Markdown highlighting (`8c477c3a8`), P2 HTML highlighting (`1ca09a3d5`, §6), P3 parity and polish (`c9adc7199`, §7), and P4 (§8, final record `4f7668cb6`) are on master. The physical-keyboard typing repair is recorded in §9 (2026-10-15). OQ15 and OQ16 were decided by the user on 2026-10-07 (§5.5); in P4 the user decided OQ17 (soft wrap stays character wrap). D10.2.6v2 resolves OQ18 on 2026-11-24 (§10).
 **Design:** [Radiant Source Editor](../radiant/Radiant_Design_Source_Editor.md) (CED11–CED22, CED14v2, CED15v2, CED16v4, CED18v2, CED19v2).
 
 ## 1. What P0 has built
@@ -237,7 +237,7 @@ Corpus fidelity (GTest (b), `test/markdown`, 40-line windows every 17 lines): 1,
 - **`lambda edit` pages had no host UI context.** Every other loader applies `DocumentJsHostConfig`; the transform loader did not, so anything that re-rendered outside a native input dispatch was silently dropped. It also masked the dialog-field bug above.
 - **A template cannot own a frame request on its own result without the rebuild rebind.** Slides got away with it because their template's result is static model content, so the rebuild reuses the element.
 - **The headless simulator ticks frames only after a JSON event's input turns** (`sim_input_turn_drain`), which every keyboard and pointer event marks; assertions retry across host turns, so fixtures see pass 2's result without `advance_time`.
-- **`input(path, 'text')` stops at the first NUL byte** (`input_from_local_path` uses `strlen`); saving such a file from the editor would truncate it. Not fixed: OQ18.
+- **At P4, `input(path, 'text')` stopped at the first NUL byte.** Saving such a file from the editor would have truncated it. The current reader preserves the file's byte length (see §10).
 - **Word-boundary wrap cannot be computed in script**: Radiant's `pre-wrap` breaking follows UAX #14 in full. OQ17: the user kept character wrap.
 - **The worktree sandbox refuses shell loops and long pipelines**; scripts under `temp/` (`run_units.sh`, small Python patchers) work.
 
@@ -262,7 +262,7 @@ Corpus fidelity (GTest (b), `test/markdown`, 40-line windows every 17 lines): 1,
 
 ### 8.5 Not done
 
-- Refusing files with NUL bytes (OQ18) is left open by the user; word-boundary wrapping is not built by decision (OQ17).
+- At P4, the user deferred NUL-byte handling (OQ18, now resolved by D10.2.6v2). The user chose to keep character wrap (OQ17).
 - Side findings filed as separate tasks: the `edit_md_view_only_keys` crash, a diagnostic for a module-level `let` read before its definition, `parse()` retaining every `Input`, lazy `dom` package loading riding on `mousewheel`, nested template state identity (needs a ruling), and E208 on expression-bodied functions.
 
 ## 9. Physical keyboard typing repair (2026-10-15)
@@ -296,3 +296,68 @@ the original source module for comparison:
   `edit_md_view_only_keys`) have identical assertion counts with the original
   module.
 - Source buffer and highlighting Lambda unit fixtures: 4/4 pass.
+
+## 10. Files with NUL bytes (2026-11-24)
+
+D10.2.6 originally classified U+0000 as a binary marker. The user revised
+the ruling after S2.5.9v2 was implemented. Under D10.2.6v2 the shared file
+reader validates one UTF-8 byte snapshot and decodes it by length. Open and
+reload select source view for text containing U+0000 so a rich parser cannot
+discard or replace the code point. Normal package routing continues for DOCX.
+
+The source buffer and write-back already preserve U+0000. The edit intent
+and clipboard now carry byte lengths through cut, copy, paste and selection
+drag. The source surface uses the explicit drop range and groups a move as
+one undoable delta. Headless editor fixtures verify caret placement, deletion,
+undo and redo, clipboard, drag, and exact bytes after saving or reloading.
+
+## 11. Horizontal scrolling and pointer selection (2026-11-24)
+
+The source editor now uses a fixed clipping box with the text offset inside it.
+The gutter width follows the document's line count under CED13. The horizontal
+thumb appears when an unwrapped line in the window overflows. The editor caches
+the width sample for the current buffer version and line window. Track paging,
+thumb dragging, wheel input and caret following share the same range. Resizing
+preserves the viewport's origin within the new bounds.
+
+Under D10.2.1, the native glyph walks now keep preserved spaces when resolving
+clicks, drag endpoints and caret positions. Before the fix the click path
+skipped indentation and both paths collapsed runs of spaces. The same-line
+regression replays a pointer drag and verifies the saved bytes.
+
+The editor UI regressions cover track paging, thumb dragging, horizontal wheel
+input, resizing with the caret off-screen, and precise clicks on indented lines
+at 2× device scale. The previous host and package fail all five assertions
+in `edit_src_indented_pointer.json`.
+
+The release build passes 222 editor UI fixtures. A replay of `view_tree.txt`
+passes six assertions around line 392 at 2× scale. The embedded NUL checks pass
+with ordinary and forced garbage collection. The wider native editing sweep
+passes 122 of 124 fixtures and reproduces the two failures on the previous
+build. In seven paired release replays of the 100,000-line fixture, median total
+time is 1.69 s before and 1.70 s after. The median event phase is 49.0 ms
+before and 52.2 ms after across 19 events.
+
+## 12. Selection painting and edge scrolling (2026-11-24)
+
+The surface publishes an empty native selection when its model selection
+has no intersection with the window. The caret position stays available to
+the next model edit, and scrolling the position back into view restores it.
+
+Under D10.2.1 the native pointer path still extends and paints the visible
+range during a drag. Its retained document recording now keys on the range
+revision, including the transition back to a caret. The source package claims
+edge scrolling at the editing host under CED13. It preserves the model anchor
+while slots are replaced and hit-tests each new window at the held pointer
+position. Pending native autoscroll also retires with its target under D5.5.1.
+
+The release passes all 223 editor UI fixtures. The replay of
+`premake5.mac.lua` hides the caret on scroll and restores the same position
+on return at 2× scale. The pointer fixtures cover live paint, dragging past
+the window, both vertical directions, horizontal scroll and keyboard
+replacement of the selected text. The wider native editing sweep passes
+124 of 126 fixtures. The previous build reproduces both failures.
+
+All 29 source fixtures pass with the interpreter. A focused drag replay
+passes with periodic forced garbage collection and poisoning. The longer
+every-allocation GC replay hits the 70-second harness limit.

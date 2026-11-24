@@ -20,6 +20,36 @@ observations still require re-verification. Add new Radiant issues here.
 
 ## Open issues
 
+<a id="ri-234"></a>
+
+- [RI-234 — Native edge scrolling retains a retired text row](<Radiant_Issue_Ledger (fixed).md#ri-234>).
+
+<a id="ri-233"></a>
+
+- [RI-233 — Retained paint reuses an old selection highlight](<Radiant_Issue_Ledger (fixed).md#ri-233>).
+
+<a id="ri-232"></a>
+
+- [RI-232 — Pointer selection collapses on indented source lines](<Radiant_Issue_Ledger (fixed).md#ri-232>).
+
+<a id="ri-231"></a>
+
+- [RI-231 — Source editor loses bytes after NUL on paste and drag](<Radiant_Issue_Ledger (fixed).md#ri-231>).
+
+<a id="ri-230"></a>
+
+- [RI-230 — Form control labels truncate at embedded NUL](<Radiant_Issue_Ledger (fixed).md#ri-230>).
+
+<a id="ri-229"></a>
+
+- [RI-229 — Generated content from attribute values truncates at embedded NUL](<Radiant_Issue_Ledger (fixed).md#ri-229>).
+
+<a id="ri-228"></a>
+
+### RI-228 — FIXED
+
+See [plain-text viewing and layout across embedded NUL](<Radiant_Issue_Ledger (fixed).md#ri-228>).
+
 <a id="ri-227"></a>
 
 - [RI-227 — Shadow fragments truncate positioned containing-block and paint walks](<Radiant_Issue_Ledger (fixed).md#ri-227>).

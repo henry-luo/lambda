@@ -758,7 +758,8 @@ static void observer_queue_child_record(JsObserverState* observer,
 }
 
 extern "C" void dom_observers_mutation_notify(DomJsMutationKind kind,
-    void* target_ptr, void* parent_ptr, const char* attribute_name, const char* old_value)
+    void* target_ptr, void* parent_ptr, const char* attribute_name, const char* old_value,
+    size_t old_value_length)
 {
     // native CSSOM defaults can mutate a document before it has an observer realm.
     if (!js_observer_runtime_state()) return;
@@ -805,7 +806,11 @@ extern "C" void dom_observers_mutation_notify(DomJsMutationKind kind,
             Rooted<Item> attribute_item(roots, attribute_name ? js_make_string(attribute_name) : ItemNull);
             bool include_old = (attribute && registration->attribute_old_value) ||
                                (character && registration->character_data_old_value);
-            Rooted<Item> old_item(roots, include_old && old_value ? js_make_string(old_value) : ItemNull);
+            Rooted<Item> old_item(roots, ItemNull);
+            if (include_old && old_value) {
+                size_t length = old_value_length == SIZE_MAX ? strlen(old_value) : old_value_length;
+                old_item.set(Item{.item = s2it(heap_strcpy(old_value, length))});
+            }
             observer_set_record_fields(record.get(), type.get(), target_item.get(), added.get(), removed.get(),
                 attribute_item.get(), old_item.get());
             observer_queue_record(observer, record.get());

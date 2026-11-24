@@ -21,8 +21,8 @@ import app: lambda.editor.app
   app.format_for_path("manual.3p").surface == 'rich_text',
   app.format_for_path("contact.vcf").surface == 'property',
   app.format_for_path("document.mark").surface == 'source',
-  app.is_non_text_path("picture.PNG"),
-  app.is_non_text_path("document.pdf"),
-  not app.is_non_text_path("document.docx") and app.format_for_path("document.docx").id == 'docx',
-  not app.is_non_text_path("drawing.svg")
+  app.format_for_path("picture.PNG") == null,
+  app.format_for_path("document.pdf") == null,
+  app.format_for_path("document.docx").id == 'docx',
+  app.format_for_path("image.ppm") == null
 ]

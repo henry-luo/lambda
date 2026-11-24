@@ -318,12 +318,13 @@ extern "C" Item dom_core_create_node(Item doc, Item type, Item name, Item data) 
         return elem ? dom_realm_custom_element_upgrade(dom_wrap_element(elem)) : ItemNull;
     }
     case DOM_NODE_TEXT: {
-        const char* s = text ? text : "";
-        DomText* t = DomText::create_detached_copy(document, s, strlen(s));
+        // a DOMString carries its length independently of its terminator.
+        DomText* t = DomText::create_detached_copy(document, text ? text : "",
+                                                   text ? data.get_len() : 0);
         return t ? dom_wrap_element((void*)t) : ItemNull;
     }
     case DOM_NODE_COMMENT: {
-        Item backing = builder.element("#comment").text(text ? text : "").final();
+        Item backing = builder.element("#comment").text(text ? text : "", text ? data.get_len() : 0).final();
         DomNode* c = (DomNode*)dom_comment_create_detached(backing.element, document);
         return c ? dom_wrap_element((void*)c) : ItemNull;
     }

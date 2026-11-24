@@ -594,7 +594,7 @@ static void custom_element_enqueue(Item element, Item definition,
 }
 
 extern "C" void dom_realm_custom_element_attribute(Item element, const char* name,
-        const char* old_value, const char* value) {
+        StrView old_value, StrView value) {
     if (!dom_realm_active() || !name) return;
     RootFrame roots(7);
     Rooted<Item> owner(roots, element), state(roots, custom_element_state(element, false));
@@ -603,8 +603,10 @@ extern "C" void dom_realm_custom_element_attribute(Item element, const char* nam
     Rooted<Item> definition(roots, js_get_key_cstr(state.get(), "definition"));
     Rooted<Item> observed(roots, js_get_key_cstr(definition.get(), "observedAttributes"));
     Rooted<Item> key(roots, js_name_item(name));
-    Rooted<Item> old(roots, old_value ? js_make_string(old_value) : ItemNull);
-    Rooted<Item> current(roots, value ? js_make_string(value) : ItemNull);
+    Rooted<Item> old(roots, old_value.str
+        ? Item{.item = s2it(heap_strcpy(old_value.str, old_value.length))} : ItemNull);
+    Rooted<Item> current(roots, value.str
+        ? Item{.item = s2it(heap_strcpy(value.str, value.length))} : ItemNull);
     for (int64_t index = 0; index < js_array_length(observed.get()); index++) {
         if (js_strict_equal(js_elements_get_int(observed.get(), index), key.get()).item != ITEM_TRUE) continue;
         Item args[] = {key.get(), old.get(), current.get()};
@@ -638,8 +640,8 @@ extern "C" Item dom_realm_custom_element_upgrade(Item element) {
     DomAttributeIterator iterator = dom_element_attribute_iterator(node);
     DomAttributeView attribute;
     while (dom_element_next_attribute(&iterator, &attribute)) {
-        dom_realm_custom_element_attribute(owner.get(), attribute.local_name, nullptr,
-            attribute.value ? attribute.value : "");
+        dom_realm_custom_element_attribute(owner.get(), attribute.local_name, {},
+            {attribute.value ? attribute.value : "", attribute.value_length});
     }
     return owner.get();
 }

@@ -6,9 +6,9 @@ remain in the [active issue ledger](Lib_Input_Issue_Ledger.md).
 
 ## Fixed issues
 
-<a id="li-109"></a>
+<a id="li-112"></a>
 
-### LI-109 — Explicit epoch-zero cookie expiry is stored as a session cookie
+### LI-112 — Explicit epoch-zero cookie expiry is stored as a session cookie
 
 **Fixed 2026-11-24.** Cookiebot probes cookie support by writing a temporary
 `-3` cookie and deleting it with `Expires=Thu, 01 Jan 1970 00:00:00 GMT`.
@@ -40,9 +40,9 @@ Evidence: `temp/online-visual-round201/{cookie-unit-before.log,cookie-unit-after
 cookie-dom-after.log,browser-cookie-expiry.log,cookiebot-http-before.json,
 cookiebot-http-after.json}`; `test/online/render_cookie_expiry.test.cjs`.
 
-<a id="li-108"></a>
+<a id="li-111"></a>
 
-### LI-108 — Text-element fragments tokenize their contents as ordinary HTML
+### LI-111 — Text-element fragments tokenize their contents as ordinary HTML
 
 **Fixed 2026-11-24.** Fragment parsing selected a text mode only for enabled
 `noscript`. Setting a script's `innerHTML` therefore stripped literal end tags,
@@ -66,6 +66,47 @@ exception is absent in the new capture, but its missing consent panel remains
 high severity. Evidence: `temp/online-visual-round194/fragment-before.log`,
 `html-focused-final.log`, `sourcepos-focused.log`, `dom-focused.log`,
 `script-preparation-focused.log` and `selected-network/`.
+
+<a id="li-110"></a>
+
+### LI-110 — DOM attribute values lose bytes after embedded NUL
+
+**Fixed 2026-11-24.** The DOM attribute cache treated values with the same
+prefix before U+0000 as equal. DOM attribute storage, cache keys, and CSS
+attribute comparisons now carry the byte length, under S2.5.9v2 and
+D9.1.1v4. The core preserves the lengths for synthetic and namespaced
+attributes as well. `test/test_nul_text.py` writes two values that differ
+only after U+0000 and verifies that each reads and matches independently.
+
+<a id="li-109"></a>
+
+### LI-109 — XML formatter emits an invalid zero character reference
+
+**Fixed 2026-11-24.** `format("a\u0000b", 'xml')` used to emit
+`<root>a&#x00;b</root>`. S2.5.9v2 requires a format error. The
+XML writer checks the lengths of serialized names and text,
+including raw script, comment and processing-instruction text.
+Nested output buffers share the failure and no partial result
+reaches the caller. The regression checks scalars, attributes,
+raw text, map keys and nested maps.
+
+<a id="li-108"></a>
+
+### LI-108 — Text adapters truncate at embedded NUL
+
+**Fixed 2026-11-24.** Under S2.5.9v2 and D9.1.1v4, a zero byte in a
+Lambda string must survive length-delimited handling. YAML decoded
+`"before\0after"` but passed only the prefix to MarkBuilder. YAML
+and JSON key output also used C-string lengths. The parser and
+formatters now carry the scalar and key lengths. YAML writes a zero
+byte as `\0`. Legacy parsers that consume C strings report a literal
+zero byte in the source before parsing. Raw text and binary readers
+take the full input length. The host resource resolver rejects NUL
+in a textual path or URL before passing it to native code.
+The JSX raw expression and MDX passthrough writers also copy full spans.
+
+Coverage lives in `test/lambda/string_embedded_nul.ls` and
+`test/test_nul_text.py` in the Lambda checkout.
 
 <a id="li-107"></a>
 

@@ -3705,7 +3705,7 @@ the 1000ms frame and admission profile remain (**D10.1.7**).
 [Evidence and images](comparison/repairs.html#round-169). Goal remains active.
 
 
-Round170 fixes **LI-108**: text-element fragments now share the existing
+Round170 fixes **LI-111**: text-element fragments now share the existing
 tag-to-text-mode helper, preserving script innerHTML source bytes
 (**D9.1.1v4 / D9.1.3v2**). Both new regressions fail before repair;
 all **36 focused checks** pass. The existing raw-text script-mode limitation
@@ -3807,7 +3807,7 @@ change (**D8.4.4 / D6.3.3 / D9.1.3v2 / D9.5.6v2 / D10.1.7**).
 [Evidence and images](comparison/repairs.html#round-176). Goal remains active.
 
 
-Round177 fixes **LI-109**: explicit epoch-zero and negative cookie expiry no
+Round177 fixes **LI-112**: explicit epoch-zero and negative cookie expiry no
 longer becomes session storage. The unchanged Cookiebot SDK now completes its
 create/delete probe and requests its banner script. All **seven focused cookie
 unit tests** and **six HTTP DOM controls** pass; the six browser controls also

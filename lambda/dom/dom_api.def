@@ -217,6 +217,8 @@ DOM_OP(CORE, set_edit_session, editing, 2, "pn(host: any, session: any) -> any",
 // through that handle after their owning reactive handler publishes the model.
 DOM_OP(CORE, bind_model_edit_surface, editing, 2, "pn(host: any, revision: int) -> int|null", dom_engine_bind_model_edit_surface, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 DOM_OP(CORE, finish_model_edit, editing, 2, "pn(surface: int, result: any) -> bool", dom_engine_finish_model_edit, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+// A model viewport can re-hit-test a stationary selection pointer after reflow.
+DOM_OP(CORE, source_drag_position, editing, 3, "fn(host: any, x: float, y: float) -> map|null", dom_engine_source_drag_position, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
 // This is a text-control predicate, not the control's string value.
 DOM_OP(CORE, tc_value,         textctl, 1, "fn(n: any) -> bool",                            dom_engine_tc_value, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
 DOM_OP(DERIVED, tc_set_value,  textctl, 2, "pn(n: any, v: string) -> bool",                 DOM_NO_BODY, DOM_F_NEUTRAL | DOM_F_MUTATES,

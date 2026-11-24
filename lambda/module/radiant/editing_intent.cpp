@@ -10,6 +10,7 @@ const char* clipboard_get_text();
 InputIntent::InputIntent()
     : type(INPUT_INTENT_NONE),
       data(nullptr),
+      data_length(0),
       html_data(nullptr),
       data_mime(nullptr),
       owned_data(nullptr),
@@ -42,8 +43,13 @@ void input_intent_dispose(InputIntent* intent) {
     intent->owned_data = nullptr;
     intent->owned_html_data = nullptr;
     intent->data = nullptr;
+    intent->data_length = 0;
     intent->html_data = nullptr;
     intent->data_mime = nullptr;
+}
+
+size_t InputIntent::text_length() const {
+    return data_length || !data ? data_length : strlen(data);
 }
 
 bool input_intent_clone(const InputIntent* source, InputIntent* destination) {
@@ -62,7 +68,8 @@ bool input_intent_clone(const InputIntent* source, InputIntent* destination) {
     destination->context_menu_item = source->context_menu_item;
     destination->drag_move = source->drag_move;
     if (source->data) {
-        destination->owned_data = mem_strdup(source->data, MEM_CAT_TEMP);
+        destination->data_length = source->text_length();
+        destination->owned_data = mem_dup_n(source->data, destination->data_length, MEM_CAT_TEMP);
         if (!destination->owned_data) goto fail;
         destination->data = destination->owned_data;
     }
@@ -195,7 +202,8 @@ bool input_intent_from_name(const char* name, InputIntent* out) {
 
     // Clipboard snapshots belong to the execution waist, not to key policy.
     if (type == INPUT_INTENT_INSERT_FROM_PASTE) {
-        if (!clipboard_store_read_paste(&out->owned_html_data, &out->owned_data)) {
+        if (!clipboard_store_read_paste_n(&out->owned_html_data, &out->owned_data,
+                                         &out->data_length)) {
             const char* text = clipboard_get_text();
             if (!text || !text[0]) return false;
             mem_free(out->owned_data);

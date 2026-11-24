@@ -1,0 +1,31 @@
+{
+  "name": "drag copy and drag move preserve source text through NUL",
+  "command": "edit",
+  "html": "temp/edit-ui/edit_src_nul_drag.txt",
+  "prepare": ["python3", "-c", "from pathlib import Path; p=Path('temp/edit-ui/edit_src_nul_drag.txt'); p.parent.mkdir(parents=True,exist_ok=True); p.write_bytes(b'ABC\\0AFTER\\nDEST\\n')"],
+  "events": [
+    {"type": "click", "target": {"selector": ".src-text .edit-doc > div:first-child"}},
+    {"type": "key_press", "key": "Home"},
+    {"type": "key_combo", "key": "End", "mods_str": "shift"},
+    {"type": "mouse_drag", "target": {"text": "ABC"}, "to_target": {"text": "DEST"}, "mods_str": "ctrl"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_src_nul_drag.txt", "equals": "ABC\u0000AFTER\nABC\u0000AFTERDEST\n"},
+    {"type": "key_combo", "key": "z", "mods_str": "super"},
+    {"type": "click", "target": {"selector": ".src-text .edit-doc > div:first-child"}},
+    {"type": "key_press", "key": "Home"},
+    {"type": "key_combo", "key": "End", "mods_str": "shift"},
+    {"type": "mouse_drag", "target": {"text": "ABC"}, "to_target": {"text": "DEST"}},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_src_nul_drag.txt", "equals": "\nABC\u0000AFTERDEST\n"},
+    {"type": "key_combo", "key": "z", "mods_str": "super"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_src_nul_drag.txt", "equals": "ABC\u0000AFTER\nDEST\n"},
+    {"type": "click", "target": {"text": "DEST"}},
+    {"type": "key_press", "key": "Home"},
+    {"type": "key_combo", "key": "End", "mods_str": "shift"},
+    {"type": "mouse_drag", "target": {"text": "DEST"}, "to_target": {"text": "ABC"}},
+    {"type": "assert_text", "target": {"selector": ".edit-status"}, "contains": "Ln 1, Col 5"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_src_nul_drag.txt", "equals": "DESTABC\u0000AFTER\n\n"}
+  ]
+}

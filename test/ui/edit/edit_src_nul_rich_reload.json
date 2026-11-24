@@ -1,0 +1,22 @@
+{
+  "name": "reload switches to source when a rich document gains an embedded NUL",
+  "command": "edit",
+  "html": "test/ui/edit/sample.md",
+  "working_copy": "temp/edit-ui/edit_src_nul_rich_reload.md",
+  "events": [
+    {"type": "click", "target": {"text": "short paragraph"}},
+    {"type": "type", "text": "MINE"},
+    {"type": "write_file", "path": "temp/edit-ui/edit_src_nul_rich_reload.md", "content": "# Text\u0000 after\n"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_count", "target": {"selector": ".edit-dialog-changed"}, "count": 1},
+    {"type": "click", "target": {"selector": ".edit-dialog-reload"}},
+    {"type": "assert_count", "target": {"selector": ".src-text"}, "count": 1},
+    {"type": "assert_text", "target": {"selector": ".src-text .edit-doc > div:first-child"}, "equals": "# Text\u0000 after"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""},
+    {"type": "click", "target": {"selector": ".src-text .edit-doc > div:first-child"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type_physical", "text": "z"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_src_nul_rich_reload.md", "equals": "# Text\u0000 afterz\n"}
+  ]
+}

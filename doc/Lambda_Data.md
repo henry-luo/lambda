@@ -167,6 +167,10 @@ can span multiple lines"
 | `\r` | Carriage return |
 | `\\` | Backslash |
 | `\"` | Double quote |
+| `\u0000` | NUL (`U+0000`) |
+
+`"a\u0000b"` is a three-character string. NUL counts as a character, and
+the `b` remains at index 2 (**S2.5.9v2**).
 
 #### String Indexing and Slicing
 
