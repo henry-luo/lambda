@@ -572,7 +572,9 @@ extern "C" Item mvp_lmd_caught_value(MvpLmdLibraryState* state, Item carrier) {
     if (!state->errors) return carrier;
     const char* message = error->code == ERR_STACK_OVERFLOW
         ? "Maximum call stack size exceeded" : error->message ? error->message : "";
-    String* copied = heap_strcpy(message, strlen(message));
+    size_t message_length = error->code == ERR_STACK_OVERFLOW
+        ? strlen(message) : error->message_length;
+    String* copied = heap_strcpy(message, message_length);
     if (!copied) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     text.set(Item{.item = s2it(copied)});
     Item argument = text.get();

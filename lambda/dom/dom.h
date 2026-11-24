@@ -13,6 +13,7 @@
 #pragma once
 
 #include "lambda/input/css/dom_xml_serializer.h"
+#include "lib/strview.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -29,6 +30,8 @@ void dom_svg_invalidate_presentation(void* node);
 
 
 #include "lambda/lambda.h"
+
+StrView dom_item_text_view(Item item);
 
 // =============================================================================
 // DOM Context Management
@@ -545,7 +548,7 @@ Item dom_realm_custom_element_prototype(const char* local_name);
 Item dom_realm_custom_element_upgrade(Item element);
 void dom_realm_custom_element_connection(Item element, bool connected);
 void dom_realm_custom_element_attribute(Item element, const char* name,
-    const char* old_value, const char* value);
+    StrView old_value, StrView value);
 void dom_custom_element_tree_changed(void* node, bool connected);
 void dom_custom_elements_registry_changed(void);
 void* dom_form_first_submitter(void* form, bool skip_disabled);
@@ -604,12 +607,15 @@ struct DomElement;
 class DomAttributeOldValue {
 public:
     explicit DomAttributeOldValue(const char* value);
+    explicit DomAttributeOldValue(StrView value);
     DomAttributeOldValue(DomElement* element, const char* name);
     ~DomAttributeOldValue();
     const char* get() const { return value_; }
+    StrView view() const { return {value_, length_}; }
     DomAttributeOldValue(const DomAttributeOldValue&) = delete;
     DomAttributeOldValue& operator=(const DomAttributeOldValue&) = delete;
 private:
     char* value_;
+    size_t length_;
 };
 #endif

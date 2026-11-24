@@ -1165,21 +1165,22 @@ static bool copy_current_selection_to_clipboard(DocState* state, const char* pre
     View* surface_target = canonical_selection_focus_target(state);
 
     Arena* temp_arena = mem_arena_create(NULL, MEM_ROLE_TEMP, "event.arena");
-    char* text = state_store_extract_selection_text(state, temp_arena);
+    size_t text_length = 0;
+    char* text = state_store_extract_selection_text(state, temp_arena, &text_length);
     char* html = state_store_extract_selection_html(state, temp_arena);
     bool copied = false;
     if (html && html[0]) {
-        clipboard_copy_rich(html, text ? text : "");
-        log_debug("%s: copied rich selection html=%zu text=%zu", prefix ? prefix : "copy selection", strlen(html), text ? strlen(text) : 0);
+        clipboard_copy_rich(html, text, text_length);
+        log_debug("%s: copied rich selection html=%zu text=%zu", prefix ? prefix : "copy selection", strlen(html), text_length);
         copied = true;
     } else if (text) {
-        clipboard_copy_text(text);
-        log_debug("%s: copied plain selection text=%zu", prefix ? prefix : "copy selection", strlen(text));
+        clipboard_copy_rich(nullptr, text, text_length);
+        log_debug("%s: copied plain selection text=%zu", prefix ? prefix : "copy selection", text_length);
         copied = true;
     }
     if (copied) {
         log_clipboard_copy(state, surface_target, prefix,
-                           text ? (uint32_t)strlen(text) : 0,
+                           (uint32_t)text_length,
                            html ? (uint32_t)strlen(html) : 0);
     }
     arena_destroy(temp_arena);
@@ -1192,7 +1193,8 @@ static bool copy_current_selection_to_clipboard(DocState* state, const char* pre
 static bool copy_model_payload_to_clipboard(DocState* state, Item result, const char* prefix) {
     char* image = radiant_edit_result_string_copy(result, "clipboard_image");
     char* html = radiant_edit_result_string_copy(result, "clipboard_html");
-    char* text = radiant_edit_result_string_copy(result, "clipboard_text");
+    size_t text_length = 0;
+    char* text = radiant_edit_result_string_copy(result, "clipboard_text", &text_length);
     if (image && clipboard_store_write_image(image, html, text)) {
         mem_free(image);
         mem_free(html);
@@ -1200,16 +1202,11 @@ static bool copy_model_payload_to_clipboard(DocState* state, Item result, const 
         return true;
     }
     mem_free(image);
-    bool copied = (html && html[0]) || (text && text[0]);
-    if (html && html[0]) {
-        // model selections can name rich fragments without an image, including table cells.
-        clipboard_copy_rich(html, text ? text : "");
-    } else if (copied) {
-        clipboard_copy_text(text);
-    }
+    bool copied = (html && html[0]) || text_length;
     if (copied) {
+        clipboard_copy_rich(html, text, text_length);
         log_clipboard_copy(state, canonical_selection_focus_target(state), prefix,
-                           text ? (uint32_t)strlen(text) : 0, html ? (uint32_t)strlen(html) : 0);
+                           (uint32_t)text_length, html ? (uint32_t)strlen(html) : 0);
     }
     mem_free(html);
     mem_free(text);
@@ -1405,6 +1402,25 @@ static Item event_source_position(DomDocument* doc, const SourcePosC* position) 
     return result.get();
 }
 
+Item radiant_source_drag_position(DomElement* host, float x, float y) {
+    DomDocument* doc = host ? host->doc : nullptr;
+    if (!doc || !doc->view_tree || !doc->js.host_ui_context) return ItemNull;
+    View* anchor = nullptr;
+    if (!selection_get_pointer_anchor(doc->state, &anchor, nullptr) ||
+        !view_geometry_dom_is_descendant(anchor, host)) return ItemNull;
+    EditingSurface surface;
+    EditingBoundary hit;
+    if (!editing_surface_from_target(host, &surface) || surface.owner != host ||
+        !editing_geometry_hit_test_boundary(static_cast<UiContext*>(doc->js.host_ui_context),
+            doc->view_tree->root, &surface, x, y, EDITING_CLAMP_SKIP_TEXT_CONTROLS, &hit))
+        return ItemNull;
+    SourcePosC position = {};
+    if (!source_pos_from_dom_boundary(&hit.dom, &position)) return ItemNull;
+    Item result = event_source_position(doc, &position);
+    source_pos_free(&position);
+    return result;
+}
+
 static Item event_source_selection(DomDocument* doc, const SourcePosC* anchor,
                                     const SourcePosC* head) {
     EventSourcePayloadSeeds* seeds = event_source_payload_seeds(doc);
@@ -1543,9 +1559,11 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
 
     if (intent && intent->type != INPUT_INTENT_NONE) {
         const char* input_type = input_intent_type_name(intent->type);
+        // Both package payloads share a length-delimited snapshot of the text.
+        Item data = intent->data
+            ? Item{.item = s2it(builder.createString(intent->data, intent->text_length()))} : ItemNull;
         mb.put("input_type", input_type);
-        if (intent->data) mb.put("data", intent->data);
-        else mb.putNull("data");
+        mb.put("data", data);
         if (intent->data_mime) mb.put("mime", intent->data_mime);
         else mb.putNull("mime");
         // ES17: an undo/redo hands the template the entry to install — the
@@ -1565,8 +1583,7 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
 
         MapBuilder im = builder.map();
         im.put("input_type", input_type);
-        if (intent->data) im.put("data", intent->data);
-        else im.putNull("data");
+        im.put("data", data);
         if (intent->data_mime) im.put("mime", intent->data_mime);
         else im.putNull("mime");
         if (intent->html_data) {
@@ -2309,11 +2326,16 @@ bool radiant_edit_result_bool(Item result, const char* name) {
     return get_type_id(field) == LMD_TYPE_BOOL && it2b(field);
 }
 
-char* radiant_edit_result_string_copy(Item result, const char* name) {
+char* radiant_edit_result_string_copy(Item result, const char* name, size_t* length) {
     Item field = radiant_edit_result_field(result, name);
+    if (length) *length = 0;
     if (get_type_id(field) == LMD_TYPE_NULL) return nullptr;
     const char* text = fn_to_cstr(field);
-    return text ? mem_strdup(text, MEM_CAT_TEMP) : nullptr;
+    if (!text) return nullptr;
+    size_t size = is_text_type_id(get_type_id(field)) ? field.get_len() : strlen(text);
+    char* copy = mem_dup_n(text, size, MEM_CAT_TEMP);
+    if (copy && length) *length = size;
+    return copy;
 }
 
 static bool apply_edit_result_source_selection(EventContext* evcon,
@@ -6643,8 +6665,8 @@ static bool dom_js_selector_prefix_can_match_anchor(CssSelector* selector, size_
 }
 
 static bool dom_js_child_list_has_anchor(CssSelector* selector, size_t index,
-        DomJsChildListDependency* dependency, bool self) {
-    DomNode* parent = dependency->parent;
+        DomJsChildListDependency* dependency, bool self, DomNode* parent_override = nullptr) {
+    DomNode* parent = parent_override ? parent_override : dependency->parent;
     if (!parent || !parent->is_element()) return true;
     if (self) return dom_js_selector_prefix_can_match_anchor(selector, index,
         parent->as_element(), &dependency->matcher);
@@ -6721,9 +6743,18 @@ static bool dom_js_selector_has_child_list_dependency(CssSelector* selector, voi
                 if (!can_change) continue;
             }
             // only leading siblings escape the anchor's descendants; internal siblings still have an enclosing anchor.
+            bool leading_sibling = false;
             for (size_t f = 0; f < simple->function_selector_count; f++) {
                 if (dom_js_selector_has_combinator_dependency(
-                        simple->function_selectors[f], CSS_COMBINATOR_NEXT_SIBLING, true)) return true;
+                        simple->function_selectors[f], CSS_COMBINATOR_NEXT_SIBLING, true)) leading_sibling = true;
+            }
+            if (leading_sibling) {
+                // sibling witnesses can escape the edited subtree, but still need an enclosing anchor.
+                for (DomNode* parent = dependency->parent; parent; parent = parent->parent) {
+                    if (parent->is_element() && dom_js_child_list_has_anchor(
+                            selector, c, dependency, false, parent)) return true;
+                }
+                continue;
             }
             for (DomNode* node = dependency->parent; node; node = node->parent) {
                 if (node->is_element() && dom_js_selector_prefix_can_match_anchor(
@@ -12811,6 +12842,7 @@ struct EventTextRun {
     float pdf_width;
     bool pdf_copy_space;
     bool is_pdf;
+    bool preserve_spaces;
 };
 
 static EventTextRun event_text_run(ViewText* text, TextRect* rect) {
@@ -12822,27 +12854,28 @@ static EventTextRun event_text_run(ViewText* text, TextRect* rect) {
     int end_offset = run.is_pdf
         ? run.visible_end_offset : rect->start_index + max(rect->length, 0);
     run.end = text->text_data() + end_offset;
+    run.preserve_spaces = !run.is_pdf && white_space_preserves_space_advance(get_white_space_value(text));
     return run;
 }
 
 static bool event_text_glyph_advance(UiContext* uicon, FontBox* font,
-                                     unsigned char* p, unsigned char* end,
+                                     unsigned char* p, const EventTextRun& run,
                                      bool* has_space, int* out_bytes, float* out_advance,
                                      float justified_word_spacing) {
     *out_bytes = 1;
     *out_advance = 0.0f;
     if (is_space(*p)) {
-        if (*has_space) return false;
+        if (!run.preserve_spaces && *has_space) return false;
         *has_space = true;
         // selection/caret walks consume the word expansion already published by line layout.
         *out_advance = font->style->space_width + font->style->word_spacing + justified_word_spacing;
-        if (p + 1 < end) *out_advance += font->style->letter_spacing;
+        if (p + 1 < run.end) *out_advance += font->style->letter_spacing;
         return *out_advance > 0.0f;
     }
 
     *has_space = false;
     uint32_t codepoint;
-    *out_bytes = str_utf8_decode((const char*)p, (size_t)(end - p), &codepoint);
+    *out_bytes = str_utf8_decode((const char*)p, (size_t)(run.end - p), &codepoint);
     if (*out_bytes <= 0) {
         *out_bytes = 1;
         codepoint = *p;
@@ -12852,7 +12885,7 @@ static bool event_text_glyph_advance(UiContext* uicon, FontBox* font,
     *out_advance = layout_measure_font_glyph_advance(
         font_box_handle(font), font->style, codepoint, ui_context_raster_scale(uicon));
     if (*out_advance <= 0.0f) return false;
-    if (p + *out_bytes < end) *out_advance += font->style->letter_spacing;
+    if (p + *out_bytes < run.end) *out_advance += font->style->letter_spacing;
     return true;
 }
 
@@ -12882,7 +12915,7 @@ static float event_text_x_for_offset(UiContext* uicon, FontBox* font, ViewText* 
         float advance = 0.0f;
         int bytes = 1;
         bool has_advance = event_text_glyph_advance(
-            uicon, font, current, run.end, &has_space, &bytes, &advance, justification.word);
+            uicon, font, current, run, &has_space, &bytes, &advance, justification.word);
         current += bytes;
         current_offset += bytes;
         if (has_advance) x += advance;
@@ -12919,9 +12952,8 @@ static int event_text_offset_for_x(UiContext* uicon, FontBox* font,
 
     unsigned char* current = text->text_data() + rect->start_index;
     int byte_offset = rect->start_index;
-    while (current < run.end &&
-           (is_space(*current) || *current == '\n' ||
-            *current == '\r' || *current == '\t')) {
+    // preformatted indentation occupies the same columns in paint and hit testing.
+    while (!run.preserve_spaces && current < run.end && is_space(*current)) {
         current++;
         byte_offset++;
     }
@@ -12934,7 +12966,7 @@ static int event_text_offset_for_x(UiContext* uicon, FontBox* font,
         float advance = 0.0f;
         int bytes = 1;
         bool has_advance = event_text_glyph_advance(
-            uicon, font, current, run.end, &has_space, &bytes, &advance, justification.word);
+            uicon, font, current, run, &has_space, &bytes, &advance, justification.word);
         if (!has_advance) {
             current += bytes;
             byte_offset += bytes;
@@ -13493,6 +13525,7 @@ static void handle_event_impl(UiContext* uicon, DomDocument* doc, RdtEvent* even
     event_context_init(&evcon, uicon, event);
     escape_scope.prevented = &evcon.default_prevented;  // the page's verdict exists from here on
     DocState* cascade_state = (DocState*)doc->state;
+    bool had_selection = selection_has(cascade_state);
     EventStateLog* cascade_log = cascade_state && cascade_state->active_event_log
         ? cascade_state->active_event_log : evcon.ui_context->event_log;
     uint64_t cascade_id = state_begin_event_cascade(cascade_state, cascade_log, "input");
@@ -13784,17 +13817,18 @@ static void handle_event_impl(UiContext* uicon, DomDocument* doc, RdtEvent* even
                 &selection_focus_offset, &selection_iframe_offset_x,
                 &selection_iframe_offset_y, &selection_collapsed);
             DomDocument* selection_doc = event_context_target_document(&evcon);
-            if (current_target && current_target->view_type == RDT_VIEW_TEXT) {
+            EditingSurface anchor_surface;
+            bool rich_anchor = anchor_view && editing_surface_from_target(anchor_view, &anchor_surface) &&
+                editing_surface_is_rich(&anchor_surface);
+            if (current_target && current_target->view_type == RDT_VIEW_TEXT &&
+                (!rich_anchor || view_geometry_dom_is_descendant(current_target, anchor_surface.owner))) {
                 drag_target_view = current_target;
-            } else if (anchor_view && anchor_view->view_type == RDT_VIEW_TEXT &&
+            } else if (rich_anchor &&
                        selection_doc && selection_doc->view_tree &&
                        selection_doc->view_tree->root) {
-                EditingSurface anchor_surface;
                 EditingBoundary hit_boundary;
-                bool has_anchor_surface = editing_surface_from_target(anchor_view, &anchor_surface) &&
-                    editing_surface_is_rich(&anchor_surface);
-                bool has_hit_boundary = has_anchor_surface &&
-                    editing_geometry_hit_test_boundary(evcon.ui_context,
+                // Crossing editor chrome must keep the endpoint in the editing host.
+                bool has_hit_boundary = editing_geometry_hit_test_boundary(evcon.ui_context,
                         static_cast<View*>(selection_doc->view_tree->root), &anchor_surface,
                         (float)motion->x - selection_iframe_offset_x,
                         (float)motion->y - selection_iframe_offset_y,
@@ -13964,11 +13998,22 @@ static void handle_event_impl(UiContext* uicon, DomDocument* doc, RdtEvent* even
                 log_debug("Dragging selection to offset %d, collapsed=%d", char_offset, selection_collapsed);
                 evcon.need_repaint = true;
             }
+            // A model viewport can own edge scrolling. Route the request at
+            // the editing host even if the pointer has crossed its boundary.
+            bool model_scroll = false;
+            if (rich_anchor && context && author_template_may_handle("selectiondrag")) {
+                bool was_prevented = evcon.default_prevented;
+                if (dispatch_lambda_handler(&evcon, anchor_surface.owner, "selectiondrag", nullptr, nullptr, false))
+                    evcon.need_repaint = true;
+                model_scroll = evcon.default_prevented;
+                evcon.default_prevented = was_prevented;
+                // A handled notification can reconcile the rows holding the range.
+                selection_get_pointer_anchor(state, &anchor_view, nullptr);
+            }
             EditingControllerHooks hooks = editing_controller_hooks();
-            editing_controller_drag_autoscroll(&evcon, state, anchor_view,
-                                               (float)motion->x,
-                                               (float)motion->y,
-                                               &hooks);
+            if (model_scroll) editing_controller_drag_autoscroll_stop(state, &hooks);
+            else editing_controller_drag_autoscroll(&evcon, state, anchor_view,
+                (float)motion->x, (float)motion->y, &hooks);
         }
         textarea_drag_done:
 
@@ -14768,9 +14813,9 @@ static void handle_event_impl(UiContext* uicon, DomDocument* doc, RdtEvent* even
                             if (same_rich_surface) {
                                 Arena* drag_arena = mem_arena_create(
                                     NULL, MEM_ROLE_TEMP, "rich.drag.arena");
-                                char* drag_text = state_store_extract_selection_text(
-                                    state, drag_arena);
                                 InputIntent drop_intent;
+                                char* drag_text = state_store_extract_selection_text(
+                                    state, drag_arena, &drop_intent.data_length);
                                 drop_intent.type = INPUT_INTENT_INSERT_FROM_DROP;
                                 drop_intent.data = drag_text ? drag_text : "";
                                 drop_intent.data_mime = "text/plain";
@@ -15056,7 +15101,9 @@ static void handle_event_impl(UiContext* uicon, DomDocument* doc, RdtEvent* even
 
             // End selection mode
             if (selection_has_projection(state)) {
-                dispatch_selectionchange(&evcon, state, evcon.target);
+                View* anchor = nullptr;
+                selection_get_pointer_anchor(state, &anchor, nullptr);
+                dispatch_selectionchange(&evcon, state, anchor ? anchor : evcon.target);
             }
             // a click handler may clear the range; mouse-up still ends its pointer gesture.
             selection_transition(state, SELECTION_TRANSITION_END_POINTER_SELECTION, NULL);
@@ -15748,7 +15795,7 @@ static void handle_event_impl(UiContext* uicon, DomDocument* doc, RdtEvent* even
 
     // Selection repaint changes both the old and new highlight spans. A
     // caret-sized dirty region leaves stale highlight pixels during live drag.
-    if (evcon.need_repaint && selection_has(state)) {
+    if (evcon.need_repaint && (had_selection || selection_has(state))) {
         state->dirty_tracker.full_repaint = true;
     }
 

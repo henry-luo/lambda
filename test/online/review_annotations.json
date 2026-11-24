@@ -46,7 +46,7 @@
     {
       "label": "saas_landing_473",
       "url": "https://www.popcorn.space/",
-      "manual_major_remaining": "Main heading, copy and action are restored, but the large device illustration remains absent at the bottom of the hero.",
+      "manual_major_remaining": "",
       "rechecks": [
         {
           "rechecked_at": "2026-11-18T04:43:31.020Z",
@@ -54,7 +54,12 @@
           "previous_manual_major_remaining": "Hero heading, copy, actions and device imagery remain absent; the mostly light reference hides this from the coarse score.",
           "manual_major_remaining": "Main heading, copy and action are restored, but the large device illustration remains absent at the bottom of the hero."
         }
-      ]
+      ],
+      "resolved_previous_manual_major_remaining": "Main heading, copy and action are restored, but the large device illustration remains absent at the bottom of the hero.",
+      "resolved_at": "2026-11-24T12:33:33.560Z",
+      "resolution": "The current native pixels equal the prior capture: device artwork is already visible at the viewport edge. Current Chromium confirms only a minor position/animation-phase and heading-wrap difference. The earlier major-omission annotation was too broad; this is a review correction, not a new rendering fix.",
+      "resolution_evidence": "comparison/repairs.html#round-178",
+      "resolved_capture_settle_ms": 1000
     },
     {
       "label": "saas_landing_134",
@@ -167,7 +172,20 @@
     {
       "label": "maven_central",
       "url": "https://central.sonatype.com/",
-      "manual_major_remaining": "The promotional panel now has the correct text/image sizing after RI-043/RI-044. The primary component-search input remains absent; retained as a major omission despite the low changed-area score."
+      "manual_major_remaining": "",
+      "rechecks": [
+        {
+          "rechecked_at": "2026-11-24T10:08:10.499Z",
+          "evidence": "comparison/repairs.html#round-173",
+          "previous_manual_major_remaining": "The promotional panel now has the correct text/image sizing after RI-043/RI-044. The primary component-search input remains absent; retained as a major omission despite the low changed-area score.",
+          "manual_major_remaining": "The search control is visible and the promotional card text is readable after the SVG sizing repair. The large browser consent/preferences panel remains absent."
+        }
+      ],
+      "resolved_previous_manual_major_remaining": "The search control is visible and the promotional card text is readable after the SVG sizing repair. The large browser consent/preferences panel remains absent.",
+      "resolved_at": "2026-11-24T11:11:52.976Z",
+      "resolution": "The consent/preferences panel and all of its controls render after the stacking-context paint-culling repair. Main content matches; remaining card spacing and input alignment are minor.",
+      "resolution_evidence": "comparison/repairs.html#round-175",
+      "resolved_capture_settle_ms": 1000
     },
     {
       "label": "saas_landing_087",
@@ -264,7 +282,15 @@
     {
       "label": "saas_landing_565",
       "url": "https://www.amperos.com/",
-      "manual_major_remaining": "Hero media and main text are present, but the brand and primary navigation remain nearly invisible as dark text on the dark header. Retained as a major navigation omission after before/current/browser review despite the small threshold crossing."
+      "manual_major_remaining": "Client startup replaces the hero with an application error page because the dedicated Worker API is unavailable (JS13-L69). Deleting Worker in Chromium reproduces the same boundary. This major platform feature remains deferred.",
+      "rechecks": [
+        {
+          "rechecked_at": "2026-11-24T12:33:33.560Z",
+          "evidence": "comparison/repairs.html#round-178",
+          "previous_manual_major_remaining": "Hero media and main text are present, but the brand and primary navigation remain nearly invisible as dark text on the dark header. Retained as a major navigation omission after before/current/browser review despite the small threshold crossing.",
+          "manual_major_remaining": "Client startup replaces the hero with an application error page because the dedicated Worker API is unavailable (JS13-L69). Deleting Worker in Chromium reproduces the same boundary. This major platform feature remains deferred."
+        }
+      ]
     },
     {
       "label": "saas_landing_442",
@@ -552,9 +578,14 @@
     {
       "label": "pnpm_docs",
       "url": "https://pnpm.io/",
-      "manual_major_remaining": "The complete client-created top navigation and brand remain absent, shifting the otherwise restored hero upward.",
+      "manual_major_remaining": "",
       "reviewed_at": "2026-11-20T05:45:28.245309+00:00",
-      "evidence": "comparison/repairs.html#round-102"
+      "evidence": "comparison/repairs.html#round-102",
+      "resolved_previous_manual_major_remaining": "The complete client-created top navigation and brand remain absent, shifting the otherwise restored hero upward.",
+      "resolved_at": "2026-11-24T13:29:24.734Z",
+      "resolution": "The current qualified release renders the complete top navigation and brand alongside the hero. The prior large client-created navigation omission is cleared; remaining text and terminal-graphic differences are minor.",
+      "resolution_evidence": "comparison/repairs.html#round-179",
+      "resolved_capture_settle_ms": 1000
     },
     {
       "label": "saas_landing_463",
@@ -616,6 +647,32 @@
       "manual_major_remaining": "Main heading and phone photograph render, but the large consent panel/backdrop and prominent trust badges are absent. Retain major review despite the lower image score; currency formatting also remains unsupported.",
       "reviewed_at": "2026-11-23T10:17:02.237Z",
       "evidence": "comparison/repairs.html#round-169"
+    },
+    {
+      "label": "saas_landing_188",
+      "url": "https://swagapp.com/",
+      "manual_major_remaining": "The main job-search page and consent panel render, but the large AI side pane and regional notice visible in Chromium are absent. The successful native capture still retains a major UI omission.",
+      "reviewed_at": "2026-11-24T10:08:10.499Z",
+      "evidence": "comparison/repairs.html#round-173"
+    },
+    {
+      "label": "saas_landing_111",
+      "url": "https://www.jetty.com/",
+      "manual_major_remaining": "Navigation, heading, explanatory text, button and announcement render after the navigation-origin timing repair. The large lazy hero image remains absent despite correct geometry; its source is still the transparent placeholder.",
+      "reviewed_at": "2026-11-24T10:46:03.831Z",
+      "evidence": "comparison/repairs.html#round-174"
+    },
+    {
+      "label": "saas_landing_281",
+      "url": "https://family.co/",
+      "manual_major_remaining": "Heading, navigation and hero artwork now render, but supporting copy remains faint and the primary download/video actions remain absent in the matched frame. Retain the major action omission despite the low image score."
+    },
+    {
+      "label": "saas_landing_342",
+      "url": "https://teachable.com/",
+      "manual_major_remaining": "Main navigation, heading, actions and product media now render. RI-227 repairs the consent notice width and fixed positioning, but missing :host custom-property styles leave transparent fill and unstyled text/buttons overlapping the product interface. Retain this large overlay defect under JS13-L2.",
+      "reviewed_at": "2026-11-24T13:29:24.734Z",
+      "evidence": "comparison/repairs.html#round-179"
     }
   ]
 }

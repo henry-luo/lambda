@@ -160,6 +160,7 @@ enum JsClass : uint8_t {
     JS_CLASS_PROGRESS_EVENT,
     JS_CLASS_COMMAND_EVENT,
     JS_CLASS_NODE_ITERATOR,
+    JS_CLASS_INTERSECTION_OBSERVER_ENTRY,
     JS_CLASS__COUNT  // sentinel
 };
 
@@ -333,6 +334,7 @@ static inline JsClass js_class_from_name(const char* nm, int nl) {
                 return JS_CLASS_CONTENT_VISIBILITY_AUTO_STATE_CHANGE_EVENT;
             break;
         case 25:
+            if (!strncmp(nm, "IntersectionObserverEntry", 25)) return JS_CLASS_INTERSECTION_OBSERVER_ENTRY;
             if (!strncmp(nm, "PerformanceResourceTiming", 25)) return JS_CLASS_PERFORMANCE_RESOURCE_TIMING;
             if (!strncmp(nm, "ByteLengthQueuingStrategy", 25)) return JS_CLASS_BYTE_LENGTH_QUEUING_STRATEGY;
             break;
@@ -439,6 +441,7 @@ static inline const char* js_class_to_name(JsClass cls) {
         case JS_CLASS_PROGRESS_EVENT: return "ProgressEvent";
         case JS_CLASS_COMMAND_EVENT: return "CommandEvent";
         case JS_CLASS_NODE_ITERATOR: return "NodeIterator";
+        case JS_CLASS_INTERSECTION_OBSERVER_ENTRY: return "IntersectionObserverEntry";
         case JS_CLASS_SECURITY_POLICY_VIOLATION_EVENT: return "SecurityPolicyViolationEvent";
         case JS_CLASS_XML_HTTP_REQUEST: return "XMLHttpRequest";
         case JS_CLASS_TYPE_ERROR: return "TypeError";

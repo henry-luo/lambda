@@ -15,6 +15,7 @@ typedef enum JsObserverKind {
 
 const char* dom_observer_interface_name(JsObserverKind kind);
 void dom_observer_install_interface(Item prototype, JsObserverKind kind);
+void dom_intersection_entry_install_interface(Item prototype);
 void dom_install_observer_globals(Item global);
 Item dom_mutation_observer_new(Item callback);
 Item dom_resize_observer_new(Item callback);
@@ -23,7 +24,7 @@ Item dom_intersection_observer_new(Item callback, Item options);
 void dom_observers_mutation_notify(DomJsMutationKind kind,
                                       void* target, void* parent,
                                       const char* attribute_name,
-                                      const char* old_value);
+                                      const char* old_value, size_t old_value_length = SIZE_MAX);
 void dom_observers_child_replace_notify(void* parent, void* added,
                                            void* removed);
 void dom_observers_children_replace_notify(void* parent, Item added, Item removed);
@@ -50,6 +51,9 @@ void dom_notify_mutation_detail(DomJsMutationKind kind,
                                    void* target, void* parent,
                                    const char* attribute_name,
                                    const char* old_value);
+void dom_notify_mutation_detail_n(DomJsMutationKind kind, void* target, void* parent,
+                                  const char* attribute_name, const char* old_value,
+                                  size_t old_value_length);
 // apply proven non-style data/aria writes with ordinary observer/attribute side effects.
 bool dom_set_non_style_metadata(void* target, const char* name, const char* value);
 void dom_notify_scroll_position_change(void* element, float old_x, float old_y);

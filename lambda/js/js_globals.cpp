@@ -75,6 +75,7 @@ extern "C" Item js_cjs_leave(Item module);
 extern "C" void js_register_clipboard_globals(Item global);
 
 static bool js_string_exotic_index_in_range(Item obj, String* key);
+static Item* js_intrinsic_prototype_slot(int class_id);
 
 template <typename Target>
 JS_FORWARD_STATIC_VOID( js_globals_set_native_method, (Item object, const char* name, Target target), js_set_native_key, (object, make_string_item(name), target))
@@ -1710,6 +1711,19 @@ static Item js_timing_new(bool mark, Item name, double start, double duration, I
     return result.get();
 }
 
+static int js_timing_navigation_field(Item name) {
+    static const char* const fields[] = {
+        "navigationStart", "unloadEventStart", "unloadEventEnd", "redirectStart", "redirectEnd",
+        "fetchStart", "domainLookupStart", "domainLookupEnd", "connectStart", "connectEnd",
+        "secureConnectionStart", "requestStart", "responseStart", "responseEnd", "domLoading",
+        "domInteractive", "domContentLoadedEventStart", "domContentLoadedEventEnd", "domComplete",
+        "loadEventStart", "loadEventEnd"
+    };
+    for (size_t i = 0; i < sizeof(fields) / sizeof(fields[0]); i++)
+        if (js_string_equals(name, fields[i])) return (int)i;
+    return -1;
+}
+
 static Item js_timing_timestamp(Item value, bool allow_name, double* out) {
     RootFrame roots(2);
     Rooted<Item> input(roots, value), entry(roots, ItemNull);
@@ -1722,6 +1736,15 @@ static Item js_timing_timestamp(Item value, bool allow_name, double* out) {
         return ItemNull;
     }
     input.set(js_to_string(input.get())); JS_RETURN_IF_ERROR(input.get());
+    int navigation_field = js_timing_navigation_field(input.get());
+    if (navigation_field >= 0) {
+        if (!dom_get_document()) return js_throw_type_error("Navigation timing requires a Window realm");
+        // user timing defines the navigation origin as zero, without requiring a user mark.
+        if (navigation_field == 0) { *out = 0; return ItemNull; }
+        // other legacy navigation timestamps are not recorded by this host.
+        return js_throw_value(js_domexception_new(js_name_item("The navigation timestamp is unavailable"),
+            js_name_item("InvalidAccessError")));
+    }
     JsPerformanceState* state = js_performance_resources();
     // the buffer is chronological; equal timestamps preserve insertion order.
     for (int64_t i = js_array_length(state->user_entries); i > 0; i--) {
@@ -1741,6 +1764,9 @@ static Item js_performance_mark_construct(Item, Item* args, int argc, Item targe
     Rooted<Item> name(roots, args[0]), options(roots, argc > 1 ? args[1] : make_js_undefined());
     Rooted<Item> detail(roots, ItemNull), value(roots, ItemNull), new_target(roots, target);
     name.set(js_to_string(name.get())); JS_RETURN_IF_ERROR(name.get());
+    if (dom_get_document() && js_timing_navigation_field(name.get()) >= 0)
+        return js_throw_value(js_domexception_new(js_name_item("Navigation timing names are reserved"),
+            js_name_item("SyntaxError")));
     double start = js_performance_now_ms();
     if (get_type_id(options.get()) != LMD_TYPE_UNDEFINED && get_type_id(options.get()) != LMD_TYPE_NULL) {
         if (!js_is_object_value(options.get())) return js_throw_type_error("PerformanceMark options must be an object");
@@ -14298,7 +14324,7 @@ static Item js_node_filter_new(void) {
 }
 
 static Item js_intersection_observer_entry_new(void) {
-    return js_new_object();
+    return js_throw_type_error("Illegal IntersectionObserverEntry constructor");
 }
 
 enum JsQueuingStrategySlot { JS_QUEUE_HIGH_WATER_MARK, JS_QUEUE_SIZE_FUNCTION, JS_QUEUE_SLOT_COUNT };
@@ -14443,8 +14469,20 @@ static Item js_install_host_global_group(Item target, JsHostGlobalGroup group) {
         // document TreeWalker; expose the shared DOM constants rather than
         // giving an editor-specific traversal path.
         js_set_key_cstr(global.get(), "NodeFilter", js_node_filter_new());
-        js_install_native_constructor(global.get(), "IntersectionObserverEntry",
-            js_intersection_observer_entry_new);
+        {
+            RootFrame roots(2);
+            Rooted<Item> constructor(roots, js_install_native_constructor(global.get(),
+                "IntersectionObserverEntry", js_intersection_observer_entry_new));
+            Rooted<Item> prototype(roots, js_get_constructor_intrinsic_prototype(constructor.get()));
+            dom_intersection_entry_install_interface(prototype.get());
+            js_set_key_default(prototype.get(), js_well_known_symbol_key(4), js_name_item("IntersectionObserverEntry"));
+            js_mark_non_enumerable(prototype.get(), js_well_known_symbol_key(4));
+            js_mark_non_writable(prototype.get(), js_well_known_symbol_key(4));
+            // native notifications retain their intrinsic interface after guest rebinding.
+            Item* slot = js_intrinsic_prototype_slot(JS_CLASS_INTERSECTION_OBSERVER_ENTRY);
+            if (!slot) return ItemError;
+            *slot = prototype.get();
+        }
         break;
     }
     case JS_HOST_GROUP_ABORT_CONTROLLER: {

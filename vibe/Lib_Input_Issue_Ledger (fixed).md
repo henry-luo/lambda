@@ -6,9 +6,9 @@ remain in the [active issue ledger](Lib_Input_Issue_Ledger.md).
 
 ## Fixed issues
 
-<a id="li-109"></a>
+<a id="li-114"></a>
 
-### LI-109 — Native JSX and LaTeX writers silently omitted large strings
+### LI-114 — Native JSX and LaTeX writers silently omitted large strings
 
 **Fixed 2026-11-24.** The [JSX writer](../lambda-input/lambda/format/format-jsx.cpp)
 omitted text above 10,000 bytes and emitted empty braces for JavaScript
@@ -18,7 +18,7 @@ omitted string values at or above 65,536 bytes, leaving empty command arguments.
 
 The native writers removed all three cutoffs under D9.1.1v4. The user directed
 that memory pressure and invalid storage be handled through overall memory
-management (D5.2.1). [LI-108](#li-108) and
+management (D5.2.1). [LI-113](#li-113) and
 [LR09-31](<Lambda_Issue_Ledger (fixed).md#lr09-31>) record the preceding
 HTML/XML repair.
 
@@ -26,14 +26,14 @@ Three [native formatter tests](../lambda-input/test/test_format_markup_gtest.cpp
 reproduce the omissions at the first rejected lengths. All three pass after
 the fix and verify the full payload, JSX escaping and closing syntax. The
 full markup executable passes 47/47 checks. Evidence:
-`temp/li-109/before.log` and `temp/li-109/markup.log`.
+`temp/li-114/before.log` and `temp/li-114/markup.log`.
 The loopback-enabled Input baseline reports 5,363 passed, 3 skipped, and the
-same three failures recorded for LI-108: the Bootstrap CSS round trip and
-two native DOM checks. See `temp/li-109/input-baseline.log`.
+same three failures recorded for LI-113: the Bootstrap CSS round trip and
+two native DOM checks. See `temp/li-114/input-baseline.log`.
 
-<a id="li-108"></a>
+<a id="li-113"></a>
 
-### LI-108 — HTML and XML silently omitted large text and attributes
+### LI-113 — HTML and XML silently omitted large text and attributes
 
 **Fixed 2026-11-24.** The shared native escape helper (D9.1.1v4) dropped
 text above 1 MiB and attribute values above 32 MiB. At 1 MiB plus one byte,
@@ -46,7 +46,109 @@ The owner regression serializes a 1.2 MB text node through both writers
 and checks the full payload, escaping, and following paragraph. The markup
 suite passed 34/34. The Input baseline and loopback reruns retained a
 Bootstrap CSS round-trip failure and two native DOM failures.
-See [LI-109](#li-109) for removal of the JSX and native LaTeX cutoffs.
+See [LI-114](#li-114) for removal of the JSX and native LaTeX cutoffs.
+<a id="li-112"></a>
+
+### LI-112 — Explicit epoch-zero cookie expiry is stored as a session cookie
+
+**Fixed 2026-11-24.** Cookiebot probes cookie support by writing a temporary
+`-3` cookie and deleting it with `Expires=Thu, 01 Jan 1970 00:00:00 GMT`.
+The jar used zero both for that parsed timestamp and for an absent expiry,
+then required a positive timestamp before deleting an expired entry. The
+probe cookie survived, and the unchanged SDK treated it as an existing
+response instead of requesting its banner script. Negative past timestamps
+also survived the same check.
+
+The private header parser now reports expiry-attribute presence separately
+from its timestamp. The store rejects expired cookies before any session
+entry is retained. Valid Max-Age retains precedence, and the last valid
+Expires value is selected when Max-Age is absent. Public cookie storage and
+profile formats are unchanged. This stays input-owned under
+**D9.1.1v4 / D9.1.3v2** and implements the existing
+[RFC 6265 §5.2–5.3 contract](https://httpwg.org/specs/rfc6265.html#section-5.2).
+
+All three new C++ regressions fail before repair. Seven focused cookie tests
+pass afterward, including four existing hostname, file, HTTP-only and redirect
+controls. Six real-HTTP DOM fixtures pass natively and in Chromium. The
+unchanged Cookiebot SDK now has `hasResponse=false` and requests its `cc.js`
+banner script; its loopback domain is correctly refused by the external
+service. This establishes initialization progress, not a full-page clearance.
+Typelane currently fails document loading in both renderers. Dayos still
+retains its independent loading cover. No site source, profile cookie,
+capture clock or deadline is overridden (**D10.1.7**).
+
+Evidence: `temp/online-visual-round201/{cookie-unit-before.log,cookie-unit-after.log,
+cookie-dom-after.log,browser-cookie-expiry.log,cookiebot-http-before.json,
+cookiebot-http-after.json}`; `test/online/render_cookie_expiry.test.cjs`.
+
+<a id="li-111"></a>
+
+### LI-111 — Text-element fragments tokenize their contents as ordinary HTML
+
+**Fixed 2026-11-24.** Fragment parsing selected a text mode only for enabled
+`noscript`. Setting a script's `innerHTML` therefore stripped literal end tags,
+created elements from embedded markup and decoded character references inside
+JavaScript strings. A reduced script assigning `'</script>'` instead assigned
+an empty string. The browser retained the exact source bytes.
+
+Fragment parsing now shares the existing standalone lexer's tag-to-text-mode
+helper. RCDATA contexts decode references; raw-text and plaintext contexts keep
+them literal. No context start tag has been emitted, so a context end tag stays
+text. The existing document parser's raw-text treatment of scripts is retained;
+the separately declared, unimplemented escaped script-data states are not claimed
+as supported. Input remains runtime-free (**D9.1.1v4 / D9.1.3v2**).
+
+The prior qualified release fails both new script `innerHTML` regressions and
+passes the `textContent` control. All **36 focused checks pass** after repair:
+11 native HTML tests covering ten text contexts, one lexer/tree agreement test,
+and 24 rendered script/Range controls. No baseline repetition or live-page
+clearance is attributed to this bounded repair. Lokalise's earlier inline parse
+exception is absent in the new capture, but its missing consent panel remains
+high severity. Evidence: `temp/online-visual-round194/fragment-before.log`,
+`html-focused-final.log`, `sourcepos-focused.log`, `dom-focused.log`,
+`script-preparation-focused.log` and `selected-network/`.
+
+<a id="li-110"></a>
+
+### LI-110 — DOM attribute values lose bytes after embedded NUL
+
+**Fixed 2026-11-24.** The DOM attribute cache treated values with the same
+prefix before U+0000 as equal. DOM attribute storage, cache keys, and CSS
+attribute comparisons now carry the byte length, under S2.5.9v2 and
+D9.1.1v4. The core preserves the lengths for synthetic and namespaced
+attributes as well. `test/test_nul_text.py` writes two values that differ
+only after U+0000 and verifies that each reads and matches independently.
+
+<a id="li-109"></a>
+
+### LI-109 — XML formatter emits an invalid zero character reference
+
+**Fixed 2026-11-24.** `format("a\u0000b", 'xml')` used to emit
+`<root>a&#x00;b</root>`. S2.5.9v2 requires a format error. The
+XML writer checks the lengths of serialized names and text,
+including raw script, comment and processing-instruction text.
+Nested output buffers share the failure and no partial result
+reaches the caller. The regression checks scalars, attributes,
+raw text, map keys and nested maps.
+
+<a id="li-108"></a>
+
+### LI-108 — Text adapters truncate at embedded NUL
+
+**Fixed 2026-11-24.** Under S2.5.9v2 and D9.1.1v4, a zero byte in a
+Lambda string must survive length-delimited handling. YAML decoded
+`"before\0after"` but passed only the prefix to MarkBuilder. YAML
+and JSON key output also used C-string lengths. The parser and
+formatters now carry the scalar and key lengths. YAML writes a zero
+byte as `\0`. Legacy parsers that consume C strings report a literal
+zero byte in the source before parsing. Raw text and binary readers
+take the full input length. The host resource resolver rejects NUL
+in a textual path or URL before passing it to native code.
+The JSX raw expression and MDX passthrough writers also copy full spans.
+
+Coverage lives in `test/lambda/string_embedded_nul.ls` and
+`test/test_nul_text.py` in the Lambda checkout.
+
 
 <a id="li-107"></a>
 

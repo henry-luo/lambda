@@ -54,6 +54,10 @@ Item dom_realm_native_private_array_state(Item receiver, int brand,
 Item dom_realm_native_private_array_object(int brand, Item key, Item state, Item prototype) {
     return js_native_private_array_object((JsClass)brand, key, state, prototype);
 }
+Item dom_realm_private_key_for_class(Item owner, Item name) { return js_private_key_for_class(owner, name); }
+Item dom_realm_ensure_host_global_family(const char* name) { return js_ensure_host_global_family(name); }
+Item dom_realm_json_parse(Item source) { return js_json_parse(source); }
+Item dom_realm_decode_utf8_body(Item bytes) { return js_body_decode_utf8(bytes); }
 void dom_realm_install_interface(Item global, const char* name) {
     js_dom_install_interface(global, name);
 }

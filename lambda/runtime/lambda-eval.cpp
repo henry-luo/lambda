@@ -147,11 +147,11 @@ Item _map_get(TypeMap* map_type, void* map_data, const char *key, bool *is_found
 // Runtime Error Helper
 // =============================================================================
 
-static LambdaError* create_runtime_error(LambdaErrorCode code, const char* message) {
+static LambdaError* create_runtime_error(LambdaErrorCode code, const char* message, size_t length) {
     if (!context) return NULL;
     SourceLocation loc = {0};
     if (context->current_file) loc.file = context->current_file;
-    LambdaError* error = err_create(code, message, &loc);
+    LambdaError* error = err_create_n(code, message, length, &loc);
     if (!error) {
         if (lambda_recovery_frame_raise_fault(LAMBDA_FAULT_OUT_OF_MEMORY, code)) return NULL;
         (void)lambda_recovery_publish_fault_item((Context*)context,
@@ -214,6 +214,10 @@ static Item input_parse_error_item(const char* function_name, Input* input,
     }
 }
 
+static bool format_option_has_nul(const String* value) {
+    return value && memchr(value->chars, 0, value->len);
+}
+
 /**
  * Public API to set a runtime error from external modules (e.g., lambda-stack.cpp)
  * Does NOT capture stack trace since it may be called in low-stack situations.
@@ -221,7 +225,7 @@ static Item input_parse_error_item(const char* function_name, Input* input,
 extern "C" void set_runtime_error_no_trace(LambdaErrorCode code, const char* message) {
     if (!context) return;
 
-    LambdaError* error = create_runtime_error(code, message);
+    LambdaError* error = create_runtime_error(code, message, message ? strlen(message) : 0);
     if (!error) return;
     // Skip stack trace capture - may be called in low-stack conditions
     eval_context_set_last_error(context, error);
@@ -240,7 +244,7 @@ static Item runtime_error_payload(LambdaError* diagnostic, LambdaError* cause) {
     if (context && context->heap && context->heap->gc) {
         // Copy from this producer's stable record before publishing can retire
         // the ambient mirror. The Item owns its diagnostic from here onward.
-        payload = err_create_heap(diagnostic->code, diagnostic->message,
+        payload = err_create_heap_n(diagnostic->code, diagnostic->message, diagnostic->message_length,
             &diagnostic->location);
         if (payload) {
             payload->raw_stack_trace = err_capture_raw_stack_trace(context->debug_info,
@@ -254,7 +258,8 @@ static Item runtime_error_payload(LambdaError* diagnostic, LambdaError* cause) {
 
 Item runtime_error_item(LambdaErrorCode code, const char* message,
         LambdaError* cause) {
-    return runtime_error_payload(create_runtime_error(code, message), cause);
+    return runtime_error_payload(
+        create_runtime_error(code, message, message ? strlen(message) : 0), cause);
 }
 
 Item lambda_non_callable_error(void) {
@@ -277,13 +282,10 @@ static Item error_from_fields(Item message, Item source) {
     RootFrame roots(2);
     Rooted<Item> rooted_message(roots, message);
     Rooted<Item> rooted_source(roots, source);
-    const char* msg = "Error";
+    String* text = nullptr;
     LambdaErrorCode code = ERR_USER_ERROR;
     if (get_type_id(message) == LMD_TYPE_STRING) {
-        String* str = it2s(message);
-        if (str) {
-            msg = str->chars;
-        }
+        text = it2s(message);
     } else if (get_type_id(message) == LMD_TYPE_MAP) {
         // S7.4.4's parameter-map constructor, error({code, message}): it had no
         // branch, so every map built code 318 "Error" (LR10-7).
@@ -293,13 +295,13 @@ static Item error_from_fields(Item message, Item source) {
             if (value >= INT32_MIN && value <= INT32_MAX) code = (LambdaErrorCode)(int32_t)value;
         }
         Item message_item = item_attr(message, "message");
-        if (get_type_id(message_item) == LMD_TYPE_STRING && it2s(message_item)) {
-            msg = it2s(message_item)->chars;
-        }
+        if (get_type_id(message_item) == LMD_TYPE_STRING) text = it2s(message_item);
         if (get_type_id(source) != LMD_TYPE_ERROR) source = item_attr(message, "source");
     }
     // the payload-less sentinel has no record to chain, so it wraps as no cause
-    return runtime_error_item(code, msg, it2err(source));
+    return runtime_error_payload(
+        create_runtime_error(code, text ? text->chars : "Error", text ? text->len : 5),
+        it2err(source));
 }
 
 /**
@@ -5978,6 +5980,11 @@ static Item input_resource(Item target_item, Item type, bool template_url_only) 
         return failure;
     }
 
+    if (format_option_has_nul(type_str) || format_option_has_nul(flavor_str)) {
+        target_free(target);
+        return runtime_error_item(ERR_INVALID_OPERATION, "input: format options cannot contain NUL", NULL);
+    }
+
     // Check if context is properly initialized
     if (!context) {
         Item failure = runtime_error_itemf(ERR_INVALID_STATE, "input: runtime context is not initialized");
@@ -7156,7 +7163,8 @@ Item fn_parse2(Item str_item, Item type) {
         Item input_sourcepos = _map_get((TypeMap*)options_map->type, options_map->data, "sourcepos", &is_found);
         if (is_found && input_sourcepos.item && input_sourcepos._type_id != LMD_TYPE_NULL) {
             TypeId sourcepos_type = get_type_id(input_sourcepos);
-            if (is_text_type_id(sourcepos_type) && strcmp(fn_string(input_sourcepos)->chars, "spans") == 0) {
+            if (is_text_type_id(sourcepos_type) &&
+                str_eq_const(input_sourcepos.get_chars(), input_sourcepos.get_len(), "spans")) {
                 highlight_spans = true;
                 window_item = _map_get((TypeMap*)options_map->type, options_map->data, "window", &is_found);
                 if (!is_found) window_item = ItemNull;
@@ -7187,6 +7195,14 @@ Item fn_parse2(Item str_item, Item type) {
         return runtime_error_itemf(ERR_TYPE_MISMATCH,
             "parse: 2nd argument must be a format symbol or options map, got type: %s",
             get_type_name(type_id));
+    }
+
+    // Registry names are C strings; reject an option that would select a prefix.
+    if (format_option_has_nul(type_str) || format_option_has_nul(flavor_str)) {
+        arraylist_free(adapter_names);
+        arraylist_free(raw_names);
+        arraylist_free(chaptered_names);
+        return runtime_error_item(ERR_INVALID_OPERATION, "parse: format options cannot contain NUL", NULL);
     }
 
     if (highlight_spans) {
@@ -7368,21 +7384,23 @@ Item fn_format2(Item item, Item type) {
         }
         else if (is_text_type_id(type_id)) {
             const char* pattern_chars = type.get_chars();
+            size_t pattern_length = type.get_len();
             // check for named format presets
-            if (strcmp(pattern_chars, "iso") == 0 || strcmp(pattern_chars, "iso8601") == 0) {
+            if (str_eq_const(pattern_chars, pattern_length, "iso") ||
+                str_eq_const(pattern_chars, pattern_length, "iso8601")) {
                 datetime_format_iso8601(buf, &dt);
             }
-            else if (strcmp(pattern_chars, "date") == 0) {
+            else if (str_eq_const(pattern_chars, pattern_length, "date")) {
                 // format date portion only: YYYY-MM-DD
                 datetime_format_pattern(buf, &dt, "YYYY-MM-DD");
             }
-            else if (strcmp(pattern_chars, "time") == 0) {
+            else if (str_eq_const(pattern_chars, pattern_length, "time")) {
                 // format time portion only: HH:mm:ss
                 datetime_format_pattern(buf, &dt, "HH:mm:ss");
             }
             else {
                 // custom pattern format
-                datetime_format_pattern(buf, &dt, pattern_chars);
+                datetime_format_pattern_n(buf, &dt, pattern_chars, pattern_length);
             }
         }
         else {
@@ -7457,6 +7475,9 @@ Item fn_format2(Item item, Item type) {
             "format: the format must be a string, symbol, or map, got %s", get_type_name(type_id));
     }
 
+    if (format_option_has_nul(rooted_type.get()) || format_option_has_nul(rooted_flavor.get())) {
+        return runtime_error_item(ERR_FORMAT_ERROR, "format: format options cannot contain NUL", NULL);
+    }
     log_debug("format item type: %s, flavor: %s", rooted_type.get() ? rooted_type.get()->chars : "null",
         rooted_flavor.get() ? rooted_flavor.get()->chars : "null");
     ScriptFormatRoute route = script_format_route(rooted_type.get() ? rooted_type.get()->chars : nullptr,
@@ -8120,7 +8141,7 @@ Item fn_member(Item item, Item key) {
         }
         if (strcmp(k, "message") == 0) {
             if (err && err->message) {
-                String* msg = heap_strcpy(err->message, strlen(err->message));
+                String* msg = heap_strcpy(err->message, err->message_length);
                 return {.item = s2it(msg)};
             }
             String* msg = heap_create_name("Error");
@@ -9107,7 +9128,8 @@ Item fn_url_resolve(Item base_item, Item relative_item) {
 
     const char* base_chars = base_item.get_chars();
     const char* rel_chars = relative_item.get_chars();
-    if (!base_chars || !rel_chars) {
+    if (!base_chars || !rel_chars || memchr(base_chars, 0, base_item.get_len()) ||
+            memchr(rel_chars, 0, relative_item.get_len())) {
         return ItemNull;
     }
 

@@ -3,7 +3,7 @@
 .pair{display:flex;gap:12px}.pair a{width:50%}img{width:100%;border:1px solid #aaa}h2{font-size:18px}
 input{padding:8px;width:360px}.hidden{display:none}small{display:block}.severity{font-weight:700;padding:2px 7px;border-radius:4px}
 .critical{background:#8b0000;color:white}.high{background:#b54708;color:white}.low{background:#e5e7eb;color:#222}</style>
-<h1>Online snapshot comparison</h1><p>Generated 2026-11-23T10:17:02.212Z. 1067 catalog pages, ordered by severity: 0 critical, 100 high and 967 low. Critical means the comparison is blocked by a capture or image problem; high means an automated major difference or a major omission retained in visual review; low means below the major triage threshold. Coarse 120 × 80 RGB averages suppress fine text noise.
+<h1>Online snapshot comparison</h1><p>Generated 2026-11-24T13:29:25.106Z. 1067 catalog pages, ordered by severity: 0 critical, 88 high and 979 low. Critical means the comparison is blocked by a capture or image problem; high means an automated major difference or a major omission retained in visual review; low means below the major triage threshold. Coarse 120 × 80 RGB averages suppress fine text noise.
 Major candidate: mean channel error ≥12% and changed area ≥35% (RGB distance &gt;12%),
 or a nearly uniform image against content with mean error ≥2% and changed area ≥12%.
 These are review candidates, not confirmed engine defects. Live content, animation, consent and capture dates can differ.</p>
@@ -48,13 +48,23 @@ These are review candidates, not confirmed engine defects. Live content, animati
  / Chromium 1200 × 800 · 2026-11-18T04:22:09.748Z</small>
 <div class="pair"><a href="../snapshots/saas_landing_638-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_638-lambda.png"></a>
 <a href="../snapshots/saas_landing_638-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_638-browser.png"></a></div></article>
+<article data-search="saas_landing_565 https://www.amperos.com/" data-severity="high">
+<h2><span class="severity high">HIGH</span> saas_landing_565 — 69.6% mean error; 99.3% area · MAJOR CANDIDATE</h2>
+<a href="https://www.amperos.com/">https://www.amperos.com/</a><small></small>
+<small>Post-load window: Lambda 1000 ms · Chromium 1000 ms.</small>
+<small>Animation origin: Lambda post-load · Chromium .</small>
+<small>Client startup replaces the hero with an application error page because the dedicated Worker API is unavailable (JS13-L69). Deleting Worker in Chromium reproduces the same boundary. This major platform feature remains deferred.</small>
+<small>Lambda 1200 × 800 · 2026-11-24T12:26:00.712Z
+ / Chromium 1200 × 800 · 2026-11-18T04:20:04.201Z</small>
+<div class="pair"><a href="../snapshots/saas_landing_565-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_565-lambda.png"></a>
+<a href="../snapshots/saas_landing_565-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_565-browser.png"></a></div></article>
 <article data-search="saas_landing_435 https://www.dayos.com/" data-severity="high">
 <h2><span class="severity high">HIGH</span> saas_landing_435 — 62.3% mean error; 98.8% area · MAJOR CANDIDATE</h2>
 <a href="https://www.dayos.com/">https://www.dayos.com/</a><small></small>
 <small>Post-load window: Lambda 1000 ms · Chromium 1000 ms.</small>
 <small>Animation origin: Lambda post-load · Chromium post-load.</small>
-<small>Major visual difference remains: the startup cover persists after the main module executes.</small>
-<small>Lambda 1200 × 800 · 2026-11-23T09:35:50.645Z
+<small>The startup cover still hides the page after the main module executes. Cookie expiry handling is repaired separately; current Chromium renders the underlying page, so the major difference remains unresolved.</small>
+<small>Lambda 1200 × 800 · 2026-11-24T12:19:53.458Z
  / Chromium 1200 × 800 · 2026-11-21T02:00:11.181Z</small>
 <div class="pair"><a href="../snapshots/saas_landing_435-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_435-lambda.png"></a>
 <a href="../snapshots/saas_landing_435-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_435-browser.png"></a></div></article>
@@ -78,6 +88,16 @@ These are review candidates, not confirmed engine defects. Live content, animati
  / Chromium 1200 × 800 · 2026-11-18T04:24:01.179Z</small>
 <div class="pair"><a href="../snapshots/saas_landing_696-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_696-lambda.png"></a>
 <a href="../snapshots/saas_landing_696-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_696-browser.png"></a></div></article>
+<article data-search="saas_landing_294 https://fable.co/" data-severity="high">
+<h2><span class="severity high">HIGH</span> saas_landing_294 — 52.2% mean error; 95.9% area · MAJOR CANDIDATE</h2>
+<a href="https://fable.co/">https://fable.co/</a><small></small>
+<small>Post-load window: Lambda 1000 ms · Chromium 1000 ms.</small>
+<small>Animation origin: Lambda post-load · Chromium .</small>
+<small>Native renders a styled hero and book strip, while Chromium receives unstyled prerendered HTML. Response variation remains unresolved; no native rendering cause is established.</small>
+<small>Lambda 1200 × 800 · 2026-11-24T09:00:42.298Z
+ / Chromium 1200 × 800 · 2026-11-18T04:09:21.969Z</small>
+<div class="pair"><a href="../snapshots/saas_landing_294-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_294-lambda.png"></a>
+<a href="../snapshots/saas_landing_294-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_294-browser.png"></a></div></article>
 <article data-search="saas_landing_677 https://pitch.com/" data-severity="high">
 <h2><span class="severity high">HIGH</span> saas_landing_677 — 51.2% mean error; 83.2% area · MAJOR CANDIDATE</h2>
 <a href="https://pitch.com/">https://pitch.com/</a><small></small>
@@ -118,16 +138,6 @@ These are review candidates, not confirmed engine defects. Live content, animati
  / Chromium 1200 × 800 · 2026-11-18T04:19:55.825Z</small>
 <div class="pair"><a href="../snapshots/saas_landing_553-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_553-lambda.png"></a>
 <a href="../snapshots/saas_landing_553-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_553-browser.png"></a></div></article>
-<article data-search="saas_landing_318 https://www.setpoint.io/" data-severity="high">
-<h2><span class="severity high">HIGH</span> saas_landing_318 — 49.1% mean error; 97.8% area · MAJOR CANDIDATE</h2>
-<a href="https://www.setpoint.io/">https://www.setpoint.io/</a><small></small>
-<small>Post-load window: Lambda 1000 ms · Chromium 1000 ms.</small>
-
-<small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-18T04:11:26.829Z
- / Chromium 1200 × 800 · 2026-11-18T04:11:26.829Z</small>
-<div class="pair"><a href="../snapshots/saas_landing_318-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_318-lambda.png"></a>
-<a href="../snapshots/saas_landing_318-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_318-browser.png"></a></div></article>
 <article data-search="saas_landing_205 https://readymag.com/" data-severity="high">
 <h2><span class="severity high">HIGH</span> saas_landing_205 — 48.2% mean error; 89.0% area · MAJOR CANDIDATE</h2>
 <a href="https://readymag.com/">https://readymag.com/</a><small></small>
@@ -158,16 +168,6 @@ These are review candidates, not confirmed engine defects. Live content, animati
  / Chromium 1200 × 800 · 2026-11-18T04:13:27.573Z</small>
 <div class="pair"><a href="../snapshots/saas_landing_394-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_394-lambda.png"></a>
 <a href="../snapshots/saas_landing_394-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_394-browser.png"></a></div></article>
-<article data-search="saas_landing_223 https://www.xolo.io/zz-en/teams" data-severity="high">
-<h2><span class="severity high">HIGH</span> saas_landing_223 — 44.9% mean error; 92.9% area · MAJOR CANDIDATE</h2>
-<a href="https://www.xolo.io/zz-en/teams">https://www.xolo.io/zz-en/teams</a><small></small>
-<small>Post-load window: Lambda 1000 ms · Chromium 1000 ms.</small>
-
-<small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-18T04:07:56.702Z
- / Chromium 1200 × 800 · 2026-11-18T04:07:56.702Z</small>
-<div class="pair"><a href="../snapshots/saas_landing_223-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_223-lambda.png"></a>
-<a href="../snapshots/saas_landing_223-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_223-browser.png"></a></div></article>
 <article data-search="saas_landing_073 https://typelane.com/" data-severity="high">
 <h2><span class="severity high">HIGH</span> saas_landing_073 — 44.2% mean error; 70.2% area · MAJOR CANDIDATE</h2>
 <a href="https://typelane.com/">https://typelane.com/</a><small></small>
@@ -199,25 +199,15 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <div class="pair"><a href="../snapshots/saas_landing_290-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_290-lambda.png"></a>
 <a href="../snapshots/saas_landing_290-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_290-browser.png"></a></div></article>
 <article data-search="saas_landing_341 https://lokalise.com/" data-severity="high">
-<h2><span class="severity high">HIGH</span> saas_landing_341 — 40.5% mean error; 89.1% area · MAJOR CANDIDATE</h2>
+<h2><span class="severity high">HIGH</span> saas_landing_341 — 39.4% mean error; 92.1% area · MAJOR CANDIDATE</h2>
 <a href="https://lokalise.com/">https://lokalise.com/</a><small></small>
 <small>Post-load window: Lambda 1000 ms · Chromium 1000 ms.</small>
-
-<small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-18T04:12:04.880Z
+<small>Animation origin: Lambda post-load · Chromium .</small>
+<small>Main content renders, but the large consent panel and backdrop remain absent. Isolated SDK loading works; full-page traces reach the network-drain watchdog with consent template/style fetches pending. No capture budget change or engine cause is claimed.</small>
+<small>Lambda 1200 × 800 · 2026-11-24T12:53:07.165Z
  / Chromium 1200 × 800 · 2026-11-18T04:12:04.880Z</small>
 <div class="pair"><a href="../snapshots/saas_landing_341-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_341-lambda.png"></a>
 <a href="../snapshots/saas_landing_341-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_341-browser.png"></a></div></article>
-<article data-search="saas_landing_041 https://www.wineinvestment.com/faqs/" data-severity="high">
-<h2><span class="severity high">HIGH</span> saas_landing_041 — 36.3% mean error; 94.9% area · MAJOR CANDIDATE</h2>
-<a href="https://www.wineinvestment.com/faqs/">https://www.wineinvestment.com/faqs/</a><small></small>
-<small>Post-load window: Lambda 1000 ms · Chromium 1000 ms.</small>
-
-<small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-18T04:04:25.035Z
- / Chromium 1200 × 800 · 2026-11-18T04:04:25.035Z</small>
-<div class="pair"><a href="../snapshots/saas_landing_041-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_041-lambda.png"></a>
-<a href="../snapshots/saas_landing_041-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_041-browser.png"></a></div></article>
 <article data-search="saas_landing_528 https://handhold.io/" data-severity="high">
 <h2><span class="severity high">HIGH</span> saas_landing_528 — 36.0% mean error; 88.3% area · MAJOR CANDIDATE</h2>
 <a href="https://handhold.io/">https://handhold.io/</a><small></small>
@@ -228,46 +218,16 @@ These are review candidates, not confirmed engine defects. Live content, animati
  / Chromium 1200 × 800 · 2026-11-18T04:19:40.118Z</small>
 <div class="pair"><a href="../snapshots/saas_landing_528-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_528-lambda.png"></a>
 <a href="../snapshots/saas_landing_528-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_528-browser.png"></a></div></article>
-<article data-search="saas_landing_137 https://vivid.money/en-eu/" data-severity="high">
-<h2><span class="severity high">HIGH</span> saas_landing_137 — 35.3% mean error; 76.9% area · MAJOR CANDIDATE</h2>
-<a href="https://vivid.money/en-eu/">https://vivid.money/en-eu/</a><small></small>
-<small>Post-load window: Lambda 1000 ms · Chromium 1000 ms.</small>
-
-<small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-18T04:05:48.329Z
- / Chromium 1200 × 800 · 2026-11-18T04:05:48.329Z</small>
-<div class="pair"><a href="../snapshots/saas_landing_137-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_137-lambda.png"></a>
-<a href="../snapshots/saas_landing_137-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_137-browser.png"></a></div></article>
-<article data-search="maven_central https://central.sonatype.com/" data-severity="high">
-<h2><span class="severity high">HIGH</span> maven_central — 34.6% mean error; 45.9% area · MAJOR CANDIDATE</h2>
-<a href="https://central.sonatype.com/">https://central.sonatype.com/</a><small></small>
-<small>Post-load window: Lambda 1000 ms · Chromium 1000 ms.</small>
-
-<small>The promotional panel now has the correct text/image sizing after RI-043/RI-044. The primary component-search input remains absent; retained as a major omission despite the low changed-area score.</small>
-<small>Lambda 1200 × 800 · 2026-11-18T04:03:31.816Z
- / Chromium 1200 × 800 · 2026-11-18T04:03:31.816Z</small>
-<div class="pair"><a href="../snapshots/maven_central-lambda.png">Lambda<img loading="lazy" src="../snapshots/maven_central-lambda.png"></a>
-<a href="../snapshots/maven_central-browser.png">Chromium<img loading="lazy" src="../snapshots/maven_central-browser.png"></a></div></article>
 <article data-search="azure_docs https://learn.microsoft.com/en-us/azure/" data-severity="high">
-<h2><span class="severity high">HIGH</span> azure_docs — 33.4% mean error; 58.3% area · MAJOR CANDIDATE</h2>
+<h2><span class="severity high">HIGH</span> azure_docs — 33.6% mean error; 58.7% area · MAJOR CANDIDATE</h2>
 <a href="https://learn.microsoft.com/en-us/azure/">https://learn.microsoft.com/en-us/azure/</a><small></small>
 <small>Post-load window: Lambda 1000 ms · Chromium 1000 ms.</small>
-
-<small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-18T04:03:05.333Z
+<small>Animation origin: Lambda post-load · Chromium .</small>
+<small>Main documentation content renders, but both complete top navigation rows and brand remain absent.</small>
+<small>Lambda 1200 × 800 · 2026-11-24T09:08:25.058Z
  / Chromium 1200 × 800 · 2026-11-18T04:03:05.333Z</small>
 <div class="pair"><a href="../snapshots/azure_docs-lambda.png">Lambda<img loading="lazy" src="../snapshots/azure_docs-lambda.png"></a>
 <a href="../snapshots/azure_docs-browser.png">Chromium<img loading="lazy" src="../snapshots/azure_docs-browser.png"></a></div></article>
-<article data-search="nvd_nist https://nvd.nist.gov/" data-severity="high">
-<h2><span class="severity high">HIGH</span> nvd_nist — 31.8% mean error; 49.6% area · MAJOR CANDIDATE</h2>
-<a href="https://nvd.nist.gov/">https://nvd.nist.gov/</a><small></small>
-<small>Post-load window: Lambda 1000 ms · Chromium 1000 ms.</small>
-
-<small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-18T04:03:17.981Z
- / Chromium 1200 × 800 · 2026-11-18T04:03:17.981Z</small>
-<div class="pair"><a href="../snapshots/nvd_nist-lambda.png">Lambda<img loading="lazy" src="../snapshots/nvd_nist-lambda.png"></a>
-<a href="../snapshots/nvd_nist-browser.png">Chromium<img loading="lazy" src="../snapshots/nvd_nist-browser.png"></a></div></article>
 <article data-search="loc https://www.loc.gov/" data-severity="high">
 <h2><span class="severity high">HIGH</span> loc — 30.9% mean error; 62.6% area · MAJOR CANDIDATE</h2>
 <a href="https://www.loc.gov/">https://www.loc.gov/</a><small></small>
@@ -308,16 +268,6 @@ These are review candidates, not confirmed engine defects. Live content, animati
  / Chromium 1200 × 800 · 2026-11-18T04:09:39.773Z</small>
 <div class="pair"><a href="../snapshots/saas_landing_302-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_302-lambda.png"></a>
 <a href="../snapshots/saas_landing_302-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_302-browser.png"></a></div></article>
-<article data-search="saas_landing_188 https://swagapp.com/" data-severity="high">
-<h2><span class="severity high">HIGH</span> saas_landing_188 — 26.9% mean error; 49.9% area · MAJOR CANDIDATE</h2>
-<a href="https://swagapp.com/">https://swagapp.com/</a><small></small>
-<small>Post-load window: Lambda 1000 ms · Chromium 1000 ms.</small>
-<small>Animation origin: Lambda post-load · Chromium post-load.</small>
-<small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-20T23:19:03.546Z
- / Chromium 1200 × 800 · 2026-11-20T23:19:06.246Z</small>
-<div class="pair"><a href="../snapshots/saas_landing_188-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_188-lambda.png"></a>
-<a href="../snapshots/saas_landing_188-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_188-browser.png"></a></div></article>
 <article data-search="saas_landing_082 https://www.getmaple.ca/" data-severity="high">
 <h2><span class="severity high">HIGH</span> saas_landing_082 — 26.8% mean error; 44.6% area · MAJOR CANDIDATE</h2>
 <a href="https://www.getmaple.ca/">https://www.getmaple.ca/</a><small></small>
@@ -338,16 +288,6 @@ These are review candidates, not confirmed engine defects. Live content, animati
  / Chromium 1200 × 800 · 2026-11-18T04:05:29.164Z</small>
 <div class="pair"><a href="../snapshots/saas_landing_122-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_122-lambda.png"></a>
 <a href="../snapshots/saas_landing_122-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_122-browser.png"></a></div></article>
-<article data-search="saas_landing_349 https://infermedica.com/" data-severity="high">
-<h2><span class="severity high">HIGH</span> saas_landing_349 — 26.2% mean error; 91.5% area · MAJOR CANDIDATE</h2>
-<a href="https://infermedica.com/">https://infermedica.com/</a><small></small>
-<small>Post-load window: Lambda 1000 ms · Chromium 1000 ms.</small>
-
-<small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-18T04:12:57.975Z
- / Chromium 1200 × 800 · 2026-11-18T04:12:57.975Z</small>
-<div class="pair"><a href="../snapshots/saas_landing_349-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_349-lambda.png"></a>
-<a href="../snapshots/saas_landing_349-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_349-browser.png"></a></div></article>
 <article data-search="saas_landing_129 https://cleanup.pictures/" data-severity="high">
 <h2><span class="severity high">HIGH</span> saas_landing_129 — 25.5% mean error; 59.1% area · MAJOR CANDIDATE</h2>
 <a href="https://cleanup.pictures/">https://cleanup.pictures/</a><small></small>
@@ -358,26 +298,6 @@ These are review candidates, not confirmed engine defects. Live content, animati
  / Chromium 1200 × 800 · 2026-11-18T04:05:40.803Z</small>
 <div class="pair"><a href="../snapshots/saas_landing_129-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_129-lambda.png"></a>
 <a href="../snapshots/saas_landing_129-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_129-browser.png"></a></div></article>
-<article data-search="saas_landing_151 https://www.wineinvestment.com/" data-severity="high">
-<h2><span class="severity high">HIGH</span> saas_landing_151 — 25.4% mean error; 93.6% area · MAJOR CANDIDATE</h2>
-<a href="https://www.wineinvestment.com/">https://www.wineinvestment.com/</a><small></small>
-<small>Post-load window: Lambda 1000 ms · Chromium 1000 ms.</small>
-
-<small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-18T04:06:10.342Z
- / Chromium 1200 × 800 · 2026-11-18T04:06:10.342Z</small>
-<div class="pair"><a href="../snapshots/saas_landing_151-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_151-lambda.png"></a>
-<a href="../snapshots/saas_landing_151-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_151-browser.png"></a></div></article>
-<article data-search="saas_landing_150 https://metronome.com/" data-severity="high">
-<h2><span class="severity high">HIGH</span> saas_landing_150 — 25.4% mean error; 85.1% area · MAJOR CANDIDATE</h2>
-<a href="https://metronome.com/">https://metronome.com/</a><small></small>
-<small>Post-load window: Lambda 1000 ms · Chromium 1000 ms.</small>
-
-<small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-18T04:06:09.400Z
- / Chromium 1200 × 800 · 2026-11-18T04:06:09.400Z</small>
-<div class="pair"><a href="../snapshots/saas_landing_150-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_150-lambda.png"></a>
-<a href="../snapshots/saas_landing_150-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_150-browser.png"></a></div></article>
 <article data-search="saas_landing_083 https://www.overpass.com/" data-severity="high">
 <h2><span class="severity high">HIGH</span> saas_landing_083 — 24.5% mean error; 51.6% area · MAJOR CANDIDATE</h2>
 <a href="https://www.overpass.com/">https://www.overpass.com/</a><small></small>
@@ -438,36 +358,6 @@ These are review candidates, not confirmed engine defects. Live content, animati
  / Chromium 1200 × 800 · 2026-11-18T04:03:29.775Z</small>
 <div class="pair"><a href="../snapshots/archive_org-lambda.png">Lambda<img loading="lazy" src="../snapshots/archive_org-lambda.png"></a>
 <a href="../snapshots/archive_org-browser.png">Chromium<img loading="lazy" src="../snapshots/archive_org-browser.png"></a></div></article>
-<article data-search="saas_landing_294 https://fable.co/" data-severity="high">
-<h2><span class="severity high">HIGH</span> saas_landing_294 — 19.9% mean error; 54.6% area · MAJOR CANDIDATE</h2>
-<a href="https://fable.co/">https://fable.co/</a><small></small>
-<small>Post-load window: Lambda 1000 ms · Chromium 1000 ms.</small>
-
-<small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-18T04:09:21.969Z
- / Chromium 1200 × 800 · 2026-11-18T04:09:21.969Z</small>
-<div class="pair"><a href="../snapshots/saas_landing_294-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_294-lambda.png"></a>
-<a href="../snapshots/saas_landing_294-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_294-browser.png"></a></div></article>
-<article data-search="saas_landing_342 https://teachable.com/" data-severity="high">
-<h2><span class="severity high">HIGH</span> saas_landing_342 — 19.5% mean error; 32.0% area · MAJOR CANDIDATE</h2>
-<a href="https://teachable.com/">https://teachable.com/</a><small></small>
-<small>Post-load window: Lambda 1000 ms · Chromium 1000 ms.</small>
-
-<small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-18T04:12:11.793Z
- / Chromium 1200 × 800 · 2026-11-18T04:12:11.793Z</small>
-<div class="pair"><a href="../snapshots/saas_landing_342-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_342-lambda.png"></a>
-<a href="../snapshots/saas_landing_342-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_342-browser.png"></a></div></article>
-<article data-search="saas_landing_565 https://www.amperos.com/" data-severity="high">
-<h2><span class="severity high">HIGH</span> saas_landing_565 — 19.5% mean error; 50.6% area · MAJOR CANDIDATE</h2>
-<a href="https://www.amperos.com/">https://www.amperos.com/</a><small></small>
-<small>Post-load window: Lambda 1000 ms · Chromium 1000 ms.</small>
-
-<small>Hero media and main text are present, but the brand and primary navigation remain nearly invisible as dark text on the dark header. Retained as a major navigation omission after before/current/browser review despite the small threshold crossing.</small>
-<small>Lambda 1200 × 800 · 2026-11-18T04:20:04.201Z
- / Chromium 1200 × 800 · 2026-11-18T04:20:04.201Z</small>
-<div class="pair"><a href="../snapshots/saas_landing_565-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_565-lambda.png"></a>
-<a href="../snapshots/saas_landing_565-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_565-browser.png"></a></div></article>
 <article data-search="saas_landing_452 https://lattice.com/customers" data-severity="high">
 <h2><span class="severity high">HIGH</span> saas_landing_452 — 19.3% mean error; 38.6% area · MAJOR CANDIDATE</h2>
 <a href="https://lattice.com/customers">https://lattice.com/customers</a><small></small>
@@ -478,16 +368,16 @@ These are review candidates, not confirmed engine defects. Live content, animati
  / Chromium 1200 × 800 · 2026-11-18T04:20:42.356Z</small>
 <div class="pair"><a href="../snapshots/saas_landing_452-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_452-lambda.png"></a>
 <a href="../snapshots/saas_landing_452-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_452-browser.png"></a></div></article>
-<article data-search="saas_landing_111 https://www.jetty.com/" data-severity="high">
-<h2><span class="severity high">HIGH</span> saas_landing_111 — 18.1% mean error; 39.5% area · MAJOR CANDIDATE</h2>
-<a href="https://www.jetty.com/">https://www.jetty.com/</a><small></small>
+<article data-search="saas_landing_150 https://metronome.com/" data-severity="high">
+<h2><span class="severity high">HIGH</span> saas_landing_150 — 18.9% mean error; 66.5% area · MAJOR CANDIDATE</h2>
+<a href="https://metronome.com/">https://metronome.com/</a><small></small>
 <small>Post-load window: Lambda 1000 ms · Chromium 1000 ms.</small>
-<small>Animation origin: Lambda post-load · Chromium post-load.</small>
-<small>The normal-load capture is blank; heading, navigation and hero remain unresolved.</small>
-<small>Lambda 1200 × 800 · 2026-11-23T10:00:54.414Z
- / Chromium 1200 × 800 · 2026-11-21T05:40:16.385Z</small>
-<div class="pair"><a href="../snapshots/saas_landing_111-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_111-lambda.png"></a>
-<a href="../snapshots/saas_landing_111-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_111-browser.png"></a></div></article>
+<small>Animation origin: Lambda post-load · Chromium .</small>
+<small>The product animation now renders after JSON response decoding and SVG snapshot repairs. The consent bar is visible, but the hero remains blurred by an unresolved navigation overlay.</small>
+<small>Lambda 1200 × 800 · 2026-11-24T11:55:15.079Z
+ / Chromium 1200 × 800 · 2026-11-18T04:06:09.400Z</small>
+<div class="pair"><a href="../snapshots/saas_landing_150-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_150-lambda.png"></a>
+<a href="../snapshots/saas_landing_150-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_150-browser.png"></a></div></article>
 <article data-search="saas_landing_095 https://draftbit.com/" data-severity="high">
 <h2><span class="severity high">HIGH</span> saas_landing_095 — 17.9% mean error; 79.5% area · MAJOR CANDIDATE</h2>
 <a href="https://draftbit.com/">https://draftbit.com/</a><small></small>
@@ -528,16 +418,6 @@ These are review candidates, not confirmed engine defects. Live content, animati
  / Chromium 1200 × 800 · 2026-11-18T04:22:16.723Z</small>
 <div class="pair"><a href="../snapshots/saas_landing_647-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_647-lambda.png"></a>
 <a href="../snapshots/saas_landing_647-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_647-browser.png"></a></div></article>
-<article data-search="saas_landing_577 https://www.podia.com/" data-severity="high">
-<h2><span class="severity high">HIGH</span> saas_landing_577 — 17.2% mean error; 36.0% area · MAJOR CANDIDATE</h2>
-<a href="https://www.podia.com/">https://www.podia.com/</a><small></small>
-<small>Post-load window: Lambda 1000 ms · Chromium 1000 ms.</small>
-
-<small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-18T04:20:11.510Z
- / Chromium 1200 × 800 · 2026-11-18T04:20:11.510Z</small>
-<div class="pair"><a href="../snapshots/saas_landing_577-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_577-lambda.png"></a>
-<a href="../snapshots/saas_landing_577-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_577-browser.png"></a></div></article>
 <article data-search="saas_landing_695 https://www.homerun.co/" data-severity="high">
 <h2><span class="severity high">HIGH</span> saas_landing_695 — 17.2% mean error; 37.7% area · MAJOR CANDIDATE</h2>
 <a href="https://www.homerun.co/">https://www.homerun.co/</a><small></small>
@@ -552,9 +432,9 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_149 — 17.1% mean error; 36.8% area · MAJOR CANDIDATE</h2>
 <a href="https://www.modernlife.com/">https://www.modernlife.com/</a><small></small>
 <small>Post-load window: Lambda 1000 ms · Chromium 1000 ms.</small>
-
-<small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-18T04:06:03.467Z
+<small>Animation origin: Lambda post-load · Chromium .</small>
+<small>The native viewport remains blank against the retained content reference. Current Chromium is also still in its loading-logo phase, making this timing-sensitive; no engine cause is claimed.</small>
+<small>Lambda 1200 × 800 · 2026-11-24T13:09:52.155Z
  / Chromium 1200 × 800 · 2026-11-18T04:06:03.467Z</small>
 <div class="pair"><a href="../snapshots/saas_landing_149-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_149-lambda.png"></a>
 <a href="../snapshots/saas_landing_149-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_149-browser.png"></a></div></article>
@@ -588,16 +468,6 @@ These are review candidates, not confirmed engine defects. Live content, animati
  / Chromium 1200 × 800 · 2026-11-18T04:09:18.911Z</small>
 <div class="pair"><a href="../snapshots/saas_landing_293-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_293-lambda.png"></a>
 <a href="../snapshots/saas_landing_293-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_293-browser.png"></a></div></article>
-<article data-search="influx_docs https://docs.influxdata.com/" data-severity="high">
-<h2><span class="severity high">HIGH</span> influx_docs — 14.6% mean error; 33.9% area · MAJOR CANDIDATE</h2>
-<a href="https://docs.influxdata.com/">https://docs.influxdata.com/</a><small></small>
-<small>Post-load window: Lambda 1000 ms · Chromium 1000 ms.</small>
-
-<small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-18T04:03:39.815Z
- / Chromium 1200 × 800 · 2026-11-18T04:03:39.815Z</small>
-<div class="pair"><a href="../snapshots/influx_docs-lambda.png">Lambda<img loading="lazy" src="../snapshots/influx_docs-lambda.png"></a>
-<a href="../snapshots/influx_docs-browser.png">Chromium<img loading="lazy" src="../snapshots/influx_docs-browser.png"></a></div></article>
 <article data-search="saas_landing_582 https://www.figma.com/pricing/" data-severity="high">
 <h2><span class="severity high">HIGH</span> saas_landing_582 — 14.1% mean error; 20.5% area · MAJOR CANDIDATE</h2>
 <a href="https://www.figma.com/pricing/">https://www.figma.com/pricing/</a><small></small>
@@ -628,6 +498,16 @@ These are review candidates, not confirmed engine defects. Live content, animati
  / Chromium 1200 × 800 · 2026-11-22T04:04:12.696Z</small>
 <div class="pair"><a href="../snapshots/saas_landing_679-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_679-lambda.png"></a>
 <a href="../snapshots/saas_landing_679-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_679-browser.png"></a></div></article>
+<article data-search="saas_landing_342 https://teachable.com/" data-severity="high">
+<h2><span class="severity high">HIGH</span> saas_landing_342 — 13.6% mean error; 29.9% area</h2>
+<a href="https://teachable.com/">https://teachable.com/</a><small></small>
+<small>Post-load window: Lambda 1000 ms · Chromium 1000 ms.</small>
+<small>Animation origin: Lambda post-load · Chromium .</small>
+<small>Main navigation, heading, actions and product media now render. RI-227 repairs the consent notice width and fixed positioning, but missing :host custom-property styles leave transparent fill and unstyled text/buttons overlapping the product interface. Retain this large overlay defect under JS13-L2.</small>
+<small>Lambda 1200 × 800 · 2026-11-24T13:26:41.991Z
+ / Chromium 1200 × 800 · 2026-11-18T04:12:11.793Z</small>
+<div class="pair"><a href="../snapshots/saas_landing_342-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_342-lambda.png"></a>
+<a href="../snapshots/saas_landing_342-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_342-browser.png"></a></div></article>
 <article data-search="saas_landing_258 https://www.opus.so/about-us" data-severity="high">
 <h2><span class="severity high">HIGH</span> saas_landing_258 — 13.4% mean error; 30.2% area</h2>
 <a href="https://www.opus.so/about-us">https://www.opus.so/about-us</a><small></small>
@@ -732,9 +612,9 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_475 — 11.6% mean error; 23.1% area · MAJOR CANDIDATE</h2>
 <a href="https://www.agora.xyz/about">https://www.agora.xyz/about</a><small></small>
 <small>Post-load window: Lambda 1000 ms · Chromium 1000 ms.</small>
-
-<small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-18T04:18:19.336Z
+<small>Animation origin: Lambda post-load · Chromium .</small>
+<small>The viewport remains blank while current Chromium renders the main page. Its authored initial markup hides the main wrapper; the unresolved initialization cause is not assigned to layout.</small>
+<small>Lambda 1200 × 800 · 2026-11-24T13:09:28.190Z
  / Chromium 1200 × 800 · 2026-11-18T04:18:19.336Z</small>
 <div class="pair"><a href="../snapshots/saas_landing_475-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_475-lambda.png"></a>
 <a href="../snapshots/saas_landing_475-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_475-browser.png"></a></div></article>
@@ -758,16 +638,6 @@ These are review candidates, not confirmed engine defects. Live content, animati
  / Chromium 1200 × 800 · 2026-11-20T18:07:00.791Z</small>
 <div class="pair"><a href="../snapshots/saas_landing_207-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_207-lambda.png"></a>
 <a href="../snapshots/saas_landing_207-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_207-browser.png"></a></div></article>
-<article data-search="pnpm_docs https://pnpm.io/" data-severity="high">
-<h2><span class="severity high">HIGH</span> pnpm_docs — 11.4% mean error; 27.3% area</h2>
-<a href="https://pnpm.io/">https://pnpm.io/</a><small></small>
-<small>Post-load window: Lambda 1000 ms · Chromium 1000 ms.</small>
-<small>Animation origin: Lambda post-load · Chromium post-load.</small>
-<small>The complete client-created top navigation and brand remain absent, shifting the otherwise restored hero upward.</small>
-<small>Lambda 1200 × 800 · 2026-11-20T05:42:06.807Z
- / Chromium 1200 × 800 · 2026-11-20T05:41:48.380Z</small>
-<div class="pair"><a href="../snapshots/pnpm_docs-lambda.png">Lambda<img loading="lazy" src="../snapshots/pnpm_docs-lambda.png"></a>
-<a href="../snapshots/pnpm_docs-browser.png">Chromium<img loading="lazy" src="../snapshots/pnpm_docs-browser.png"></a></div></article>
 <article data-search="saas_landing_619 https://webflow.grsm.io/xiud01gp3yvv" data-severity="high">
 <h2><span class="severity high">HIGH</span> saas_landing_619 — 10.7% mean error; 25.0% area · MAJOR CANDIDATE</h2>
 <a href="https://webflow.grsm.io/xiud01gp3yvv">https://webflow.grsm.io/xiud01gp3yvv</a><small></small>
@@ -788,6 +658,16 @@ These are review candidates, not confirmed engine defects. Live content, animati
  / Chromium 1200 × 800 · 2026-11-18T04:15:09.594Z</small>
 <div class="pair"><a href="../snapshots/saas_landing_446-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_446-lambda.png"></a>
 <a href="../snapshots/saas_landing_446-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_446-browser.png"></a></div></article>
+<article data-search="saas_landing_111 https://www.jetty.com/" data-severity="high">
+<h2><span class="severity high">HIGH</span> saas_landing_111 — 9.7% mean error; 27.3% area</h2>
+<a href="https://www.jetty.com/">https://www.jetty.com/</a><small></small>
+<small>Post-load window: Lambda 1000 ms · Chromium 1000 ms.</small>
+<small>Animation origin: Lambda post-load · Chromium post-load.</small>
+<small>Navigation, heading, explanatory text, button and announcement render after the navigation-origin timing repair. The large lazy hero image remains absent despite correct geometry; its source is still the transparent placeholder.</small>
+<small>Lambda 1200 × 800 · 2026-11-24T10:41:00.959Z
+ / Chromium 1200 × 800 · 2026-11-21T05:40:16.385Z</small>
+<div class="pair"><a href="../snapshots/saas_landing_111-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_111-lambda.png"></a>
+<a href="../snapshots/saas_landing_111-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_111-browser.png"></a></div></article>
 <article data-search="saas_landing_266 https://coda.io/" data-severity="high">
 <h2><span class="severity high">HIGH</span> saas_landing_266 — 9.5% mean error; 31.4% area</h2>
 <a href="https://coda.io/">https://coda.io/</a><small></small>
@@ -828,6 +708,16 @@ These are review candidates, not confirmed engine defects. Live content, animati
  / Chromium 1200 × 800 · 2026-11-18T04:12:33.667Z</small>
 <div class="pair"><a href="../snapshots/saas_landing_343-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_343-lambda.png"></a>
 <a href="../snapshots/saas_landing_343-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_343-browser.png"></a></div></article>
+<article data-search="saas_landing_188 https://swagapp.com/" data-severity="high">
+<h2><span class="severity high">HIGH</span> saas_landing_188 — 8.6% mean error; 21.1% area</h2>
+<a href="https://swagapp.com/">https://swagapp.com/</a><small></small>
+<small>Post-load window: Lambda 1000 ms · Chromium 1000 ms.</small>
+<small>Animation origin: Lambda post-load · Chromium post-load.</small>
+<small>The main job-search page and consent panel render, but the large AI side pane and regional notice visible in Chromium are absent. The successful native capture still retains a major UI omission.</small>
+<small>Lambda 1200 × 800 · 2026-11-24T10:00:47.313Z
+ / Chromium 1200 × 800 · 2026-11-20T23:19:06.246Z</small>
+<div class="pair"><a href="../snapshots/saas_landing_188-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_188-lambda.png"></a>
+<a href="../snapshots/saas_landing_188-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_188-browser.png"></a></div></article>
 <article data-search="saas_landing_453 https://lattice.com/blog" data-severity="high">
 <h2><span class="severity high">HIGH</span> saas_landing_453 — 8.5% mean error; 22.1% area · MAJOR CANDIDATE</h2>
 <a href="https://lattice.com/blog">https://lattice.com/blog</a><small></small>
@@ -878,16 +768,6 @@ These are review candidates, not confirmed engine defects. Live content, animati
  / Chromium 1200 × 800 · 2026-11-18T04:03:19.841Z</small>
 <div class="pair"><a href="../snapshots/eclipse_help-lambda.png">Lambda<img loading="lazy" src="../snapshots/eclipse_help-lambda.png"></a>
 <a href="../snapshots/eclipse_help-browser.png">Chromium<img loading="lazy" src="../snapshots/eclipse_help-browser.png"></a></div></article>
-<article data-search="saas_landing_281 https://family.co/" data-severity="high">
-<h2><span class="severity high">HIGH</span> saas_landing_281 — 6.9% mean error; 17.9% area · MAJOR CANDIDATE</h2>
-<a href="https://family.co/">https://family.co/</a><small></small>
-<small>Post-load window: Lambda 1000 ms · Chromium 1000 ms.</small>
-
-<small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-18T04:09:06.447Z
- / Chromium 1200 × 800 · 2026-11-18T04:09:06.447Z</small>
-<div class="pair"><a href="../snapshots/saas_landing_281-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_281-lambda.png"></a>
-<a href="../snapshots/saas_landing_281-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_281-browser.png"></a></div></article>
 <article data-search="saas_landing_106 https://oku.club/" data-severity="high">
 <h2><span class="severity high">HIGH</span> saas_landing_106 — 6.9% mean error; 12.1% area · MAJOR CANDIDATE</h2>
 <a href="https://oku.club/">https://oku.club/</a><small></small>
@@ -968,6 +848,16 @@ These are review candidates, not confirmed engine defects. Live content, animati
  / Chromium 1200 × 800 · 2026-11-18T04:05:42.815Z</small>
 <div class="pair"><a href="../snapshots/saas_landing_134-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_134-lambda.png"></a>
 <a href="../snapshots/saas_landing_134-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_134-browser.png"></a></div></article>
+<article data-search="saas_landing_281 https://family.co/" data-severity="high">
+<h2><span class="severity high">HIGH</span> saas_landing_281 — 2.9% mean error; 8.6% area</h2>
+<a href="https://family.co/">https://family.co/</a><small></small>
+<small>Post-load window: Lambda 1000 ms · Chromium 1000 ms.</small>
+<small>Animation origin: Lambda post-load · Chromium .</small>
+<small>Heading, navigation and hero artwork now render, but supporting copy remains faint and the primary download/video actions remain absent in the matched frame. Retain the major action omission despite the low image score.</small>
+<small>Lambda 1200 × 800 · 2026-11-24T12:29:28.105Z
+ / Chromium 1200 × 800 · 2026-11-18T04:09:06.447Z</small>
+<div class="pair"><a href="../snapshots/saas_landing_281-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_281-lambda.png"></a>
+<a href="../snapshots/saas_landing_281-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_281-browser.png"></a></div></article>
 <article data-search="saas_landing_309 https://prismic.io/pricing" data-severity="high">
 <h2><span class="severity high">HIGH</span> saas_landing_309 — 2.9% mean error; 7.5% area</h2>
 <a href="https://prismic.io/pricing">https://prismic.io/pricing</a><small></small>
@@ -988,16 +878,6 @@ These are review candidates, not confirmed engine defects. Live content, animati
  / Chromium 1200 × 800 · 2026-11-18T04:13:10.669Z</small>
 <div class="pair"><a href="../snapshots/saas_landing_365-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_365-lambda.png"></a>
 <a href="../snapshots/saas_landing_365-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_365-browser.png"></a></div></article>
-<article data-search="saas_landing_473 https://www.popcorn.space/" data-severity="high">
-<h2><span class="severity high">HIGH</span> saas_landing_473 — 2.6% mean error; 6.0% area</h2>
-<a href="https://www.popcorn.space/">https://www.popcorn.space/</a><small></small>
-<small>Post-load window: Lambda 1000 ms · Chromium 1000 ms.</small>
-
-<small>Main heading, copy and action are restored, but the large device illustration remains absent at the bottom of the hero.</small>
-<small>Lambda 1200 × 800 · 2026-11-20T04:38:46.835Z
- / Chromium 1200 × 800 · 2026-11-18T04:18:15.111Z</small>
-<div class="pair"><a href="../snapshots/saas_landing_473-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_473-lambda.png"></a>
-<a href="../snapshots/saas_landing_473-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_473-browser.png"></a></div></article>
 <article data-search="saas_landing_463 https://hera.travel/" data-severity="high">
 <h2><span class="severity high">HIGH</span> saas_landing_463 — 1.5% mean error; 4.2% area</h2>
 <a href="https://hera.travel/">https://hera.travel/</a><small></small>
@@ -2998,6 +2878,16 @@ These are review candidates, not confirmed engine defects. Live content, animati
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/latex_project_docs-lambda.png">Lambda<img loading="lazy" src="../snapshots/latex_project_docs-lambda.png"></a>
 <a href="../snapshots/latex_project_docs-browser.png">Chromium<img loading="lazy" src="../snapshots/latex_project_docs-browser.png"></a></div></article>
+<article data-search="pnpm_docs https://pnpm.io/" data-severity="low">
+<h2><span class="severity low">LOW</span> pnpm_docs — 8.3% mean error; 21.0% area</h2>
+<a href="https://pnpm.io/">https://pnpm.io/</a><small></small>
+<small>Post-load window: Lambda 1000 ms · Chromium 1000 ms.</small>
+<small>Animation origin: Lambda post-load · Chromium post-load.</small>
+<small>The current qualified release renders the complete top navigation and brand alongside the hero. The prior large client-created navigation omission is cleared; remaining text and terminal-graphic differences are minor.</small>
+<small>Lambda 1200 × 800 · 2026-11-24T12:53:29.210Z
+ / Chromium 1200 × 800 · 2026-11-20T05:41:48.380Z</small>
+<div class="pair"><a href="../snapshots/pnpm_docs-lambda.png">Lambda<img loading="lazy" src="../snapshots/pnpm_docs-lambda.png"></a>
+<a href="../snapshots/pnpm_docs-browser.png">Chromium<img loading="lazy" src="../snapshots/pnpm_docs-browser.png"></a></div></article>
 <article data-search="saas_landing_219 https://miro.com/blog/" data-severity="low">
 <h2><span class="severity low">LOW</span> saas_landing_219 — 8.3% mean error; 14.9% area</h2>
 <a href="https://miro.com/blog/">https://miro.com/blog/</a><small></small>
@@ -3178,6 +3068,16 @@ These are review candidates, not confirmed engine defects. Live content, animati
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_694-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_694-lambda.png"></a>
 <a href="../snapshots/saas_landing_694-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_694-browser.png"></a></div></article>
+<article data-search="saas_landing_137 https://vivid.money/en-eu/" data-severity="low">
+<h2><span class="severity low">LOW</span> saas_landing_137 — 7.8% mean error; 25.6% area</h2>
+<a href="https://vivid.money/en-eu/">https://vivid.money/en-eu/</a><small></small>
+<small>Post-load window: Lambda 1000 ms · Chromium 1000 ms.</small>
+<small>Animation origin: Lambda post-load · Chromium .</small>
+<small>Main navigation, heading, trust badges, phone imagery and consent panel render. Hero translation and typography differences are minor.</small>
+<small>Lambda 1200 × 800 · 2026-11-24T09:05:58.885Z
+ / Chromium 1200 × 800 · 2026-11-18T04:05:48.329Z</small>
+<div class="pair"><a href="../snapshots/saas_landing_137-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_137-lambda.png"></a>
+<a href="../snapshots/saas_landing_137-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_137-browser.png"></a></div></article>
 <article data-search="saas_landing_167 https://typefully.com/homepage" data-severity="low">
 <h2><span class="severity low">LOW</span> saas_landing_167 — 7.8% mean error; 26.2% area</h2>
 <a href="https://typefully.com/homepage">https://typefully.com/homepage</a><small></small>
@@ -3208,6 +3108,16 @@ These are review candidates, not confirmed engine defects. Live content, animati
  / Chromium 1200 × 800 · 2026-11-18T04:03:58.108Z</small>
 <div class="pair"><a href="../snapshots/saas_landing_002-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_002-lambda.png"></a>
 <a href="../snapshots/saas_landing_002-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_002-browser.png"></a></div></article>
+<article data-search="maven_central https://central.sonatype.com/" data-severity="low">
+<h2><span class="severity low">LOW</span> maven_central — 7.8% mean error; 16.9% area</h2>
+<a href="https://central.sonatype.com/">https://central.sonatype.com/</a><small></small>
+<small>Post-load window: Lambda 1000 ms · Chromium 1000 ms.</small>
+<small>Animation origin: Lambda post-load · Chromium .</small>
+<small>The consent/preferences panel and all of its controls render after the stacking-context paint-culling repair. Main content matches; remaining card spacing and input alignment are minor.</small>
+<small>Lambda 1200 × 800 · 2026-11-24T11:08:28.908Z
+ / Chromium 1200 × 800 · 2026-11-18T04:03:31.816Z</small>
+<div class="pair"><a href="../snapshots/maven_central-lambda.png">Lambda<img loading="lazy" src="../snapshots/maven_central-lambda.png"></a>
+<a href="../snapshots/maven_central-browser.png">Chromium<img loading="lazy" src="../snapshots/maven_central-browser.png"></a></div></article>
 <article data-search="saas_landing_364 https://miro.com/customers/" data-severity="low">
 <h2><span class="severity low">LOW</span> saas_landing_364 — 7.8% mean error; 20.0% area</h2>
 <a href="https://miro.com/customers/">https://miro.com/customers/</a><small></small>
@@ -4528,6 +4438,16 @@ These are review candidates, not confirmed engine defects. Live content, animati
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_209-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_209-lambda.png"></a>
 <a href="../snapshots/saas_landing_209-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_209-browser.png"></a></div></article>
+<article data-search="influx_docs https://docs.influxdata.com/" data-severity="low">
+<h2><span class="severity low">LOW</span> influx_docs — 5.7% mean error; 13.7% area</h2>
+<a href="https://docs.influxdata.com/">https://docs.influxdata.com/</a><small></small>
+<small>Post-load window: Lambda 1000 ms · Chromium 1000 ms.</small>
+<small>Animation origin: Lambda post-load · Chromium .</small>
+<small>The main documentation, navigation, cards and notices now render close to current Chromium. Remaining gradient-title and text/spacing differences are minor.</small>
+<small>Lambda 1200 × 800 · 2026-11-24T12:25:52.378Z
+ / Chromium 1200 × 800 · 2026-11-18T04:03:39.815Z</small>
+<div class="pair"><a href="../snapshots/influx_docs-lambda.png">Lambda<img loading="lazy" src="../snapshots/influx_docs-lambda.png"></a>
+<a href="../snapshots/influx_docs-browser.png">Chromium<img loading="lazy" src="../snapshots/influx_docs-browser.png"></a></div></article>
 <article data-search="saas_landing_669 https://getproven.com/features" data-severity="low">
 <h2><span class="severity low">LOW</span> saas_landing_669 — 5.7% mean error; 16.4% area</h2>
 <a href="https://getproven.com/features">https://getproven.com/features</a><small></small>
@@ -5108,6 +5028,16 @@ These are review candidates, not confirmed engine defects. Live content, animati
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/rust_reference-lambda.png">Lambda<img loading="lazy" src="../snapshots/rust_reference-lambda.png"></a>
 <a href="../snapshots/rust_reference-browser.png">Chromium<img loading="lazy" src="../snapshots/rust_reference-browser.png"></a></div></article>
+<article data-search="saas_landing_577 https://www.podia.com/" data-severity="low">
+<h2><span class="severity low">LOW</span> saas_landing_577 — 5.0% mean error; 12.0% area</h2>
+<a href="https://www.podia.com/">https://www.podia.com/</a><small></small>
+<small>Post-load window: Lambda 1000 ms · Chromium 1000 ms.</small>
+<small>Animation origin: Lambda post-load · Chromium .</small>
+<small>The previously blank page now renders its full navigation, hero, action and large photograph. Current Chromium confirms only text-wrapping and spacing differences.</small>
+<small>Lambda 1200 × 800 · 2026-11-24T13:09:45.941Z
+ / Chromium 1200 × 800 · 2026-11-18T04:20:11.510Z</small>
+<div class="pair"><a href="../snapshots/saas_landing_577-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_577-lambda.png"></a>
+<a href="../snapshots/saas_landing_577-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_577-browser.png"></a></div></article>
 <article data-search="wikidata_main https://www.wikidata.org/wiki/Wikidata:Main_Page" data-severity="low">
 <h2><span class="severity low">LOW</span> wikidata_main — 5.0% mean error; 13.8% area</h2>
 <a href="https://www.wikidata.org/wiki/Wikidata:Main_Page">https://www.wikidata.org/wiki/Wikidata:Main_Page</a><small></small>
@@ -7238,6 +7168,16 @@ These are review candidates, not confirmed engine defects. Live content, animati
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_244-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_244-lambda.png"></a>
 <a href="../snapshots/saas_landing_244-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_244-browser.png"></a></div></article>
+<article data-search="saas_landing_473 https://www.popcorn.space/" data-severity="low">
+<h2><span class="severity low">LOW</span> saas_landing_473 — 2.6% mean error; 6.0% area</h2>
+<a href="https://www.popcorn.space/">https://www.popcorn.space/</a><small></small>
+<small>Post-load window: Lambda 1000 ms · Chromium 1000 ms.</small>
+<small>Animation origin: Lambda post-load · Chromium .</small>
+<small>The current native pixels equal the prior capture: device artwork is already visible at the viewport edge. Current Chromium confirms only a minor position/animation-phase and heading-wrap difference. The earlier major-omission annotation was too broad; this is a review correction, not a new rendering fix.</small>
+<small>Lambda 1200 × 800 · 2026-11-24T12:26:05.098Z
+ / Chromium 1200 × 800 · 2026-11-18T04:18:15.111Z</small>
+<div class="pair"><a href="../snapshots/saas_landing_473-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_473-lambda.png"></a>
+<a href="../snapshots/saas_landing_473-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_473-browser.png"></a></div></article>
 <article data-search="material_ui_docs https://mui.com/material-ui/getting-started/" data-severity="low">
 <h2><span class="severity low">LOW</span> material_ui_docs — 2.6% mean error; 6.6% area</h2>
 <a href="https://mui.com/material-ui/getting-started/">https://mui.com/material-ui/getting-started/</a><small></small>
@@ -7948,6 +7888,16 @@ These are review candidates, not confirmed engine defects. Live content, animati
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/llvm_getting_started-lambda.png">Lambda<img loading="lazy" src="../snapshots/llvm_getting_started-lambda.png"></a>
 <a href="../snapshots/llvm_getting_started-browser.png">Chromium<img loading="lazy" src="../snapshots/llvm_getting_started-browser.png"></a></div></article>
+<article data-search="saas_landing_318 https://www.setpoint.io/" data-severity="low">
+<h2><span class="severity low">LOW</span> saas_landing_318 — 2.0% mean error; 4.8% area</h2>
+<a href="https://www.setpoint.io/">https://www.setpoint.io/</a><small></small>
+<small>Post-load window: Lambda 1000 ms · Chromium 1000 ms.</small>
+<small>Animation origin: Lambda post-load · Chromium .</small>
+<small>Startup cover is removed; main navigation, headline, copy and action match. Remaining text-size and border differences are minor.</small>
+<small>Lambda 1200 × 800 · 2026-11-24T09:00:58.102Z
+ / Chromium 1200 × 800 · 2026-11-18T04:11:26.829Z</small>
+<div class="pair"><a href="../snapshots/saas_landing_318-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_318-lambda.png"></a>
+<a href="../snapshots/saas_landing_318-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_318-browser.png"></a></div></article>
 <article data-search="nginx_core_module https://nginx.org/en/docs/http/ngx_http_core_module.html" data-severity="low">
 <h2><span class="severity low">LOW</span> nginx_core_module — 2.0% mean error; 7.5% area</h2>
 <a href="https://nginx.org/en/docs/http/ngx_http_core_module.html">https://nginx.org/en/docs/http/ngx_http_core_module.html</a><small></small>
@@ -9278,6 +9228,16 @@ These are review candidates, not confirmed engine defects. Live content, animati
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_535-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_535-lambda.png"></a>
 <a href="../snapshots/saas_landing_535-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_535-browser.png"></a></div></article>
+<article data-search="nvd_nist https://nvd.nist.gov/" data-severity="low">
+<h2><span class="severity low">LOW</span> nvd_nist — 0.8% mean error; 0.9% area</h2>
+<a href="https://nvd.nist.gov/">https://nvd.nist.gov/</a><small></small>
+<small>Post-load window: Lambda 1000 ms · Chromium 1000 ms.</small>
+<small>Animation origin: Lambda post-load · Chromium .</small>
+<small>The root-positioned footer follows the updated document height. Main navigation, links, images and text now match; remaining icons and typography are minor.</small>
+<small>Lambda 1200 × 800 · 2026-11-24T09:24:36.207Z
+ / Chromium 1200 × 800 · 2026-11-18T04:03:17.981Z</small>
+<div class="pair"><a href="../snapshots/nvd_nist-lambda.png">Lambda<img loading="lazy" src="../snapshots/nvd_nist-lambda.png"></a>
+<a href="../snapshots/nvd_nist-browser.png">Chromium<img loading="lazy" src="../snapshots/nvd_nist-browser.png"></a></div></article>
 <article data-search="iana_reserved https://www.iana.org/domains/reserved" data-severity="low">
 <h2><span class="severity low">LOW</span> iana_reserved — 0.8% mean error; 1.3% area</h2>
 <a href="https://www.iana.org/domains/reserved">https://www.iana.org/domains/reserved</a><small></small>
@@ -9588,6 +9548,16 @@ These are review candidates, not confirmed engine defects. Live content, animati
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/toml_spec-lambda.png">Lambda<img loading="lazy" src="../snapshots/toml_spec-lambda.png"></a>
 <a href="../snapshots/toml_spec-browser.png">Chromium<img loading="lazy" src="../snapshots/toml_spec-browser.png"></a></div></article>
+<article data-search="saas_landing_349 https://infermedica.com/" data-severity="low">
+<h2><span class="severity low">LOW</span> saas_landing_349 — 0.7% mean error; 1.6% area</h2>
+<a href="https://infermedica.com/">https://infermedica.com/</a><small></small>
+<small>Post-load window: Lambda 1000 ms · Chromium 1000 ms.</small>
+<small>Animation origin: Lambda post-load · Chromium .</small>
+<small>Main navigation, heading, actions, hero photograph and consent panel match; only a small lower logo strip remains absent.</small>
+<small>Lambda 1200 × 800 · 2026-11-24T08:59:33.037Z
+ / Chromium 1200 × 800 · 2026-11-18T04:12:57.975Z</small>
+<div class="pair"><a href="../snapshots/saas_landing_349-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_349-lambda.png"></a>
+<a href="../snapshots/saas_landing_349-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_349-browser.png"></a></div></article>
 <article data-search="saas_landing_287 https://data.to.design/about" data-severity="low">
 <h2><span class="severity low">LOW</span> saas_landing_287 — 0.7% mean error; 1.7% area</h2>
 <a href="https://data.to.design/about">https://data.to.design/about</a><small></small>
@@ -9808,6 +9778,16 @@ These are review candidates, not confirmed engine defects. Live content, animati
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_180-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_180-lambda.png"></a>
 <a href="../snapshots/saas_landing_180-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_180-browser.png"></a></div></article>
+<article data-search="saas_landing_151 https://www.wineinvestment.com/" data-severity="low">
+<h2><span class="severity low">LOW</span> saas_landing_151 — 0.6% mean error; 0.9% area</h2>
+<a href="https://www.wineinvestment.com/">https://www.wineinvestment.com/</a><small></small>
+<small>Post-load window: Lambda 1000 ms · Chromium 1000 ms.</small>
+<small>Animation origin: Lambda post-load · Chromium .</small>
+<small>Navigation, wine hero illustration, heading, actions and regional dialog match current Chromium.</small>
+<small>Lambda 1200 × 800 · 2026-11-24T09:00:34.456Z
+ / Chromium 1200 × 800 · 2026-11-18T04:06:10.342Z</small>
+<div class="pair"><a href="../snapshots/saas_landing_151-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_151-lambda.png"></a>
+<a href="../snapshots/saas_landing_151-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_151-browser.png"></a></div></article>
 <article data-search="kernel_docs https://www.kernel.org/doc/html/latest/" data-severity="low">
 <h2><span class="severity low">LOW</span> kernel_docs — 0.6% mean error; 0.2% area</h2>
 <a href="https://www.kernel.org/doc/html/latest/">https://www.kernel.org/doc/html/latest/</a><small></small>
@@ -9998,6 +9978,16 @@ These are review candidates, not confirmed engine defects. Live content, animati
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_157-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_157-lambda.png"></a>
 <a href="../snapshots/saas_landing_157-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_157-browser.png"></a></div></article>
+<article data-search="saas_landing_041 https://www.wineinvestment.com/faqs/" data-severity="low">
+<h2><span class="severity low">LOW</span> saas_landing_041 — 0.5% mean error; 0.3% area</h2>
+<a href="https://www.wineinvestment.com/faqs/">https://www.wineinvestment.com/faqs/</a><small></small>
+<small>Post-load window: Lambda 1000 ms · Chromium 1000 ms.</small>
+<small>Animation origin: Lambda post-load · Chromium .</small>
+<small>FAQ heading, navigation, questions and regional dialog match current Chromium.</small>
+<small>Lambda 1200 × 800 · 2026-11-24T09:00:44.659Z
+ / Chromium 1200 × 800 · 2026-11-18T04:04:25.035Z</small>
+<div class="pair"><a href="../snapshots/saas_landing_041-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_041-lambda.png"></a>
+<a href="../snapshots/saas_landing_041-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_041-browser.png"></a></div></article>
 <article data-search="tcl_lang https://tcl.apache.org/" data-severity="low">
 <h2><span class="severity low">LOW</span> tcl_lang — 0.5% mean error; 0.4% area</h2>
 <a href="https://tcl.apache.org/">https://tcl.apache.org/</a><small></small>
@@ -10208,6 +10198,16 @@ These are review candidates, not confirmed engine defects. Live content, animati
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/google-lambda.png">Lambda<img loading="lazy" src="../snapshots/google-lambda.png"></a>
 <a href="../snapshots/google-browser.png">Chromium<img loading="lazy" src="../snapshots/google-browser.png"></a></div></article>
+<article data-search="saas_landing_223 https://www.xolo.io/zz-en/teams" data-severity="low">
+<h2><span class="severity low">LOW</span> saas_landing_223 — 0.4% mean error; 0.1% area</h2>
+<a href="https://www.xolo.io/zz-en/teams">https://www.xolo.io/zz-en/teams</a><small></small>
+<small>Post-load window: Lambda 1000 ms · Chromium 1000 ms.</small>
+<small>Animation origin: Lambda post-load · Chromium .</small>
+<small>Main navigation, heading, action, product illustration and consent panel match current Chromium.</small>
+<small>Lambda 1200 × 800 · 2026-11-24T09:05:32.156Z
+ / Chromium 1200 × 800 · 2026-11-18T04:07:56.702Z</small>
+<div class="pair"><a href="../snapshots/saas_landing_223-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_223-lambda.png"></a>
+<a href="../snapshots/saas_landing_223-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_223-browser.png"></a></div></article>
 <article data-search="tex_live_docs https://tug.org/texlive/doc.html" data-severity="low">
 <h2><span class="severity low">LOW</span> tex_live_docs — 0.4% mean error; 0.1% area</h2>
 <a href="https://tug.org/texlive/doc.html">https://tug.org/texlive/doc.html</a><small></small>

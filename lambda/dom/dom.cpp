@@ -236,6 +236,20 @@ static const char* dom_to_dom_string_cstr(Item value) {
     Item string_value = js_to_string(value);
     return fn_to_cstr(string_value);
 }
+extern "C" StrView dom_item_text_view(Item item) {
+    if (!is_text_type_id(item._type_id)) return {};
+    return {item.get_chars(), item.get_len()};
+}
+
+static Item dom_string_from_view(StrView text) {
+    return text.str ? Item{.item = s2it(heap_create_name(text.str, text.length))} : ItemNull;
+}
+
+static bool dom_identifier_has_nul(Item item) {
+    StrView text = dom_item_text_view(item);
+    return text.str && memchr(text.str, 0, text.length);
+}
+
 JS_FORWARD_RETURN(const char*, dom_to_attribute_cstr, (Item value), dom_to_attr_cstr, (value))
 
 // Forward declarations
@@ -324,7 +338,7 @@ static Html5Parser* dom_create_fragment_parser(DomDocument* doc,
         context && dom_element_is_svg(context));
 }
 
-static bool dom_replace_inner_html(DomElement* elem, const char* html_str,
+static bool dom_replace_inner_html(DomElement* elem, StrView markup,
                                    bool notify_mutation, bool declarative = false);
 
 static String* dom_fragment_text(Item item) {
@@ -515,27 +529,31 @@ static inline void dom_record_mutation_detail(DomJsMutationKind kind, DomNode* t
 // publishes mutations immediately.
 extern "C" __attribute__((weak)) bool dom_edit_transaction_defer_mutation(
         DomDocument* document, DomJsMutationKind kind, DomNode* target,
-        DomNode* parent, const char* attribute_name, const char* old_value) {
+        DomNode* parent, const char* attribute_name, const char* old_value,
+        size_t old_value_length) {
     (void)document;
     (void)kind;
     (void)target;
     (void)parent;
     (void)attribute_name;
     (void)old_value;
+    (void)old_value_length;
     return false;
 }
 
 static void dom_mutation_notify_observers(DomJsMutationKind kind, DomNode* target,
-        DomNode* parent, const char* attribute_name, const char* old_value) {
-    dom_observers_mutation_notify(kind, target, parent, attribute_name, old_value);
+        DomNode* parent, const char* attribute_name, const char* old_value,
+        size_t old_value_length = SIZE_MAX) {
+    dom_observers_mutation_notify(kind, target, parent, attribute_name, old_value, old_value_length);
     // native-only renderers have no realm in which to allocate a callback receiver.
     if (dom_realm_active() && kind == DOM_JS_MUTATION_ATTRIBUTE && target &&
             target->is_element() && attribute_name) {
         DomElement* element = target->as_element();
-        const char* value = element->has_attribute(attribute_name)
-            ? element->get_attribute(attribute_name) : nullptr;
-        dom_realm_custom_element_attribute(dom_wrap_element(element), attribute_name,
-            old_value, value ? value : element->has_attribute(attribute_name) ? "" : nullptr);
+        StrView value = element->get_attribute_view(attribute_name);
+        if (!value.str && element->has_attribute(attribute_name)) value.str = "";
+        StrView old = {old_value, old_value_length == SIZE_MAX
+            ? (old_value ? strlen(old_value) : 0) : old_value_length};
+        dom_realm_custom_element_attribute(dom_wrap_element(element), attribute_name, old, value);
     }
 }
 
@@ -694,13 +712,17 @@ private:
     DomDocument* document_;
 };
 
-DomAttributeOldValue::DomAttributeOldValue(const char* value) {
+DomAttributeOldValue::DomAttributeOldValue(const char* value)
+    : DomAttributeOldValue(value ? strview_from_cstr(value) : StrView{}) {}
+
+DomAttributeOldValue::DomAttributeOldValue(StrView value) {
     // synthetic attribute storage can release these bytes on replacement.
-    value_ = value ? mem_strdup(value, MEM_CAT_DOM) : nullptr;
+    value_ = value.str ? mem_dup_n(value.str, value.length, MEM_CAT_DOM) : nullptr;
+    length_ = value_ ? value.length : 0;
 }
 
 DomAttributeOldValue::DomAttributeOldValue(DomElement* element, const char* name)
-    : DomAttributeOldValue(element->get_attribute(name)) {}
+    : DomAttributeOldValue(element->get_attribute_view(name)) {}
 
 DomAttributeOldValue::~DomAttributeOldValue() { mem_free(value_); }
 
@@ -711,7 +733,8 @@ static inline void dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATION_
                                           const char* attribute_name = nullptr,
                                           const char* old_value = nullptr,
                                           CssPropertyCode presentation_property = CSS_PROPERTY_UNKNOWN,
-                                          bool recheck_focus = false) {
+                                          bool recheck_focus = false,
+                                          size_t old_value_length = SIZE_MAX) {
     parent = dom_source_inclusive_ancestor(parent);
     DomDocument* doc = dom_mutation_document(target, parent);
     if (!doc) return;
@@ -728,18 +751,19 @@ static inline void dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATION_
         }
     }
     if (dom_edit_transaction_defer_mutation(doc, kind, target, parent,
-                                            attribute_name, old_value)) {
+                                            attribute_name, old_value, old_value_length)) {
         return;
     }
 
-    radiant_dom_mutation_begin(doc, kind, target, parent, attribute_name, presentation_property, old_value);
+    radiant_dom_mutation_begin(doc, kind, target, parent, attribute_name,
+                               presentation_property, old_value, old_value_length);
     // Recheck after invalidating the cascade, before reflow validates focus.
     if (recheck_focus && target) dom_recheck_focus_in(target->as_element());
     // CSSOM retains a narrow rendering kind but still mutates the authored attribute.
     DomJsMutationKind observer_kind = attribute_name &&
         (kind == DOM_JS_MUTATION_INLINE_STYLE || kind == DOM_JS_MUTATION_STYLE_REPAINT)
         ? DOM_JS_MUTATION_ATTRIBUTE : kind;
-    dom_mutation_notify_observers(observer_kind, target, parent, attribute_name, old_value);
+    dom_mutation_notify_observers(observer_kind, target, parent, attribute_name, old_value, old_value_length);
     if (kind == DOM_JS_MUTATION_ATTRIBUTE) dom_slots_after_attribute_change(doc, target, attribute_name);
     radiant_dom_mutation_finish(doc, kind);
     if (kind == DOM_JS_MUTATION_ATTRIBUTE && attribute_name && str_ieq_cstr(attribute_name, "popover"))
@@ -815,6 +839,12 @@ extern "C" void dom_notify_inline_style_mutation(DomElement* element,
         element, element->parent, "style", old_value, dependency ? CSS_PROPERTY_UNKNOWN : property);
 }
 JS_FORWARD_VOID( dom_notify_mutation_detail, (DomJsMutationKind kind, void* target,                                                 void* parent, const char* attribute_name,                                                 const char* old_value), dom_mutation_notify, (kind, (DomNode*)target, (DomNode*)parent, attribute_name, old_value))
+
+extern "C" void dom_notify_mutation_detail_n(DomJsMutationKind kind, void* target, void* parent,
+        const char* attribute_name, const char* old_value, size_t old_value_length) {
+    dom_mutation_notify(kind, (DomNode*)target, (DomNode*)parent, attribute_name, old_value,
+                        CSS_PROPERTY_UNKNOWN, false, old_value_length);
+}
 
 extern "C" bool dom_has_committed_geometry_snapshot(void* dom_doc) {
     DomDocument* doc = (DomDocument*)dom_doc;
@@ -1347,9 +1377,14 @@ static Item dom_throw_index_size_error(const char* message) {
 }
 
 static Item dom_replace_text_data(DomText* text_node, uint32_t offset,
-                                     uint32_t count, const char* repl_chars) {
+                                     uint32_t count, Item replacement) {
     if (!text_node) return js_status_ok();
-    if (!repl_chars) repl_chars = "";
+    JS_RETURN_IF_ERROR(replacement);
+    RootFrame roots(1);
+    Rooted<Item> rooted_replacement(roots, replacement);
+    const String* text = rooted_replacement.get().get_safe_string();
+    const char* repl_chars = text ? text->chars : "";
+    size_t repl_len = text ? text->len : 0;
 
     uint32_t old_u16_len = dom_text_utf16_length(text_node);
     if (offset > old_u16_len) {
@@ -1358,10 +1393,10 @@ static Item dom_replace_text_data(DomText* text_node, uint32_t offset,
     uint32_t available = old_u16_len - offset;
     if (count > available) count = available;
 
-    size_t repl_len = strlen(repl_chars);
     uint32_t repl_u16_len = (uint32_t)utf8_to_utf16_length(repl_chars, repl_len);
     // replacing a detached node's owned payload can free it before observers run.
-    char* old_text = mem_strdup(text_node->text ? text_node->text : "", MEM_CAT_DOM);
+    size_t old_text_length = text_node->length;
+    char* old_text = mem_dup_n(text_node->text ? text_node->text : "", old_text_length, MEM_CAT_DOM);
     if (!old_text) return js_status_ok();
     DocState* state = dom_state_for_nodes(
         (DomNode*)text_node, text_node->parent);
@@ -1373,8 +1408,8 @@ static Item dom_replace_text_data(DomText* text_node, uint32_t offset,
     }
     dom_record_mutation_detail(DOM_JS_MUTATION_TEXT, (DomNode*)text_node,
                                   text_node->parent, 0);
-    dom_mutation_notify(DOM_JS_MUTATION_TEXT, (DomNode*)text_node,
-                           text_node->parent, nullptr, old_text);
+    dom_notify_mutation_detail_n(DOM_JS_MUTATION_TEXT, text_node,
+                                 text_node->parent, nullptr, old_text, old_text_length);
     mem_free(old_text);
     log_debug("dom_replace_text_data: offset=%u count=%u replacement_u16=%u",
               offset, count, repl_u16_len);
@@ -2518,35 +2553,40 @@ static bool dom_token_list_is_ascii_whitespace(char ch) {
     return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f';
 }
 
+static StrView dom_token_list_next(StrView& remaining) {
+    if (!remaining.length) return {};
+    const char* end = remaining.str + remaining.length;
+    const char* start = remaining.str;
+    while (start < end && dom_token_list_is_ascii_whitespace(*start)) start++;
+    const char* next = start;
+    while (next < end && !dom_token_list_is_ascii_whitespace(*next)) next++;
+    remaining = {next, (size_t)(end - next)};
+    return {start, (size_t)(next - start)};
+}
+
+static StrView dom_token_list_value(const DomCollectionVArray* collection) {
+    DomElement* owner = collection ? dom_collection_varray_owner((void*)collection) : nullptr;
+    const char* name = dom_token_list_attribute_name(collection);
+    return owner && name ? owner->get_attribute_view(name) : StrView{};
+}
+
 static bool dom_token_list_token_at(const DomCollectionVArray* collection,
                                     int64_t target, const char** token_start,
                                     size_t* token_len) {
-    if (!collection || target < 0 || !token_start || !token_len) return false;
-    DomElement* owner = dom_collection_varray_owner((void*)collection);
-    const char* attr_name = dom_token_list_attribute_name(collection);
-    const char* value = owner && attr_name ? owner->get_attribute(attr_name) : nullptr;
-    if (!value) return false;
-    int64_t index = 0;
-    const char* cursor = value;
-    while (*cursor) {
-        while (*cursor && dom_token_list_is_ascii_whitespace(*cursor)) cursor++;
-        const char* start = cursor;
-        while (*cursor && !dom_token_list_is_ascii_whitespace(*cursor)) cursor++;
-        if (start == cursor) break;
-        if (index++ == target) {
-            *token_start = start;
-            *token_len = (size_t)(cursor - start);
-            return true;
-        }
+    if (target < 0 || !token_start || !token_len) return false;
+    StrView value = dom_token_list_value(collection);
+    for (StrView token = dom_token_list_next(value); token.length; token = dom_token_list_next(value)) {
+        if (target-- != 0) continue;
+        *token_start = token.str;
+        *token_len = token.length;
+        return true;
     }
     return false;
 }
 
-static int64_t dom_token_list_count(const DomCollectionVArray* collection) {
+static int64_t dom_token_list_count(StrView value) {
     int64_t count = 0;
-    const char* token_start = nullptr;
-    size_t token_len = 0;
-    while (dom_token_list_token_at(collection, count, &token_start, &token_len)) count++;
+    while (dom_token_list_next(value).length) count++;
     return count;
 }
 
@@ -2781,7 +2821,7 @@ static int64_t dom_collection_varray_count(void* data) {
     }
     if (collection && (collection->kind == DOM_VARRAY_CLASS_LIST ||
                        collection->kind == DOM_VARRAY_REL_LIST)) {
-        return dom_token_list_count(collection);
+        return dom_token_list_count(dom_token_list_value(collection));
     }
     int64_t count = 0;
     (void)dom_collection_varray_walk(data, -1, &count);
@@ -3313,7 +3353,7 @@ static DomElement* dom_document_title_element(DomDocument* document, bool create
     return item_is_error(inserted) ? nullptr : title;
 }
 
-static bool dom_replace_text_content(DomElement* element, const char* text);
+static bool dom_replace_text_content(DomElement* element, Item text);
 
 static Item dom_document_set_title(DomDocument* document, Item value) {
     RootFrame roots(2);
@@ -3321,7 +3361,7 @@ static Item dom_document_set_title(DomDocument* document, Item value) {
     if (item_is_error(text.get())) return text.get();
     // title is document-owned text, not a realm-wide cached reflection value.
     DomElement* title = dom_document_title_element(document, true);
-    if (title && !dom_replace_text_content(title, fn_to_cstr(text.get()))) return ItemError;
+    if (title && !dom_replace_text_content(title, text.get())) return ItemError;
     return original.get();
 }
 
@@ -3337,9 +3377,10 @@ extern "C" Item dom_document_proxy_set_property(Item prop_name, Item value) {
         if (strcmp(prop, "href") == 0 || strcmp(prop, "location") == 0 ||
             strcmp(prop, "hash") == 0 || strcmp(prop, "search") == 0 ||
             strcmp(prop, "pathname") == 0) {
-            // Location writes share the module-owned same-document history
-            // machine; this prevents URL reflection and traversal from diverging.
-            return js_history_set_location(value, strcmp(prop, "hash") == 0);
+            // full URL assignments may replace the document; fragment writes retain its history state.
+            bool navigate_document = strcmp(prop, "href") == 0 || strcmp(prop, "location") == 0;
+            return navigate_document ? dom_location_set_href(value)
+                : js_history_set_location(value, strcmp(prop, "hash") == 0);
         }
         Item* cached = strcmp(prop, "defaultView") == 0 ? &js_document_default_view :
             strcmp(prop, "fonts") == 0 ? &js_document_fonts_value : nullptr;
@@ -4573,14 +4614,15 @@ static Item dom_get_inline_style_wrapper(DomElement* elem) {
 }
 
 static Item js_classlist_value_item(DomElement* elem) {
-    if (!elem || elem->class_count() == 0) {
-        return js_name_item("");
-    }
-    StrBuf* sb = strbuf_new_cap(64);
+    StrView value = elem ? elem->get_attribute_view("class") : StrView{};
+    if (!value.length) return js_name_item("");
+    if (memchr(value.str, 0, value.length)) return dom_string_from_view(value);
+    StrBuf* sb = strbuf_new_cap(value.length + 1);
+    if (!sb) return ItemError;
     for (int i = 0; i < elem->class_count(); i++) {
         strbuf_append_all(sb, 2, i > 0 ? " " : "", elem->class_names()[i]);
     }
-    Item result = js_name_item(sb->str ? sb->str : "");
+    Item result = dom_string_from_view({sb->str, sb->length});
     strbuf_free(sb);
     return result;
 }
@@ -5584,9 +5626,10 @@ extern "C" Item dom_dataset_property(Item elem_item) {
     for (int i = 0; i < attr_count; i++) {
         char key_buf[128];
         if (!dom_data_attr_to_dataset_key(names[i], key_buf, sizeof(key_buf))) continue;
-        const char* value = elem->get_attribute(names[i]);
+        StrView value = elem->get_attribute_view(names[i]);
         key_root.set(js_name_item(key_buf));
-        value_root.set(js_name_item(value ? value : ""));
+        if (!value.str) value.str = "";
+        value_root.set(dom_string_from_view(value));
         js_define_own_key_storage(dataset_root.get(), key_root.get(), value_root.get());
     }
     return dataset_root.get();
@@ -5891,9 +5934,21 @@ JS_FORWARD_ITEM(dom_throw_contenteditable_syntax_error, (void), dom_throw_syntax
 static Item dom_text_content_item(DomElement* elem) {
     StrBuf* sb = strbuf_new_cap(32);
     dom_collect_text_content((DomNode*)elem, sb);
-    String* text = heap_create_name(sb->str ? sb->str : "");
+    String* text = heap_create_name(sb->str ? sb->str : "", sb->length);
     strbuf_free(sb);
     return (Item){.item = s2it(text)};
+}
+
+static Item dom_text_data_item(const DomText* text) {
+    return {.item = s2it(heap_create_name(text->text ? text->text.get() : "", text->length))};
+}
+
+static Item dom_attribute_data_item(const DomAttr* attribute) {
+    return dom_string_from_view({attribute->value.get(), attribute->value_length});
+}
+
+static Item dom_comment_data_item(const DomComment* comment) {
+    return dom_string_from_view({comment->content ? comment->content.get() : "", comment->length});
 }
 JS_FORWARD_STATIC_EXPRESSION(bool, dom_ascii_space, (char ch), (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f'))
 
@@ -6052,9 +6107,9 @@ static int64_t dom_geometry_client_start_border(DomElement* elem, bool vertical)
 // Helper: recursive innerHTML serialization
 // ============================================================================
 
-static void collect_html_attr_value(const char* value, StrBuf* sb) {
+static void collect_html_attr_value(const char* value, size_t length, StrBuf* sb) {
     if (!value) return;
-    for (const char* p = value; *p; p++) {
+    for (const char* p = value; p < value + length; p++) {
         if (*p == '&') strbuf_append_str(sb, "&amp;");
         else if (*p == '"') strbuf_append_str(sb, "&quot;");
         else strbuf_append_char(sb, *p);
@@ -6141,7 +6196,7 @@ static void collect_inner_html(DomNode* node, StrBuf* sb, const DomShadowSeriali
         DomComment* comment = node->as_comment();
         strbuf_append_str(sb, "<!--");
         if (comment->content && comment->length > 0) {
-            strbuf_append_str_n(sb, comment->content, (int)comment->length);
+            strbuf_append_str_n(sb, comment->content, comment->length);
         }
         strbuf_append_str(sb, "-->");
         return;
@@ -6172,7 +6227,7 @@ static void collect_inner_html(DomNode* node, StrBuf* sb, const DomShadowSeriali
             }
             if (prefix) strbuf_append_str(sb, prefix);
             strbuf_append_all(sb, 2, name, "=\"");
-            collect_html_attr_value(attribute.value, sb);
+            collect_html_attr_value(attribute.value, attribute.value_length, sb);
             strbuf_append_char(sb, '"');
         }
         strbuf_append_char(sb, '>');
@@ -6197,10 +6252,11 @@ extern "C" Item dom_xml_serializer_serialize_to_string(Item node_item) {
     // standard DOM API; serializing the live node preserves namespaces and
     // attributes instead of substituting a format-specific graph snapshot.
     StrBuf* sb = strbuf_new_cap(256);
-    dom_serialize_xml(node, sb, nullptr);
-    String* result = heap_create_name(sb->str ? sb->str : "");
+    if (!sb) return ItemError;
+    bool serialized = dom_serialize_xml_dom_string(node, sb);
+    Item result = serialized ? dom_string_from_view({sb->str ? sb->str : "", sb->length}) : ItemNull;
     strbuf_free(sb);
-    return (Item){.item = s2it(result)};
+    return serialized ? result : dom_raise_exception("InvalidStateError", "The node cannot be serialized as XML");
 }
 
 static void dom_collapse_selection_before_child_replace(DomElement* elem,
@@ -6233,7 +6289,7 @@ static void dom_collapse_selection_before_child_replace(DomElement* elem,
 
 
 // Parse in the context's document without replacing its existing children.
-static bool dom_parse_markup_into(DomElement* target, const char* html_str,
+static bool dom_parse_markup_into(DomElement* target, StrView markup,
                                   bool notify_mutation, DomElement* context = nullptr,
                                   bool declarative = false,
                                   DomFragmentScriptMode script_mode = DomFragmentScriptMode::inert) {
@@ -6245,7 +6301,7 @@ static bool dom_parse_markup_into(DomElement* target, const char* html_str,
     Html5ParserScope parser_scope(parser);
     if (!parser) return false;
     parser->allow_declarative_shadow_roots = declarative;
-    html5_fragment_parse(parser, html_str);
+    if (!html5_fragment_parse_n(parser, markup.str, markup.length)) return false;
     Element* body_elem = html5_fragment_get_body(parser);
     if (!body_elem) return false;
     for (int64_t i = 0; i < body_elem->length; i++) {
@@ -6259,9 +6315,9 @@ static bool dom_parse_markup_into(DomElement* target, const char* html_str,
 }
 
 
-static bool dom_replace_inner_html(DomElement* elem, const char* html_str,
+static bool dom_replace_inner_html(DomElement* elem, StrView markup,
                                    bool notify_mutation, bool declarative) {
-    if (!elem || !html_str) return false;
+    if (!elem || !markup.str) return false;
     elem = dom_prepare_children_for_mutation(elem);
     if (!elem) return false;
     DomScriptReactionScope script_reactions(elem->doc);
@@ -6284,8 +6340,8 @@ static bool dom_replace_inner_html(DomElement* elem, const char* html_str,
         // may have been retired by that relink.
     }
 
-    if (html_str[0] != '\0' || elem->tag() == MARKUP_NAME_HTML) {
-        if (!dom_parse_markup_into(elem, html_str, notify_mutation, nullptr, declarative)) return false;
+    if (markup.length || elem->tag() == MARKUP_NAME_HTML) {
+        if (!dom_parse_markup_into(elem, markup, notify_mutation, nullptr, declarative)) return false;
     }
 
     dom_register_named_elements(elem);
@@ -6308,7 +6364,7 @@ Item dom_set_html_unsafe(Item receiver, Item markup, Item options, bool shadow) 
     source.set(js_to_string(source.get()));
     JS_RETURN_IF_ERROR(source.get());
     JS_RETURN_IF_ERROR(dom_check_unsafe_html_options(dictionary.get()));
-    return dom_replace_inner_html(element, fn_to_cstr(source.get()), true, true)
+    return dom_replace_inner_html(element, strview_init(source.get().get_chars(), source.get().get_len()), true, true)
         ? make_js_undefined() : ItemError;
 }
 
@@ -6328,7 +6384,7 @@ static Item dom_parse_fragment(Item context, Item markup, DomFragmentScriptMode 
     result.set(dom_wrap_element(fragment));
     {
         DomScriptReactionScope script_reactions(doc);
-        if (!dom_parse_markup_into(fragment, fn_to_cstr(source.get()), false,
+        if (!dom_parse_markup_into(fragment, strview_init(source.get().get_chars(), source.get().get_len()), false,
                 ctx->as_element(), false, script_mode)) return ItemNull;
     }
     return result.get();
@@ -6366,13 +6422,13 @@ extern "C" Item dom_parse_contextual_fragment(Item start, Item markup) {
 
 static Item dom_replace_children(Item parent_item, Item* args, int argc);
 
-static bool dom_replace_text_content(DomElement* elem, const char* text) {
-    if (!elem || !text) return false;
+static bool dom_replace_text_content(DomElement* elem, Item text) {
+    if (!elem || get_type_id(text) != LMD_TYPE_STRING) return false;
     // replace-all owns a single childList record, including both removed and added nodes.
     RootFrame roots(2);
-    // copy borrowed text before wrapping the parent can collect its source.
-    bool has_text = *text != '\0';
-    Rooted<Item> replacement(roots, js_name_item(text));
+    // keep the original length and root the value while wrapping the parent.
+    bool has_text = text.get_len() != 0;
+    Rooted<Item> replacement(roots, text);
     Rooted<Item> parent(roots, dom_wrap_element(elem));
     Item argument = replacement.get();
     if (item_is_error(dom_replace_children(parent.get(), &argument, has_text ? 1 : 0))) return false;
@@ -6386,9 +6442,9 @@ static bool dom_replace_text_content(DomElement* elem, const char* text) {
 }
 
 static DomElement* dom_parse_html_fragment(DomDocument* doc,
-                                              const char* html_str, DomElement* context,
+                                              StrView markup, DomElement* context,
                                               DomFragmentScriptMode script_mode = DomFragmentScriptMode::inert) {
-    if (!doc || !doc->input || !html_str) return nullptr;
+    if (!doc || !doc->input || !markup.str) return nullptr;
 
     Html5Parser* parser = dom_create_fragment_parser(doc, context);
     Html5ParserScope parser_scope(parser);
@@ -6396,7 +6452,7 @@ static DomElement* dom_parse_html_fragment(DomDocument* doc,
     // a parser-owned write insertion point inherits the navigation opt-in.
     parser->allow_declarative_shadow_roots =
         script_mode == DomFragmentScriptMode::parser_inserted && doc->js.write_cursor;
-    html5_fragment_parse(parser, html_str);
+    if (!html5_fragment_parse_n(parser, markup.str, markup.length)) return nullptr;
     Element* body_elem = html5_fragment_get_body(parser);
     if (!body_elem) return nullptr;
 
@@ -6424,7 +6480,7 @@ extern "C" bool dom_exec_insert_html(DomDocument* doc, const char* html_str) {
     DomNode* context_node = range->start.node;
     if (!context_node->is_element()) context_node = context_node->parent;
     DomElement* context = context_node && context_node->is_element() ? context_node->as_element() : nullptr;
-    DomElement* fragment = dom_parse_html_fragment(doc, html_str, context);
+    DomElement* fragment = dom_parse_html_fragment(doc, strview_init(html_str, strlen(html_str)), context);
     if (!fragment) return false;
 
     ArrayList* inserted = arraylist_new(8);
@@ -7018,7 +7074,7 @@ extern "C" Item dom_document_create_event_bridge(Item interface_name) {
     return js_create_event_init("", false, false, false);
 }
 
-static bool dom_append_document_text(DomDocument* doc, const char* text) {
+static bool dom_append_document_text(DomDocument* doc, StrView text) {
     DomNode* cursor = doc->js.write_cursor;
     DomElement* parent = cursor && cursor->parent ? cursor->parent->as_element()
         : dom_document_body_element(doc);
@@ -8083,11 +8139,8 @@ static Item dom_text_replace_data_method(DomText* text_node, Item offset_arg,
         return dom_throw_index_size_error("The offset or count is negative.");
     }
 
-    Item data_text_item = js_to_string(data_arg);
-    const char* data_text = fn_to_cstr(data_text_item);
-    if (!data_text) data_text = "";
     JS_RETURN_IF_ERROR(dom_replace_text_data(text_node, (uint32_t)offset,
-        (uint32_t)count, data_text));
+        (uint32_t)count, js_to_string(data_arg)));
     return make_js_undefined();
 }
 JS_FORWARD_STATIC_ITEM(dom_text_insert_data_method, (DomText* text_node, Item offset_arg,                                            Item data_arg), dom_text_replace_data_method, (text_node, offset_arg, (Item){.item = i2it(0)}, data_arg))
@@ -8154,14 +8207,9 @@ extern "C" Item dom_set_text_data_property(void* text_ptr, Item value) {
     if (!text_node) return value;
     // The specialized MIR member path must preserve CharacterData's DOMString
     // conversion just like the generic host-property path.
-    const char* new_text = dom_to_dom_string_cstr(value);
-    if (new_text) {
-        uint32_t old_u16_len = dom_text_utf16_length(text_node);
-        // text data writes must continue through the JS helper because it
-        // updates live ranges and publishes the text mutation kind.
-        JS_ASSIGN_OR_RETURN(set_result, dom_replace_text_data(text_node, 0, old_u16_len, new_text));
-        log_debug("dom_set_text_data_property: set text node data='%.30s'", new_text);
-    }
+    uint32_t old_u16_len = dom_text_utf16_length(text_node);
+    // the shared helper updates live ranges and publishes the text mutation.
+    JS_RETURN_IF_ERROR(dom_replace_text_data(text_node, 0, old_u16_len, js_to_string(value)));
     return value;
 }
 
@@ -8378,13 +8426,12 @@ static void _collect_options(DomElement* select, Item arr) {
 // Get the option's text content (concatenated descendant text, trimmed
 // of leading/trailing ASCII whitespace, with internal whitespace
 // collapsed per HTML spec for <option> label).
-static char* _option_text(DomElement* opt) {
-    StrBuf* out = strbuf_new_cap(32);
-    if (!out) return mem_strdup("", MEM_CAT_JS_RUNTIME);
-    dom_option_text_normalized(opt, out);
-    char* result = mem_strdup(out->str ? out->str : "", MEM_CAT_JS_RUNTIME);
-    strbuf_free(out);
-    return result;
+static StrView dom_option_text_view(DomElement* option, StrBuf** buffer) {
+    if (!*buffer) *buffer = strbuf_new_cap(32);
+    if (!*buffer) return {"", 0};
+    strbuf_reset(*buffer);
+    dom_option_text_normalized(option, *buffer);
+    return {(*buffer)->str ? (*buffer)->str : "", (*buffer)->length};
 }
 
 // Get/set the option's selectedness. Stored as expando "__selected".
@@ -8462,12 +8509,7 @@ static Item dom_output_default_value(DomElement* elem) {
 }
 
 static bool dom_output_set_text(DomElement* elem, Item value) {
-    const char* raw = dom_to_dom_string_cstr(value);
-    char* text = mem_strdup(raw ? raw : "", MEM_CAT_JS_RUNTIME);
-    if (!text) return false;
-    bool replaced = dom_replace_text_content(elem, text);
-    mem_free(text);
-    return replaced;
+    return dom_replace_text_content(elem, js_to_string(value));
 }
 
 extern "C" Item dom_text_control_set_value_bridge(void* dom_elem, Item value) {
@@ -8486,7 +8528,7 @@ extern "C" Item dom_text_control_set_value_bridge(void* dom_elem, Item value) {
                            strcmp(itype, "tel") == 0 || strcmp(itype, "url") == 0 ||
                            strcmp(itype, "email") == 0 || strcmp(itype, "password") == 0;
         if (single_line) {
-            size_t slen = strlen(s);
+            size_t slen = text.get().get_len();
             bool has_newline = false;
             for (size_t k = 0; k < slen; k++) {
                 if (s[k] == '\r' || s[k] == '\n') { has_newline = true; break; }
@@ -8510,7 +8552,7 @@ extern "C" Item dom_text_control_set_value_bridge(void* dom_elem, Item value) {
         }
     }
     // text-control value writes dirty live state without changing the default attribute.
-    tc_set_value(elem, s, strlen(s));
+    tc_set_value(elem, s, text.get().get_len());
     dom_expando_flag_set(elem, "__valueDirty", (Item){.item = b2it(true)});
     dom_mutation_notify(DOM_JS_MUTATION_CONTROL_VALUE,
         (DomNode*)elem, elem->parent);
@@ -8832,9 +8874,8 @@ extern "C" void dom_after_set_attribute(void* elem_ptr,
     }
 }
 
-extern "C" bool dom_set_non_style_metadata(void* target, const char* name, const char* value) {
-    DomElement* element = (DomElement*)target;
-    if (!element || !element->doc || !name || !value || strchr(name, ':')) return false;
+static bool dom_set_non_style_metadata_view(DomElement* element, const char* name, StrView value) {
+    if (!element || !element->doc || !name || !value.str || strchr(name, ':')) return false;
     bool metadata = dom_element_can_write_metadata(element, name);
     bool scene_paint = !metadata && dom_engine_scene_paint_attribute(element, name);
     if (!metadata && !scene_paint) return false;
@@ -8843,22 +8884,30 @@ extern "C" bool dom_set_non_style_metadata(void* target, const char* name, const
         if (*character >= 'A' && *character <= 'Z') return false;
     const char* local_name = nullptr;
     const char* uri = dom_element_attribute_namespace_uri(element, name, &local_name);
-    const char* old_value = element->get_attribute(name);
+    StrView old_value = element->get_attribute_view(name);
     // identical metadata cannot change CSS matching; observers may still perform their own writes.
-    bool same_value = old_value && strcmp(old_value, value) == 0;
+    bool same_value = old_value.str && strview_eq(&old_value, &value);
     if ((uri && *uri) || (!same_value &&
             dom_engine_attribute_has_css_dependency(element->doc, element, name))) return false;
+    // synthetic writes can release the displaced value before observation.
+    DomAttributeOldValue saved(element->is_synthetic() ? old_value : StrView{});
+    if (element->is_synthetic()) old_value = saved.view();
     if (!dom_element_write_attribute_without_cascade(element, name, value)) return false;
-    dom_after_set_attribute(element, name, value);
+    dom_after_set_attribute(element, name, value.str);
     if (dom_edit_transaction_defer_mutation(element->doc, DOM_JS_MUTATION_ATTRIBUTE,
-            element, element->parent, name, old_value)) return true;
+            element, element->parent, name, old_value.str, old_value.length)) return true;
     // observers/custom elements still see the write, but unrelated geometry
     // reads must not recascade and reflow the document for application metadata.
     element->doc->advance_mutation_epoch();
     if (scene_paint && !same_value) dom_engine_publish_scene_attribute_change(element);
-    dom_mutation_notify_observers(DOM_JS_MUTATION_ATTRIBUTE, element, element->parent, name, old_value);
+    dom_mutation_notify_observers(DOM_JS_MUTATION_ATTRIBUTE, element, element->parent,
+                                  name, old_value.str, old_value.length);
     dom_engine_publish_metadata_change(element->doc);
     return true;
+}
+
+extern "C" bool dom_set_non_style_metadata(void* target, const char* name, const char* value) {
+    return value && dom_set_non_style_metadata_view((DomElement*)target, name, strview_from_cstr(value));
 }
 
 extern "C" void dom_after_remove_attribute(void* elem_ptr,
@@ -8893,18 +8942,14 @@ extern "C" void dom_after_toggle_attribute_remove(void* elem_ptr,
     }
 }
 
-// Return the option's effective value (`value` attribute, or text content
-// if absent). Heap-allocated cstring caller must mem_free.
-static char* _option_value(DomElement* opt) {
-    const char* v = opt->get_attribute("value");
-    if (v) return mem_strdup(v, MEM_CAT_JS_RUNTIME);
-    return _option_text(opt);
+// Borrow the value attribute or build the fallback text in the caller's buffer.
+static StrView dom_option_value_view(DomElement* option, StrBuf** buffer) {
+    StrView value = option->get_attribute_view("value");
+    return value.str ? value : dom_option_text_view(option, buffer);
 }
 
-static char* _select_value(DomElement* elem) {
-    if (!elem || !_is_tag(elem, "select")) {
-        return mem_strdup("", MEM_CAT_JS_RUNTIME);
-    }
+static DomElement* dom_select_effective_option(DomElement* elem) {
+    if (!elem || !_is_tag(elem, "select")) return nullptr;
     RootFrame roots(1);
     Rooted<Item> options(roots, js_array_new(0));
     _collect_options(elem, options.get());
@@ -8914,7 +8959,7 @@ static char* _select_value(DomElement* elem) {
         DomElement* option = (DomElement*)dom_unwrap_element(
             js_elements_get_int(options.get(), i));
         if (!option) continue;
-        if (_get_selectedness(option)) return _option_value(option);
+        if (_get_selectedness(option)) return option;
         if (!first_non_disabled &&
             !option->has_attribute("disabled")) {
             first_non_disabled = option;
@@ -8932,16 +8977,18 @@ static char* _select_value(DomElement* elem) {
     }
     if (!elem->has_attribute("multiple") && size <= 1 &&
         first_non_disabled && !_select_is_dirty(elem)) {
-        return _option_value(first_non_disabled);
+        return first_non_disabled;
     }
-    return mem_strdup("", MEM_CAT_JS_RUNTIME);
+    return nullptr;
 }
 
 extern "C" Item dom_select_value_bridge(void* element) {
-    char* value = _select_value((DomElement*)element);
-    String* result = heap_create_name(value ? value : "");
-    if (value) mem_free(value);
-    return (Item){.item = s2it(result)};
+    DomElement* option = dom_select_effective_option((DomElement*)element);
+    if (!option) return js_name_item("");
+    StrBuf* buffer = nullptr;
+    Item result = dom_string_from_view(dom_option_value_view(option, &buffer));
+    strbuf_free(buffer);
+    return result;
 }
 
 // Return index of `opt` within its owner select's options list (-1 if not
@@ -8992,30 +9039,27 @@ extern "C" void dom_after_default_selected_set(void* dom_elem, bool selected) {
 }
 JS_FORWARD_VOID( dom_after_select_multiple_removed, (void* dom_elem), _select_ask_for_reset, ((DomElement*)dom_elem))
 
-static int dom_select_apply_value(DomElement* elem, const char* value,
-        bool sync_native_index) {
+static int dom_select_apply_value(DomElement* elem, StrView value) {
     RootFrame roots(1);
     Rooted<Item> arr(roots, js_array_new(0));
     _collect_options(elem, arr.get());
     int64_t n = js_array_length(arr.get());
     int found = -1;
+    StrBuf* buffer = nullptr;
     for (int64_t i = 0; i < n; i++) {
         DomElement* opt = (DomElement*)dom_unwrap_element(js_elements_get_int(arr.get(), i));
         if (!opt) continue;
-        char* option_value = _option_value(opt);
-        bool match = option_value && strcmp(option_value, value) == 0;
-        mem_free(option_value);
-        if (match) { found = (int)i; break; } // INT_CAST_OK: option index
+        StrView option_value = dom_option_value_view(opt, &buffer);
+        if (strview_eq(&option_value, &value)) { found = (int)i; break; } // INT_CAST_OK: option index
     }
+    strbuf_free(buffer);
     for (int64_t i = 0; i < n; i++) {
         DomElement* opt = (DomElement*)dom_unwrap_element(js_elements_get_int(arr.get(), i));
         if (!opt) continue;
         _set_selectedness(opt, found >= 0 && (int)i == found); // INT_CAST_OK: option index
     }
-    if (sync_native_index) {
-        radiant_select_sync_native_index(elem, found,
-            (int)n); // INT_CAST_OK: option count
-    }
+    radiant_select_sync_native_index(elem, found,
+        (int)n); // INT_CAST_OK: option count
     dom_update_selected_content(elem);
     return found;
 }
@@ -9023,8 +9067,7 @@ static int dom_select_apply_value(DomElement* elem, const char* value,
 extern "C" void dom_select_set_value_bridge(void* dom_elem, const char* value) {
     DomElement* elem = (DomElement*)dom_elem;
     if (!elem) return;
-    const char* sv = value ? value : "";
-    dom_select_apply_value(elem, sv, true);
+    dom_select_apply_value(elem, strview_from_cstr(value));
     dom_expando_flag_set(elem, "__selDirty", (Item){.item = b2it(true)});
 }
 JS_FORWARD_VOID( dom_select_set_selected_index_bridge, (void* dom_elem, Item value), _select_set_selected_index, ((DomElement*)dom_elem, _select_index_from_item(value)))
@@ -9107,7 +9150,7 @@ extern "C" void dom_set_option_selected_dirty(void* dom_elem, bool selected) {
 
 extern "C" void dom_set_option_text_bridge(void* dom_elem, const char* value) {
     // the shared replacement also updates the backing tree and leaves no child for empty text.
-    dom_replace_text_content(static_cast<DomElement*>(dom_elem), value ? value : "");
+    dom_replace_text_content(static_cast<DomElement*>(dom_elem), js_name_item(value ? value : ""));
 }
 
 // For a <select required> element, returns true iff no <option> is
@@ -9135,9 +9178,9 @@ static bool _select_validity_visit(DomElement* elem, void* context) {
     if (!scan->first_option) {
         scan->first_option = elem;
         if (!scan->is_listbox && elem->parent == (DomNode*)scan->select) {
-            char* value = _option_value(elem);
-            if (!value || !*value) scan->placeholder = elem;
-            mem_free(value);
+            StrBuf* buffer = nullptr;
+            if (!dom_option_value_view(elem, &buffer).length) scan->placeholder = elem;
+            strbuf_free(buffer);
         }
     }
     if (!scan->first_enabled && !elem->has_attribute("disabled")) {
@@ -9255,12 +9298,8 @@ static void _reset_form_control(DomElement* elem) {
     }
     if (str_icmp_cstr(tag, "output") == 0) {
         Item default_value = dom_output_default_value(elem);
-        const char* raw = fn_to_cstr(default_value);
-        char* text = mem_strdup(raw ? raw : "", MEM_CAT_JS_RUNTIME);
-        if (!text) return;
         // Reset restores the saved default and returns the output to default mode.
-        dom_replace_text_content(elem, text);
-        mem_free(text);
+        if (!dom_replace_text_content(elem, default_value)) return;
         dom_expando_flag_set(elem, "__outputValueMode", ItemNull);
         dom_expando_flag_set(elem, "__outputDefaultValue", ItemNull);
         return;
@@ -10141,12 +10180,12 @@ static Item dom_template_content(DomElement* template_elem) {
 }
 
 static bool dom_get_textlike_property(DomNode* node, Item elem_item,
-        Item prop_name, const char* prop, const char* content,
+        Item prop_name, const char* prop,
         int64_t length, int64_t node_type, const char* node_name,
         bool is_text, Item* result) {
     if (strcmp(prop, "data") == 0 || strcmp(prop, "nodeValue") == 0 ||
             strcmp(prop, "textContent") == 0) {
-        *result = js_name_item(content ? content : "");
+        *result = is_text ? dom_text_data_item(node->as_text()) : dom_core_node_value(elem_item);
         return true;
     }
     if (strcmp(prop, "length") == 0) {
@@ -10306,15 +10345,9 @@ extern "C" Item dom_core_node_value(Item n) {
     DomNode* node = (DomNode*)dom_unwrap_element(n);
     if (!node) return ItemNull;
     if (node->node_type == DOM_NODE_DOCTYPE) return ItemNull;
-    if (DomAttr* attribute = node->as_attribute()) return js_name_item(attribute->value);
-    if (node->is_text()) {
-        const char* text = node->as_text()->text;
-        return js_name_item(text ? text : "");
-    }
-    if (node->is_comment()) {
-        const char* content = node->as_comment()->content;
-        return js_name_item(content ? content : "");
-    }
+    if (DomAttr* attribute = node->as_attribute()) return dom_attribute_data_item(attribute);
+    if (node->is_text()) return dom_text_data_item(node->as_text());
+    if (node->is_comment()) return dom_comment_data_item(node->as_comment());
     return ItemNull;  // Element.nodeValue is null, not the element's text
 }
 
@@ -10467,7 +10500,7 @@ extern "C" Item dom_fp_child_nodes(Item n) {
 // re-entry, so `dom.text_content(n)` walked the property chain to reach a
 // recursive walk that lives three lines away.
 static Item dom_serialized_item(StrBuf* sb) {
-    String* result = heap_create_name(sb->str ? sb->str : "");
+    String* result = heap_create_name(sb->str ? sb->str : "", sb->length);
     strbuf_free(sb);
     return (Item){.item = s2it(result)};
 }
@@ -10476,17 +10509,11 @@ extern "C" Item dom_fp_text_content(Item n) {
     DomNode* node = (DomNode*)dom_unwrap_element(n);
     if (!node) return ItemNull;
     if (node->node_type == DOM_NODE_DOCTYPE) return ItemNull;
-    if (DomAttr* attribute = node->as_attribute()) return js_name_item(attribute->value);
+    if (DomAttr* attribute = node->as_attribute()) return dom_attribute_data_item(attribute);
     // CharacterData.textContent is its own data verbatim -- including for a
     // generated pseudo node, which the descendant walk below skips.
-    if (node->is_text()) {
-        const char* text = node->as_text()->text;
-        return js_name_item(text ? text : "");
-    }
-    if (node->is_comment()) {
-        const char* content = node->as_comment()->content;
-        return js_name_item(content ? content : "");
-    }
+    if (node->is_text()) return dom_text_data_item(node->as_text());
+    if (node->is_comment()) return dom_comment_data_item(node->as_comment());
     StrBuf* sb = strbuf_new_cap(128);
     dom_collect_text_content(node, sb);
     return dom_serialized_item(sb);
@@ -10654,13 +10681,13 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         if (prop_id == JS_DOM_PROP_PREFIX)
             return attribute->prefix ? js_name_item(attribute->prefix) : ItemNull;
         if (prop_id == JS_DOM_PROP_VALUE || prop_id == JS_DOM_PROP_NODE_VALUE ||
-            prop_id == JS_DOM_PROP_TEXT_CONTENT) return js_name_item(attribute->value);
+            prop_id == JS_DOM_PROP_TEXT_CONTENT) return dom_attribute_data_item(attribute);
         if (strcmp(prop, "ownerElement") == 0) return dom_node_link_item(attribute->owner_element);
         if (strcmp(prop, "specified") == 0) return (Item){.item = ITEM_TRUE};
         Item result = ItemNull;
         if (strcmp(prop, "data") != 0 && strcmp(prop, "length") != 0 &&
             dom_get_textlike_property(node, elem_item, prop_name, prop,
-                attribute->value, 0, DOM_NODE_ATTRIBUTE, attribute->qualified_name, false, &result))
+                0, DOM_NODE_ATTRIBUTE, attribute->qualified_name, false, &result))
             return result;
         return make_js_undefined();
     }
@@ -10703,7 +10730,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         DomText* text_node = node->as_text();
         Item result = ItemNull;
         if (dom_get_textlike_property(node, elem_item, prop_name, prop,
-                text_node->text, dom_text_utf16_length(text_node), 3,
+                dom_text_utf16_length(text_node), 3,
                 "#text", true, &result)) return result;
         log_debug("dom_get_property: unknown text node property '%s'", prop);
         return make_js_undefined();
@@ -10720,7 +10747,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         }
         Item result = ItemNull;
         if (dom_get_textlike_property(node, elem_item, prop_name, prop,
-                comment_node->content, comment_node->length,
+                utf8_to_utf16_length(comment_node->content, comment_node->length),
                 comment_node->node_type, "#comment", false, &result)) return result;
         log_debug("dom_get_property: unknown comment node property '%s'", prop);
         return make_js_undefined();
@@ -10845,8 +10872,9 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
 
     // id
     if (prop_id == JS_DOM_PROP_ID) {
-        return (Item){.item = elem->id ? s2it(heap_create_name(elem->id))
-                                        : s2it(heap_create_name(""))};
+        if (elem->id) return js_name_item(elem->id);
+        StrView id = elem->get_attribute_view("id");
+        return id.str ? dom_string_from_view(id) : js_name_item("");
     }
 
     // HTMLElement.slot reflects the content attribute and controls default
@@ -11168,14 +11196,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     // data (text node content) — check if the wrapped node is actually a DomText
     if (prop_id == JS_DOM_PROP_DATA) {
         DomNode* node = (DomNode*)elem;  // may be DomText wrapped as DomElement*
-        if (node->is_text()) {
-            DomText* text_node = node->as_text();
-            if (text_node->text && text_node->length > 0) {
-                String* s = heap_strcpy((char*)text_node->text, text_node->length);
-                return (Item){.item = s2it(s)};
-            }
-            return js_name_item("");
-        }
+        if (node->is_text()) return dom_text_data_item(node->as_text());
         return ItemNull;
     }
 
@@ -11234,22 +11255,18 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
 
     // HTMLOptionElement properties.
     if (_is_tag(elem, "option")) {
-        if (prop_id == JS_DOM_PROP_VALUE) {
-            char* v = _option_value(elem);
-            String* s = heap_create_name(v ? v : "");
-            mem_free(v);
-            return (Item){.item = s2it(s)};
-        }
-        if (prop_id == JS_DOM_PROP_TEXT || prop_id == JS_DOM_PROP_LABEL) {
+        if (prop_id == JS_DOM_PROP_VALUE || prop_id == JS_DOM_PROP_TEXT ||
+            prop_id == JS_DOM_PROP_LABEL) {
             // label IDL: returns label attribute, falling back to text.
             if (prop_id == JS_DOM_PROP_LABEL) {
-                const char* lab = elem->get_attribute("label");
-                if (lab && *lab) return js_name_item(lab);
+                StrView label = elem->get_attribute_view("label");
+                if (label.length) return dom_string_from_view(label);
             }
-            char* t = _option_text(elem);
-            String* s = heap_create_name(t ? t : "");
-            mem_free(t);
-            return (Item){.item = s2it(s)};
+            StrBuf* buffer = nullptr;
+            Item result = dom_string_from_view(prop_id == JS_DOM_PROP_VALUE
+                ? dom_option_value_view(elem, &buffer) : dom_option_text_view(elem, &buffer));
+            strbuf_free(buffer);
+            return result;
         }
         if (prop_id == JS_DOM_PROP_SELECTED) {
             if (_get_selectedness(elem)) return (Item){.item = b2it(true)};
@@ -11344,11 +11361,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         if (prop_id == JS_DOM_PROP_DEFAULT_VALUE) {
             // <input>: getAttribute("value"); <textarea>: text content of children.
             if (elem->tag_name() && str_icmp_cstr(elem->tag_name(), "textarea") == 0) {
-                StrBuf* sb = strbuf_new_cap(64);
-                dom_collect_text_content((DomNode*)elem, sb);
-                String* s = heap_create_name(sb->str ? sb->str : "");
-                strbuf_free(sb);
-                return (Item){.item = s2it(s)};
+                return dom_text_content_item(elem);
             }
             const char* v = elem->get_attribute("value");
             return js_name_item(v ? v : "");
@@ -11433,36 +11446,29 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         (_is_tag(elem, "details") || dom_element_is_html_tag(elem, MARKUP_NAME_DIALOG))) {
         return (Item){.item = b2it(elem->has_attribute("open"))};
     }
-    // name attribute (all listed form controls and form/fieldset)
-    if (prop_id == JS_DOM_PROP_NAME &&
-        (_is_tag(elem, "input") || _is_tag(elem, "button") || _is_tag(elem, "select") ||
-         _is_tag(elem, "textarea") || _is_tag(elem, "form") || _is_tag(elem, "fieldset") ||
-         _is_tag(elem, "output") || _is_tag(elem, "object"))) {
-        const char* v = elem->get_attribute("name");
-        return js_name_item(v ? v : "");
+    // Common form reflections keep their direct attribute lookup.
+    if ((prop_id == JS_DOM_PROP_NAME &&
+         (_is_tag(elem, "input") || _is_tag(elem, "button") || _is_tag(elem, "select") ||
+          _is_tag(elem, "textarea") || _is_tag(elem, "form") || _is_tag(elem, "fieldset") ||
+          _is_tag(elem, "output") || _is_tag(elem, "object"))) ||
+        (prop_id == JS_DOM_PROP_PLACEHOLDER &&
+         (_is_tag(elem, "input") || _is_tag(elem, "textarea"))) ||
+        (prop_id == JS_DOM_PROP_AUTOCOMPLETE &&
+         (_is_tag(elem, "form") || _is_tag(elem, "input") || _is_tag(elem, "select") ||
+          _is_tag(elem, "textarea")))) {
+        StrView reflected = elem->get_attribute_view(prop);
+        return reflected.str ? dom_string_from_view(reflected) : js_name_item("");
     }
     // type for button (default "submit"; only valid values: "submit","reset","button")
     if (prop_id == JS_DOM_PROP_TYPE && _is_tag(elem, "button")) {
         return js_name_item(radiant_form_button_type(elem));
     }
-    // placeholder (input, textarea)
-    if (prop_id == JS_DOM_PROP_PLACEHOLDER &&
-        (_is_tag(elem, "input") || _is_tag(elem, "textarea"))) {
-        const char* v = elem->get_attribute("placeholder");
-        return js_name_item(v ? v : "");
-    }
-    // autocomplete (form, input, select, textarea)
-    if (prop_id == JS_DOM_PROP_AUTOCOMPLETE &&
-        (_is_tag(elem, "form") || _is_tag(elem, "input") || _is_tag(elem, "select") || _is_tag(elem, "textarea"))) {
-        const char* v = elem->get_attribute("autocomplete");
-        return js_name_item(v ? v : "");
-    }
     // pattern, min, max, step, accept (input only — simple string reflection)
     if (_is_tag(elem, "input") &&
         (prop_id == JS_DOM_PROP_PATTERN || prop_id == JS_DOM_PROP_MIN || prop_id == JS_DOM_PROP_MAX ||
          prop_id == JS_DOM_PROP_STEP || prop_id == JS_DOM_PROP_ACCEPT)) {
-        const char* v = elem->get_attribute(prop);
-        return js_name_item(v ? v : "");
+        StrView reflected = elem->get_attribute_view(prop);
+        return reflected.str ? dom_string_from_view(reflected) : js_name_item("");
     }
     // HTMLFormElement: action, method, enctype/encoding, acceptCharset, target
     if (_is_tag(elem, "form")) {
@@ -11551,8 +11557,9 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         Item url_value = ItemNull;
         if ((prop_id == JS_DOM_PROP_SRC || prop_id == JS_DOM_PROP_HREF) &&
                 dom_engine_url_attribute_get(elem_item, &url_value, string_attr)) return url_value;
-        const char* v = dom_element_attribute_value_ns(elem, "", string_attr);
-        return js_name_item(v ? v : "");
+        StrView reflected = {};
+        reflected.str = dom_element_attribute_value_ns(elem, "", string_attr, &reflected.length);
+        return reflected.str ? dom_string_from_view(reflected) : js_name_item("");
     }
 
     // HTMLInputElement.defaultChecked — reflects `checked` content attribute
@@ -11858,13 +11865,13 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
             JS_RETURN_IF_ERROR(value_root.get());
             Rooted<Item> name_root(roots, js_name_item(attribute->qualified_name));
             Rooted<Item> namespace_root(roots, js_name_item(attribute->namespace_uri));
-            const char* next_value = fn_to_cstr(value_root.get());
             if (attribute->owner_element) {
                 // Attr.value targets its expanded name even when a different attribute has the same QName.
                 return dom_core_set_attribute_ns(dom_wrap_element(attribute->owner_element),
                     namespace_root.get(), name_root.get(), value_root.get());
             }
-            return dom_attribute_node_set_value(attribute, next_value) ? value_root.get() : ItemError;
+            return dom_attribute_node_set_value(attribute, dom_item_text_view(value_root.get()))
+                ? value_root.get() : ItemError;
         }
         expando_set_property(node, prop_name, value);
         return value;
@@ -11878,26 +11885,24 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
         DomText* text_node = node->as_text();
         // CharacterData setters accept DOMString, so numeric/boolean values
         // must be converted instead of being mistaken for an absent string.
-        const char* new_text = prop_id != JS_DOM_PROP_DATA && value.item == ITEM_NULL
-            ? "" : dom_to_dom_string_cstr(value);
-        if (new_text) {
-            uint32_t old_u16_len = dom_text_utf16_length(text_node);
-            JS_ASSIGN_OR_RETURN(set_result, dom_replace_text_data(text_node, 0, old_u16_len, new_text));
-            log_debug("dom_set_property: set text node data='%.30s'", new_text);
-        }
+        Item new_text = prop_id != JS_DOM_PROP_DATA && value.item == ITEM_NULL
+            ? ItemNull : js_to_string(value);
+        JS_RETURN_IF_ERROR(dom_replace_text_data(text_node, 0, dom_text_utf16_length(text_node), new_text));
         return value;
     }
 
     if (node->is_comment() &&
             (prop_id == JS_DOM_PROP_DATA || prop_id == JS_DOM_PROP_NODE_VALUE ||
              prop_id == JS_DOM_PROP_TEXT_CONTENT)) {
-        const char* next = prop_id != JS_DOM_PROP_DATA && value.item == ITEM_NULL
-            ? "" : dom_to_dom_string_cstr(value);
+        RootFrame roots(1);
+        Rooted<Item> converted(roots, prop_id != JS_DOM_PROP_DATA && value.item == ITEM_NULL
+            ? js_name_item("") : js_to_string(value));
+        JS_RETURN_IF_ERROR(converted.get());
         DomComment* comment = node->as_comment();
-        const char* old = comment->content;
-        if (next && dom_comment_set_content(comment, next, dom_node_ancestor_document(node))) {
+        StrView old = {comment->content, comment->length};
+        if (dom_comment_set_content(comment, dom_item_text_view(converted.get()), dom_node_ancestor_document(node))) {
             dom_record_mutation_detail(DOM_JS_MUTATION_TEXT, node, node->parent, 0);
-            dom_mutation_notify(DOM_JS_MUTATION_TEXT, node, node->parent, nullptr, old);
+            dom_notify_mutation_detail_n(DOM_JS_MUTATION_TEXT, node, node->parent, nullptr, old.str, old.length);
         }
         return value;
     }
@@ -12183,17 +12188,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
 
     // classList's PutForwards=value setter updates the class attribute without replacing its wrapper.
     if (prop_id == JS_DOM_PROP_CLASS_NAME || prop_id == JS_DOM_PROP_CLASS_LIST) {
-        const char* class_str = dom_to_attr_cstr(value);
-        {
-            // set_attribute owns the pooled class cache; writing the class list
-            // directly bypasses its persistent-field lifetime bookkeeping.
-            DomAttributeOldValue old_value(elem, "class");
-            elem->set_attribute("class", class_str);
-            dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent,
-                                "class", old_value.get());
-            log_debug("dom_set_property: set className='%s' on <%s>",
-                      class_str, elem->tag_name() ? elem->tag_name() : "?");
-        }
+        JS_RETURN_IF_ERROR(dom_core_set_attribute(elem_item, js_name_item("class"), value));
         return value;
     }
 
@@ -12268,14 +12263,8 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
 
     // id
     if (prop_id == JS_DOM_PROP_ID) {
-        const char* id_str = dom_to_attr_cstr(value);
-        if (elem->doc && elem->doc->document_pool) {
-            // the attribute setter owns cache replacement, including adopted-node provenance.
-            elem->set_attribute("id", id_str);
-            dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
-            log_debug("dom_set_property: set id='%s' on <%s>",
-                      id_str, elem->tag_name() ? elem->tag_name() : "?");
-        }
+        if (elem->doc && elem->doc->document_pool)
+            JS_RETURN_IF_ERROR(dom_core_set_attribute(elem_item, js_name_item("id"), value));
         return value;
     }
 
@@ -12341,13 +12330,9 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
             (prop_id == JS_DOM_PROP_TEXT && _is_tag(elem, "script"))) {
         // Node.textContent performs DOMString conversion; reactive libraries
         // routinely assign numbers directly from their data model.
-        const char* text_str = value.item == ITEM_NULL
-            ? "" : dom_to_dom_string_cstr(value);
-        if (text_str) {
-            if (!dom_replace_text_content(elem, text_str)) return ItemNull;
-            log_debug("dom_set_property: set textContent on <%s>",
-                      elem->tag_name() ? elem->tag_name() : "?");
-        }
+        Item text = value.item == ITEM_NULL ? js_name_item("") : js_to_string(value);
+        JS_RETURN_IF_ERROR(text);
+        if (!dom_replace_text_content(elem, text)) return ItemNull;
         return value;
     }
 
@@ -12355,9 +12340,10 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
     if (prop_id == JS_DOM_PROP_INNER_HTML) {
         // innerHTML is a DOMString setter; numeric assignments must become
         // text markup instead of being treated as an empty path string.
-        const char* html_str = dom_to_dom_string_cstr(value);
-        if (!html_str) return ItemNull;
-        dom_replace_inner_html(elem, html_str, true);
+        RootFrame roots(1);
+        Rooted<Item> markup(roots, js_to_string(value));
+        JS_RETURN_IF_ERROR(markup.get());
+        dom_replace_inner_html(elem, strview_init(markup.get().get_chars(), markup.get().get_len()), true);
         return value;
     }
 
@@ -12396,9 +12382,9 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
             if (!dom_output_is_value_mode(elem)) {
                 return dom_output_set_text(elem, value) ? value : ItemNull;
             }
-            const char* raw = dom_to_dom_string_cstr(value);
             RootFrame roots(2);
-            Rooted<Item> value_root(roots, js_name_item(raw ? raw : ""));
+            Rooted<Item> value_root(roots, js_to_string(value));
+            JS_RETURN_IF_ERROR(value_root.get());
             Rooted<Item> exp_root(roots, expando_get_or_create_map((DomNode*)elem));
             if (exp_root.get().item == ITEM_NULL) return ItemNull;
             dom_realm_set_cstr(exp_root.get(), "__outputDefaultValue", value_root.get());
@@ -12423,7 +12409,10 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
     // ------------------------------------------------------------------
     if (_is_tag(elem, "select")) {
         if (prop_id == JS_DOM_PROP_VALUE) {
-            dom_select_apply_value(elem, dom_to_attr_cstr(value), false);
+            RootFrame roots(1);
+            Rooted<Item> converted(roots, js_to_string(value));
+            JS_RETURN_IF_ERROR(converted.get());
+            dom_select_apply_value(elem, dom_item_text_view(converted.get()));
             dom_expando_flag_set(elem, "__selDirty", (Item){.item = b2it(true)});
             return value;
         }
@@ -12458,11 +12447,16 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
             return value;
         }
         if (prop_id == JS_DOM_PROP_VALUE) {
-            elem->set_attribute("value", dom_to_attr_cstr(value));
+            RootFrame roots(1);
+            Rooted<Item> converted(roots, js_to_string(value));
+            JS_RETURN_IF_ERROR(converted.get());
+            elem->set_attribute("value", dom_item_text_view(converted.get()));
             return value;
         }
         if (prop_id == JS_DOM_PROP_TEXT) {
-            dom_set_option_text_bridge((void*)elem, dom_to_attr_cstr(value));
+            Item converted = js_to_string(value);
+            JS_RETURN_IF_ERROR(converted);
+            dom_replace_text_content(elem, converted);
             return value;
         }
         if (prop_id == JS_DOM_PROP_DEFAULT_SELECTED) {
@@ -12624,7 +12618,10 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
         const char* string_attr = nullptr;
         if (_is_string_reflected(elem, prop, &string_attr) ||
             _is_write_reflected(elem, prop, &string_attr)) {
-            dom_element_set_attribute_ns(elem, "", string_attr, dom_to_attr_cstr(value));
+            RootFrame roots(1);
+            Rooted<Item> converted(roots, js_to_string(value));
+            JS_RETURN_IF_ERROR(converted.get());
+            dom_element_set_attribute_ns(elem, "", string_attr, dom_item_text_view(converted.get()));
             dom_cssom_owner_attribute_changed(elem, string_attr);
             // reflected writes must identify the attribute for observers and src preparation.
             dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent, string_attr);
@@ -13027,19 +13024,13 @@ static Item dom_svg_get_transform_list(DomElement* elem) {
 
 static Item dom_svg_class_name_get_base_val(void) {
     DomElement* elem = dom_svg_owner_from_value(dom_realm_receiver());
-    const char* class_name = elem ? elem->get_attribute("class") : nullptr;
-    return js_name_item(class_name ? class_name : "");
+    StrView class_name = elem ? elem->get_attribute_view("class") : StrView{};
+    return class_name.str ? dom_string_from_view(class_name) : js_name_item("");
 }
 
 static Item dom_svg_class_name_set_base_val(Item value) {
     DomElement* elem = dom_svg_owner_from_value(dom_realm_receiver());
-    if (elem) {
-        const char* class_str = dom_to_attr_cstr(value);
-        DomAttributeOldValue old_value(elem, "class");
-        elem->set_attribute("class", class_str);
-        dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent,
-                            "class", old_value.get());
-    }
+    if (elem) JS_RETURN_IF_ERROR(dom_core_set_attribute(dom_wrap_element(elem), js_name_item("class"), value));
     return value;
 }
 
@@ -14420,7 +14411,7 @@ extern "C" Item dom_document_open_bridge(void* doc_ptr) {
     DomElement* body = dom_document_body_element(doc);
     if (body) {
         // clearing only native links lets the next Mark-aware write resurrect the old body.
-        dom_replace_inner_html(body, "", true);
+        dom_replace_inner_html(body, strview_init("", 0), true);
     }
     return js_get_document_object_value();
 }
@@ -14434,11 +14425,12 @@ extern "C" Item dom_document_write_bridge(void* doc_ptr, Item text_arg) {
     const char* text = fn_to_cstr(markup.get());
     if (!text) return ItemNull;
 
-    if (!dom_append_document_text(doc, text)) {
+    size_t length = markup.get().get_len();
+    if (!dom_append_document_text(doc, strview_init(text, length))) {
         log_debug("js_document_write_bridge: no body element found");
         return ItemNull;
     }
-    log_debug("js_document_write_bridge: parsed %zu bytes at the document insertion point", strlen(text));
+    log_debug("js_document_write_bridge: parsed %zu bytes at the document insertion point", length);
     return ItemNull;
 }
 
@@ -14488,7 +14480,8 @@ static void dom_clone_content_attributes(DomElement* source, DomElement* clone) 
     DomAttributeView attribute;
     while (dom_element_next_attribute(&iterator, &attribute)) {
         if (dom_is_internal_attr(attribute.qualified_name)) continue;
-        dom_element_set_attribute_ns(clone, attribute.namespace_uri, attribute.qualified_name, attribute.value);
+        dom_element_set_attribute_ns(clone, attribute.namespace_uri, attribute.qualified_name,
+            {attribute.value, attribute.value_length});
     }
 }
 
@@ -15333,7 +15326,7 @@ extern "C" Item dom_core_clone_node(Item n, Item deep) {
     DomNode* node = (DomNode*)dom_unwrap_element(n);
     if (DomAttr* attribute = node ? node->as_attribute() : nullptr) {
         DomAttr* clone = dom_attribute_node_create(attribute->doc, attribute->namespace_uri,
-            attribute->qualified_name, attribute->value);
+            attribute->qualified_name, {attribute->value, attribute->value_length});
         if (clone) clone->owner_changed = dom_attribute_node_owner_changed;
         return clone ? dom_wrap_element(clone) : ItemNull;
     }
@@ -15392,30 +15385,35 @@ extern "C" Item dom_core_get_attribute(Item n, Item name) {
     DomElement* elem = dom_op_element(n);
     if (!elem) return ItemNull;
     const char* attr_name = fn_to_cstr(name);
-    if (!attr_name) return ItemNull;
+    if (!attr_name || dom_identifier_has_nul(name)) return ItemNull;
     if (dom_is_internal_attr(attr_name)) return ItemNull;
-    const char* val = elem->get_attribute(attr_name);
-    if (val) return js_name_item(val);
+    StrView value = elem->get_attribute_view(attr_name);
+    if (value.str) return dom_string_from_view(value);
     if (elem->has_attribute(attr_name))
         return js_name_item("");
     return ItemNull;
 }
 
 static void dom_attribute_value_did_set(DomElement* elem, const char* attr_name,
-        const char* attr_val, const char* old_value) {
+        StrView value, StrView old_value) {
     // neutral and reflected writes run the same attribute side effects.
-    dom_after_set_attribute(elem, attr_name, attr_val);
-    dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem,
-                           elem->parent, attr_name, old_value);
+    dom_after_set_attribute(elem, attr_name, value.str);
+    dom_notify_mutation_detail_n(DOM_JS_MUTATION_ATTRIBUTE, elem, elem->parent,
+                                 attr_name, old_value.str, old_value.length);
 }
 
 extern "C" Item dom_core_set_attribute(Item n, Item name, Item value) {
     DomElement* elem = dom_op_element(n);
     if (!elem) return ItemNull;
-    const char* attr_name = fn_to_cstr(name);
-    const char* attr_val = dom_to_attr_cstr(value);
-    if (!attr_name || !attr_val || dom_is_internal_attr(attr_name)) return ItemNull;
-    if (dom_set_non_style_metadata(elem, attr_name, attr_val)) return ItemNull;
+    RootFrame roots(3);
+    Rooted<Item> receiver(roots, n), key(roots, name), converted(roots, js_to_string(value));
+    JS_RETURN_IF_ERROR(converted.get());
+    const char* attr_name = fn_to_cstr(key.get());
+    if (dom_identifier_has_nul(key.get()))
+        return dom_raise_exception("InvalidCharacterError", "Invalid attribute name");
+    if (!attr_name || dom_is_internal_attr(attr_name)) return ItemNull;
+    StrView attr_val = dom_item_text_view(converted.get());
+    if (dom_set_non_style_metadata_view(elem, attr_name, attr_val)) return ItemNull;
     DomAttributeOldValue old_value(elem, attr_name);
     const char* local = nullptr;
     const char* uri = old_value.get() ? dom_element_attribute_namespace_uri(elem, attr_name, &local) : "";
@@ -15423,7 +15421,7 @@ extern "C" Item dom_core_set_attribute(Item n, Item name, Item value) {
     // an ordinary write changes an existing Attr's value without changing its namespace.
     if ((uri && *uri) || strchr(attr_name, ':'))
         dom_element_record_namespaced_attribute(elem, uri ? uri : "", attr_name, attr_val);
-    dom_attribute_value_did_set(elem, attr_name, attr_val, old_value.get());
+    dom_attribute_value_did_set(elem, attr_name, attr_val, old_value.view());
     return ItemNull;
 }
 
@@ -15431,10 +15429,10 @@ extern "C" Item dom_core_remove_attribute(Item n, Item name) {
     DomElement* elem = dom_op_element(n);
     if (!elem) return ItemNull;
     const char* attr_name = fn_to_cstr(name);
-    if (!attr_name) return ItemNull;
+    if (!attr_name || dom_identifier_has_nul(name)) return ItemNull;
     // absent attributes must not enqueue mutations or invalidate layout.
     if (!elem->has_attribute(attr_name)) return ItemNull;
-    const char* old_value = elem->get_attribute(attr_name);
+    DomAttributeOldValue old_value(elem, attr_name);
     elem->remove_attribute(attr_name);
     dom_cssom_owner_attribute_changed(elem, attr_name);
     dom_clear_direct_element_ref(elem, attr_name);
@@ -15443,8 +15441,8 @@ extern "C" Item dom_core_remove_attribute(Item n, Item name) {
     if (_is_tag(elem, "select") && str_icmp_cstr(attr_name, "multiple") == 0) {
         _select_ask_for_reset(elem);
     }
-    dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem,
-                           elem->parent, attr_name, old_value);
+    dom_notify_mutation_detail_n(DOM_JS_MUTATION_ATTRIBUTE, elem, elem->parent,
+                                 attr_name, old_value.get(), old_value.view().length);
     return ItemNull;
 }
 
@@ -15560,9 +15558,7 @@ extern "C" Item dom_core_closest(Item n, Item selector) {
 extern "C" Item dom_core_get_element_by_id(Item n, Item id_item) {
     DomElement* elem = dom_op_element(n);
     if (!elem) return ItemNull;
-    const char* id = fn_to_cstr(id_item);
-    if (!id) return ItemNull;
-    DomElement* found = dom_find_source_element_by_id(elem, id);
+    DomElement* found = dom_find_source_element_by_id(elem, dom_item_text_view(id_item));
     return found ? dom_wrap_element(found) : ItemNull;
 }
 
@@ -15575,7 +15571,14 @@ extern "C" Item dom_core_get_element_by_id(Item n, Item id_item) {
 
 extern "C" Item dom_core_set_node_value(Item n, Item data) {
     DomNode* node = (DomNode*)dom_unwrap_element(n);
-    if (!node || !node->is_text()) return ItemNull;
+    if (!node) return ItemNull;
+    if (!node->is_text()) {
+        if (node->is_comment() || node->as_attribute()) {
+            // Use the shared property setter for Comment and Attr mutation records.
+            JS_RETURN_IF_ERROR(dom_set_property_impl(n, js_name_item("nodeValue"), data));
+        }
+        return ItemNull;
+    }
     // replaceData(0, +inf, data): the spec clamps count to the data length, so
     // one call rewrites the whole node value with a single mutation record.
     Item zero = { .item = i2it(0) };
@@ -15656,9 +15659,10 @@ extern "C" Item dom_core_get_attribute_ns(Item n, Item ns, Item local) {
     if (!elem) return ItemNull;
     const char* namespace_uri = fn_to_cstr(ns);
     const char* local_name = fn_to_cstr(local);
-    if (!local_name) return ItemNull;
-    const char* value = dom_element_attribute_ns(elem, namespace_uri, local_name);
-    return value ? js_name_item(value) : ItemNull;
+    if (!local_name || dom_identifier_has_nul(local) || dom_identifier_has_nul(ns)) return ItemNull;
+    StrView value = {};
+    value.str = dom_element_attribute_value_ns(elem, namespace_uri, local_name, &value.length);
+    return dom_string_from_view(value);
 }
 
 static DomAttr* dom_attribute_from_item(Item item) {
@@ -15667,7 +15671,7 @@ static DomAttr* dom_attribute_from_item(Item item) {
 }
 
 static Item dom_set_attribute_ns_value(Item n, Item ns, Item qname, Item value_arg,
-    const char* replaced_value, bool replace_name = false);
+    StrView replaced_value, bool replace_name = false);
 
 extern "C" Item dom_core_get_attribute_node(Item n, Item name) {
     DomElement* element = dom_op_element(n);
@@ -15675,6 +15679,7 @@ extern "C" Item dom_core_get_attribute_node(Item n, Item name) {
     RootFrame roots(1);
     Rooted<Item> name_root(roots, js_to_string(name));
     JS_RETURN_IF_ERROR(name_root.get());
+    if (dom_identifier_has_nul(name_root.get())) return ItemNull;
     return dom_collection_attribute_item(element, fn_to_cstr(name_root.get()));
 }
 
@@ -15689,6 +15694,7 @@ extern "C" Item dom_core_get_attribute_node_ns(Item n, Item ns, Item name) {
     }
     name_root.set(js_to_string(name_root.get()));
     JS_RETURN_IF_ERROR(name_root.get());
+    if (dom_identifier_has_nul(name_root.get()) || dom_identifier_has_nul(namespace_root.get())) return ItemNull;
     const char* uri = fn_to_cstr(namespace_root.get());
     DomAttr* attribute = dom_element_attribute_node_ns(element, uri ? uri : "", fn_to_cstr(name_root.get()));
     if (!attribute) return ItemNull;
@@ -15710,11 +15716,11 @@ extern "C" Item dom_core_set_attribute_node(Item n, Item attr_item) {
     if (previous == attribute) return attr_item;
     if (!dom_prepare_cross_document_insertion(attribute, element)) return ItemError;
     Rooted<Item> name_root(roots, js_name_item(attribute->qualified_name));
-    Rooted<Item> value_root(roots, js_name_item(attribute->value));
+    Rooted<Item> value_root(roots, dom_attribute_data_item(attribute));
     // detach before writing so the replaced Attr keeps its original value and identity.
     if (previous) dom_attribute_node_detach(previous);
     dom_set_attribute_ns_value(n, namespace_root.get(), name_root.get(), value_root.get(),
-        previous ? previous->value.get() : nullptr, true);
+        previous ? StrView{previous->value.get(), previous->value_length} : StrView{}, true);
     attribute->owner_changed = dom_attribute_node_owner_changed;
     dom_attribute_node_attach(element, attribute);
     return previous_root.get();
@@ -15802,33 +15808,40 @@ extern "C" Item dom_core_remove_named_attribute(Item n, Item ns, Item name, Item
 }
 
 static Item dom_set_attribute_ns_value(Item n, Item ns, Item qname, Item value_arg,
-        const char* replaced_value, bool replace_name) {
+        StrView replaced_value, bool replace_name) {
     DomElement* elem = dom_op_element(n);
     if (!elem) return ItemNull;
-    const char* namespace_uri = fn_to_cstr(ns);
-    const char* qualified_name = fn_to_cstr(qname);
-    const char* value = dom_to_attr_cstr(value_arg);
-    if (!qualified_name || !value) return ItemNull;
+    RootFrame roots(4);
+    Rooted<Item> receiver(roots, n), uri(roots, ns), key(roots, qname), converted(roots, js_to_string(value_arg));
+    JS_RETURN_IF_ERROR(converted.get());
+    const char* namespace_uri = fn_to_cstr(uri.get());
+    const char* qualified_name = fn_to_cstr(key.get());
+    if (dom_identifier_has_nul(key.get()) || dom_identifier_has_nul(uri.get()))
+        return dom_raise_exception("InvalidCharacterError", "Invalid attribute name or namespace");
+    StrView value = dom_item_text_view(converted.get());
+    if (!qualified_name || !value.str) return ItemNull;
     if (!namespace_uri) namespace_uri = "";
     const char* colon = *namespace_uri ? strchr(qualified_name, ':') : nullptr;
     const char* stored_name = dom_element_find_qualified_attribute(elem, namespace_uri, colon ? colon + 1 : qualified_name);
     // setAttributeNS preserves the existing Attr's prefix and identity for an expanded name.
     if (!stored_name || replace_name) stored_name = qualified_name;
     const char* local_name = colon ? colon + 1 : qualified_name;
-    DomAttributeOldValue old_value(replaced_value ? replaced_value :
-        dom_element_attribute_value_ns(elem, namespace_uri, local_name));
+    StrView previous = replaced_value;
+    if (!previous.str)
+        previous.str = dom_element_attribute_value_ns(elem, namespace_uri, local_name, &previous.length);
     // null-namespace writes and reflected properties share ordinary metadata semantics.
-    if (!*namespace_uri && !replace_name && !replaced_value &&
-        dom_set_non_style_metadata(elem, stored_name, value)) return ItemNull;
+    if (!*namespace_uri && !replace_name && !replaced_value.str &&
+        dom_set_non_style_metadata_view(elem, stored_name, value)) return ItemNull;
+    DomAttributeOldValue old_value(previous);
     if (!dom_element_set_attribute_ns(elem, namespace_uri, stored_name, value, replace_name)) return ItemNull;
-    if (!*namespace_uri) dom_attribute_value_did_set(elem, stored_name, value, old_value.get());
-    else dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem,
-        elem->parent, stored_name, old_value.get());
+    if (!*namespace_uri) dom_attribute_value_did_set(elem, stored_name, value, old_value.view());
+    else dom_notify_mutation_detail_n(DOM_JS_MUTATION_ATTRIBUTE, elem, elem->parent,
+        stored_name, old_value.get(), old_value.view().length);
     return ItemNull;
 }
 
 extern "C" Item dom_core_set_attribute_ns(Item n, Item ns, Item qname, Item value_arg) {
-    return dom_set_attribute_ns_value(n, ns, qname, value_arg, nullptr);
+    return dom_set_attribute_ns_value(n, ns, qname, value_arg, {});
 }
 
 extern "C" Item dom_core_remove_attribute_ns(Item n, Item ns, Item local) {
@@ -15836,13 +15849,16 @@ extern "C" Item dom_core_remove_attribute_ns(Item n, Item ns, Item local) {
     if (!elem) return ItemNull;
     const char* namespace_uri = fn_to_cstr(ns);
     const char* local_name = fn_to_cstr(local);
-    if (!local_name) return ItemNull;
+    if (!local_name || dom_identifier_has_nul(local) || dom_identifier_has_nul(ns)) return ItemNull;
     if (!namespace_uri) namespace_uri = "";
     const char* name = dom_element_find_qualified_attribute(elem, namespace_uri, local_name);
-    const char* old_value = dom_element_attribute_value_ns(elem, namespace_uri, local_name);
+    StrView old_value = {};
+    old_value.str = dom_element_attribute_value_ns(elem, namespace_uri, local_name, &old_value.length);
+    DomAttributeOldValue saved(old_value);
     if (name && dom_element_remove_attribute_ns(elem, namespace_uri, local_name)) {
         if (!*namespace_uri) dom_clear_direct_element_ref(elem, name);
-        dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent, name, old_value);
+        dom_notify_mutation_detail_n(DOM_JS_MUTATION_ATTRIBUTE, elem, elem->parent,
+            name, saved.get(), saved.view().length);
     }
     return ItemNull;
 }
@@ -16277,7 +16293,7 @@ extern "C" Item dom_core_attach_shadow(Item n, Item init) {
         // hydration retains root identity and options while removing its parsed children.
         option.set(dom_wrap_element(existing));
         state->declarative = false;
-        if (!dom_replace_inner_html(existing, "", true)) return ItemError;
+        if (!dom_replace_inner_html(existing, strview_init("", 0), true)) return ItemError;
         return option.get();
     }
     DomElement* frag = dom_attach_shadow_root(elem, {
@@ -17321,61 +17337,50 @@ extern "C" Item dom_element_operation_impl(Item elem_item,
 // ============================================================================
 
 static bool dom_token_list_token_matches(const DomCollectionVArray* collection,
-                                         const char* token_start, size_t token_len,
-                                         const char* candidate) {
-    if (!collection || !token_start || !candidate) return false;
-    size_t candidate_len = strlen(candidate);
+                                         StrView token, StrView candidate) {
+    if (!collection || !token.str || !candidate.str) return false;
     if (collection->kind == DOM_VARRAY_REL_LIST) {
-        return str_icmp(token_start, token_len, candidate, candidate_len) == 0;
+        return str_icmp(token.str, token.length, candidate.str, candidate.length) == 0;
     }
-    return str_eq(token_start, token_len, candidate, candidate_len);
+    return strview_eq(&token, &candidate);
 }
 
-static bool dom_token_list_contains_token(const DomCollectionVArray* collection,
-                                          const char* candidate) {
-    const char* token_start = nullptr;
-    size_t token_len = 0;
-    for (int64_t index = 0;
-         dom_token_list_token_at(collection, index, &token_start, &token_len); index++) {
-        if (dom_token_list_token_matches(collection, token_start, token_len, candidate)) {
-            return true;
-        }
+static bool dom_token_list_contains_token(const DomCollectionVArray* collection, StrView candidate) {
+    StrView value = dom_token_list_value(collection);
+    for (StrView token = dom_token_list_next(value); token.length; token = dom_token_list_next(value)) {
+        if (dom_token_list_token_matches(collection, token, candidate)) return true;
     }
     return false;
 }
 
-static bool dom_token_list_rewrite(DomCollectionVArray* collection,
-                                   const char* remove_token, const char* append_token,
-                                   bool* removed) {
+static bool dom_token_list_rewrite(DomCollectionVArray* collection, StrView remove_token,
+                                    StrView append_token, bool* removed) {
     if (removed) *removed = false;
     DomElement* elem = collection ? dom_collection_varray_owner(collection) : nullptr;
     const char* attr_name = dom_token_list_attribute_name(collection);
     if (!elem || !attr_name) return false;
-    const char* source = elem->get_attribute(attr_name);
-    StrBuf* normalized = strbuf_new_cap((source ? strlen(source) : 0) +
-                                        (append_token ? strlen(append_token) : 0) + 2);
+    StrView source = elem->get_attribute_view(attr_name);
+    StrBuf* normalized = strbuf_new_cap(source.length + append_token.length + 2);
     if (!normalized) return false;
-    const char* token_start = nullptr;
-    size_t token_len = 0;
-    for (int64_t index = 0;
-         dom_token_list_token_at(collection, index, &token_start, &token_len); index++) {
-        if (remove_token &&
-                dom_token_list_token_matches(collection, token_start, token_len, remove_token)) {
+    StrView remaining = source;
+    for (StrView token = dom_token_list_next(remaining); token.length; token = dom_token_list_next(remaining)) {
+        if (remove_token.str && dom_token_list_token_matches(collection, token, remove_token)) {
             if (removed) *removed = true;
             continue;
         }
-        if (normalized->length > 0) strbuf_append_char(normalized, ' ');
-        strbuf_append_str_n(normalized, token_start, token_len);
+        if (normalized->length) strbuf_append_char(normalized, ' ');
+        strbuf_append_str_n(normalized, token.str, token.length);
     }
-    if (append_token && append_token[0]) {
-        if (normalized->length > 0) strbuf_append_char(normalized, ' ');
-        strbuf_append_str(normalized, append_token);
+    if (append_token.length) {
+        if (normalized->length) strbuf_append_char(normalized, ' ');
+        strbuf_append_str_n(normalized, append_token.str, append_token.length);
     }
-    DomAttributeOldValue old_value(elem, attr_name);
-    elem->set_attribute(attr_name, normalized->str ? normalized->str : "");
-    dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent, attr_name, old_value.get());
+    DomAttributeOldValue old_value(source);
+    bool written = elem->set_attribute(attr_name, {normalized->str, normalized->length});
+    if (written) dom_notify_mutation_detail_n(DOM_JS_MUTATION_ATTRIBUTE, elem, elem->parent,
+        attr_name, old_value.get(), old_value.view().length);
     strbuf_free(normalized);
-    return true;
+    return written;
 }
 
 static bool dom_link_rel_is_supported(const char* token) {
@@ -17404,9 +17409,9 @@ static Item js_token_list_operation(DomCollectionVArray* collection,
 
     if (operation == JUBE_DOM_TOKEN_LIST_ADD) {
         for (int index = 0; index < argc; index++) {
-            const char* token = fn_to_cstr(args[index]);
-            if (token && token[0] && !dom_token_list_contains_token(collection, token)) {
-                dom_token_list_rewrite(collection, nullptr, token, nullptr);
+            StrView token = dom_item_text_view(args[index]);
+            if (token.length && !dom_token_list_contains_token(collection, token)) {
+                dom_token_list_rewrite(collection, {}, token, nullptr);
             }
         }
         return ItemNull;
@@ -17414,11 +17419,11 @@ static Item js_token_list_operation(DomCollectionVArray* collection,
 
     if (operation == JUBE_DOM_TOKEN_LIST_REMOVE) {
         for (int index = 0; index < argc; index++) {
-            const char* token = fn_to_cstr(args[index]);
+            StrView token = dom_item_text_view(args[index]);
             // Removing a token that is not present leaves the token set and its
             // content attribute unchanged, so it must not publish a DOM mutation.
-            if (token && token[0] && dom_token_list_contains_token(collection, token)) {
-                dom_token_list_rewrite(collection, token, nullptr, nullptr);
+            if (token.length && dom_token_list_contains_token(collection, token)) {
+                dom_token_list_rewrite(collection, token, {}, nullptr);
             }
         }
         return ItemNull;
@@ -17426,18 +17431,18 @@ static Item js_token_list_operation(DomCollectionVArray* collection,
 
     if (operation == JUBE_DOM_TOKEN_LIST_TOGGLE) {
         if (argc < 1) return (Item){.item = ITEM_FALSE};
-        const char* token = fn_to_cstr(args[0]);
-        if (!token || !token[0]) return (Item){.item = ITEM_FALSE};
+        StrView token = dom_item_text_view(args[0]);
+        if (!token.length) return (Item){.item = ITEM_FALSE};
         bool present = dom_token_list_contains_token(collection, token);
         bool add_token = argc >= 2 ? js_is_truthy(args[1]) : !present;
-        if (add_token && !present) dom_token_list_rewrite(collection, nullptr, token, nullptr);
-        if (!add_token && present) dom_token_list_rewrite(collection, token, nullptr, nullptr);
+        if (add_token && !present) dom_token_list_rewrite(collection, {}, token, nullptr);
+        if (!add_token && present) dom_token_list_rewrite(collection, token, {}, nullptr);
         return (Item){.item = b2it(add_token ? 1 : 0)};
     }
 
     if (operation == JUBE_DOM_TOKEN_LIST_CONTAINS) {
-        const char* token = argc > 0 ? fn_to_cstr(args[0]) : nullptr;
-        return (Item){.item = b2it(token && dom_token_list_contains_token(collection, token))};
+        StrView token = argc > 0 ? dom_item_text_view(args[0]) : StrView{};
+        return (Item){.item = b2it(dom_token_list_contains_token(collection, token))};
     }
 
     if (operation == JUBE_DOM_TOKEN_LIST_ITEM) {
@@ -17447,45 +17452,42 @@ static Item js_token_list_operation(DomCollectionVArray* collection,
         if (!dom_token_list_token_at(collection, it2i(args[0]), &token_start, &token_len)) {
             return ItemNull;
         }
-        return js_name_item(token_start, (int)token_len);
+        return dom_string_from_view({token_start, token_len});
     }
 
     if (operation == JUBE_DOM_TOKEN_LIST_REPLACE) {
-        const char* old_token = argc > 0 ? fn_to_cstr(args[0]) : nullptr;
-        const char* new_token = argc > 1 ? fn_to_cstr(args[1]) : nullptr;
-        if (!old_token || !old_token[0] || !new_token || !new_token[0] ||
+        StrView old_token = argc > 0 ? dom_item_text_view(args[0]) : StrView{};
+        StrView new_token = argc > 1 ? dom_item_text_view(args[1]) : StrView{};
+        if (!old_token.length || !new_token.length ||
                 !dom_token_list_contains_token(collection, old_token)) {
             return (Item){.item = ITEM_FALSE};
         }
-        if (!dom_token_list_token_matches(collection, old_token, strlen(old_token), new_token)) {
+        if (!dom_token_list_token_matches(collection, old_token, new_token)) {
             dom_token_list_rewrite(collection, old_token,
-                dom_token_list_contains_token(collection, new_token) ? nullptr : new_token, nullptr);
+                dom_token_list_contains_token(collection, new_token) ? StrView{} : new_token, nullptr);
         }
         return (Item){.item = ITEM_TRUE};
     }
 
     if (operation == JUBE_DOM_TOKEN_LIST_TO_STRING) {
-        DomElement* elem = dom_collection_varray_owner(collection);
-        const char* attr_name = dom_token_list_attribute_name(collection);
-        const char* value = elem && attr_name ? elem->get_attribute(attr_name) : nullptr;
-        return js_name_item(value ? value : "");
+        StrView value = dom_token_list_value(collection);
+        return value.str ? dom_string_from_view(value) : js_name_item("");
     }
 
     if (operation == JUBE_DOM_TOKEN_LIST_ITERATOR) {
-        Item values = js_array_new(0);
-        const char* token_start = nullptr;
-        size_t token_len = 0;
-        for (int64_t index = 0;
-             dom_token_list_token_at(collection, index, &token_start, &token_len); index++) {
-            js_array_push(values, js_name_item(token_start, (int)token_len));
+        RootFrame roots(1);
+        Rooted<Item> values(roots, js_array_new(0));
+        StrView value = dom_token_list_value(collection);
+        for (StrView token = dom_token_list_next(value); token.length; token = dom_token_list_next(value)) {
+            js_array_push(values.get(), dom_string_from_view(token));
         }
-        return js_get_iterator(values);
+        return js_get_iterator(values.get());
     }
 
     if (operation == JUBE_DOM_TOKEN_LIST_SUPPORTS) {
         const char* token = argc > 0 ? fn_to_cstr(args[0]) : nullptr;
         return (Item){.item = b2it(collection->kind == DOM_VARRAY_REL_LIST &&
-            dom_link_rel_is_supported(token))};
+            !dom_identifier_has_nul(argc > 0 ? args[0] : ItemNull) && dom_link_rel_is_supported(token))};
     }
 
     log_error("js-token-list-operation: invalid operation %d", (int)operation);
@@ -17511,7 +17513,7 @@ extern "C" Item dom_classlist_get_property(Item elem_item, Item prop_name) {
 
     // length
     if (strcmp(prop, "length") == 0) {
-        return (Item){.item = i2it((int64_t)elem->class_count())};
+        return (Item){.item = i2it(dom_token_list_count(elem->get_attribute_view("class")))};
     }
 
     // value — space-separated class string
@@ -17562,10 +17564,8 @@ extern "C" Item dom_dataset_get_property(Item elem_item, Item prop_name) {
     char attr_name[256];
     camel_to_data_attr(prop, attr_name, sizeof(attr_name));
 
-    const char* val = elem->get_attribute(attr_name);
-    if (val) {
-        return js_name_item(val);
-    }
+    StrView value = elem->get_attribute_view(attr_name);
+    if (value.str) return dom_string_from_view(value);
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
@@ -17573,22 +17573,25 @@ extern "C" Item dom_dataset_set_property(Item elem_item, Item prop_name, Item va
     DomElement* elem = (DomElement*)dom_unwrap_element(elem_item);
     if (!elem) return ItemNull;
 
-    const char* prop = fn_to_cstr(prop_name);
-    const char* val_str = fn_to_cstr(value);
-    if (!prop || !val_str) return ItemNull;
+    RootFrame roots(3);
+    Rooted<Item> receiver(roots, elem_item), key(roots, prop_name), converted(roots, js_to_string(value));
+    JS_RETURN_IF_ERROR(converted.get());
+    const char* prop = fn_to_cstr(key.get());
+    if (!prop || dom_identifier_has_nul(key.get())) return ItemNull;
+    StrView attr_value = dom_item_text_view(converted.get());
 
     char attr_name[256];
     camel_to_data_attr(prop, attr_name, sizeof(attr_name));
 
     // dataset and setAttribute share dependency-aware metadata writes and observer delivery.
-    if (dom_set_non_style_metadata(elem, attr_name, val_str)) return value;
-    const char* old_value = elem->get_attribute(attr_name);
-    elem->set_attribute(attr_name, val_str);
+    if (dom_set_non_style_metadata_view(elem, attr_name, attr_value)) return converted.get();
+    DomAttributeOldValue old_value(elem, attr_name);
+    if (!elem->set_attribute(attr_name, attr_value)) return ItemNull;
     // Dataset writes must expose their data-* name so MutationObserver
     // consumers can suppress their own bookkeeping mutations.
-    dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem,
-                           elem->parent, attr_name, old_value);
-    return value;
+    dom_notify_mutation_detail_n(DOM_JS_MUTATION_ATTRIBUTE, elem, elem->parent,
+        attr_name, old_value.get(), old_value.view().length);
+    return converted.get();
 }
 
 // ============================================================================
@@ -17691,7 +17694,7 @@ static bool dom_nodes_are_equal(DomNode* left, DomNode* right) {
         DomAttr* other = right->as_attribute();
         return dom_equal_cstr(attribute->namespace_uri, other->namespace_uri) &&
             dom_equal_cstr(attribute->local_name, other->local_name) &&
-            dom_equal_cstr(attribute->value, other->value);
+            str_eq(attribute->value, attribute->value_length, other->value, other->value_length);
     }
 
     if (left->is_text()) {
@@ -17735,8 +17738,10 @@ static bool dom_nodes_are_equal(DomNode* left, DomNode* right) {
         if (dom_is_internal_attr(name)) continue;
         left_visible_attr_count++;
         if (!right_elem->has_attribute(name)) return false;
-        if (!dom_equal_cstr(left_elem->get_attribute(name),
-                               right_elem->get_attribute(name))) return false;
+        StrView left_value = left_elem->get_attribute_view(name);
+        StrView right_value = right_elem->get_attribute_view(name);
+        if ((left_value.str != nullptr) != (right_value.str != nullptr) ||
+            !strview_eq(&left_value, &right_value)) return false;
     }
     if (left_visible_attr_count != right_visible_attr_count) return false;
 

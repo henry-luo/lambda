@@ -67,7 +67,7 @@ Item pn_print(Item item) {
         // error), so render it as the printer does inside any value (LR12-25).
         StrBuf* sb = strbuf_new();
         print_item(sb, item, 0, null);
-        printf("%s", sb->str); // PRINTF_OK: Lambda's procedural print() builtin.
+        fwrite(sb->str, 1, sb->length, stdout);
         strbuf_free(sb);
         return ItemNull;
     }
@@ -75,7 +75,8 @@ Item pn_print(Item item) {
     String *str = fn_string(item);
     if (virtual_failure_version != before) return err2it_or_error(context ? context->last_error : nullptr);
     if (str) {
-        printf("%s", str->chars); // PRINTF_OK: Lambda's procedural print() builtin.
+        // print() writes the full value, including an embedded NUL.
+        fwrite(str->chars, 1, str->len, stdout);
         // print() is line-buffered wherever stdout goes: on a pipe, stdio would
         // hold whole blocks, so a parent reading a Lambda child's lines (io.exec
         // progress, AR-E5v2) saw nothing until the child exited.
@@ -1161,7 +1162,7 @@ String* escape_shell_arg(String* arg) {
 // Helper function to format arguments into command line string
 String* format_cmd_args(String* cmd, Item args) {
     StrBuf* sb = strbuf_new();
-    strbuf_append_str(sb, cmd->chars);
+    strbuf_append_str_n(sb, cmd->chars, cmd->len);
 
     TypeId args_type = get_type_id(args);
 
@@ -1175,7 +1176,8 @@ String* format_cmd_args(String* cmd, Item args) {
             String* arg_str = fn_string(arg_item);
             if (arg_str && arg_str->len > 0) {
                 String* escaped = escape_shell_arg(arg_str);
-                strbuf_append_all(sb, 2, " ", escaped->chars);
+                strbuf_append_char(sb, ' ');
+                strbuf_append_str_n(sb, escaped->chars, escaped->len);
             }
         }
     }
@@ -1208,7 +1210,8 @@ String* format_cmd_args(String* cmd, Item args) {
             if (value_str && value_str->len > 0) {
                 if (!(value_item._type_id == LMD_TYPE_BOOL && value_item.bool_val == true)) {
                     String* escaped = escape_shell_arg(value_str);
-                    strbuf_append_all(sb, 2, "=", escaped->chars);
+                    strbuf_append_char(sb, '=');
+                    strbuf_append_str_n(sb, escaped->chars, escaped->len);
                 }
                 // else skip boolean true values (just add the flag)
             }
@@ -1221,7 +1224,8 @@ String* format_cmd_args(String* cmd, Item args) {
         String* arg_str = fn_string(args);
         if (arg_str && arg_str->len > 0) {
             String* escaped = escape_shell_arg(arg_str);
-            strbuf_append_all(sb, 2, " ", escaped->chars);
+            strbuf_append_char(sb, ' ');
+            strbuf_append_str_n(sb, escaped->chars, escaped->len);
         }
     }
 
@@ -1257,6 +1261,10 @@ Item pn_cmd2(Item cmd, Item args) {
     if (!full_cmd) {
         log_debug("pn_cmd: failed to format command arguments");
         return ItemError;
+    }
+    // The OS shell takes a C string. Reject invalid commands before execution.
+    if (memchr(full_cmd->chars, 0, full_cmd->len)) {
+        return runtime_error_item(ERR_INVALID_OPERATION, "cmd: command or argument contains NUL", NULL);
     }
 
     log_debug("pn_cmd: executing command: %s", full_cmd->chars);

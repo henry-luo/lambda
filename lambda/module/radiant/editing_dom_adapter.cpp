@@ -36,8 +36,8 @@ static bool editing_remove_child(DomNode* child) {
 }
 
 static void editing_notify(DomJsMutationKind kind, DomNode* target, DomNode* parent,
-                           const char* attribute_name, const char* old_value) {
-    dom_notify_mutation_detail(kind, target, parent, attribute_name, old_value);
+                           const char* attribute_name, const char* old_value, size_t old_value_length) {
+    dom_notify_mutation_detail_n(kind, target, parent, attribute_name, old_value, old_value_length);
 }
 
 bool lambda_editing_dom_host_register() {
@@ -128,14 +128,18 @@ extern "C" bool radiant_dom_exec_command(void* document_ptr, const char* command
     // result. This bridge carries no command-name or inputType policy.
     bool emit_input = radiant_edit_result_bool(edit_result.get(), "api_input");
     char* input_type = radiant_edit_result_string_copy(edit_result.get(), "api_input_type");
-    char* input_data = radiant_edit_result_string_copy(edit_result.get(), "api_input_data");
+    size_t input_data_length = 0;
+    char* input_data = radiant_edit_result_string_copy(edit_result.get(), "api_input_data", &input_data_length);
     if (emit_input && input_type) {
         InputIntent input_intent;
         // The standard intent builder supplies a clipboard snapshot when this
         // package fact represents paste; other API event data remains exactly
         // the package-provided value.
         input_intent_from_name(input_type, &input_intent);
-        if (input_data) input_intent.data = input_data;
+        if (input_data) {
+            input_intent.data = input_data;
+            input_intent.data_length = input_data_length;
+        }
         radiant_dispatch_api_edit_input(document, host, &input_intent,
                                         input_type, input_data);
     }

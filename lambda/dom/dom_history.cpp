@@ -256,7 +256,7 @@ static DomElement* dom_history_indicated_element(DomDocument* document) {
     return element;
 }
 
-extern "C" Item js_history_set_location(Item value, bool hash_member) {
+static Item dom_location_write(Item value, bool hash_member, bool navigate_document) {
     RootFrame roots(2);
     Rooted<Item> input(roots, value), text(roots, ItemNull);
     DomDocument* document = js_history_document();
@@ -265,6 +265,22 @@ extern "C" Item js_history_set_location(Item value, bool hash_member) {
     if (item_is_error(text.get())) return text.get();
     const char* url_text = fn_to_cstr(text.get());
     if (!url_text) return input.get();
+    if (navigate_document) {
+        Url* target = document->url ? url_parse_with_base(url_text, document->url) : url_parse(url_text);
+        if (target && url_is_valid(target)) {
+            // only a fragment destination retains this document; href writes otherwise load a new one.
+            bool same_document = target->hash && url_equals_without_fragment(target, document->url);
+            if (!same_document) {
+                // serialize before releasing the URL, including an empty href's resolved reload target.
+                text.set(js_name_item(url_get_href(target)));
+                url_destroy(target);
+                JS_RETURN_IF_ERROR(text.get());
+                JS_RETURN_IF_ERROR(dom_location_navigate_bridge(document, text.get(), false));
+                return input.get();
+            }
+        }
+        if (target) url_destroy(target);
+    }
     // A Location.hash write supplies a fragment even when '#' is omitted.
     char* fragment = hash_member && *url_text != '#'
         ? mem_join3("#", 1, url_text, strlen(url_text), "", 0, MEM_CAT_DOM) : nullptr;
@@ -278,6 +294,14 @@ extern "C" Item js_history_set_location(Item value, bool hash_member) {
         dom_scroll_to_fragment_target(dom_history_indicated_element(document), true);
     }
     return input.get();
+}
+
+extern "C" Item js_history_set_location(Item value, bool hash_member) {
+    return dom_location_write(value, hash_member, false);
+}
+
+extern "C" Item dom_location_set_href(Item value) {
+    return dom_location_write(value, false, true);
 }
 
 extern "C" void js_history_install_globals(void) {

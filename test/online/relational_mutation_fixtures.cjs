@@ -2,7 +2,8 @@ const relationalMutationCases = ['unrelated', 'attributes', 'witness', 'position
     'typed-is', 'typed-where-not', 'internal-siblings', 'leading-siblings', 'leading-wrapped', 'computed-size',
     'prepared-unrelated', 'prepared-witness', 'unrelated-class', 'unrelated-class-list',
     'class-witness', 'class-attribute-witness', 'quirks-class-witness', 'synthetic-class-witness',
-    'token-class-witness'];
+    'token-class-witness', 'unrelated-leading-siblings', 'unrelated-leading-wrapped',
+    'unrelated-leading-style', 'leading-general'];
 
 function exerciseRelationalMutation(kind) {
     const failures = [], paint = document.getElementById('paint');
@@ -55,6 +56,20 @@ function exerciseRelationalMutation(kind) {
             // a later attribute write must not hide the removed witness from the batch.
             if(kind==='prepared-witness')script.className='not-marker';
             blue(false,'removed witness remains visible to invalidation');
+        } else if (kind.startsWith('unrelated-leading-')) {
+            for (const size of [80, 120, 160]) {
+                if (kind === 'unrelated-leading-style') {
+                    measure.style.width = size + 'px';
+                } else {
+                    const transient = document.createElement('div');
+                    document.body.appendChild(transient);
+                    transient.getBoundingClientRect();
+                    transient.remove();
+                }
+                check(document.getElementById('lead').getBoundingClientRect().width === 80,
+                    'unrelated mutation preserves sibling anchor');
+                measure.getBoundingClientRect();
+            }
         } else if (kind === 'unrelated' || kind === 'attributes' || kind.startsWith('typed-')) {
             for (const text of ['first measurement', 'second measurement', 'third measurement']) {
                 measure.textContent = text;
@@ -138,14 +153,17 @@ function relationalMutationHtml(kind) {
         kind === 'positions' || kind === 'empty' ? '<b class="marker">text</b>' :
         kind === 'siblings' ? '<b class="before"></b><b class="after"></b>' : '';
     const typed = kind === 'typed-where-not' ? ':where(ul,ol):not([data-skip])' : ':is(ul,ol)';
-    const siblingRule = kind.startsWith('leading-') ? '.lead' +
-        (kind === 'leading-wrapped' ? ':is(:has(+ .gate .marker))' : ':has(+ .gate .marker)') + '{width:120px}' :
+    const leading = kind.startsWith('leading-') || kind.startsWith('unrelated-leading-');
+    const relativeSibling = kind === 'leading-general' ? '~' : '+';
+    const hasSibling = ':has(' + relativeSibling + ' .gate .marker)';
+    const siblingRule = leading ? '.lead' +
+        (kind.endsWith('wrapped') ? ':is(' + hasSibling + ')' : hasSibling) + '{width:120px}' :
         kind.startsWith('typed-') || kind === 'internal-siblings' ? '.richtext ' + typed + ':has(>li>span+span){width:120px}' : '';
-    const primaryRule = kind === 'internal-siblings' || kind.startsWith('leading-') ? '' :
+    const primaryRule = kind === 'internal-siblings' || leading ? '' :
         (kind.startsWith('prepared-')?'html':'body')+':has(' + argument + ') #paint{background:blue}';
     return (kind.startsWith('quirks-') ? '' : '<!doctype html>') + '<style>body{margin:0}#probe,#paint{position:fixed;top:0;width:80px;height:80px}' +
         '#probe{left:0;background:red}#paint{left:100px;background:red}' +
-        primaryRule +
+        primaryRule + (kind === 'unrelated-leading-style' ? '.decorative:before{content:attr(data-note)}' : '') +
         '#measure{position:absolute;top:100px;width:70px;visibility:hidden}#measure:empty{width:90px;padding:6px;border:2px solid blue}' +
         'ul,ol,.lead{padding:0;margin:0;width:80px}' + siblingRule + '</style>' +
         '<div id="probe"></div><div id="paint"></div><div class="richtext"><div id="measure" class="stable">measurement</div>' +

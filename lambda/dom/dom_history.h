@@ -9,6 +9,8 @@ extern "C" {
 void js_history_install_globals(void);
 void dom_history_install_interface(Item prototype);
 Item js_history_set_location(Item value, bool hash_member);
+Item dom_location_set_href(Item value);
+Item dom_location_navigate_bridge(void* document, Item next_url, bool replace);
 void dom_scroll_to_fragment_target(void* target, bool dispatch_beforematch);
 void js_history_reset(void);
 struct RadiantHistoryTraversal;

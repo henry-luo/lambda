@@ -12,6 +12,7 @@
 #include "lambda/input/css/css_tokenizer.hpp"
 #include "lambda/input/css/selector_matcher.hpp"
 #include "lambda/core/well_known_markup_names.h"
+#include "lambda/core/utf_string.h"
 #include "../../js/js_class.h"
 #include "../../dom/dom.h"
 #include "../../dom/dom_core.h"
@@ -148,11 +149,9 @@ RADIANT_C_API Item dom_dataset_property(Item elem_item);
 #define dom_after_default_selected_set radiant_host_api->dom_catalog->after_default_selected_set
 #define dom_after_select_multiple_removed radiant_host_api->dom_catalog->after_select_multiple_removed
 #define dom_set_checked_dirty radiant_host_api->dom_catalog->set_checked_dirty
-#define dom_select_set_value_bridge radiant_host_api->dom_catalog->select_set_value_bridge
 #define dom_select_set_selected_index_bridge radiant_host_api->dom_catalog->select_set_selected_index_bridge
 #define dom_select_set_length_bridge radiant_host_api->dom_catalog->select_set_length_bridge
 #define dom_set_option_selected_dirty radiant_host_api->dom_catalog->set_option_selected_dirty
-#define dom_set_option_text_bridge radiant_host_api->dom_catalog->set_option_text_bridge
 #define dom_throw_contenteditable_syntax_error radiant_host_api->realm->throw_contenteditable_syntax_error
 #define dom_text_control_set_value_bridge radiant_host_api->dom_catalog->text_control_set_value_bridge
 #define dom_text_control_set_selection_start_bridge radiant_host_api->dom_catalog->text_control_set_selection_start_bridge
@@ -257,6 +256,10 @@ static const void* radiant_dom_host_type_for_node(DomNode* node) {
 
 static Item radiant_dom_string_item(const char* value) {
     return (Item){.item = s2it(heap_create_name(value ? value : ""))};
+}
+
+static Item radiant_dom_string_item(StrView value) {
+    return (Item){.item = s2it(heap_create_name(value.str ? value.str : "", value.length))};
 }
 
 static Item radiant_dom_int_item(int64_t value) {
@@ -407,31 +410,6 @@ static String* radiant_dom_uppercase_name(const char* name) {
     return result;
 }
 
-static int64_t radiant_dom_utf16_length(const char* text) {
-    if (!text) return 0;
-    int64_t units = 0;
-    const unsigned char* p = (const unsigned char*)text;
-    while (*p) {
-        if ((*p & 0x80) == 0) {
-            p++;
-            units++;
-        } else if ((*p & 0xE0) == 0xC0 && p[1]) {
-            p += 2;
-            units++;
-        } else if ((*p & 0xF0) == 0xE0 && p[1] && p[2]) {
-            p += 3;
-            units++;
-        } else if ((*p & 0xF8) == 0xF0 && p[1] && p[2] && p[3]) {
-            p += 4;
-            units += 2;
-        } else {
-            p++;
-            units++;
-        }
-    }
-    return units;
-}
-
 static DomNode* radiant_dom_visible_child(DomElement* elem, bool first) {
     return (DomNode*)radiant_host_api->dom_catalog->visible_child(elem, first);
 }
@@ -493,8 +471,7 @@ static VirtualOpStatus radiant_dom_velmt_attr_get(void* data, Item key,
         if (radiant_dom_is_internal_attr(name) || !name) continue;
         size_t name_length = strlen(name);
         if (name_length != length || memcmp(name, chars, length) != 0) continue;
-        const char* value = elem->get_attribute(name);
-        *out = radiant_dom_string_item(value ? value : "");
+        *out = radiant_dom_string_item(elem->get_attribute_view(name));
         return VIRTUAL_OP_OK;
     }
     return VIRTUAL_OP_MISSING;
@@ -1347,21 +1324,24 @@ static Item radiant_dom_owner_document_item(DomNode* node) {
     return radiant_dom_document_item(doc);
 }
 
-static bool radiant_dom_get_character_data_property(DomNode* node,
-        const char* content, int64_t length, int64_t node_type,
+static bool radiant_dom_get_character_data_property(DomNode* node, Item receiver,
         const char* node_name, const char* prop, Item* out) {
     if (!node || !prop || !out) return false;
     if (strcmp(prop, "data") == 0 || strcmp(prop, "nodeValue") == 0 ||
         strcmp(prop, "textContent") == 0) {
-        *out = radiant_dom_string_item(content);
+        // Use the same byte-length native getter for all CharacterData aliases.
+        *out = dom_core_node_value(receiver);
         return true;
     }
     if (strcmp(prop, "length") == 0) {
-        *out = radiant_dom_int_item(length);
+        DomComment* comment = node->as_comment();
+        *out = radiant_dom_int_item(comment
+            ? utf8_to_utf16_length(comment->content, comment->length)
+            : dom_text_utf16_length(node->as_text()));
         return true;
     }
     if (strcmp(prop, "nodeType") == 0) {
-        *out = radiant_dom_int_item(node_type);
+        *out = radiant_dom_int_item(node->node_type);
         return true;
     }
     if (strcmp(prop, "nodeName") == 0) {
@@ -1445,7 +1425,16 @@ RADIANT_C_API int radiant_dom_member_namespace_uri(Item receiver, Item* out) {
 RADIANT_C_API int radiant_dom_member_prefix(Item receiver, Item* out) {
     return radiant_dom_member_property(receiver, "prefix", out);
 }
-RADIANT_MEMBER_GET(radiant_dom_member_id, radiant_dom_string_item(elem->id))
+RADIANT_C_API int radiant_dom_member_id(Item receiver, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(receiver);
+    if (!elem || !out) return 0;
+    if (elem->id) {
+        *out = radiant_dom_string_item(elem->id);
+    } else {
+        *out = radiant_dom_string_item(elem->get_attribute_view("id"));
+    }
+    return 1;
+}
 RADIANT_C_API int radiant_dom_member_class_name(Item receiver, Item* out) {
     DomElement* elem = radiant_dom_member_elem(receiver);
     if (!elem || !out) return 0;
@@ -1628,8 +1617,8 @@ static int radiant_dom_reflected_string_get(Item receiver, Item* out,
                                             const char* attribute, const char* fallback) {
     DomElement* elem = radiant_dom_member_elem(receiver);
     if (!elem || !out) return 0;
-    const char* value = elem->get_attribute(attribute);
-    *out = radiant_dom_string_item(value ? value : fallback);
+    StrView value = elem->get_attribute_view(attribute);
+    *out = value.str ? radiant_dom_string_item(value) : radiant_dom_string_item(fallback);
     return 1;
 }
 
@@ -2191,24 +2180,18 @@ RADIANT_C_API int radiant_dom_m4c_checked_set(Item receiver, Item value, Item* o
     return 1;
 }
 
-RADIANT_C_API int radiant_dom_m4c_value_set(Item receiver, Item value, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(receiver);
-    if (!elem || !out) return 0;
-    const char* text = fn_to_cstr(value);
-    dom_select_set_value_bridge((void*)elem, text ? text : "");
-    *out = value;
-    return 1;
-}
-
 RADIANT_M4C_SET(radiant_dom_m4c_value2_set, dom_text_control_set_value_bridge)
 
 static int radiant_dom_m4c_attribute_set(Item receiver, Item value, Item* out,
                                          bool update_form, bool notify) {
     DomElement* elem = radiant_dom_member_elem(receiver);
     if (!elem || !out) return 0;
-    const char* text = fn_to_cstr(value);
-    elem->set_attribute("value", text ? text : "");
-    if (update_form && elem->form_storage()) elem->form_storage()->value = elem->get_attribute("value");
+    StrView text = dom_item_text_view(value);
+    elem->set_attribute("value", text.str ? text : StrView{"", 0});
+    if (update_form && elem->form_storage()) {
+        FormControlProp* form = elem->form_storage();
+        form->value = elem->get_attribute("value", &form->attribute_value_length);
+    }
     if (notify) {
         dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
     }
@@ -2251,15 +2234,6 @@ RADIANT_C_API int radiant_dom_m4c_selected_set(Item receiver, Item value, Item* 
     return 1;
 }
 
-RADIANT_C_API int radiant_dom_m4c_text_set(Item receiver, Item value, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(receiver);
-    if (!elem || !out) return 0;
-    const char* text = fn_to_cstr(value);
-    dom_set_option_text_bridge((void*)elem, text ? text : "");
-    *out = value;
-    return 1;
-}
-
 RADIANT_M4C_SET(radiant_dom_m4c_selection_start_set,
                 dom_text_control_set_selection_start_bridge)
 RADIANT_M4C_SET(radiant_dom_m4c_selection_end_set,
@@ -2282,14 +2256,10 @@ static int radiant_dom_member_character_data_property(Item receiver,
         return 1;
     }
     if (node->is_text()) {
-        DomText* text = node->as_text();
-        return radiant_dom_get_character_data_property(node, text->text,
-            radiant_dom_utf16_length(text->text), 3, "#text", prop, out) ? 1 : 0;
+        return radiant_dom_get_character_data_property(node, receiver, "#text", prop, out) ? 1 : 0;
     }
     if (node->is_comment()) {
-        DomComment* comment = node->as_comment();
-        return radiant_dom_get_character_data_property(node, comment->content,
-            comment->length, comment->node_type, "#comment", prop, out) ? 1 : 0;
+        return radiant_dom_get_character_data_property(node, receiver, "#comment", prop, out) ? 1 : 0;
     }
     return 0;
 }
@@ -2855,12 +2825,12 @@ static Item radiant_dom_create_element_item(DomDocument* doc, const char* tag,
 }
 
 static Item radiant_dom_create_mark_element_item(DomDocument* doc, const char* backing_tag,
-                                                  const char* node_tag, const char* text,
+                                                  const char* node_tag, StrView text,
                                                   bool comment, bool add_text) {
     if (!doc || !doc->input) return ItemNull;
     MarkBuilder builder(doc->input);
     Item backing = add_text
-        ? builder.element(backing_tag).text(text ? text : "").final()
+        ? builder.element(backing_tag).text(text.str ? text.str : "", text.length).final()
         : builder.element(backing_tag).final();
     DomNode* node = comment
         ? (DomNode*)dom_comment_create_detached(backing.element, doc)
@@ -2996,11 +2966,7 @@ static int radiant_dom_document_operation_active(RadiantDocumentOperation operat
             *out = ItemNull;
             return 1;
         }
-        const char* id = fn_to_cstr(args[0]);
-        if (!id) {
-            *out = ItemNull;
-            return 1;
-        }
+        StrView id = dom_item_text_view(args[0]);
         // handled flag preserves valid null lookup results without JS fallback.
         *out = radiant_dom_node_item((DomNode*)dom_find_source_element_by_id(root, id));
         return 1;
@@ -3099,20 +3065,23 @@ static int radiant_dom_document_operation_active(RadiantDocumentOperation operat
         // Web IDL coerces createTextNode's DOMString argument before allocation.
         const char* text = fn_to_cstr(text_value.get());
         DomText* text_node = (doc && text)
-            ? DomText::create_detached_copy(doc, text, strlen(text)) : nullptr;
+            ? DomText::create_detached_copy(doc, text, text_value.get().get_len()) : nullptr;
         *out = radiant_dom_node_item((DomNode*)text_node);
         return 1;
     }
 
     if (operation == RADIANT_DOCUMENT_CREATE_DOCUMENT_FRAGMENT) {
         *out = radiant_dom_create_mark_element_item(doc, "#document-fragment",
-            "#document-fragment", nullptr, false, false);
+            "#document-fragment", {}, false, false);
         return 1;
     }
 
     if (operation == RADIANT_DOCUMENT_CREATE_COMMENT) {
-        const char* text = (argc >= 1) ? fn_to_cstr(args[0]) : "";
-        *out = radiant_dom_create_mark_element_item(doc, "!--", "!--", text, true, true);
+        RootFrame roots(1);
+        Rooted<Item> text(roots, js_to_string(argc >= 1 ? args[0] : js_name_item("")));
+        *out = item_is_error(text.get()) ? text.get() :
+            radiant_dom_create_mark_element_item(doc, "!--", "!--",
+                dom_item_text_view(text.get()), true, true);
         return 1;
     }
 
@@ -3122,9 +3091,9 @@ static int radiant_dom_document_operation_active(RadiantDocumentOperation operat
             return 1;
         }
         const char* target = (argc >= 1) ? fn_to_cstr(args[0]) : "";
-        const char* data = (argc >= 2) ? fn_to_cstr(args[1]) : "";
+        Item data = argc >= 2 ? args[1] : ItemNull;
         *out = radiant_dom_create_mark_element_item(doc, "?", target ? target : "",
-            data, false, true);
+            dom_item_text_view(data), false, true);
         return 1;
     }
 

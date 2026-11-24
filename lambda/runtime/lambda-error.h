@@ -78,7 +78,11 @@ const char* err_category_name(LambdaErrorCode code);
 typedef void* (*LambdaErrorHeapAllocFn)(size_t size, uint8_t type_id);
 void err_set_heap_allocator(LambdaErrorHeapAllocFn alloc_fn);
 LambdaError* err_create(LambdaErrorCode code, const char* message, SourceLocation* location);
+LambdaError* err_create_n(LambdaErrorCode code, const char* message, size_t length,
+                          SourceLocation* location);
 LambdaError* err_create_heap(LambdaErrorCode code, const char* message, SourceLocation* location);
+LambdaError* err_create_heap_n(LambdaErrorCode code, const char* message, size_t length,
+                               SourceLocation* location);
 LambdaError* err_createfv(LambdaErrorCode code, SourceLocation* location,
                           const char* format, va_list args);
 LambdaError* err_createf(LambdaErrorCode code, SourceLocation* location, const char* format, ...);

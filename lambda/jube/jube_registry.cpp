@@ -578,8 +578,6 @@ extern "C" Item dom_remove_child_bridge(void* parent, Item child);
 extern "C" Item dom_insert_before_bridge(void* parent, Item new_child, Item ref_child);
 extern "C" Item dom_remove_bridge(void* node);
 extern "C" Item dom_adopt_node_bridge(Item node);
-extern "C" Item dom_location_navigate_bridge(void* doc, Item next_url,
-                                                  bool replace);
 extern "C" Item dom_document_open_bridge(void* doc);
 extern "C" Item dom_document_write_bridge(void* doc, Item text);
 extern "C" Item dom_document_element_from_point_bridge(void* doc, Item x, Item y);

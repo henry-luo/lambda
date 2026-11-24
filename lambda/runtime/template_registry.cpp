@@ -82,7 +82,7 @@ static uint64_t template_event_mask_bit(const char* event_name) {
 // static document (an iframe preview), whose wheel scrolling depends on it.
 static const char* const k_continuous_events[] = {
     "mousemove", "pointermove", "scroll", "wheel",
-    "scrollwheel", "dragmove", "dragover",
+    "scrollwheel", "dragmove", "dragover", "selectiondrag",
 };
 
 int template_continuous_event_index(const char* event_name) {

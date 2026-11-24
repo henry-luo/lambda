@@ -1005,6 +1005,25 @@ TEST_F(JsFormalMir, ClockOriginPrecedesUserCodeAndFirstNowIsNonnegative) {
     }
 }
 
+TEST_F(JsFormalMir, UserTimingNavigationNamesRespectNonWindowRealms) {
+    Item result = run(R"JS(
+        performance.mark('navigationStart', {startTime:12});
+        var reservedMark=performance.getEntriesByName('navigationStart', 'mark')[0];
+        var rejected=0;
+        for(var name of ['navigationStart', 'redirectStart', 'loadEventEnd']) {
+            try { performance.measure('legacy', name); }
+            catch(e) { if(e instanceof TypeError) rejected++; }
+        }
+        performance.mark('ordinary', {startTime:20});
+        var normal=performance.measure('normal', {start:12, end:'ordinary'});
+        gc();
+        reservedMark.name==='navigationStart' && reservedMark.startTime===12 &&
+            rejected===3 && normal.startTime===12 && normal.duration===8
+    )JS");
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+}
+
 TEST_F(JsFormalMir, ResourceTimingUsesBrandedPrivateMetadata) {
     ASSERT_EQ(run("typeof PerformanceResourceTiming==='function'").item, ITEM_TRUE);
     gc_set_force_collect_interval(runtime.eval_context->heap->gc, 1);

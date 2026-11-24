@@ -675,13 +675,12 @@ paragraph formatting from the selected row or column. A new table uses the
 document's available page width, accounting for margins and gutter. Merged
 cells, table borders, multi-paragraph cells, and other unsupported table
 properties open in source mode.
-PDF, raster images and other non-text media cannot be edited.
-When a file changes on disk, Reload checks the new content and the selected
-format's round trip before replacing the current edit. If either check fails,
-the unsaved edit stays open.
-Text files must be valid UTF-8 and cannot contain NUL bytes.
-The content checks also identify PDF, GIF and Netpbm headers when the name
-does not identify the format; SVG remains available as source text.
+The source editor accepts valid UTF-8, including embedded NULs, with any file
+extension. An embedded NUL occupies one character position and survives a save
+unless an edit removes it. Text with embedded NUL opens in source view. Reload
+also switches to source view when a text file gains a NUL. If encoding validation
+or the selected view's round-trip check fails, the unsaved edit stays open
+(D10.2.6v2).
 
 **View-only parts:** a part the rich-text editor cannot edit shows as it
 renders, inside a dashed frame, and Save writes it back exactly as it was read.

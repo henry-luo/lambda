@@ -52,6 +52,105 @@ Focused sources and tier outputs are under `temp/formal_semantics_audit_20261124
 
 Fixed in the working tree and archived. See the
 [resolution and verification](<Lambda_Issue_Ledger (fixed).md#lr12-72>).
+## Shadow-positioned ancestry and recovered startup frames — 2026-11-24
+
+Native [RI-227](<Radiant_Issue_Ledger (fixed).md#ri-227>) repairs initial
+containing-block discovery and paint/hit-test offsets across shadow roots.
+Teachable's notice gains its correct width and bottom placement; its separate
+`:host` variable gap leaves a transparent, unreadable overlay and stays high
+under JS13-L2 (**D9.1.1v4 / D9.1.3v2**). All 33 focused checks, seven Chromium
+controls and integer layout lint pass. One accumulated milestone after the
+preceding focused rounds passes 630/630 dynamic and 3851/3852 static cases,
+retaining the exact prior `dom_view_role_nested` failure.
+
+Separate preceding-release rechecks restore pnpm's navigation and Podia's
+complete main page, clearing both. Inventory becomes **88 high, zero critical,
+979 low**. Six native frames refresh with their exact release pins; browser
+references, URLs, history and 1061 other rows remain intact. Lokalise, Agora
+and Modern Life retain their major differences. Chromium/Native JavaScript
+clock equivalence remains unqualified on macOS; no partial capture change is
+installed (**D10.1.7**).
+[Evidence](../test/online/comparison/repairs.html#round-179). Goal remains active.
+
+## Positioned paint restores Maven consent — fixed 2026-11-24
+
+Native [RI-224](<Radiant_Issue_Ledger (fixed).md#ri-224>) repairs culling of
+visible positioned descendants owned by an empty stacking context.
+[RI-225](<Radiant_Issue_Ledger (fixed).md#ri-225>) applies owner overflow scopes
+according to the existing containing-block resolver in both raster and shared
+SVG/PDF traversal (**D9.1.1v4 / D9.1.3v2**). Maven Central's fully initialized
+consent panel now paints and its major review clears. Inventory becomes
+**92 high, zero critical, 975 low**. All **68 focused native checks**, sixteen
+Chromium controls and integer layout lint pass. Milestone baselines run once
+each: **630/630 dynamic**, **3851/3852 static**, retaining the exact prior
+failure. Only Maven's native frame refreshes; browser references and review
+history stay intact. No site workaround or capture-clock change (**D10.1.7**).
+[Evidence](../test/online/comparison/repairs.html#round-175). Goal remains active.
+
+## Online timing and intersection entry interfaces — fixed 2026-11-24
+
+[JS13-L66](jube/JS_Issue_Ledger.md#js13-l66) recognizes the standard navigation
+origin in user timing. Jetty's previously blank page recovers its heading,
+navigation, explanatory text, button and announcement. Its large lazy hero
+still retains a transparent placeholder, so a new manual review keeps it high.
+[JS13-L67](jube/JS_Issue_Ledger.md#js13-l67) puts readonly intersection fields
+on their intrinsic prototype with branded private storage and precise roots
+(**D8.4.4 / D6.3.3 / D9.5.6v2**). This repairs feature detection and the isolated
+polyfill reduction, while the live hero's next cause remains unisolated.
+All **34 focused checks**, nine Chromium controls and **630/630 dynamic
+baseline cases** pass. Native rendering and input are unchanged; the round197
+static milestone is retained. Two native captures refresh, all browser
+references stay intact, and inventory remains **93 high, zero critical,
+974 low**. Capture timing is unchanged (**D10.1.7**).
+[Evidence](../test/online/comparison/repairs.html#round-174). Goal remains active.
+
+## Relational reconciliation and SVG sizing — fixed 2026-11-24
+
+[JS13-L65](jube/JS_Issue_Ledger.md#js13-l65) guards leading sibling relations
+with their enclosing selector anchors. Native [RI-223](<Radiant_Issue_Ledger (fixed).md#ri-223>)
+keeps unrelated inline-style writes local, and [RI-222](<Radiant_Issue_Ledger (fixed).md#ri-222>)
+transfers a definite SVG height through its natural ratio before fallback sizing
+(**D8.4.4 / D9.1.1v4 / D9.1.3v2 / D9.5.6v2**).
+All 65 focused checks pass. Milestone baselines run once: 630/630 dynamic and
+3851/3852 static, retaining the exact previously recorded failure. Swag now
+captures in 81.6 seconds after an earlier timeout; Maven's card text is readable.
+Both keep major reviews for missing UI. Inventory remains **93 high, zero
+critical, 974 low**; capture timing remains unchanged (**D10.1.7**).
+[Evidence](../test/online/comparison/repairs.html#round-173).
+
+## Root-positioned reflow — fixed 2026-11-24
+
+[RI-221](<Radiant_Issue_Ledger (fixed).md#ri-221>) restores NVD's main content
+by recalculating root-positioned descendants after the root height settles,
+using the existing native containing-block and positioning helpers
+(**D9.1.1v4 / D9.1.3v2**). All 59 focused checks pass. The milestone layout
+baselines pass 630/630 dynamic cases and 3851/3852 static cases; the sole
+static failure exactly matches the previously recorded `dom_view_role_nested`
+result. Inventory is **93 high, zero critical, 974 low**. Capture timing remains
+unchanged (**D10.1.7**).
+[Evidence](../test/online/comparison/repairs.html#round-172).
+
+## Text-element fragment tokenization — fixed 2026-11-24
+
+[LI-111](<Lib_Input_Issue_Ledger (fixed).md#li-111>) fixes script `innerHTML`
+source corruption by sharing Input's existing text-context tokenizer selection
+(**D9.1.1v4 / D9.1.3v2**). Both new failing script regressions are repaired;
+all 36 focused native, lexer and rendered DOM controls pass. The existing
+raw-text script-mode limitation remains. No live-page clearance is attributed
+to this parser repair.
+
+A separate current-release review clears Infermedica, Wine Investment's home
+and FAQ pages, and Setpoint. Further review clears Xolo and Vivid. Inventory is
+**94 high, zero critical, 973 low**. Azure retains both missing top navigation
+rows; NVD's footer overlaps its main content. Remote and Swag exceed the
+150-second diagnostic deadline. Swag's sampled startup spends most time in
+whole-document recascading; its mutation trigger is not yet isolated.
+Lokalise retains its missing consent panel; Fable's browser receives unstyled
+prerender HTML while Lambda renders the styled live application. References,
+URLs and the 1000ms post-load frame remain unchanged (**D10.1.7**).
+[Evidence](../test/online/comparison/repairs.html#round-171).
+
+<a id="lr12-71"></a>
 
 ## LR12-71 — The viewer image prepass enters an uninitialized JavaScript realm
 
@@ -1444,7 +1543,7 @@ A survey of byte-level text processing (the [string function tuning proposal](La
 - [LR05-14](<Lambda_Issue_Ledger (fixed).md#lr05-14>): `last_index_of` and `lastIndexOf` can return a position past the real last match.
 - [LR05-15](<Lambda_Issue_Ledger (fixed).md#lr05-15>): indexing a non-ASCII symbol splits a character.
 - [LR09-31](<Lambda_Issue_Ledger (fixed).md#lr09-31>): `format()` dropped large HTML/XML text.
-  [LI-109](<Lib_Input_Issue_Ledger (fixed).md#li-109>) records the JSX and native LaTeX fixes.
+  [LI-114](<Lib_Input_Issue_Ledger (fixed).md#li-114>) records the JSX and native LaTeX fixes.
 
 The survey's other correctness claims are not yet reproduced; they stay in the proposal and are not filed here. *Later on 2026-09-24:* P0 of [the implementation](<impl/Lambda_Impl_String_Func_Tuning.md>) fixed LR05-14 and LR05-15, and both moved to the fixed archive.
 
@@ -2322,7 +2421,7 @@ surface only as a JIT import-resolution miss (`mir.c` logs
 `failed to resolve native fn`), not as a build error.
 
 <a id="lr09-31"></a>LR09-31 (HTML/XML) is [resolved and archived](<Lambda_Issue_Ledger (fixed).md#lr09-31>).
-The JSX and native LaTeX fixes are [archived under LI-109](<Lib_Input_Issue_Ledger (fixed).md#li-109>).
+The JSX and native LaTeX fixes are [archived under LI-114](<Lib_Input_Issue_Ledger (fixed).md#li-114>).
 
 <a id="lr09-34"></a>**LR09-34 · File-based `find(path, pattern, options?)` is designed but not built; it waits on a proposal that does not exist yet · OPEN (logged 2026-10-23, string doc consolidation)**
 GRP27 (USER, 2026-10-04) keeps file-based `find` an `fn` running on `lib/grep`, with the uniform `{value, index}` shape, `file` for a directory or wildcard, and opt-in `line` / `byte_offset` fields. Its determinism is to come from session caching, which a separate proposal is to design together with `input()`, `exists()` and `path#`; that proposal has not been written, so phase G5B of [Lib_Grep.md](lib/Lib_Grep.md) is blocked. Today `find` takes a string or symbol only (`SYSFUNC_FIND`, `SYSFUNC_FIND3` in `lambda/runtime/sys_func_registry.c`), and `io.grep` (a `pn`) is the only file search. Record: [Lambda_Design_String_Pattern.md §7.3](Lambda_Design_String_Pattern.md#73-file-based-findpath---designed-not-built).
@@ -3015,6 +3114,73 @@ Fixed and archived. See the [resolution and verification](<Lambda_Issue_Ledger (
 ## CLI result output truncates at embedded NUL — 2026-11-11
 
 Fixed and archived. See the [resolution and verification](<Lambda_Issue_Ledger (fixed).md#cli-result-embedded-nul>).
+**Status:** FIXED 2026-11-24 under S2.5.9v2. The top-level and procedural
+print paths write the stored byte count. `test/test_nul_text.py` checks
+the full stdout byte sequence on the interpreter and JIT.
+
+Run a script containing `"before"; "a" ++ chr(0) ++ "b"; "after"` in either
+interpreter or JIT. The process exits successfully but stdout contains only
+`"beforea`, with the remaining result missing. A separate numeric inspection
+confirms the string has length 3, character codes 0 and 98 at its last two
+positions, and compares equal to itself. The CLI result path in
+`lambda/main.cpp` prints the length-bearing result buffer using `printf("%s", ...)`,
+which truncates at a NUL; whether the item formatter should escape that NUL in
+the textual representation also needs verification. Evidence:
+`../lambda-input/temp/expl3-script/nul-print-interp.out`, `nul-print-jit.out`,
+and `nul-print-check.out`. This is independent of the TeX engine.
+
+
+
+## DOM text APIs truncate at embedded NUL — 2026-11-24
+
+**Status:** FIXED 2026-11-24 for Text nodes. Creation, CharacterData
+getters and setters, text content, and the observer's old text retain the
+stored length. A Radiant HTML page script using `"BEFORE\u0000AFTER"`
+reports a JavaScript string length of 12. DOM `textContent` reads back only
+`BEFORE` after `document.createTextNode`, assignment to an element's
+`textContent`, or assignment to a text node's `data`. The resulting text
+runs also contain only `BEFORE`.
+
+`lambda/dom/dom_core.cpp` measures new text nodes with `strlen`.
+`lambda/dom/dom.cpp` passes C strings through text content replacement and
+measures CharacterData replacements with `strlen`. The DOM boundary needs to
+preserve the full string under S2.5.9v2 and D9.5.6v2. This blocks faithful DOM
+text transfer for strings containing NUL. Layout has a separate length loss
+in [RI-228](Radiant_Issue_Ledger.md#ri-228).
+
+Evidence: `./lambda.exe layout temp/radiant-nul-1n3w59gr/probe.html` on
+checkout `0a8291edba`. The layout tree in `temp/radiant-nul-1n3w59gr/view.json`
+records `lengths 12/6/6/6`.
+
+## DOM comments and attributes truncate at embedded NUL — 2026-11-24
+
+**Status:** FIXED 2026-11-24 under S2.5.9v2 and D9.5.6v2.
+`document.createComment("a\u0000b").data.length` and the length of
+`getAttribute("data-nul")` after setting that string both returned 1.
+Comment creation narrowed to a C string before MarkBuilder, and the
+attribute bridge did the same before native storage. The adapters now
+pass byte spans through creation, reads, writes, cloning, and mutation
+records. Node properties still report lengths in UTF-16 code units where
+required. Reflected form properties and option selection also keep the
+full value through the native and JavaScript adapters. DOM HTML serialization
+and the JavaScript `XMLSerializer`
+DOMString also preserve the bytes. Lambda's XML formatter applies the
+S2.5.9v2 format error ruling.
+
+`test/test_nul_text.py` verifies the Lambda and JavaScript boundaries.
+Control evidence is in `temp/nul-support/dom-boundaries.json`. See the
+[native attribute storage fix](<Lib_Input_Issue_Ledger (fixed).md#li-110>) and
+[generated content fix](<Radiant_Issue_Ledger (fixed).md#ri-229>).
+
+## Error messages truncate at embedded NUL — 2026-11-24
+
+**Status:** FIXED under S2.5.9v2 and S7.4.4. An error constructed with
+`error("before\u0000after")` read back only `"before"` via `.message`.
+The owned error record and its runtime copy now carry the message length.
+The plain diagnostic formatter displays the zero byte as `\0` and the
+JSON diagnostic formatter emits `\u0000`. The embedded NUL golden
+checks direct and chained messages on both execution tiers.
+
 
 ## Cloud-sync isolated-host baseline qualification — 2026-11-12
 
@@ -3152,6 +3318,21 @@ future comparison profile needs explicit equivalent frame selection rather
 than an engine workaround. Evidence: `temp/online-visual-round15/` contains
 `lattice-final-state.html`, its output/PNG, `authored-timer.html`, and the
 independent `timer-browser.json` plus initial/later screenshots.
+
+**2026-11-24 qualification follow-up:** the shared capture profile now has a
+1000ms post-load window, but Chromium's playback-rate pause freezes only
+CSS/Web Animations while its JavaScript clocks continue during loading.
+Family's current browser frame can also retain faint copy and hidden actions;
+its initial fade is timing-sensitive, not a confirmed missing `Element.animate`
+implementation (the actual page makes zero such calls). A CDP virtual-time
+probe freezes Date/performance and timers, but screenshotting still advances
+rAF timestamps independently. Full begin-frame control is rejected by the
+bundled macOS headless shell: `BeginFrameControl is not supported on MacOS yet`.
+The partial protocol approach is not installed; browser references and native
+**D10.1.7** frame semantics remain unchanged. This limits clock-equivalence
+qualification, not independent engine repairs. Evidence:
+`temp/online-visual-round203/{animation-probe.js,virtual-budget-probe.cjs,controlled-frame-probe.log}`;
+[CDP virtual-time policy](https://chromedevtools.github.io/devtools-protocol/tot/Emulation/#method-setVirtualTimePolicy).
 
 The 2026-11-13 resumed review also reduces WebKit blog's missing article cards
 to only its authored `fade-in` keyframes (opacity0 to1) and `.tile` animation
