@@ -14,6 +14,37 @@ are unchanged. Full evidence is under `../../lambda/temp/kianhup-style/`.
 
 ## Fixed issues
 
+<a id="ri-227"></a>
+
+### RI-227 — Native edge scrolling retains a retired text row
+
+**Fixed 2026-11-24.** Dragging past the source viewport could start the native
+scroll timer as the editor was also recycling its rows. The next native tick
+or input event then dereferenced the retired anchor view. Under D10.2.1 the
+model surface claims its own scrolling. The native state store clears timers
+when their targets retire or leave the view tree under D5.5.1.
+
+<a id="ri-226"></a>
+
+### RI-226 — Retained paint reuses an old selection highlight
+
+**Fixed 2026-11-24.** Dragging over a preformatted editable line changed the
+DOM range while the retained display list still contained the previous
+highlight. The document recording key now includes the painted selection
+revision under D10.2.1. `test_editing_retained_range.json` warms the recording
+and checks highlight pixels while the drag grows and shrinks.
+
+<a id="ri-225"></a>
+
+### RI-225 — Pointer selection collapses on indented source lines
+
+**Fixed 2026-11-24.** Clicking a heavily indented preformatted line can
+place the caret at the line end. Dragging between two positions on that line
+can resolve both endpoints to the same offset. The glyph walks in
+`lambda/module/radiant/event.cpp` now honor preserved spaces for pointer and
+caret geometry under D10.2.1. `edit_src_indented_pointer.json` verifies
+the caret column, the selected span and the saved bytes at 2× device scale.
+
 <a id="ri-224"></a>
 
 ### RI-224 — Source editor loses bytes after NUL on paste and drag

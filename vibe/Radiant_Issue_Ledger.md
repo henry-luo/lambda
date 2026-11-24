@@ -20,6 +20,18 @@ observations still require re-verification. Add new Radiant issues here.
 
 ## Open issues
 
+<a id="ri-227"></a>
+
+- [RI-227 — Native edge scrolling retains a retired text row](<Radiant_Issue_Ledger (fixed).md#ri-227>).
+
+<a id="ri-226"></a>
+
+- [RI-226 — Retained paint reuses an old selection highlight](<Radiant_Issue_Ledger (fixed).md#ri-226>).
+
+<a id="ri-225"></a>
+
+- [RI-225 — Pointer selection collapses on indented source lines](<Radiant_Issue_Ledger (fixed).md#ri-225>).
+
 <a id="ri-224"></a>
 
 - [RI-224 — Source editor loses bytes after NUL on paste and drag](<Radiant_Issue_Ledger (fixed).md#ri-224>).

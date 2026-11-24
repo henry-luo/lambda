@@ -310,3 +310,54 @@ and clipboard now carry byte lengths through cut, copy, paste and selection
 drag. The source surface uses the explicit drop range and groups a move as
 one undoable delta. Headless editor fixtures verify caret placement, deletion,
 undo and redo, clipboard, drag, and exact bytes after saving or reloading.
+
+## 11. Horizontal scrolling and pointer selection (2026-11-24)
+
+The source editor now uses a fixed clipping box with the text offset inside it.
+The gutter width follows the document's line count under CED13. The horizontal
+thumb appears when an unwrapped line in the window overflows. The editor caches
+the width sample for the current buffer version and line window. Track paging,
+thumb dragging, wheel input and caret following share the same range. Resizing
+preserves the viewport's origin within the new bounds.
+
+Under D10.2.1, the native glyph walks now keep preserved spaces when resolving
+clicks, drag endpoints and caret positions. Before the fix the click path
+skipped indentation and both paths collapsed runs of spaces. The same-line
+regression replays a pointer drag and verifies the saved bytes.
+
+The editor UI regressions cover track paging, thumb dragging, horizontal wheel
+input, resizing with the caret off-screen, and precise clicks on indented lines
+at 2× device scale. The previous host and package fail all five assertions
+in `edit_src_indented_pointer.json`.
+
+The release build passes 222 editor UI fixtures. A replay of `view_tree.txt`
+passes six assertions around line 392 at 2× scale. The embedded NUL checks pass
+with ordinary and forced garbage collection. The wider native editing sweep
+passes 122 of 124 fixtures and reproduces the two failures on the previous
+build. In seven paired release replays of the 100,000-line fixture, median total
+time is 1.69 s before and 1.70 s after. The median event phase is 49.0 ms
+before and 52.2 ms after across 19 events.
+
+## 12. Selection painting and edge scrolling (2026-11-24)
+
+The surface publishes an empty native selection when its model selection
+has no intersection with the window. The caret position stays available to
+the next model edit, and scrolling the position back into view restores it.
+
+Under D10.2.1 the native pointer path still extends and paints the visible
+range during a drag. Its retained document recording now keys on the range
+revision, including the transition back to a caret. The source package claims
+edge scrolling at the editing host under CED13. It preserves the model anchor
+while slots are replaced and hit-tests each new window at the held pointer
+position. Pending native autoscroll also retires with its target under D5.5.1.
+
+The release passes all 223 editor UI fixtures. The replay of
+`premake5.mac.lua` hides the caret on scroll and restores the same position
+on return at 2× scale. The pointer fixtures cover live paint, dragging past
+the window, both vertical directions, horizontal scroll and keyboard
+replacement of the selected text. The wider native editing sweep passes
+124 of 126 fixtures. The previous build reproduces both failures.
+
+All 29 source fixtures pass with the interpreter. A focused drag replay
+passes with periodic forced garbage collection and poisoning. The longer
+every-allocation GC replay hits the 70-second harness limit.

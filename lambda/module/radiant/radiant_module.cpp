@@ -2398,6 +2398,13 @@ RADIANT_C_API Item fn_radiant_finish_model_edit(Item surface_item,
         surface_item, result_root.get()));
 }
 
+RADIANT_C_API Item fn_radiant_source_drag_position(Item node, Item x, Item y) {
+    DomElement* host = radiant_dom_element_from_item(node, "SOURCE_DRAG_POSITION");
+    float px, py;
+    if (!host || !radiant_item_to_float(x, &px) || !radiant_item_to_float(y, &py)) return ItemNull;
+    return radiant_source_drag_position(host, px, py);
+}
+
 // Application-window rows: the node names its document, and the window host
 // refuses any document other than the one it presents.
 static DomDocument* radiant_window_document_from_item(Item node_item, const char* op) {
@@ -6261,6 +6268,7 @@ RADIANT_PROVIDE_ENGINE_1(edit_session, fn_radiant_dom_edit_session)
 RADIANT_PROVIDE_ENGINE_2(set_edit_session, fn_radiant_dom_set_edit_session)
 RADIANT_PROVIDE_ENGINE_2(bind_model_edit_surface, fn_radiant_bind_model_edit_surface)
 RADIANT_PROVIDE_ENGINE_2(finish_model_edit, fn_radiant_finish_model_edit)
+RADIANT_PROVIDE_ENGINE_3(source_drag_position, fn_radiant_source_drag_position)
 RADIANT_PROVIDE_ENGINE_2(set_close_guard, fn_radiant_set_close_guard)
 RADIANT_PROVIDE_ENGINE_1(request_window_close, fn_radiant_request_window_close)
 RADIANT_PROVIDE_ENGINE_2(set_window_title, fn_radiant_set_window_title)

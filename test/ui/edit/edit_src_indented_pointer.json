@@ -1,0 +1,19 @@
+{
+  "name": "clicking and dragging on one preformatted line counts each preserved space",
+  "command": "edit",
+  "html": "temp/edit-ui/indented_pointer.txt",
+  "prepare": ["python3", "-c", "from pathlib import Path; p=Path('temp/edit-ui/indented_pointer.txt'); p.parent.mkdir(parents=True, exist_ok=True); p.write_text(' '*64+'abcdefghijklmnopqrstuvwxyz  1234567890  ABCDEFGHIJKLMNOPQRST\\n', encoding='utf-8')"],
+  "viewport": {"width": 1000, "height": 520},
+  "device_scale": 2.0,
+  "events": [
+    {"type": "click", "target": {"text": "klmnop"}},
+    {"type": "assert_text", "target": {"selector": ".src-status-left"}, "contains": "Ln 1, Col 75  ·"},
+    {"type": "mouse_drag", "target": {"text": "pqrst"}, "to_target": {"text": "67890"}},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
+    {"type": "assert_text", "target": {"selector": ".src-status-left"}, "contains": "Ln 1, Col 98  ·  18 selected"},
+    {"type": "type", "text": "Z"},
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "contains": "abcdefghijklmnoZ67890  ABCDEFGHIJKLMNOPQRST"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/indented_pointer.txt", "equals": "                                                                abcdefghijklmnoZ67890  ABCDEFGHIJKLMNOPQRST\n"}
+  ]
+}

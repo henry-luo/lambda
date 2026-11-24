@@ -53,14 +53,15 @@ pub let descriptor = {
 // ---------------------------------------------------------------------------
 // Geometry. The view `vw` is the surface's scroll position and measurements:
 // `top` is the first rendered line and `row` how many of its wrapped rows lie
-// above the surface (design §6.4); `rows` is the rendered row count (the
-// viewport's rows plus OVERSCAN) and `cols` the text width in characters.
+// above the surface (design §6.4); `rows` is the pane's full row capacity
+// plus OVERSCAN, and `cols` the text width in characters.
 // Without `wrap` every line is one row and `row` stays 0, and `left` columns
 // are scrolled out of view to the left (design §6.2); `char_w` is the
 // measured advance of one column.
 // ---------------------------------------------------------------------------
 
 let LINE_H = 20.0
+let HSCROLL_H = 12.0
 // rows rendered before the viewport is measured
 let DEFAULT_ROWS = 48
 let OVERSCAN = 2
@@ -72,12 +73,14 @@ let MEASURE_TEXT = "00000000000000000000"
 // the text column's horizontal padding (.src-text) and a caret's width
 let TEXT_PAD = 14.0
 
-fn new_view() => {handle: null, top: 0, row: 0, rows: DEFAULT_ROWS, cols: 0, wrap: false, left: 0, char_w: 0.0}
+fn new_view() => {handle: null, top: 0, row: 0, rows: DEFAULT_ROWS, cols: 0, wrap: false, left: 0,
+                  char_w: 0.0, width: 0.0, height: 0.0, width_sample: null}
 
 // Rendered rows for a surface `height` pixels tall.
 fn rows_for(height) any^ => max(1, int(height / LINE_H) + OVERSCAN)
 
-fn visible(vw) => max(1, vw.rows - OVERSCAN)
+fn visible(vw) any^ =>
+  max(1, (if (max_left(vw) > 0) rows_for(vw.height - HSCROLL_H) else vw.rows) - OVERSCAN)
 
 // Columns a line occupies: a tab advances to the next stop.
 fn expanded_len(parts, i, col) any^ =>
@@ -100,11 +103,11 @@ fn pos_row(b, vw, p) any^ =>
   else min(display_len(slice(buf.line(b, p.line), 0, p.col)) div vw.cols, line_rows(b, vw, p.line) - 1)
 
 // Lines rendered from the view's top: enough to fill `rows`.
-fn fill_count(b, vw, l, filled, n) any^ =>
-  if (l >= b.count or filled >= vw.rows) n
-  else fill_count(b, vw, l + 1, filled + line_rows(b, vw, l), n + 1)
+fn fill_count(b, vw, l, filled, n, limit) any^ =>
+  if (l >= b.count or filled >= limit) n
+  else fill_count(b, vw, l + 1, filled + line_rows(b, vw, l), n + 1, limit)
 
-fn window_count(b, vw) any^ => fill_count(b, vw, vw.top, 0 - vw.row, 0)
+fn window_count(b, vw) any^ => fill_count(b, vw, vw.top, 0 - vw.row, 0, visible(vw) + OVERSCAN)
 
 // The (line, row) `n` rows after (line, row), or before it for n < 0,
 // stopping at the document's ends.
@@ -146,7 +149,13 @@ fn rows_through(b, vw, line, r) any^ =>
 
 // The view that keeps position `p` visible: unchanged when it already is,
 // else scrolled just enough, as the caret moves in every editor.
-fn follow(b, vw, p) any^ => follow_left(b, follow_rows(b, vw, p), p)
+fn follow(b, vw, p) any^ {
+  let current = constrain_left(b, vw)
+  let next = constrain_left(b, follow_rows(b, current, p))
+  // a long line entering the window can reveal the horizontal bar over the last row.
+  let adjusted = if (visible(next) < visible(current)) constrain_left(b, follow_rows(b, next, p)) else next
+  follow_left(b, adjusted, p)
+}
 
 fn follow_rows(b, vw, p) any^ {
   let r = pos_row(b, vw, p)
@@ -183,20 +192,47 @@ fn follow_left(b, vw, p) any^ {
     let x = display_col(buf.line(b, p.line), p.col)
     let context = min(8, vw.cols div 4)
     if (x < vw.left) {*: vw, left: max(0, x - context)}
-    else if (x >= vw.left + vw.cols - 1) {*: vw, left: x - vw.cols + 1 + context}
+    else if (x >= vw.left + vw.cols - 1) {*: vw, left: min(x - vw.cols + 1 + context, max_left(vw))}
     else vw
   }
 }
 
-// The farthest the text column scrolls: the widest rendered line's end, in view.
-fn max_left(b, vw) {
-  let widths = [for (l in ((vw.top to vw.top + window_count(b, vw) - 1) ^ { [] })) display_len(buf.line(b, l))]
-  max(0, (if (len(widths) == 0) 0 else max(widths)) - vw.cols + 2)
+// The thumb uses the widest rendered line. Selection-only renders and
+// horizontal gestures reuse the sample for the current window.
+fn sample_width(b, vw) any^ {
+  let sample = vw.width_sample
+  if (vw.wrap or vw.cols <= 0 or
+      (sample != null and sample.version == b.version and sample.top == vw.top and sample.rows == vw.rows)) vw
+  else {
+    let widths = [for (t in (buf.lines(b, vw.top, vw.rows))^) display_len(t)]
+    {*: vw, width_sample: {version: b.version, top: vw.top, rows: vw.rows, cols: max(widths)}}
+  }
 }
 
-// The view scrolled sideways by `n` columns.
-fn scrolled_left(b, vw, n) =>
-  if (wrapping(vw)) vw else {*: vw, left: min(max(0, vw.left + n), max(vw.left, max_left(b, vw)))}
+fn max_left(vw) =>
+  if (vw.wrap or vw.width_sample == null) 0 else max(0, vw.width_sample.cols - vw.cols + 2)
+
+fn scrolled_left(vw, n) {
+  let left = min(max(0, vw.left + n), max_left(vw))
+  if (left == vw.left) vw else {*: vw, left: left}
+}
+fn constrain_left(b, vw) any^ => scrolled_left(sample_width(b, vw), 0)
+
+fn viewport_moved(a, b) => a.top != b.top or a.row != b.row or a.left != b.left
+
+// Outside the edge band the pointer moves the selection without scrolling.
+fn edge_speed(p, lo, hi) {
+  let band = min(18.0, (hi - lo) / 4.0)
+  let d = if (p < lo + band) p - lo - band else max(0.0, p - hi + band)
+  max(-1200.0, min(1200.0, d * 35.0))
+}
+
+fn drag_speeds(b, vw, r, x, y) any^ {
+  let dx = edge_speed(x, r.left, r.right)
+  let dy = edge_speed(y, r.top, r.bottom)
+  {x: if ((dx < 0.0 and vw.left > 0) or (dx > 0.0 and vw.left < max_left(vw))) dx else 0.0,
+   y: if (dy != 0.0 and viewport_moved(vw, scrolled(b, vw, if (dy < 0.0) -1 else 1))) dy else 0.0}
+}
 
 // Wheel motion arrives in pixels; whole lines move the window and the
 // remainder carries to the next event, so slow trackpad motion still scrolls.
@@ -247,8 +283,7 @@ fn shift_style(vw) any^ => if (vw.row > 0) "margin-top: " ++ string(0.0 - float(
 
 fn left_px(vw) any^ => float(vw.left) * vw.char_w
 
-// The text column scrolled sideways slides under the gutter, which paints
-// above it; a negative margin widens it by as much, so its right edge stays.
+// Only the text content moves. The surrounding clip box keeps a fixed width.
 fn surface_style(vw) any^ =>
   if (vw.row > 0) shift_style(vw)
   else if (vw.left > 0 and vw.char_w > 0.0) "margin-left: " ++ string(0.0 - left_px(vw)) ++ "px"
@@ -263,8 +298,10 @@ fn line_number(b, vw, l) any^ {
 }
 
 fn gutter(b, vw) =>
-  <div class: "src-gutter", ["aria-hidden"]: "true", style: shift_style(vw),
-    *[for (l in ((vw.top to vw.top + window_count(b, vw) - 1) ^ { [] })) line_number(b, vw, l)]
+  <div class: "src-gutter", ["aria-hidden"]: "true", ["data-lines"]: string(b.count),
+    <div style: shift_style(vw),
+      *[for (l in ((vw.top to vw.top + window_count(b, vw) - 1) ^ { [] })) line_number(b, vw, l)]
+    >
   >
 
 // The scrollbar shows where the window is; a press on the track pages.
@@ -279,6 +316,22 @@ fn scrollbar(b, vw) {
   >
 }
 
+fn horizontal_thumb(vw) {
+  let limit = max_left(vw)
+  let fraction = min(1.0, max(14.0 / max(1.0, vw.width), float(vw.cols) / float(max(1, vw.cols + limit))))
+  {limit: limit, size: fraction,
+   start: if (limit == 0) 0.0 else (1.0 - fraction) * float(vw.left) / float(limit)}
+}
+
+fn horizontal_bar(vw) {
+  let thumb = horizontal_thumb(vw);
+  if (thumb.limit == 0) null else
+    <div class: "src-hscroll", ["aria-hidden"]: "true",
+      <div class: "src-hthumb", style: "left: " ++ string(100.0 * thumb.start) ++
+          "%; width: " ++ string(100.0 * thumb.size) ++ "%">
+    >
+}
+
 // The leaf holding column `col`: the last one starting at or before it.
 fn leaf_index(leaves, col) => max(0, len([for (lf in leaves where lf.start <= col) lf]) - 1)
 
@@ -291,18 +344,23 @@ fn row_pos(b, hs, row, line, col) any^ {
 }
 
 // A model position as a source position in the rendered window, clamped to it.
-fn to_source(b, vw, hs, p) any^ {
+fn to_source(b, vw, hs, p, n) any^ {
   let top = vw.top
-  let n = window_count(b, vw)
   if (n == 0 or p.line < top) pos([0, 0], 0)
   else if (p.line >= top + n) row_pos(b, hs, n - 1, top + n - 1, buf.line_len(b, top + n - 1))
   else row_pos(b, hs, p.line - top, p.line, p.col)
 }
 
 fn source_selection_of(b, vw, hs, sel) any^ {
-  let anchor = to_source(b, vw, hs, sel.anchor)
-  let head = to_source(b, vw, hs, sel.head)
-  text_selection(anchor, head)
+  let n = window_count(b, vw)
+  // an entirely off-window selection has no native range to paint.
+  if (n == 0 or sel_to(sel).line < vw.top or sel_from(sel).line >= vw.top + n) {kind: 'none'}
+  else {
+    let anchor = to_source(b, vw, hs, sel.anchor, n)
+    let head = to_source(b, vw, hs, sel.head, n)
+    if (anchor == head and not collapsed(sel)) {kind: 'none'}
+    else text_selection(anchor, head)
+  }
 }
 
 // A source position from the rendered window as a model position.
@@ -853,10 +911,13 @@ let source_css = "
               background: #ffffff; color: #1f2328; }
   .src-gutter { flex: none; padding: 4px 10px 0 12px; text-align: right; color: #8c959f;
                 background: #f6f8fa; border-right: 1px solid #d8dee4; user-select: none;
-                position: relative; z-index: 1; cursor: default; }
+                cursor: default; }
+  .src-gutter::before { content: attr(data-lines); display: block; height: 0; visibility: hidden; }
   .src-num { height: 20px; line-height: 20px; }
-  .src-text { flex: 1; min-width: 0; padding: 4px 0 0 10px; outline: none; overflow: hidden;
-              white-space: pre; }
+  .src-pane { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .src-viewport { flex: 1; min-height: 0; overflow: clip; }
+  .src-text { min-height: 100%; box-sizing: border-box; padding: 4px 0 0 10px;
+              outline: none; white-space: pre; }
   .src-text .edit-doc > div { height: 20px; line-height: 20px; white-space: pre; }
   /* soft wrap breaks at any character, so a line's rows are its columns over
      the width (design §6.4) */
@@ -865,8 +926,11 @@ let source_css = "
   .src-measure { position: absolute; left: 0; top: 0; visibility: hidden; white-space: pre; }
   .src-scroll { flex: none; position: relative; width: 12px; background: #f6f8fa;
                 border-left: 1px solid #d8dee4; cursor: default; }
-  .src-thumb { position: absolute; left: 2px; right: 2px; min-height: 8px; border-radius: 4px;
-               background: #c4c9cf; }
+  .src-hscroll { flex: none; position: relative; height: 12px; box-sizing: border-box; background: #f6f8fa;
+                 border-top: 1px solid #d8dee4; cursor: default; }
+  .src-thumb, .src-hthumb { position: absolute; border-radius: 4px; background: #c4c9cf; }
+  .src-thumb { left: 2px; right: 2px; min-height: 8px; }
+  .src-hthumb { top: 2px; bottom: 2px; }
   .src-main { position: relative; }
   .src-find { position: absolute; top: 0; right: 24px; z-index: 5; display: flex; align-items: center;
               gap: 6px; padding: 6px 8px; background: #f6f8fa; border: 1px solid #d0d7de;
@@ -939,24 +1003,25 @@ pn rich_view(session, b) {
 // The surface's rows, and its width in characters from the measuring span's
 // advance (soft wrap): on mount and whenever the window resizes.
 fn measured(vw, root) {
-  let surface = dom.get_element_by_id(root, "edit-surface")
+  let surface = dom.get_element_by_id(root, "src-pane")
   let r = if (surface == null) null else dom.bounding_box(surface)
   let probe = dom.get_element_by_id(root, "src-measure")
   let m = if (probe == null) null else dom.bounding_box(probe)
   let char_w = if (m != null and m.width > 0) m.width / float(MEASURE_CHARS) else 0.0
-  // a column scrolled out to the left widens the surface's box by as much
   {*: vw, rows: if (r != null and r.height > 0) rows_for(r.height) else vw.rows,
-   cols: if (r != null and char_w > 0.0) int((r.width - TEXT_PAD - left_px(vw)) / char_w) else vw.cols,
+   cols: if (r != null and char_w > 0.0) max(1, int((r.width - TEXT_PAD) / char_w)) else vw.cols,
+   width: if (r == null) vw.width else r.width,
+   height: if (r == null) vw.height else r.height,
    char_w: if (char_w > 0.0) char_w else vw.char_w}
 }
 
 // Bind the surface once and measure it.
-pn mounted(vw, node, rev) {
+pn mounted(b, vw, node, rev) {
   if (vw.handle != null) { return vw }
   let root = dom.root_node(node)
   let surface = dom.get_element_by_id(root, "edit-surface")
   if (surface == null) { return vw }
-  {*: measured(vw, root), handle: dom.bind_model_edit_surface(surface, rev)}
+  {*: constrain_left(b, measured(vw, root)), handle: dom.bind_model_edit_surface(surface, rev)}
 }
 
 // Put the native selection where the model has it once this render lands;
@@ -976,15 +1041,20 @@ fn typed_step(st, text) any^ => edit_step(st, buf.delta(sel_from(st.sel), sel_to
 edit <source_app> state session: ~.session, b: ~.buf, status: ~.status, sel: caret(buf.loc(0, 0)),
                          vw: new_view(), hist: {undo: [], redo: []},
                          rev: 0, comp: null, hs: ~.hs, frame: 0, wheel_px: 0.0, wheel_dx: 0.0, drag: null, dialog: null,
-                         after_save: null {
+                         after_save: null, selection_drag: null, selection_frame: 0 {
   let dirty = sess.is_dirty(session, b);
   <body class: "edit-app edit-format-source",
     tools.toolbar(files.file_label(session, dirty), history_probe(hist), dirty, null, [],
                   if (session.rich_format != null) tools.rich_view_group else []);
     <div class: "src-main",
       gutter(b, vw);
-      <div id: "edit-surface", class: if (vw.wrap) "src-text src-wrap" else "src-text", contenteditable: "true",
-           spellcheck: "false", tabindex: "0", style: surface_style(vw), apply(window_doc(b, vw, hs))>
+      <div id: "src-pane", class: "src-pane",
+        <div id: "src-viewport", class: "src-viewport",
+          <div id: "edit-surface", class: if (vw.wrap) "src-text src-wrap" else "src-text", contenteditable: "true",
+               spellcheck: "false", tabindex: "0", style: surface_style(vw), apply(window_doc(b, vw, hs))>
+        >
+        horizontal_bar(vw)
+      >
       scrollbar(b, vw);
       <span id: "src-measure", class: "src-measure", ["aria-hidden"]: "true", MEASURE_TEXT>
       if (hs.find != null) find_bar(hs.find) else null
@@ -997,7 +1067,7 @@ on beforeinput(evt) {
   return 'pass'
 }
 on editaction(evt) {
-  vw = mounted(vw, evt.target, rev)
+  vw = mounted(b, vw, evt.target, rev)
   let input_type = evt.input_type
   let target = action_selection(b, vw, hs, sel, evt)
   let drop = if (input_type == "insertFromDrop" and evt.source_target_ranges != null and
@@ -1040,16 +1110,18 @@ on editaction(evt) {
 }
 on selectionchange(evt) {
   let picked = model_selection(b, vw.top, hs, evt.source_selection)
+  let anchor = if (selection_drag == null) null else selection_drag.anchor
+  if (selection_drag != null) { selection_drag = null; selection_frame = 0 }
   // the selection the surface itself projected keeps the model's own
   if (picked != null and evt.source_selection != source_selection_of(b, vw, hs, sel)) {
-    sel = picked
+    sel = if (anchor == null) picked else {*: picked, anchor: anchor}
     hist = closed(hist)
     // the status redraw replaces the rows the native caret is in
     rev = project(vw, b, hs, sel, rev)
   }
 }
 on edit_cmd(req) {
-  vw = mounted(vw, req.node, rev)
+  vw = mounted(b, vw, req.node, rev)
   let cmd = req.cmd
   if (cmd == "view_rich") {
     let next = rich_view(session, b)
@@ -1093,7 +1165,7 @@ on edit_dialog(req) {
   if ((filed.reloaded != null)^) {
     b = filed.reloaded
     sel = caret(buf.loc(0, 0))
-    vw = {*: vw, top: 0, row: 0}
+    vw = constrain_left(b, {*: vw, top: 0, row: 0, left: 0, width_sample: null})
     hist = {undo: [], redo: []}
     hs = new_highlight(session.path)
     frame = request_exact(req.node, hs, b, vw, frame)
@@ -1105,7 +1177,7 @@ on edit_dialog(req) {
 }
 on keydown(evt) {
   // assigning unchanged state rebuilds the rows before the pending text input
-  if ((vw.handle == null)^) { vw = mounted(vw, evt.target, rev) }
+  if ((vw.handle == null)^) { vw = mounted(b, vw, evt.target, rev) }
   let primary = evt.metaKey == true or evt.ctrlKey == true
   if ((dialog != null)^) {
     return files.dialog_keydown(dialog, evt)^
@@ -1227,30 +1299,94 @@ on keydown(evt) {
 // lines, and the selection is projected again because rows changed under it.
 on wheel(evt) {
   if ((dialog != null)^) { return 'pass' }
-  vw = mounted(vw, evt.target, rev)
+  vw = mounted(b, vw, evt.target, rev)
   let step = wheel_step(wheel_px + float(evt.deltaY or 0))
   wheel_px = step.rest
   // sideways motion moves whole columns; the remainder carries like lines
   let dx = wheel_dx + float(evt.deltaX or 0)
   let cols = if (vw.char_w > 0.0) int(dx / vw.char_w) else 0
   wheel_dx = dx - float(cols) * vw.char_w
-  let next = scrolled_left(b, scrolled(b, vw, step.lines), cols)
-  if ((next.top != vw.top or next.row != vw.row or next.left != vw.left)^) {
+  let next = scrolled_left(sample_width(b, scrolled(b, vw, step.lines)), cols)
+  if (viewport_moved(vw, next)^) {
     vw = next
     frame = request_exact(evt.target, hs, b, vw, frame)
     rev = project(vw, b, hs, sel, rev)
   }
   'prevent-default'
 }
+// Native drag reports the selection after extending it. Begin editor-owned
+// scrolling at an edge and keep the original anchor across recycled slots.
+on selectiondrag(evt) {
+  if ((dialog != null or drag != null)^) { return 'prevent-default' }
+  let root = dom.root_node(evt.target)
+  let viewport = dom.get_element_by_id(root, "src-viewport")
+  let r = if (viewport == null) null else dom.bounding_box(viewport)
+  if ((r == null)^) { return 'prevent-default' }
+  let speed = drag_speeds(b, vw, r, evt.x, evt.y)
+  let moving = speed.x != 0.0 or speed.y != 0.0
+  if ((selection_drag == null and not moving)^) { return 'prevent-default' }
+  let picked = model_selection(b, vw.top, hs, evt.source_selection)
+  if ((picked == null)^) { return 'prevent-default' }
+  if (selection_drag == null) {
+    selection_drag = {anchor: picked.anchor, x: evt.x, y: evt.y, time: evt.time_stamp, dx: 0.0, dy: 0.0}
+    hist = closed(hist)
+  } else {
+    selection_drag = {*: selection_drag, x: evt.x, y: evt.y}
+  }
+  sel = {*: picked, anchor: selection_drag.anchor}
+  rev = project(vw, b, hs, sel, rev)
+  if ((moving and selection_frame == 0)^) {
+    selection_drag = {*: selection_drag, time: evt.time_stamp, dx: 0.0, dy: 0.0}
+    selection_frame = dom.request_frame(dom.query_selector(root, "body"), "source_selection_frame")
+  }
+  'prevent-default'
+}
+
+on source_selection_frame(evt) {
+  if ((evt.detail != selection_frame or selection_drag == null)^) { return 'pass' }
+  selection_frame = 0
+  let root = dom.root_node(evt.target)
+  let viewport = dom.get_element_by_id(root, "src-viewport")
+  let host = dom.get_element_by_id(root, "edit-surface")
+  let r = if (viewport == null) null else dom.bounding_box(viewport)
+  if ((host == null or r == null or dialog != null)^) { selection_drag = null; return 'handled' }
+  let d = selection_drag
+  // After a scroll, hit-test the new window at the same pointer coordinates.
+  let x = min(max(d.x, r.left), r.right - 1.0)
+  let y = min(max(d.y, r.top + min(8.0, r.height / 2.0)), r.bottom - 1.0)
+  let hit = dom.source_drag_position(host, x, y)
+  if ((hit == null)^) { selection_drag = null; return 'handled' }
+  let head = from_source(b, vw.top, hs, hit)
+  let speed = drag_speeds(b, vw, r, d.x, d.y)
+  let elapsed = min(50.0, max(0.0, evt.time_stamp - d.time)) / 1000.0
+  let step = wheel_step(if (speed.y == 0.0) 0.0 else d.dy + elapsed * speed.y)
+  let dx = if (speed.x == 0.0) 0.0 else d.dx + elapsed * speed.x
+  let cols = if (vw.char_w > 0.0) int(dx / vw.char_w) else 0
+  let vertical = if (step.lines == 0) vw else scrolled(b, vw, step.lines)
+  let next = scrolled_left(sample_width(b, vertical), cols)
+  if ((viewport_moved(vw, next) or head != sel.head)^) {
+    sel = {anchor: d.anchor, head: head, goal: null}
+    vw = next
+    frame = request_exact(evt.target, hs, b, vw, frame)
+    rev = project(vw, b, hs, sel, rev)
+  }
+  if ((speed.x != 0.0 or speed.y != 0.0)^) {
+    selection_drag = {*: d, time: evt.time_stamp, dx: dx - float(cols) * vw.char_w, dy: step.rest}
+    selection_frame = dom.request_frame(evt.target, "source_selection_frame")
+  }
+  'handled'
+}
+
 // A press on the thumb starts a drag; a press on the track pages toward it.
 // Shift+press extends the model selection: its anchor may lie outside the
 // window, where the clamped DOM selection cannot extend from it.
 on mousedown(evt) {
+  if ((selection_drag != null and evt.button == 0)^) { selection_drag = null; selection_frame = 0 }
   // A press on a line number selects the line, as in every editor; Shift
   // extends the selection to it (design §6.3).
   let num = if (dom.node_type(evt.target) == 1) evt.target else dom.parent_node(evt.target)
   if ((dialog == null and num != null and dom.node_type(num) == 1 and dom.matches(num, ".src-num"))^) {
-    vw = mounted(vw, evt.target, rev)
+    vw = mounted(b, vw, evt.target, rev)
     let l = int(dom.get_attribute(num, "data-line"))
     let start = buf.loc(l, 0)
     let stop = if (l + 1 < b.count) buf.loc(l + 1, 0) else buf.loc(l, buf.line_len(b, l))
@@ -1264,7 +1400,7 @@ on mousedown(evt) {
     return 'prevent-default'
   }
   if ((evt.shiftKey == true and evt.source_pos != null and dialog == null)^) {
-    vw = mounted(vw, evt.target, rev)
+    vw = mounted(b, vw, evt.target, rev)
     sel = {anchor: sel.anchor, head: from_source(b, vw.top, hs, evt.source_pos), goal: null}
     hist = closed(hist)
     vw = follow(b, vw, sel.head)
@@ -1272,28 +1408,54 @@ on mousedown(evt) {
     rev = project(vw, b, hs, sel, rev)
     return 'prevent-default'
   }
-  if (dom.node_type(evt.target) != 1) { return 'pass' }
+  if ((dom.node_type(evt.target) != 1 or evt.button != 0)^) { return 'pass' }
+  let horizontal = dom.matches(evt.target, ".src-hthumb, .src-hscroll")
+  if (horizontal) {
+    let thumb = horizontal_thumb(vw)
+    if ((thumb.limit == 0)^) { return 'prevent-default' }
+    let on_thumb = dom.matches(evt.target, ".src-hthumb")
+    let track = if (on_thumb) dom.parent_node(evt.target) else evt.target
+    let r = dom.bounding_box(track)
+    if (on_thumb) {
+      drag = {axis: 'x', origin: evt.x, left: vw.left, span: thumb.limit,
+              travel: r.width * (1.0 - thumb.size)}
+    }
+    else {
+      let page = max(1, vw.cols - 1)
+      vw = scrolled_left(vw, if (evt.x < r.left + r.width * thumb.start) 0 - page else page)
+      rev = project(vw, b, hs, sel, rev)
+    }
+    return 'prevent-default'
+  }
   let on_thumb = dom.matches(evt.target, ".src-thumb")
   if (not on_thumb and not dom.matches(evt.target, ".src-scroll")) { return 'pass' }
   let track = if (on_thumb) dom.parent_node(evt.target) else evt.target
   let r = dom.bounding_box(track)
-  if (on_thumb) { drag = {y: evt.y, top: vw.top, height: r.height} }
+  if (on_thumb) { drag = {axis: 'y', origin: evt.y, top: vw.top, height: r.height} }
   else {
     let thumb_y = r.top + r.height * float(vw.top) / float(max(1, b.count))
     let page = max(1, visible(vw) - 1)
-    vw = scrolled(b, vw, if (evt.y < thumb_y) 0 - page else page)
+    vw = constrain_left(b, scrolled(b, vw, if (evt.y < thumb_y) 0 - page else page))
     frame = request_exact(evt.target, hs, b, vw, frame)
+    rev = project(vw, b, hs, sel, rev)
   }
   'prevent-default'
 }
 // The thumb follows the pointer: its travel over the track is the document's.
 on mousemove(evt) {
   if (drag == null) { return 'pass' }
-  let lines = int((evt.y - drag.y) * float(b.count) / max(1.0, drag.height))
-  let next = scrolled_to(b, vw, drag.top + lines)
-  if ((next.top != vw.top or next.row != vw.row)^) {
+  let next = if (drag.axis == 'x') {
+      let cols = int(round((evt.x - drag.origin) * float(drag.span) / max(1.0, drag.travel)))
+      scrolled_left(vw, drag.left + cols - vw.left)
+    }
+    else {
+      let lines = int((evt.y - drag.origin) * float(b.count) / max(1.0, drag.height))
+      constrain_left(b, scrolled_to(b, vw, drag.top + lines))
+    }
+  if (viewport_moved(vw, next)^) {
     vw = next
     frame = request_exact(evt.target, hs, b, vw, frame)
+    rev = project(vw, b, hs, sel, rev)
   }
   'prevent-default'
 }
@@ -1352,12 +1514,16 @@ on source_frame(evt) {
 // Measure the surface as soon as it is laid out, and again whenever the
 // window resizes: the rendered rows and the wrap width follow it.
 on load(evt) {
-  vw = mounted(vw, evt.target, rev)
+  vw = mounted(b, vw, evt.target, rev)
   frame = request_exact(evt.target, hs, b, vw, frame)
 }
 on resize(evt) {
   if ((vw.handle == null)^) { return }
-  vw = follow(b, measured(vw, dom.root_node(evt.target)), sel.head)
+  let next = measured(vw, dom.root_node(evt.target))
+  // retain the viewport's origin when the caret is off-screen after manual scrolling.
+  let row = if (wrapping(next)) min(vw.row * vw.cols div next.cols, line_rows(b, next, vw.top) - 1) else 0
+  vw = constrain_left(b, clamped(b, next, {line: vw.top, row: row}))
+  drag = null
   frame = request_exact(evt.target, hs, b, vw, frame)
   rev = project(vw, b, hs, sel, rev)
 }
