@@ -16,7 +16,7 @@ Settled elsewhere; restated here as the substrate this proposal builds on.
 
 **Surface (PD9/PD10):** `input()` is eager, `stream()` is lazy. A stream is a **recorded pipeline plan**, not running code — laziness is carried by the stream *value* through unchanged `|>`/`for` semantics (dispatch, not new operator semantics); terminal ops force. Value-backed streams are re-forcible values; live-I/O streams are one-shot resources, **`pn`-only**.
 
-**Pipe operator (`|>`):** auto-maps `~` over collection elements; without `~`, passes the whole operand (aggregated pipe); `that` filters. On a stream value, the same operators build the plan instead of executing — PD10's dispatch rule.
+**Pipe operator (`|>`):** auto-maps `~` over collection elements; without `~`, passes the whole operand (aggregated pipe); `|:` filters (S10.1.6v3). On a stream value, the same operators build the plan instead of executing — PD10's dispatch rule.
 
 **Execution at forcing (K22–K24):** ordered by default (a parallelized `fn` stage must not reorder output); `fn` segments auto-parallelize via Stage-A fork-join, `pn` stages are sequential anchors; the executor's inter-stage plumbing uses a runtime-internal blocking send on bounded queues.
 
@@ -37,7 +37,7 @@ Everything below is *additive* to this design. No decision in this document reop
 
 ## 2. Text pipelines: a framing preset, not a third core (PL2)
 
-**PL2 — Text is not a new pipeline kind.** A text pipeline is the Item chunk-queue carrying *string* Items, one string per record (typically one per line). All existing operators, ordering guarantees, error handling, and forcing semantics apply verbatim — `|> ~`, `that`, `group by`, terminal ops. The design should state this explicitly so no parallel "text stream" machinery ever grows.
+**PL2 — Text is not a new pipeline kind.** A text pipeline is the Item chunk-queue carrying *string* Items, one string per record (typically one per line). All existing operators, ordering guarantees, error handling, and forcing semantics apply verbatim — `|> ~`, `|:`, `group by`, terminal ops. The design should state this explicitly so no parallel "text stream" machinery ever grows.
 
 What text *does* need is the adapter set that produces string-Item streams from byte sources — specified in Part 2 §5 as rungs of the decode ladder, because they are shared with binary:
 
@@ -50,7 +50,7 @@ Illustrative CLI-kind pipeline (surface details subject to O-PL1):
 ```lambda
 pn main() {
     stream("/var/log/app.log", 'lines')          // lazy text stream: one string per line
-    |> that contains(~, "ERROR")                 // ordinary that-filter over string Items
+    |: contains(~, "ERROR")                      // filter over line strings
     |> parse_log_line(~)                         // fn stage → data pipeline from here on
     |> group(.module)
     |> output("errors.json")
@@ -69,13 +69,15 @@ Note the ladder crossing mid-pipeline: the moment a stage maps strings to maps, 
 
 **PL3 — Chunk boundaries are never observable semantics; byte order is pinned.** A binary stream is a sequence of *bytes* delivered in chunks whose boundaries are accidental. Spec rule: **the executor may split and merge binary chunks freely**; equality and all operator semantics are defined on the concatenated byte sequence. This is the mirror image of K22 — where data streams *pin element order* and forbid reordering, binary streams *pin byte order* and release chunking. Same philosophy (deterministic result, execution strategy invisible), applied to the regime's actual invariant. Practical consequences: the executor may coalesce small chunks between stages (K24's granularity note already batches internally — for binary this becomes *licensed at the semantic level*, not just an internal trick), and any conformance test asserting a particular chunking is a bug.
 
-**PL4 — Binary streams do not auto-map `~`.** In a data/text pipeline, `bytes_stream |> ~ * 2`-style per-element mapping is meaningful because each element is a record. On a binary stream a chunk is *not* a record, so per-chunk auto-mapping is wrong by construction (the result would depend on accidental chunking, violating PL3). Dispatch rule (the same PD10 dispatch mechanism that makes `|>` lazy on streams): on a binary stream, `|>` accepts only
+**PL4 — General byte streams require explicit framing.** Live process stdout has a line interpretation for per-item pipes under **S14.3.5**. The runtime applies the incremental UTF-8 line adapter before evaluating the first map or filter. Whole-value byte connections and general binary streams retain the dispatch below. [Shell piping](Lambda_IO_Shell_Piping.md#mapping-and-filtering-stdout-by-line)
+
+In a data/text pipeline, `bytes_stream |> ~ * 2`-style per-element mapping is meaningful because each element is a record. On a binary stream a chunk is *not* a record, so per-chunk auto-mapping is wrong by construction (the result would depend on accidental chunking, violating PL3). Dispatch rule (the same PD10 dispatch mechanism that makes `|>` lazy on streams): on a binary stream, `|>` accepts only
 
 - **whole-stream terminals** — `output(sink)`, `send_to(h)`, hashing/length-style reductions defined on the byte sequence;
 - **framing/decoding stages** — the ladder of §5, which *convert* to a text or data stream (after which normal `~` semantics resume);
 - **transducer stages** — the stateful byte-transforms of PL6 (decompress, decrypt, …), which are chunk-boundary-agnostic by contract.
 
-A `~`-expression applied directly to a binary stream is a **compile-time error** with a fix-it pointing at the framing stages ("did you mean `|> lines()` / `|> frames(...)`?"). This keeps the PL3 invariant unrepresentable-to-violate at the surface, in the same spirit as K20c making the selective-receive trap unrepresentable.
+A `~`-expression applied directly to a general unframed binary stream is a **compile-time error** with a fix-it pointing at the framing stages ("did you mean `|> lines()` / `|> frames(...)`?"). This keeps the PL3 invariant unrepresentable-to-violate at the surface, in the same spirit as K20c making the selective-receive trap unrepresentable.
 
 ## 4. Representation: `binary` joins the flat family (PL5) · byte-metric queues (PL7)
 
@@ -191,7 +193,7 @@ Sequencing guard (K17/K27 verbatim): build the byte-mode core under the Lambda e
 - **PL1 — Two regimes, not three.** Text pipelines are data pipelines over string Items; binary is the only new regime, distinguished semantically (record boundaries vs accidental chunking). No third core, ever. §0.
 - **PL2 — Text = framing preset.** All data-pipeline semantics apply verbatim to string-Item streams; text needs only the decode/frame adapters (specified as PL6 rungs) plus source sugar (spelling open, O-PL1). §2.
 - **PL3 — Re-chunking license.** Binary chunk boundaries are never observable; executor may split/merge freely; semantics defined on the concatenation; byte order pinned. The K22-analog: pin the regime's real invariant, release the accident. §3.
-- **PL4 — No `~` auto-map on binary streams.** Whole-stream terminals, framing/decode stages, and transducers only; direct `~` is a compile-time error pointing at framing. Makes PL3 violations unrepresentable (K20c spirit). §3.
+- **PL4 — Frame byte streams before per-item operations.** Live process stdout supplies UTF-8 lines to per-item pipes (S14.3.5). General binary streams require explicit framing. §3.
 - **PL5 — Binary joins the flat family.** Refcounted immutable pointer-free buffer + zero-copy `(buffer, offset, len)` sub-views; BEAM 64-byte inline/refc threshold (K29b precedent); K5-shareable across isolates by construction. Representation change to the existing type, not a new type. §4.
 - **PL6 — Transducer stage shape.** `transform(state, chunk) → (state, [out...])` + `flush(state)` at end-of-stream (before completion signal); cancel skips flush; `T^E` errors per PD12; classified `pn`/sequential-anchor under K23; one-to-one with WHATWG TransformStream. §5.
 - **PL7 — Byte-metric queues.** Layer-1 queue gains a per-element `size()` measure; bound = sum of measures; count mode ≡ existing behavior; byte mode for binary. ≡ WHATWG Count/ByteLength queuing strategies; one hook, no second queue type. §4.

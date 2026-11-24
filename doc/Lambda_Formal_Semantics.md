@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 103.1.0 (2026-11-24)
+**Spec version:** 105.0.0 (2026-11-25)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -466,7 +466,7 @@ harnesses.
   expression (S2.5.2v2), a block (S2.5.3), content (S2.6), a query (S8.2.4v3) —
   because those compose values and content and must splice where they land.
   Everything that *processes* a sequence returns an array: the mapping pipe
-  and `|:` (S10.1.2v6, S10.1.6v2), `sort`, `reverse`, `unique`, `take`, `drop`,
+  and `|:` (S10.1.2v7, S10.1.6v3), `sort`, `reverse`, `unique`, `take`, `drop`,
   `slice`, the positional selections `[i to j]`, `[mask]` and `[[i, j]]`
   (S8.2.4v3), `zip`, `fill`, `split`, `find`, `varg()`, rest
   parameters, `content(e)`, `keys`/`values`/`names` (S8.4.1v2), and the
@@ -1579,8 +1579,8 @@ cardinality, and keep failure on a separate channel.* [RF1–RF6, §7.7 record]
   performs.** Consequences, not separate rules: `len("str")` = 3 (text walks
   by code point, S2.5.8); `len(5)` = **0** — a non-text scalar has no
   content, so `for (i in 5)` iterates nothing, while the mapping pipe and
-  `|:` treat a scalar as one member by their own rule (S10.1.2v6,
-  S10.1.6v2): a placement, not an iteration;
+  `|:` treat a scalar as one member by their own rule (S10.1.2v7,
+  S10.1.6v3): a placement, not an iteration;
   `len([[1,2],[3]])` = **2** (shallow — the count indexing needs);
   `len({a: null, b: 2})` = 2; `len(null)` = 0 (absence is the empty
   sequence); `len(err)` = **error** (iterating an error yields an error, not
@@ -1747,19 +1747,19 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
 ### S10.1 Union, pipe, and filter
 
 - **S10.1.1v5*** **`|`, `&` and `!` are the type operators**: type expressions, match or-patterns, string patterns and value expressions alike (types are first-class); `|>` is the pipe. In type patterns and ordinary expressions, left-associative binary operators bind from tightest to loosest in this order: `to`, `&`, `!`, `|`. Inside a string or symbol pattern (S11.1.2v4) `|` is the only binary operator, as alternation, and `!` is prefix-only and complements a set of single characters. Intersecting or excluding patterns is `&` or `!` between whole patterns, `\(A) & \(B)` or `\(A) ! \(B)`. In a value expression a type operand is itself and any other operand reads as its literal type — a scalar as the singleton of its value, a container as the pattern its literal spells in type position (a range as its range type, S11.1.3) — and the result is always a type: `1 | 2` is the type admitting 1 or 2 (an enum), `1 | 1` is a type too, `int | null` is `int?`, and `1 & 2` is the **empty type** `none` (S11.1.7), which admits nothing — distinct from the null type, which admits `null`. A type operation never collapses to a value, so its result has the same meaning wherever it is written: `type t = 1 & 2`, `let v: 1 & 2` and `let x = 1 & 2` denote the same type, and so do `type T = [1, 2] | 3` and `let t = [1, 2] | 3`. **Binary-schema annotation exception (USER, 2026-10-15):** directly after `: binary` or a binary field's complete logical type, a trailing `& {…}` is physical-layout metadata (S11.5.1v2), not a type intersection. It does not change `&` in another type or value expression; `that` remains a predicate. Set algebra on containers is not an operator: it is the functions `unique(a, b, ...)` (≡ `unique(a ++ b ++ ...)`), `intersect(a, b, ...)` (the first operand's items held by every other) and `except(a, b)` (its items not held by the second), in first-operand order without duplicates, membership by `in` (S8.1.1), returning an array (S2.5.7v4) — text keeps its kind (S2.5.8). *Why: union is the concept Lambda needs everywhere; letting a container turn `|` into a merge made one operator mean "either" or "both" by operand kind, which C6 ruled out.* [C6, C6.4; SP17, SP18, SP20]
-- **S10.1.2v6*** The pipe is dual-mode on a parse-time syntactic test: a body
+- **S10.1.2v7*** The pipe is dual-mode on a parse-time syntactic test: a body
   with a **free current-item or key reference** is a mapping pipe. It binds
   `~` per item and `~key` to its key or index. The context roots in S2.4.8
   do not count as either reference. A body without either reference selects whole-value application
   (`data |> sum` ≡ `sum(data)`; extra args append: `data |> take(3)` ≡
-  `take(data, 3)`). A non-callable whole-value destination is a type error except for the file sink in S10.1.4v2. The mapping
+  `take(data, 3)`). A non-callable whole-value destination is a type error except for the file sink in S10.1.4v2. On live process stdout the mapping pipe walks lines and yields a stream (S14.3.5). On ordinary values the mapping
   pipe walks what `for … in` walks — an array or list by item, a map by
   value, an element by attribute values then children (S8.1.2v2), text by
   code point (S2.5.8) — and its result is an **array** for every sequence
   source, a list included (S2.5.7v4: `(1, 2, 3) |> ~ * 2` is `[2, 4, 6]`),
   text excepted, which gives its own kind when every result item belongs to
   it (S2.5.8). A non-sequence scalar pipes as one value: `5 |> ~ + 1` is `6`.
-  Dual mode belongs to `|>` alone: the filter stage `|:` (S10.1.6v2) shares the
+  Dual mode belongs to `|>` alone: the filter stage `|:` (S10.1.6v3) shares the
   walk and the kind rule. Its body must refer to the current item or key. [C6]
 - **S10.1.3** `~` is lexically scoped to the RHS of its pipe; nested
   constructs shadow, **innermost-wins** — uniformly for pipes, `|:` filters,
@@ -1782,24 +1782,25 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
   contract does. A bare name in `p` may read a field of `x` (S10.1.7v4). It
   sits at the pipe precedence tier, left-associative, so
   `c |> f that p` applies the proviso to the piped result. Filtering the
-  members of a sequence is `|:` (S10.1.6v2): the former filter reading of
+  members of a sequence is `|:` (S10.1.6v3): the former filter reading of
   `that` (S10.1.5v2) is superseded, and an old filter site `xs that p` is
   still legal under the new meaning — the fixture sweep converts every one.
   The filter was spelled `where` before `that` (S10.3.1v3). [Expr_Pipe §F.5]
-- **S10.1.6v2*** **`|:` is the filter stage of the pipe family.** `c |: p` walks
-  exactly what `c |> body` walks (S10.1.2v6) — an array or list by item, a map
+- **S10.1.6v3*** **`|:` is the filter stage of the pipe family.** `c |: p` walks
+  live process stdout by line and yields a stream of the survivors (S14.3.5). On ordinary values it walks
+  exactly what `c |> body` walks (S10.1.2v7) — an array or list by item, a map
   by value, an element by attribute values then children (S8.1.2v2), text by
   code point (S2.5.8), a non-sequence scalar as one member — binds `~` to the
   member and `~key` to its key or index (S10.1.3), and keeps the members for
   which `p` is truthy. **Its result kind is the pipe's, by reference**, not a
-  rule of its own: as S10.1.2v6 and S2.5.7v4 give the mapping pipe, `|:`
+  rule of its own: as S10.1.2v7 and S2.5.7v4 give the mapping pipe, `|:`
   returns an **array** of the survivors for every sequence source — a list
   included, so `(1, 2, 3) |: ~ > 2` is `[3]` and never collapses — `[]` when
   none survive (a map's keys are dropped, SO38); text gives its own kind,
   `""` when empty (S2.5.8); a non-sequence scalar gives itself or `null`. **`|:` is single-mode:** a body with no free
-  current-item or key reference (S10.1.2v6) is a compile error — `xs |: is_even` is rejected, the idiom is
+  current-item or key reference (S10.1.2v7) is a compile error — `xs |: is_even` is rejected, the idiom is
   `xs |: is_even(~)` — because `|>` reads a `~`-free body as whole-value
-  application (S10.1.2v6) and the two pipes must not read the same text two
+  application (S10.1.2v7) and the two pipes must not read the same text two
   ways; for the same reason its body never reads a bare name as a field
   (S10.1.7v4). Pipe precedence tier, left-associative: `c |: p |> f |: q` chains left
   to right. The spelling is set-builder "such that" (`{x ∈ S | P(x)}`,
@@ -1838,8 +1839,8 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
 
   A pipe-family body (`|>`, `|:`) reads bare names as ordinary names, even
   nested in one of these bodies. `|>` tells mapping from application by the
-  free `~` its text spells (S10.1.2v6), and `|:` must read that text the
-  same way (S10.1.6v2). A field supplied behind the text would also let a
+  free `~` its text spells (S10.1.2v7), and `|:` must read that text the
+  same way (S10.1.6v3). A field supplied behind the text would also let a
   misspelled `xs |: is_evne` pass E238 as a silent `[]`. For the same
   reason, a `~` that a nested body binds, spelled or implicit, is never free
   in an enclosing pipe body (S10.1.3): `xs |> match (1) { case int: ~ * 10 }`
@@ -1884,7 +1885,7 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
 - **S10.3.1v3** `and or not is in to div that at eq ne lt le gt ge` — Lambda is
   a keyword-operator language; new operators prefer words over sigils. `where`
   is **not** among them: binary `where` was retired as the filter spelling
-  (first for `that`, S10.1.5v2; the filter is now `|:`, S10.1.6v2, and `that`
+  (first for `that`, S10.1.5v2; the filter is now `|:`, S10.1.6v3, and `that`
   is the proviso, S10.1.5v3), and `where` survives only as a `for`-header
   clause word. A `where` in infix position is the retired spelling and is a
   compile error naming `|:`, never a silent reinterpretation. [Grammar_Reduce2
@@ -1900,9 +1901,9 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
   [PTH3, PTH5, PTH9]
 - **S10.4.2*** Bare `~~` is exactly `~.~~`: it is valid exactly where `~` is
   bound, selects the innermost current-value context, and counts as a free
-  `~` for the S10.1.2v6 mapping-pipe test. Thus `~~.~~.a` means
+  `~` for the S10.1.2v7 mapping-pipe test. Thus `~~.~~.a` means
   `~.~~.~~.a`; it never denotes a relative path, whose form starts with `\.`.
-  [S10.1.2v6,
+  [S10.1.2v7,
   S10.1.3, PTH6]
 - **S10.4.3v2*** Contextual parent navigation is occurrence-based and
   carries lineage in the evaluation context as a navigation path, cursor, or
@@ -2669,6 +2670,17 @@ ordinary call surface.* Full record: [`Lambda_Design_Concurrency.md`](../vibe/La
   A successful final stage or file write cannot mask an upstream failure.
   An upstream broken pipe caused by a successful early consumer is expected.
   Completion retains the individual stage statuses. [PL8; Shell Piping §Execution and completion]
+- **S14.3.5*** **Per-item pipes on live process stdout consume UTF-8 lines.**
+  A mapping `|>` or a filter `|:` binds `~` to each decoded line and yields a stream of Lambda values.
+  Decode incrementally across read boundaries. Remove each LF or CRLF terminator, preserve blank lines,
+  and emit a final unterminated line. Empty stdout yields zero lines. Invalid UTF-8 raises a decoding
+  error during consumption, including an incomplete character at EOF (S14.3.2).
+  Whole-value connections to external commands and file sinks carry the original bytes. [PL2, PL4]
+- **S14.3.6v2*** **A list, array or stream of Lambda values piped to an external command supplies its stdin.**
+  Write each outer item in order, followed by one LF. For a string, write its UTF-8 contents verbatim.
+  For any other item, write its usual CLI result representation without the CLI's final newline.
+  Nested containers remain single items (S2.5.6). An empty input supplies zero bytes.
+  Encode a value stream incrementally. Direct process-to-process pipes carry exact bytes (S14.3.5).
 
 ---
 
@@ -3298,6 +3310,8 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 
 | Ruling | Status |
 |---|---|
+| S10.1.2v7, S10.1.6v3, S14.3.5 | Ruled 2026-11-24. Per-line mapping and filtering await the live process runtime. [Shell piping](../vibe/Lambda_IO_Shell_Piping.md#mapping-and-filtering-stdout-by-line) |
+| S14.3.6v2 | Revised 2026-11-25 to include outer arrays. Encoding Lambda items to process stdin awaits the shell pipeline runtime. [Shell piping](../vibe/Lambda_IO_Shell_Piping.md#sending-lambda-items-to-stdin) |
 | S14.3.4 | Shell pipeline completion awaits the live process runtime. [Shell piping](../vibe/Lambda_IO_Shell_Piping.md#execution-and-completion) |
 | S10.1.2v6, S10.1.4v2 | Ruled 2026-11-24. The live process stdout source and file-path sink await implementation. Ordinary file write and append through `output` are available. [Shell piping](../vibe/Lambda_IO_Shell_Piping.md#writing-stdout-to-a-file) |
 | S2.4.8, S10.1.2v5, S10.1.6v2, S17.3.1v2 | The seven context roots and escaped references work on interpreter and JIT. Forced-GC fixtures and the Lambda baseline pass on the host. The no-sysinfo and non-host profiles need further qualification. [Path implementation plan §6](../vibe/impl/Lambda_Impl_Path_Node_Access.md#6-named-context-roots-word). |
@@ -3572,6 +3586,8 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 | S11.5 | Physical binary schemas and native references | `Lambda_Type_Binary_Schema.md` §10 |
 | S12 effects/resources | Features §3.5–3.7; Design_Procedural; Function_Arg; C19, C20; OB5–OB6; IO ZIP §2, §5; Reactive_UI §2.7 | `Lambda_Semantics_Formal2.md`, `Lambda_Semantics_Features.md`, `Lambda_Design_Procedural.md`, `Lambda_Design_Function_Arg.md`, `Lambda_Type_Object.md`, `Lambda_IO_Zip.md`, `Lambda_Design_Reactive_UI.md` |
 | S13 concurrency | K11–K32; K30g (S13.3.1v2) | `Lambda_Design_Concurrency.md`, `Lambda_Pkg_Archive.md` (AR-O10) |
+| S14.3.6v2 | Lambda items to process stdin | [Shell piping](../vibe/Lambda_IO_Shell_Piping.md#sending-lambda-items-to-stdin) |
+| S14.3.5 | Incremental UTF-8 line semantics for live process stdout | [Shell piping](../vibe/Lambda_IO_Shell_Piping.md#mapping-and-filtering-stdout-by-line) |
 | S14.3.4 | External stage statuses and pipeline completion | [Shell piping](../vibe/Lambda_IO_Shell_Piping.md#execution-and-completion) |
 | S14 data processing | PD9–PD16; FC1–FC11; IO ZIP §5 | `Lambda_Design_Data_Processing.md`, `Lambda_Expr_For_Clauses.md`, `Lambda_IO_Zip.md` |
 | S15 metaprogramming | C9, C9a | `Lambda_Semantics_Formal2.md` |
