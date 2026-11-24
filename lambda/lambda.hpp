@@ -628,6 +628,7 @@ LAMBDA_RT_API String* heap_create_name(const char* name);
 // String creation for runtime strings
 String* heap_strcpy(const char* src, int64_t len);
 Binary* heap_binary_from_bytes(const char* src, int64_t len);
+Item heap_binary_value_from_bytes(const char* src, size_t len);
 Binary* heap_binary_from_storage(ByteStorage* storage, size_t offset,
     size_t length, bool is_ascii);
 Binary* heap_binary_slice(Binary* source, size_t offset, size_t length);

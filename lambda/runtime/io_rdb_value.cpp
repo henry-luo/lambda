@@ -213,8 +213,7 @@ bool io_rdb_append_value(Array* destination, const RdbValue* value) {
             if (!utf8_valid(bytes, (size_t)value->str_len)) return false;
             cell.set(io_fs_make_string(bytes, (size_t)value->str_len));
         } else {
-            Binary* binary = heap_binary_from_bytes(bytes, value->str_len);
-            cell.set(binary ? (Item){.item = x2it(binary)} : ItemError);
+            cell.set(heap_binary_value_from_bytes(bytes, (size_t)value->str_len));
         }
     } else return false;
     if (item_is_error(cell.get())) return false;

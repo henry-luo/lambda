@@ -391,9 +391,8 @@ static VirtualOpStatus binary_schema_field(BinarySchemaView* view, size_t index,
             if (count > UINT32_MAX || field->stride != 1)
                 return binary_schema_failed(out, "native byte span exceeds binary storage limits");
             // owned bytes remain safe when the native allocation is invalidated.
-            Binary* bytes = heap_binary_from_bytes((const char*)items, (size_t)count);
-            if (!bytes) return binary_schema_failed(out, "cannot copy native byte span");
-            *out = {.item = x2it(bytes)};
+            *out = heap_binary_value_from_bytes((const char*)items, (size_t)count);
+            if (item_is_error(*out)) return binary_schema_failed(out, "cannot copy native byte span");
         } else *out = binary_schema_span_wrap(field, items, count, view->owner);
         return get_type_id(*out) == LMD_TYPE_ERROR ? VIRTUAL_OP_ERROR : VIRTUAL_OP_OK;
     }

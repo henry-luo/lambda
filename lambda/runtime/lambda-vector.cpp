@@ -457,9 +457,9 @@ static Item seq_finish_text_kind(Item result, TypeId text_kind) {
                 bytes[at++] = (char)(uint8_t)item_to_double(value);
             }
         }
-        Binary* out = heap_binary_from_bytes(bytes ? bytes : "", (int64_t)total);
+        Item out = heap_binary_value_from_bytes(bytes, total);
         if (bytes) mem_free(bytes);
-        return out ? (Item){.item = x2it(out)} : ItemError;
+        return out;
     }
     // the string is allocated once and filled from the rooted result: the
     // allocation is a safepoint, so every item is re-read after it
@@ -1757,19 +1757,7 @@ Item vec_idiv(Item a, Item b) {
 
 Item vec_pow(Item a, Item b) {
     GUARD_ERROR2(a, b);
-    TypeId ta = get_type_id(a);
-    TypeId tb = get_type_id(b);
-
-    if (is_scalar_numeric(ta) && is_vector_type(tb)) {
-        return vec_scalar_op(b, a, 5, true);
-    }
-    if (is_vector_type(ta) && is_scalar_numeric(tb)) {
-        return vec_scalar_op(a, b, 5, false);
-    }
-    if (is_vector_type(ta) && is_vector_type(tb)) {
-        return vec_vec_op(a, b, 5);
-    }
-    return ItemError;
+    return vec_model_op(a, b, 5);
 }
 
 //==============================================================================
@@ -1781,16 +1769,8 @@ static bool is_skip_null_option(Item option) {
 }
 
 static bool vector_number_or_null(Item item, double* out, bool* is_null) {
-    TypeId type = get_type_id(item);
-    if (type == LMD_TYPE_NULL) {
-        *is_null = true;
-        return true;
-    }
-    *is_null = false;
-    double val = item_to_double(item);
-    if (std::isnan(val)) return false;
-    *out = val;
-    return true;
+    *is_null = get_type_id(item) == LMD_TYPE_NULL;
+    return *is_null || item_try_to_double(item, out);
 }
 
 // prod(vec) - product of all elements
@@ -2024,13 +2004,16 @@ Item fn_math_dot(Item a, Item b) {
 // norm(vec) - Euclidean norm (L2 norm)
 Item fn_math_norm(Item item) {
     GUARD_ERROR1(item);
+    GUARD_NULL1(item);
     int64_t len = vector_length(item);
-    if (len == 0) return push_d(0.0);
+    if (len < 0) return ItemError;
 
+    RootFrame roots(1);
+    Rooted<Item> source(roots, item);
     double sum_sq = 0.0;
     for (int64_t i = 0; i < len; i++) {
-        double val = item_to_double(vector_get(item, i));
-        if (std::isnan(val)) {
+        double val;
+        if (!item_try_to_double(vector_get(source.get(), i), &val)) {
             log_error("fn_math_norm: non-numeric element at index %ld", i);
             return ItemError;
         }
@@ -2058,33 +2041,47 @@ Item fn_math_mean_skip_null(Item item, bool skip_null) {
     return fn_avg_skip_null(item, skip_null);
 }
 
+static Item numeric_sorted_sample(Item item, int64_t len, bool skip_null) {
+    RootFrame roots(2);
+    Rooted<Item> source(roots, item);
+    Rooted<ArrayNum*> sorted(roots, array_float_new(len));
+    if (!sorted.get()) return ItemError;
+    int64_t count = 0;
+    bool has_nan = false;
+    bool has_null = false;
+    for (int64_t i = 0; i < len; i++) {
+        double val = 0.0;
+        bool is_null;
+        Item element = vector_get(source.get(), i);
+        GUARD_ERROR1(element);
+        if (!vector_number_or_null(element, &val, &is_null)) return ItemError;
+        if (is_null) {
+            has_null = true;
+        } else {
+            has_nan |= std::isnan(val);
+            sorted.get()->float_items[count++] = val;
+        }
+    }
+    if ((!skip_null && has_null) || count == 0) return ItemNull;
+    // the ordering comparator only handles ordered values.
+    if (has_nan) return push_d(NAN);
+    sorted.get()->length = count;
+    insertion_sort(sorted.get()->float_items, (size_t)count, sizeof(double), cmp_double_asc, NULL);
+    return {.array_num = sorted.get()};
+}
+
 // median(vec) - median value
 Item fn_math_median_skip_null(Item item, bool skip_null) {
     GUARD_ERROR1(item);
+    GUARD_NULL1(item);
     int64_t len = vector_length(item);
-    if (len <= 0) return ItemNull;
+    if (len < 0) return ItemError;
+    if (len == 0) return ItemNull;
 
-    // Copy values to sortable array
-    ArrayNum* sorted = array_float_new(len);
-    int64_t count = 0;
-    for (int64_t i = 0; i < len; i++) {
-        double val = 0.0;
-        bool is_null = false;
-        if (!vector_number_or_null(vector_get(item, i), &val, &is_null)) {
-            log_error("fn_math_median: non-numeric element at index %ld", i);
-            return ItemError;
-        }
-        // null is an absence marker; strict aggregates propagate it, skip_null removes it.
-        if (is_null) {
-            if (skip_null) continue;
-            return ItemNull;
-        }
-        sorted->float_items[count++] = val;
-    }
-    if (count == 0) return ItemNull;
-
-    insertion_sort(sorted->float_items, (size_t)count, sizeof(double), cmp_double_asc, NULL);
-
+    Item sample = numeric_sorted_sample(item, len, skip_null);
+    if (get_type_id(sample) != LMD_TYPE_ARRAY_NUM) return sample;
+    ArrayNum* sorted = sample.array_num;
+    int64_t count = sorted->length;
     if (count % 2 == 1) {
         return push_d(sorted->float_items[count / 2]);
     } else {
@@ -2099,28 +2096,35 @@ Item fn_math_median(Item item) {
 // variance(vec) - population variance
 Item fn_math_variance_skip_null(Item item, bool skip_null) {
     GUARD_ERROR1(item);
+    GUARD_NULL1(item);
     int64_t len = vector_length(item);
-    if (len <= 0) return ItemNull;
+    if (len < 0) return ItemError;
+    if (len == 0) return ItemNull;
 
+    RootFrame roots(1);
+    Rooted<Item> source(roots, item);
     // Calculate mean
     double sum = 0.0;
     int64_t count = 0;
+    bool has_null = false;
     for (int64_t i = 0; i < len; i++) {
         double val = 0.0;
         bool is_null = false;
-        if (!vector_number_or_null(vector_get(item, i), &val, &is_null)) {
+        Item element = vector_get(source.get(), i);
+        GUARD_ERROR1(element);
+        if (!vector_number_or_null(element, &val, &is_null)) {
             log_error("fn_math_variance: non-numeric element at index %ld", i);
             return ItemError;
         }
         // null is an absence marker; strict aggregates propagate it, skip_null removes it.
         if (is_null) {
-            if (skip_null) continue;
-            return ItemNull;
+            has_null = true;
+            continue;
         }
         sum += val;
         count++;
     }
-    if (count == 0) return ItemNull;
+    if ((!skip_null && has_null) || count == 0) return ItemNull;
     double mean = sum / count;
 
     // Calculate variance
@@ -2128,7 +2132,7 @@ Item fn_math_variance_skip_null(Item item, bool skip_null) {
     for (int64_t i = 0; i < len; i++) {
         double val = 0.0;
         bool is_null = false;
-        if (!vector_number_or_null(vector_get(item, i), &val, &is_null)) {
+        if (!vector_number_or_null(vector_get(source.get(), i), &val, &is_null)) {
             log_error("fn_math_variance: non-numeric element at index %ld", i);
             return ItemError;
         }
@@ -2162,6 +2166,7 @@ Item fn_math_deviation(Item item) {
 // quantile(vec, p) - p-th quantile (0 <= p <= 1)
 Item fn_math_quantile_skip_null(Item item, Item p_item, bool skip_null) {
     GUARD_ERROR2(item, p_item);
+    GUARD_NULL1(item);
     int64_t len = vector_length(item);
     if (len < 0) return ItemError;
     if (len == 0) return ItemNull;
@@ -2172,35 +2177,10 @@ Item fn_math_quantile_skip_null(Item item, Item p_item, bool skip_null) {
         return ItemError;
     }
 
-    // Copy values to sortable array
-    ArrayNum* sorted = array_float_new(len);
-    int64_t count = 0;
-    for (int64_t i = 0; i < len; i++) {
-        double val = 0.0;
-        bool is_null = false;
-        if (!vector_number_or_null(vector_get(item, i), &val, &is_null)) {
-            log_error("fn_math_quantile: non-numeric element at index %ld", i);
-            return ItemError;
-        }
-        // null is an absence marker; strict aggregates propagate it, skip_null removes it.
-        if (is_null) {
-            if (skip_null) continue;
-            return ItemNull;
-        }
-        sorted->float_items[count++] = val;
-    }
-    if (count == 0) return ItemNull;
-
-    // Sort
-    for (int64_t i = 0; i < count - 1; i++) {
-        for (int64_t j = 0; j < count - i - 1; j++) {
-            if (sorted->float_items[j] > sorted->float_items[j + 1]) {
-                double tmp = sorted->float_items[j];
-                sorted->float_items[j] = sorted->float_items[j + 1];
-                sorted->float_items[j + 1] = tmp;
-            }
-        }
-    }
+    Item sample = numeric_sorted_sample(item, len, skip_null);
+    if (get_type_id(sample) != LMD_TYPE_ARRAY_NUM) return sample;
+    ArrayNum* sorted = sample.array_num;
+    int64_t count = sorted->length;
 
     // Linear interpolation method (same as NumPy's default)
     double idx = p * (count - 1);
@@ -2223,26 +2203,44 @@ Item fn_math_quantile(Item item, Item p_item) {
 // Element-wise Math Functions
 //==============================================================================
 
-// Helper: apply unary math function element-wise
-static Item vec_unary_math(Item item, double (*func)(double), const char* name) {
+static ArrayNum* numeric_vector_result(Item source, int64_t length, ArrayNumElemType elem) {
+    int64_t shape[LAMBDA_ARRAY_NUM_MAX_NDIM], strides[LAMBDA_ARRAY_NUM_MAX_NDIM];
+    int rank = get_type_id(source) == LMD_TYPE_ARRAY_NUM ?
+        array_num_get_shape_strides(source.array_num, shape, strides) : 1;
+    if (rank < 1) return nullptr;
+    return rank > 1 ? array_num_new_ndim(elem, length, rank, shape) :
+        array_num_new(elem, length);
+}
+
+// real-valued operations share checked input admission and shape preservation.
+static Item vec_unary_math(Item item, double (*func)(double), const char* name,
+        ArrayNumElemType elem = ELEM_FLOAT64) {
     int64_t len = vector_length(item);
     if (len < 0) return ItemError;
-    if (len == 0) {
-        ArrayNum* result = array_float_new(0);
-        return { .array_num = result };
-    }
 
-    ArrayNum* result = array_float_new(len);
+    RootFrame roots(2);
+    Rooted<Item> source(roots, item);
+    Rooted<ArrayNum*> result(roots, numeric_vector_result(item, len, elem));
+    if (!result.get()) return ItemError;
     for (int64_t i = 0; i < len; i++) {
-        double val = item_to_double(vector_get(item, i));
-        if (std::isnan(val)) {
-            result->float_items[i] = NAN;  // propagate error as NaN
+        Item lane = vector_get(source.get(), i);
+        GUARD_ERROR1(lane);
+        double val = 0.0;
+        bool is_null;
+        if (!vector_number_or_null(lane, &val, &is_null)) {
+            log_error("%s: non-numeric element at index %ld", name, i);
+            return ItemError;
+        }
+        if (is_null) {
+            if (elem == ELEM_INT) result.get()->items[i] = INT_LANE_NULL;
+            else result.get()->float_items[i] = NAN;
+        } else if (elem == ELEM_INT) {
+            result.get()->items[i] = lambda_double_to_int_lane(func(val));
         } else {
-            result->float_items[i] = func(val);
+            result.get()->float_items[i] = func(val);
         }
     }
-    // S7.10.5v3: sequence in, array out -- a list input gives an array
-    return seq_finish_array({ .array_num = result });
+    return seq_finish_array({ .array_num = result.get() });
 }
 
 typedef Item (*ComplexUnaryMathFn)(Item item);
@@ -2254,7 +2252,8 @@ static Item fn_math_unary(Item item, double (*func)(double), const char* name,
     TypeId type = get_type_id(item);
     if (complex_func && type == LMD_TYPE_COMPLEX) return complex_func(item);
     if (is_scalar_numeric(type)) {
-        return push_d(func(item_to_double(item)));
+        double value;
+        return item_try_to_double(item, &value) ? push_d(func(value)) : ItemError;
     }
     return vec_unary_math(item, func, name);
 }
@@ -2553,19 +2552,23 @@ Item fn_any(Item item) {
     return (Item){ .item = b2it(BOOL_FALSE) };
 }
 
+static double clip_real(double value, double lo, double hi) {
+    if (std::isnan(value) || std::isnan(lo) || std::isnan(hi)) return NAN;
+    if (value < lo) return lo;
+    if (value > hi) return hi;
+    return value;
+}
+
 // clip(x, lo, hi) - clamp element-wise to [lo, hi]
 // scalar x: returns scalar; vector x: returns ArrayNum (float result)
 // lo/hi must be scalar numerics
 Item fn_clip(Item item, Item lo_item, Item hi_item) {
     GUARD_ERROR3(item, lo_item, hi_item);
-    TypeId lo_type = get_type_id(lo_item);
-    TypeId hi_type = get_type_id(hi_item);
-    if (!is_scalar_numeric(lo_type) || !is_scalar_numeric(hi_type)) {
+    double lo, hi;
+    if (!item_try_to_double(lo_item, &lo) || !item_try_to_double(hi_item, &hi)) {
         log_error("fn_clip: lo and hi must be scalar numerics");
         return ItemError;
     }
-    double lo = item_to_double(lo_item);
-    double hi = item_to_double(hi_item);
     if (lo > hi) {
         log_error("fn_clip: lo (%g) must be <= hi (%g)", lo, hi);
         return ItemError;
@@ -2573,34 +2576,28 @@ Item fn_clip(Item item, Item lo_item, Item hi_item) {
     GUARD_NULL1(item);  // S7.10.5v3: null in is null out; the bounds stay checked
     TypeId type = get_type_id(item);
     if (is_scalar_numeric(type)) {
-        double val = item_to_double(item);
-        if (std::isnan(val)) return push_d(NAN);
-        if (val < lo) val = lo;
-        else if (val > hi) val = hi;
-        return push_d(val);
+        double value;
+        return item_try_to_double(item, &value) ? push_d(clip_real(value, lo, hi)) : ItemError;
     }
     int64_t len = vector_length(item);
     if (len < 0) {
         log_error("fn_clip: expected numeric or vector input, got type %d", type);
         return ItemError;
     }
-    if (len == 0) {
-        ArrayNum* result = array_float_new(0);
-        return { .array_num = result };
-    }
-    ArrayNum* result = array_float_new(len);
+    RootFrame roots(2);
+    Rooted<Item> source(roots, item);
+    Rooted<ArrayNum*> result(roots, numeric_vector_result(item, len, ELEM_FLOAT64));
+    if (!result.get()) return ItemError;
     for (int64_t i = 0; i < len; i++) {
-        double val = item_to_double(vector_get(item, i));
-        if (std::isnan(val)) {
-            result->float_items[i] = NAN;
-        } else {
-            if (val < lo) val = lo;
-            else if (val > hi) val = hi;
-            result->float_items[i] = val;
-        }
+        Item lane = vector_get(source.get(), i);
+        GUARD_ERROR1(lane);
+        double val = 0.0;
+        bool is_null;
+        if (!vector_number_or_null(lane, &val, &is_null)) return ItemError;
+        result.get()->float_items[i] = is_null ? NAN : clip_real(val, lo, hi);
     }
     // S7.10.5v3: sequence in, array out -- a list input gives an array
-    return seq_finish_array({ .array_num = result });
+    return seq_finish_array({ .array_num = result.get() });
 }
 
 // hypot(y, x) - Euclidean distance sqrt(y*y + x*x)
@@ -2623,35 +2620,22 @@ Item fn_math_log1p(Item item) {
     return fn_math_unary(item, log1p, "fn_math_log1p", NULL);
 }
 
-// sign(vec) - element-wise sign (-1, 0, 1)
+static double sign_real(double value) {
+    if (std::isnan(value)) return value;
+    return (value > 0) - (value < 0);
+}
+
+// sign(vec) - element-wise sign (-1, 0, 1, or NaN)
 Item fn_sign(Item item) {
     GUARD_ERROR1(item);
     GUARD_NULL1(item);
     TypeId type = get_type_id(item);
     if (is_scalar_numeric(type)) {
-        double val = item_to_double(item);
-        int64_t s = (val > 0) ? 1 : (val < 0) ? -1 : 0;
-        return { .item = i2it(s) };
+        double value;
+        if (!item_try_to_double(item, &value)) return ItemError;
+        return {.item = lambda_int_box_double(sign_real(value))};
     }
-
-    int64_t len = vector_length(item);
-    if (len < 0) return ItemError;
-    if (len == 0) {
-        ArrayNum* result = array_int64_new(0);
-        return { .array_num = result };
-    }
-
-    ArrayNum* result = array_int64_new(len);
-    for (int64_t i = 0; i < len; i++) {
-        double val = item_to_double(vector_get(item, i));
-        if (std::isnan(val)) {
-            result->items[i] = 0;  // treat NaN as 0
-        } else {
-            result->items[i] = (val > 0) ? 1 : (val < 0) ? -1 : 0;
-        }
-    }
-    // S7.10.5v3: sequence in, array out -- a list input gives an array
-    return seq_finish_array({ .array_num = result });
+    return vec_unary_math(item, sign_real, "fn_sign", ELEM_INT);
 }
 
 // math.random(seed) - pure functional PRNG using SplitMix64
@@ -3239,6 +3223,7 @@ Item fn_slice(Item vec, Item start_item, Item end_item) {
     int64_t new_len = end - start;
 
     if (type == LMD_TYPE_BINARY) {
+        if (new_len == 0) return ItemNull;
         Binary* bin = vec.get_safe_binary();
         if (!bin) return ItemError;
         // Storage-backed Binary slices retain the root allocation and flatten offsets.

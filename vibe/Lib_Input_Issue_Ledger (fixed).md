@@ -6,6 +6,47 @@ remain in the [active issue ledger](Lib_Input_Issue_Ledger.md).
 
 ## Fixed issues
 
+<a id="li-114"></a>
+
+### LI-114 — Native JSX and LaTeX writers silently omitted large strings
+
+**Fixed 2026-11-24.** The [JSX writer](../lambda-input/lambda/format/format-jsx.cpp)
+omitted text above 10,000 bytes and emitted empty braces for JavaScript
+expressions at or above 10,000 bytes. The
+[native LaTeX writer](../lambda-input/lambda/format/format-latex.cpp)
+omitted string values at or above 65,536 bytes, leaving empty command arguments.
+
+The native writers removed all three cutoffs under D9.1.1v4. The user directed
+that memory pressure and invalid storage be handled through overall memory
+management (D5.2.1). [LI-113](#li-113) and
+[LR09-31](<Lambda_Issue_Ledger (fixed).md#lr09-31>) record the preceding
+HTML/XML repair.
+
+Three [native formatter tests](../lambda-input/test/test_format_markup_gtest.cpp)
+reproduce the omissions at the first rejected lengths. All three pass after
+the fix and verify the full payload, JSX escaping and closing syntax. The
+full markup executable passes 47/47 checks. Evidence:
+`temp/li-114/before.log` and `temp/li-114/markup.log`.
+The loopback-enabled Input baseline reports 5,363 passed, 3 skipped, and the
+same three failures recorded for LI-113: the Bootstrap CSS round trip and
+two native DOM checks. See `temp/li-114/input-baseline.log`.
+
+<a id="li-113"></a>
+
+### LI-113 — HTML and XML silently omitted large text and attributes
+
+**Fixed 2026-11-24.** The shared native escape helper (D9.1.1v4) dropped
+text above 1 MiB and attribute values above 32 MiB. At 1 MiB plus one byte,
+both Lambda tiers returned a successful string with the text missing and
+a later paragraph intact. The guard used size as a proxy for invalid
+storage. The user directed that memory concerns be handled by overall
+memory management (D5.2.1). Both formatter cutoffs were removed.
+
+The owner regression serializes a 1.2 MB text node through both writers
+and checks the full payload, escaping, and following paragraph. The markup
+suite passed 34/34. The Input baseline and loopback reruns retained a
+Bootstrap CSS round-trip failure and two native DOM failures.
+See [LI-114](#li-114) for removal of the JSX and native LaTeX cutoffs.
 <a id="li-112"></a>
 
 ### LI-112 — Explicit epoch-zero cookie expiry is stored as a session cookie
@@ -107,6 +148,7 @@ The JSX raw expression and MDX passthrough writers also copy full spans.
 
 Coverage lives in `test/lambda/string_embedded_nul.ls` and
 `test/test_nul_text.py` in the Lambda checkout.
+
 
 <a id="li-107"></a>
 

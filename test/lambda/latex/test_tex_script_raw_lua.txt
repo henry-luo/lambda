@@ -148,5 +148,5 @@
   native: null
 }
 {
-  digestion_guarded: true
+  digestion_matches_native: true
 }

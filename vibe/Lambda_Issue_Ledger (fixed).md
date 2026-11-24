@@ -16,6 +16,21 @@
 > Semantic and design rulings remain cited by S# / D#; where no formal ruling
 > covers a point, the original vibe ledger ID is retained.
 
+<a id="lr12-72"></a>
+## LR12-72 — DOM and document-preview seams blocked the split build
+
+**Fixed in the working tree, 2026-11-24.** Lambda's DOM caller requires the
+seven-argument mutation interface paired with Radiant `b0a225b`; its document
+preview adapter also requires the later Radiant `ad7fdc8`, which contains that
+interface. The pinned `f0b739b` had neither. The clean Radiant checkout is now
+at `ad7fdc8` and its gitlink remains unstaged. This retains the paired
+relational-style invalidation and preview behavior (D9.1.3v2).
+
+The debug and release split builds pass. The unrestricted Lambda baseline
+passes 6,128/6,128 tests; its sandboxed run failed on 17 local-service cases,
+which all passed in exact unrestricted reruns. Evidence is in
+`temp/latex-port-resume/{lambda-baseline-paired,lambda-baseline-unsandboxed,release-build-paired}.log`.
+
 <a id="lr12-70"></a>
 ## LR12-70 — The JIT declaration optimizer crashes on decomposition
 
@@ -206,7 +221,7 @@ The final sync cases and local S3 interrupted-upload recovery also pass.
 
 ## Archive index
 
-This archive contains **328 anchored records**, preserving fixed, resolved,
+This archive contains **378 anchored records**, preserving fixed, resolved,
 closed and obsolete entries. Records closed by consolidation point to
 [LR12-24](Lambda_Issue_Ledger.md#lr12-24). LR03-11, LR07-16, LR07-17 and LR10-7, from the
 wrong-value group, were fixed on 2026-09-25 (see the central ledger's
@@ -1381,6 +1396,42 @@ S2.5.8 has indexing and every sequence operation see a symbol as its code points
 
 ## 7. MIR Direct transpiler & JIT (LR07)
 
+<a id="lr07-59"></a>**LR07-59 · Three execution-profile tests retain Full MIR emission expectations · FIXED (2026-11-10)**
+
+`LambdaOptProfile.ExecutedCallsAreCountedOnlyWhenEnabled`,
+`ExecutedCallsCanBeAttributedToCaller`, and `CowBindingDoesNotReloadLiveOwner`
+fail on both the helper-retirement release (SHA256
+`0e17c8c569764b0619088296bdb93fc5bfadc2f6cfde2f433b4fa55ea536ee75`)
+and the COW-site-attribution candidate. Semantic output, diagnostic TSV emission
+and overflow checks pass. The failures require retired `_accept_u32_`,
+`_shaped__raw0_`/`_shaped__raw1_`, `_main_`/`_capture_dynamic_` names, a
+`fn_len_l` call, or two `cow_bind_var` calls. Current MVP uses `mvp_*` entries,
+inlines the scalar/capture bodies and uses checked length helpers for these
+fixtures. The ordinary non-profiled native capture also bypasses a COW helper.
+
+The structural/counter oracles need an MVP audit that preserves their intent:
+opt-in diagnostics, executed-call attribution, and no spurious GC roots or
+safepoints (D6.3.1–D6.3.4, D7.3.1). Do not restore Full variants or add runtime
+calls solely to satisfy old counter shapes. Assertions remain unchanged.
+
+Reproduce with `LAMBDA_JS_OPT_EXE=<candidate> ./temp/mvp_regions_profile/test-opt.exe --gtest_filter='LambdaOptProfile.ExecutedCalls*:LambdaOptProfile.CowBindingDoesNotReloadLiveOwner'`.
+Evidence: `temp/mvp_regions_profile/profile-units-control.log`,
+`profile-units-candidate.log`, and the current TSVs under
+`temp/lambda_opt_contract/`. The separate COW census regression was caused by
+missing MVP site-wrapper selection and is fixed; it passes on the candidate.
+This issue does not block the allocator assessment or COW-site fix.
+
+
+Migration update (2026-11-10): the two executed-call tests now identify MVP
+entries, inlining and the canonical checked length helper. The COW test is now
+`CowBindingMarksInlineBeforeObservation`: it requires the native share-mark,
+observed COW mutation and unchanged values, rather than Full's helper count and
+retired physical caller. All three pass on the rebuilt release identified in
+the [migration checkpoint](impl/Lambda_Impl_MVP_Optimization_Tests.md).
+The separate diagnostic parity unit preserves roots, memory operations and
+safepoints, including COW site attribution (D6.3.2–D6.3.3). No Full helper or
+profiling event is restored.
+
 <a id="lr07-62"></a>**LR07-62 · Native MVP immutable-array consumer fixture segfaults · RESOLVED (2026-11-10; private release unit qualification)**
 
 On the exact installed debug CLI identified in LR07-60,
@@ -2195,6 +2246,22 @@ A map or element with more than 64 fields got no pooled shape (`shape_pool.cpp`)
 
 
 ## 9. Runtime builtins (LR09)
+
+<a id="lr09-31"></a>**LR09-31 · `format()` silently drops large text in HTML/XML output · FIXED (2026-11-24)**
+
+HTML/XML formerly skipped escaped text above 1 MiB and attribute values above
+32 MiB. Interpreter and JIT both reproduced the omission at exactly 1 MiB plus
+one byte, with later paragraphs intact. Native writer ownership follows
+**D9.1.1v4**. The owner removed both cutoffs from the shared escape helper.
+[LI-108](<Lib_Input_Issue_Ledger (fixed).md#li-108>) records the fix and evidence.
+
+**User decision, 2026-11-24:** Handle memory pressure and invalid storage
+through overall memory management (D5.2.1). String length alone does not
+establish storage validity. The HTML/XML formatter must not impose a fixed
+size cutoff that discards valid content.
+
+The JSX and native LaTeX cutoffs were removed in
+[LI-109](<Lib_Input_Issue_Ledger (fixed).md#li-109>).
 
 <a id="lr09-2"></a>**LR09-2 · `SysFuncInfo` lacked a data-driven native-argument convention · RESOLVED 2026-09-14**
 The coarse call-wide `c_arg_conv` flag is retired. A fixed-arity registry row
@@ -5556,3 +5623,1020 @@ sibling/vendor source changes were needed. Fresh full release linking succeeds.
 See [implementation and qualification](impl/Lambda_Impl_Sync_Test_Performance.md#implementation--2026-11-17).
 
 **Verification:** full release link passes; all 201 Radiant document cases pass in the full baseline. No sibling implementation or vendor code was edited.
+
+# Resolved runtime and integration findings
+
+<a id="lr12-71"></a>
+
+## LR12-71 — The viewer image prepass enters an uninitialized JavaScript realm
+
+**Fixed 2026-11-23.** On `3b23b87dc`, the load pass for documents without
+executable JavaScript called the scripted image completion queue. Nine
+replays exited 139 when that queue tried to allocate a callback without a
+JavaScript Input. The prepass also cached GIF and Lottie surfaces before
+their scheduler existed and held live local navigation until a remote image
+finished downloading (D6.4.1 / D9.5.6v2).
+
+Live script-free documents leave image completion to the viewer. Static
+captures wait for the selected eager network images through native resource
+discovery, and layout registers image animations with the presentation
+scheduler (D9.1.3v2 / D10.1.7). The 11 affected replays and the Radiant
+baseline pass. All 48 focused loading and animation controls pass, as do
+two local static capture probes for delayed eager and lazy images.
+Evidence is in `temp/view-test-regressions/`.
+
+<a id="cssom-style-notification-lifetime"></a>
+
+## CSSOM style notification lifetime — fixed 2026-11-23
+
+[JS13-L64](jube/JS_Issue_Ledger.md#js13-l64) retains old style bytes while
+CSSOM replaces synthetic attribute storage and then notifies selector and
+observer consumers (**D5.5.1 / D8.4.4 / D9.5.6v2**). It reuses the existing
+attribute snapshot helper. All 32 focused style/relational controls pass;
+the three new controls also passed before the source-proven lifetime repair.
+No page clearance or baseline rerun is claimed for this independent fix.
+
+<a id="normal-document-startup-admission"></a>
+
+## Normal document startup admission — fixed 2026-11-23
+
+Further review on the same qualified release clears **Agiloft and Overflow**:
+the startup cover disappears and the previously absent navigation returns.
+Current Chromium checks support both; Agiloft still takes 100.8 seconds to
+capture. Inventory is **100 high, zero critical, 967 low**. Aircall's empty
+application DOM is directly confirmed, but its cause remains unisolated.
+No new production patch or baseline repetition is claimed for this extension.
+
+[JS13-L63](jube/JS_Issue_Ledger.md#js13-l63) scopes the default 128 KiB
+async/defer limit to the existing static-view profile (**D8.4.4 / D9.5.6v2**).
+Normal loads retain the existing 5 MiB external/20 MiB aggregate limits;
+explicit overrides still apply to both profiles. Payload's document and
+WeTransfer's main content return. Aircall's consent panel returns, but its
+empty application root keeps it high. Dayos still retains its loading cover.
+All 89 focused controls and the 630-case dynamic layout baseline pass. The
+1000ms capture frame is unchanged (**D10.1.7**). This is an admission-profile
+fix, with remaining runtime compatibility unqualified for other large pages.
+
+<a id="class-mutation-invalidation-lifetime"></a>
+
+## Class mutation invalidation and old-value lifetime — fixed 2026-11-23
+
+[JS13-L61](jube/JS_Issue_Ledger.md#js13-l61) retains local cascade when actual
+relational class/attribute matches stay unchanged, reusing input/native
+matching and preserving history and shadow guards (**D8.4.4 / D9.5.6v2 /
+D9.1.1v4 / D9.1.3v2**). [JS13-L62](jube/JS_Issue_Ledger.md#js13-l62) retains
+replaced class bytes through mutation notification and restores observer old
+values (**D5.5.1**). All 29 focused render checks and the input class-cache
+projection unit pass. The three reduced class/observer controls fail on the
+prior release. Swag still times out on the first candidate; no canonical page
+is cleared. Baselines are not repeated for this focused repair.
+
+<a id="css-dependency-overinvalidation"></a>
+
+## CSS dependency overinvalidation — fixed 2026-11-23
+
+[JS13-L59](jube/JS_Issue_Ledger.md#js13-l59) compares style-attribute predicate
+results before forcing global cascade, reusing input/native helpers
+(**D9.1.1v4 / D9.1.3v2**). [JS13-L60](jube/JS_Issue_Ledger.md#js13-l60)
+preserves the inserted-subtree proof after earlier detached setup; connected
+and later edits and removal history remain guarded (**D8.4.4 / D9.5.6v2 /
+D5.5.1**). All 39 focused render controls, six input tests and 630 dynamic
+layout baseline cases pass. Swag still times out; capture timing and budgets
+remain unchanged (**D10.1.7**).
+
+<a id="nested-browser-timer-scheduling"></a>
+
+## Nested browser timer scheduling — fixed 2026-11-23
+
+[JS13-L58](jube/JS_Issue_Ledger.md#js13-l58) adds the missing HTML task-nesting
+delay to browser timeouts, intervals and mixed chains (**D8.4.4 / D9.5.6v2**).
+Focused tests cover the 4ms threshold, cancellation, microtask boundaries,
+Node behavior and runtime isolation. Capture timing remains unchanged
+(**D10.1.7**); online impact requires a separate page capture.
+
+<a id="script-free-document-image-completion"></a>
+
+## Script-free document image completion — fixed 2026-11-23
+
+[JS13-L57](jube/JS_Issue_Ledger.md#js13-l57) reuses the ordinary load boundary
+for pages without executable scripts, including declined document budgets.
+Native eager/lazy request records no longer depend on a JS realm. The wait
+uses the native load-blocker predicate and retains existing deadlines and
+virtual time (**D8.4.4 / D9.5.6v2 / D10.1.7**). Seven focused PNG controls
+and 17 existing load-boundary cases pass. Azure's body is close in the current
+diagnostic, but its client-created navigation remains absent; no high review
+is cleared by that partial result.
+
+<a id="computed-custom-property-serialization-lifetime"></a>
+
+## Computed custom-property serialization lifetime — fixed 2026-11-23
+
+[JS13-L56](jube/JS_Issue_Ledger.md#js13-l56) fixes temporary formatter
+allocations retained by each computed custom-property read. Both property
+branches now release their serialization pool after copying the JS value
+(**D5.5.1 / D8.4.4**). Two focused runtime/native-provider tests pass, including
+zero document-pool growth and forced-GC value checks. This is an allocation
+repair; the 106 high-severity online reviews remain unchanged.
+
+<a id="isolated-radiant-replay-costs"></a>
+
+## Isolated Radiant replay costs in Lambda — 2026-11-19
+
+Every-allocation GC in the View resource and module tests amplified the work
+of queueing scalar leaf objects. The marker now marks leaves directly and
+validates alignment before consulting the exact object index (D5.3.1). The
+View tests still force collection on each allocation and poison freed memory.
+The JS watchdog also wakes at native layout boundaries without waiting for
+the next sampling interval (D7.4.3).
+
+The LaTeX replay exposed a quadratic `unique` scan over packed integers.
+Homogeneous packed-int inputs now use a membership table with the original
+first-occurrence order. Mixed values keep the comparison path (S5.6.1v2).
+The interpreter also rules out ineligible compact array literals before
+walking their widening dependencies (D8.3.1v3).
+
+<a id="lr12-61"></a>
+## LR12-61 — Identical CSS-dependent metadata forces layout again
+
+**Status:** FIXED, 2026-11-18. Shared DOM/host invalidation belongs to Lambda
+under **D9.5.6v2**. Attribute text retains its document ownership (**D5.5.1**).
+
+The dependency-aware metadata path rejected any attribute referenced by CSS,
+even when a data/aria value was identical to its stored value. Both setAttribute
+and dataset therefore dirtied native styles on repeated state publication. Ten
+unchanged writes interleaved with geometry reads cause eleven layouts, while
+an otherwise identical no-write control needs one.
+
+The helper now checks value identity before asking whether a CSS dependency
+requires ordinary invalidation. Namespaced and case-sensitive paths retain their
+existing guards. Changed CSS-dependent values still use normal invalidation.
+Observer and custom-element delivery is preserved: callbacks can still change
+style, and pending reflow prevents metadata publication from consuming that work.
+There is no new cache, property exception or timing/admission-budget change.
+
+Five metadata tests and four existing observer startup controls pass. The saved
+round85 renderer fails the new identity reduction. Controls retain all ten
+MutationObserver old values, changed selector-dependent widths and paint. A
+custom-element callback changes width on each identical metadata write; all ten
+callbacks and the measured 110–200px widths remain observable through both APIs.
+The online qualification is recorded separately; reduced layout counts do not
+establish a reliable live-page capture-time improvement.
+
+Evidence: test/online/render_dataset_metadata.test.cjs and
+[round86 repair record](../test/online/comparison/repairs.html#round-86).
+
+<a id="lr12-60"></a>
+## LR12-60 — Dataset metadata writes force avoidable geometry layouts
+
+**Status:** FIXED, 2026-11-18. The shared DOM/host adapter remains Lambda-owned
+under **D9.5.6v2**; metadata and retained attribute text use the existing document
+ownership under **D5.5.1**.
+
+The dataset setter wrote directly through the general attribute path, bypassing
+`dom_set_non_style_metadata`, which `setAttribute` already uses. Unrelated
+application metadata consequently dirtied native styles and forced layout on
+following geometry reads. Ten identical or changed writes cause eleven layouts
+through dataset, compared with one through setAttribute. Both APIs still queue
+ten MutationObserver records, including correct old values.
+
+The dataset setter now uses the same dependency-aware helper. It retains normal
+invalidation when selectors or computed values depend on the data attribute,
+and retains observer/custom-element delivery for metadata. There is no new
+cache heuristic, selector exception, source budget or timing change.
+
+Three focused comparisons cover repeated identical metadata, changed metadata
+and CSS-dependent values. Each checks observer names/old values, live widths,
+paint and actual layout-profile counts against setAttribute. The saved renderer
+fails both metadata cases; all three pass after repair. Four existing observer
+startup controls also pass. The Dock capture result and bounded qualification
+are recorded in the online round85 repair report; this issue does not claim
+that every Dock timeout was caused by dataset writes.
+
+Evidence: test/online/render_dataset_metadata.test.cjs and
+[round85 repair record](../test/online/comparison/repairs.html#round-85).
+
+<a id="lr12-59"></a>
+## LR12-59 — Event dispatch continues after host execution termination
+
+**Status:** FIXED, 2026-11-18. **D7.4.3** requires cooperative interruption and
+ordinary frame unwinding; a host CPU-budget termination is not an isolated
+application exception. The document binding remains Lambda-owned under
+**D9.5.6v2**.
+
+Squarespace's selected-window capture exceeds the parent deadline after logging
+roughly 22 MB of repeated load-listener timeout errors. Dispatch correctly
+isolates ordinary listener throws, but applied that policy to the sticky host
+execution interrupt too. A reduction with one looping load listener and 500
+followers logs 501 timeout exceptions before the fix.
+
+Listener invocation and propagation now stop when the existing host interrupt
+is pending. Dispatch restores passive/position/path state and returns the
+cooperative error after cleanup; a later dispatch immediately returns that same
+termination status. Ordinary exceptions still report and allow the next
+listener. The reduced timeout and ordinary-exception controls pass on the
+release host; the latter paints the following listener's green update. No CPU
+or wall-time budget is increased. Squarespace now writes a complete PNG within
+the existing parent deadline; its admitted script still reaches the existing
+CPU budget and the page remains high. Evidence: temp/online-visual-round83/.
+
+<a id="lr12-58"></a>
+## LR12-58 — Selected CSS frames lose effects at loader layout checkpoints
+
+**Status:** FIXED, 2026-11-18. Lambda owns the document/runtime binding at the
+native layout seam (**D9.1.1v4 / D9.5.6v2**). Snapshot selection precedes encoding
+under **D10.1.7**.
+
+A document with an 80 ms CSS animation and an otherwise idle script still paints
+its initial frame after an explicit 250 ms settling window. Width and opacity
+reductions fail too. Script-free selection, default initial frames and no-fill
+restoration provide controls. Two lifecycle omissions combine: without a script
+geometry read, no first layout establishes the CSS timeline before settlement;
+subsequent loader checkpoints pass a document argument without temporarily
+binding it to the UI context. Native CSS sampling reads that context, so a
+finish-triggered reflow restores authored values without the retained effect.
+An instrumented release run confirmed that virtual time reached 266.667 ms and
+the effect finished at 83.333 ms; lack of clock advancement was not the cause.
+
+Explicit positive-window exports now establish geometry before their ordinary
+drain. Initial and pending geometry layouts share one temporary document-binding
+helper, restoring the previous UI document after the native call. Existing zero
+and unspecified native export frames are preserved. No timer budget or encoding
+clock change is introduced. Twenty selected-frame checks, with Chromium pixel
+controls, and sixteen capture/comparison checks pass. The saved renderer fails
+all three color/width/opacity regressions. Evidence: temp/online-visual-round83/.
+
+<a id="lr12-56"></a>
+## LR12-56 — Web Animations excludes a supported shorthand before native parsing
+
+**Status:** FIXED, 2026-11-18. The Lambda DOM adapter owns property admission
+(**D9.1.1v4 / D9.5.6v2**); native interpolation belongs to Radiant.
+
+The enumerable-key filter examined the background shorthand's animation type
+before invoking the native parser. That type is NONE even when its color
+component maps to an implemented track. The adapter now queries the shared
+native target normalizer used by RI-128, retaining the authored name/value for
+normal dictionary conversion and shorthand parsing. No second property table
+or page exception is added. Explicit shorthand and longhand seeks both paint
+the Chromium-matched endpoint in the focused loopback tests.
+
+Automatic Web Animations playback is still incomplete, as recorded in the HTML
+support matrix. A longhand control reproduces the same unadvanced sample;
+the shorthand test therefore uses the supported explicit currentTime seek.
+No automatic-playback fix is claimed. The aggregate focused run passes 29
+checks; logs are under temp/online-visual-round79/.
+
+<a id="lr12-55"></a>
+## LR12-55 — TreeWalker discards NodeFilter and lets cleanup delete all text
+
+**Status:** FIXED, 2026-11-17; the final append-only API, focused regressions,
+live capture and curated Radiant milestone are qualified. **Affected owner:** Lambda `lambda/dom/` and its
+`radiant-dom` binding (**D9.1.1v4 / D9.5.6v2**), not native Radiant paint.
+
+Wispr's current HTTP source contains its heading text, but the loaded native
+DOM has an empty heading with visible styles. The page's quote-cleanup script
+creates a SHOW_TEXT walker whose object filter rejects ordinary content. The
+binding forwarded only root and mask, and traversal never invoked a filter.
+The cleanup therefore received every text node and removed the entire page's
+text. A two-node reduction deletes both before the fix instead of preserving
+ordinary text and removing only the quote.
+
+The shared constructor now retains function/object filters. A new three-argument
+catalog operation is appended; all **461 published catalog rows**, including
+the legacy two-argument constructor, keep their order and signature (**D9.5.4**).
+The old constructor delegates with a null filter. The document binding forwards
+the optional filter and keeps SHOW_ALL as the omitted/undefined mask default.
+The readonly filter getter preserves identity. Traversal applies the mask before
+calling the filter, distinguishes rejection/pruning from skipping/descending,
+and keeps first-child/sibling traversal within the visible boundary. Callback
+getters, invocation, return conversion and reentrancy errors use one active-flag
+scope, cleared on exceptions. `RootFrame` / `Rooted` retain the callback, walker
+and candidate wrappers across script allocations (**D6.3.3**). This follows
+[DOM §6 Traversal](https://dom.spec.whatwg.org/#traversal).
+
+Three new native tests cover destructive cleanup, function/object filters,
+masking and receiver identity, reject/skip behavior, readonly filter identity,
+traversal bounds, callback getter exceptions, reentrancy and result conversion.
+Those tests and the existing unfiltered template walker control pass on the
+final release binary, including strict function-filter receiver semantics;
+Chromium confirms the three new scripts. The fast Radiant baseline deliberately
+selects 201 named document cases, so these focused regressions run separately
+without changing that inventory. The final curated milestone passes **8,169
+of 8,488**, with 299 partial, 20 skipped and no failures. Final live Wispr text
+returns with **0.85%** error against the preserved browser reference, clearing
+its temporary manual high annotation. The sorted inventory becomes **150 high,
+1 critical, 916 low**. Other rows, prior annotations and browser references remain
+unchanged. The final capture's metrics exactly match the earlier comparison
+row and are checked directly, avoiding another whole-catalog image recomputation.
+Evidence: `temp/online-visual-round74/`; report destination:
+`test/online/comparison/repairs.html#round-74`. Capture budgets and clocks stay
+unchanged (**D10.1.7**); no page-specific exception is introduced.
+
+## Online resource-timing interface branding — 2026-11-17
+
+<a id="online-resource-timing-brand"></a>
+
+**Status:** FIXED for the existing fetch/XHR resource-timing profile.
+Host interfaces follow **D8.4.4 / D7.2.2** and precise record ownership
+**D6.3.3 / D6.4.1**; capture clocks remain unchanged (**D10.1.7**).
+
+Clay's consent bootstrap reads PerformanceResourceTiming and captures its
+prototype getters. The existing network path records real resource timings,
+but returned plain objects and never published the interface. The captured
+bootstrap consequently throws ReferenceError before initialization. This is an
+incomplete binding for an implemented data path, rather than missing network
+measurement infrastructure. The [Resource Timing interface](https://www.w3.org/TR/resource-timing/#performanceresourcetiming)
+extends [PerformanceEntry](https://www.w3.org/TR/performance-timeline/#the-performanceentry-interface).
+
+The existing timing-record/accessor helpers now accept native resource entries.
+A realm-rooted illegal constructor and prototype inherit from PerformanceEntry;
+readonly getters expose the recorded name, type, start, duration, initiator,
+fetch start and response end. Private metadata also drives filtering, ordering
+and JSON serialization when public properties are shadowed. The same producer
+continues feeding the existing observer and overflow buffers. No timing values,
+missing network phases or transfer-size fields are fabricated. Detailed timing
+phases and size metadata remain unsupported.
+
+Six focused native tests pass, covering branding, illegal construction, getter
+receivers, JSON, GC, public metadata shadowing, constructor replacement and the
+adjacent Window/StorageEvent controls. The actual local HTTP fetch/XHR fixture
+fails before the fix with ReferenceError and passes afterward in both AST and
+MIR with forced GC and zero retained allocations. The same updated fixture
+passes Chromium headless shell. The captured Clay bootstrap now reaches
+airgap.initialized true. No broad baseline is repeated after the green round51
+milestone. Live-page visual qualification is recorded in round55's checkpoint
+and the online comparison report; exception removal alone is not clearance.
+
+Artifacts: temp/online-visual-round55/ retains the before/after bootstrap,
+focused unit and HTTP logs, browser control, source hashes and release pin.
+
+## Online Window.document accessor binding — 2026-11-17
+
+<a id="online-window-document-accessor"></a>
+
+**Status:** FIXED for the owning Window's unforgeable accessor and captured
+getter invocation. Shared host behavior follows **D8.4.4 / D7.2.2**, and realm
+ownership **D6.4.1**. No capture time or admission change (**D10.1.7**).
+
+After the StorageEvent repair, the Coda/Superhuman consent bootstrap still
+throws TypeError. Function/declaration traces reduce this to a captured getter:
+it reads Object.getOwnPropertyDescriptor(window,"document").get, then invokes
+it during protection setup. The selection installer had published document as
+a writable, configurable data property, so the captured getter was undefined.
+The [HTML Window interface](https://html.spec.whatwg.org/multipage/nav-history-apis.html#the-window-object)
+requires a readonly LegacyUnforgeable document attribute.
+
+The Window interface now installs its own non-configurable native getter,
+returning the same stable proxy as bare document. The selection installer no
+longer replaces it with a data property. Window/document/closed getters share
+receiver validation; null/undefined receivers use their realm global as in
+WebIDL, while unrelated objects are rejected. There are no URL conditions.
+
+The focused descriptor/identity/readonly/receiver/GC case passes in Chromium
+headless shell and native MIR. All **six** selected native tests pass, including
+the previous StorageEvent and dispatch controls. Its initial standalone fixture
+had omitted production DOM interface setup and failed ReferenceError; installing
+the same collection/selection interfaces fixes the fixture without stubbing
+Document or weakening expectations. The captured 140,490-byte bootstrap changes
+from TypeError with airgap.initialized false to airgap.initialized true under the
+same script URL. Both selected live pages load with their bootstrap exceptions
+gone. Their PNGs are byte-identical to round52; neither page is cleared.
+The inventory remains **159 high, one critical and 907 low**. No broad baseline
+is repeated after the green round51 milestone. Evidence:
+`temp/online-visual-round53/`; qualified release pin
+`1e1b4b6069dbca539c6ebfb24b4afac7bd0e1ddf8018965bb422c133e8294b0f`.
+
+## Online foreign-document adoption retirement — 2026-11-21
+
+<a id="online-foreign-document-retirement"></a>
+
+**Foreign-document adoption teardown — FIXED, 2026-11-21.** A document created
+by `createHTMLDocument()` can own an adopted node whose rare extension is
+allocated from the main document's pool. Window retirement destroyed that pool
+before deferred runtime cleanup released the foreign-document cache;
+`dom_retire_begin_destroy()` then read freed node storage while unlinking slots.
+The main document's bound host now releases that cache before native pool
+destruction, using the existing foreign-document cleanup path. Deferred runtime
+retirement and precise ownership stay intact (**D5.5.1 / D6.3.3 / D6.4.1**).
+Both an adopted prepared script and a non-executable data script crashed before
+repair and now terminate normally; Chromium controls pass. The standalone data
+adoption reduction also reproduced `LOAD_OK` followed by SIGSEGV on round151.
+Evidence: round152 `adoption-storage-before/after` logs and JSON,
+`tests-retirement.log`, archived crash reports and the
+[focused qualification](Lambda_Issue_Ledger.md#online-dynamic-script-preparation).
+No vendor changes or native-stack GC scanning.
+
+## Online observer zero-area intersections — 2026-11-17
+
+<a id="online-observer-zero-area"></a>
+
+**Status:** FIXED in focused rendering controls. The shared DOM operation
+contract follows **D8.4.4**, owner boundary **D9.1.3v2**, and observer/callback
+state **D6.4.1**. **D10.1.7** capture time and script admission are unchanged.
+
+The online review's observer audit found that geometry sampling required both
+intersection dimensions to be positive. Connected, rendered zero-height or
+zero-width targets therefore never became intersecting; edge-adjacent boxes
+also remained false. A deferred panel waiting on its empty container's first
+intersection callback stayed completely absent. A collapsed CSS transform
+reproduces the same notification failure.
+
+The sampler now distinguishes principal-box existence from intersection area,
+accepts edge contact, and uses ratio one for an intersecting zero-area target.
+Disconnected nodes, display:none targets/ancestors, display:contents targets and
+skipped content remain ineligible. Existing target/record rooting and scheduling
+are retained. No observer is forced visible or dispatched synchronously.
+
+The [Intersection Observer update algorithm](https://w3c.github.io/IntersectionObserver/#update-intersection-observations-algo)
+and its entry definitions distinguish zero-area intersection from absence.
+All twelve fixture expectations pass in bundled Chromium headless shell.
+Seven new states fail before the repair, including the empty-to-populated 300px
+panel. After repair all **16** focused observer rendering controls pass: twelve
+new geometry/deferred-content cases and four existing sampling/resize/disconnect
+controls. Hidden, detached, offscreen and transparent-box controls are retained.
+
+A separate percentage root-margin hypothesis was **rejected and reverted**:
+Chromium's entries match the old axis-based calculation, despite the draft's
+width wording. No percentage-margin change is included. Saved-page diagnosis
+also identified initial opacity animations, non-serialized consent UI and an
+invalid serialized p/div replay; those observations are not native fixes.
+The three selected live pages load and capture successfully. Calendly's main
+heading, copy and signup actions are restored; an old-pin control gives the
+same PNG, so this clearance predates the current observer repair. Its stale
+manual-major annotation is removed. Sanity's current light-theme hero differs
+from its original dark-theme reference, and Primer remains major; neither is
+cleared. The severity inventory is 159 high, one critical and 907 low.
+No broad baseline is repeated after the round47 milestone. Evidence:
+`temp/online-visual-round50`; qualified release pin
+`c4820dc947adc9c460968a46f86aad343a1428682900eb50d91f038b7f496b50`.
+
+## Online console inspection bindings — 2026-11-17
+
+<a id="online-console-inspection"></a>
+
+**Status:** FIXED for the missing isolated-host bindings. D8.4.4 requires the
+shared JavaScript operation contract; D6.4.1 retains context-owned host state.
+No semantic ruling, capture clock or source-admission policy changes.
+
+Squarespace's admitted about-company script calls `console.table(data)` during
+its initial analytics setup. The call was undefined and aborted initialization.
+The native console already exposes table and dir through single-value logging,
+but the isolated MVP host's binding list omitted both. The existing host output
+adapter now has a shared first-value specialization for those methods, with
+arity one and the same undefined return. Embedder output routing is preserved.
+This exposes the existing inspection subset; tabular column selection and rich
+formatting are not newly implemented.
+
+Three focused document-render controls pass: existing console groups, table and
+dir. Both new cases fail on the previous pin. They cover an object, valid options,
+detached/no-argument calls, method length, window alias identity and completion
+pixels. The current live Squarespace exception disappears. Its hero remains
+visually absent at the selected frame, so no page clearance is claimed. Diagnostic
+observer callbacks set the reveal attributes to true and computed target styles
+are visible; the page also authors delayed 0.7s child transitions. Those observations
+do not by themselves prove the remaining painted-frame cause. D10.1.7 time is
+unchanged. Evidence: `temp/online-visual-round48` and its comparison repair report.
+The round47 baseline milestone was not repeated for this small binding repair.
+
+## Online DOM comment anchors — 2026-11-17
+
+<a id="online-dom-comment-anchors"></a>
+
+**Status:** FIXED in focused rendering controls. Shared JS operations follow
+D8.4.4; destination ownership and callback scopes follow D5.5.1 / D6.4.1.
+Input/Radiant ownership remains D9.1.1v4 / D9.1.3v2.
+
+Deep clone/import copied elements and text but silently dropped comments.
+Fragment roots passed through an element-only builder, losing top-level
+comments before cloning. Svelte uses those nodes as insertion anchors and
+subsequently called Node.firstChild with null. The shared clone now preserves
+comment backing in the destination document, reuses the backed child-insertion
+path and serves every Node kind through the catalog. The adapter's separate
+non-element cloning path is removed. Fragment construction shares one node
+factory across markup insertion, fragment parsing and iframe srcdoc.
+
+Six focused PNG tests cover clone/import/foreign-import, template/element HTML
+and insertAdjacentHTML; they verify comment order, identity, mutation isolation,
+destination ownership, shallow clones and standalone CharacterData. Four more
+mixed-fragment tests reproduce and qualify Input
+[LI-070](<Lib_Input_Issue_Ledger (fixed).md#li-070>).
+The network completion dependency is
+[RI-102](<Radiant_Issue_Ledger (fixed).md#ri-102>).
+All twenty combined HTTP/DOM rendering tests pass. Four document/iframe,
+three Input and one observer controls pass during implementation. The milestone
+release baseline reports 8,140 passed, 10 failed, 299 partial and 8 skipped.
+Its failures expose borrowed fragment text after the factory refactor; text
+occurrences now retain independent owned storage, matching the old insertion
+contract. All nine persistent failures pass focused rechecks, including eight
+layout fixtures at 100% element/text matches. The initial jQuery failure also
+passes directly. No clean repeated full baseline is claimed.
+Crates.io now renders its primary content; image error falls from 54.2222%
+to about 2.7368%, clearing one major candidate. Icons and API/loading-state
+differences remain. The severity inventory is 160 high / 1 critical / 906 low;
+the round47 online report records the final capture and qualification.
+Evidence: `temp/online-visual-round47`. No site condition, vendor edit, admission
+budget or D10.1.7 capture-clock change is used. The clone requirement is the
+[DOM cloning algorithm](https://dom.spec.whatwg.org/#concept-node-clone).
+
+<a id="select-invalid-timeout"></a>
+
+## Invalid select timeout silently disables the deadline — 2026-11-17
+
+**Status:** FIXED in the working tree; AUTO/interpreter/JIT regression checks pass.
+The full Lambda baseline passes 7,566/7,566. Timeout observation follows
+S13.3.2; invalid timeout arguments must follow ordinary error admission
+(S7.4.1v2, S11.4.1v5). `pn_select` ignored failure of
+`task_read_milliseconds`, leaving its zero-initialized timeout unbounded for a
+float or string. `wait` already rejects those inputs. This surfaced when sync
+passed a floating-point monotonic deadline difference to `select`. Sync now
+rounds remaining durations up to integer milliseconds; the runtime also rejects
+invalid/negative select timeouts. Regression: `proc/select_invalid_timeout`.
+
+<a id="propagated-operator-refresh"></a>
+
+## Refreshing propagated recursive calls invents operator errors — 2026-11-16
+
+**Status:** FIXED in the working tree; focused AUTO/interpreter/JIT checks and
+the full Lambda baseline (7,560/7,560) pass. This blocked the sync validation-cache
+optimization. S7.5.1v6,
+S7.6.1v9 and S3.4 require `not (f(...)^)` to consume the successful value after
+propagation, while preserving actual unhandled errors.
+
+The current release (`672531532`) rejects the recursive array comparator in
+`temp/sync-warm-latency/tune2/minimal.ls` with E228 on
+`if (not (compare(a[i],b[i])^))`. The call has an explicit `bool^` return and
+propagates with `^`. The refresh pass in `build_ast.cpp` updates a completed
+recursive call signature, then unconditionally adds `error` to enclosing unary
+and binary nodes when any child changed. That change can remove an error from
+a propagated call's normal outcome; it is not evidence of a new operator error.
+The refresh pass now recomputes operator outcomes using their existing resolvers.
+`propagated_operator_refresh` covers recursive/forward unary, logical and numeric
+operations, including actual propagated failures. The negative
+`operator_refresh_unhandled` case still reports E228 on all three tiers; its
+native error-harness registration retains that rejection as a baseline check.
+Focused loop-admission fixtures pass as well. Evidence:
+`temp/sync-warm-latency/tune2/verification.log` and matching tier outputs.
+The aggregate result is in `tune2/lambda-baseline.log` under the same directory.
+
+<a id="standalone-dom-media-playback"></a>
+
+## Standalone DOM media playback stalls with offline audio
+
+**Fixed 2026-11-24** for standalone JS with offline audio. The CLI drained
+decoder polling timers while the shared document submix stayed at time zero.
+The native drain now runs the existing document frame tick between libuv turns
+so the submix advances on the document's monotonic clock (D8.4.4, D9.5.6v2,
+D11.3.1). The real media regression passes with offline output and macOS
+decoder services available. Evidence is in
+`temp/fix-reported-tests/{media-native-runtime,media-after}.log`.
+
+The earlier editor baseline printed the first ten assertions before stalling
+at the first sourced `await media.play()`. An isolated run reproduced the
+stall with either a relative or an absolute corpus link. The following
+baseline passed with the original link (`temp/edit-viewer/columns-lambda.log`).
+Earlier evidence is in `temp/edit-viewer/ini-control-
+{lambda,recheck-test_js_gtest,media-recheck,media-absolute}.log`.
+
+<a id="node-keyobject-native-gc-ownership"></a>
+
+## Node KeyObject native GC ownership — 2026-11-13
+
+**Status:** FIXED and verified, 2026-11-13. **D6.3.3**
+requires slot-backed roots for native temporaries; conservative stack scanning
+remains retired. `LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js
+test/js/crypto_mbed_only.js --no-log` loses native P-256 KeyObject material and
+reports an invalid `key` object after the digest checks. Ordinary mode passes.
+The KeyObject factories leave the new typed-array bytes and wrapper in unrooted
+C++ locals while constructor linking, property allocation and RSA details can
+collect. RSA pair construction also leaves the private wrapper unrooted during
+public-wrapper creation. These native lifetime paths predate OpenSSL removal;
+no old fallback or vendor modification is needed to reproduce the ownership gap.
+
+The fix roots backing bytes, wrappers, details, method keys, one-shot operation
+objects and key-pair results through `RootFrame` / `Rooted`. Signature results
+also stay rooted while stream-context cleanup allocates. Final verification:
+576/576 JS tests; both crypto fixtures under forced GC/poison; three ordinary
+and three forced-GC direct profile runs. Evidence and final qualification are tracked in
+[the migration plan](<impl/Lambda_Impl_MbedCrypto_Only (done).md>) and
+`temp/mbedcrypto-only/node-mbed-only-gc.out/.err`. No test limits or goldens are
+changed to hide the failure.
+
+## Recovery/scale integration findings — 2026-11-12
+
+<a id="sync-recovery-scale-safety"></a>
+
+**Status:** FIXED for the named script integration defects; qualification residue
+is retained below. The [implementation record](<impl/Lambda_Impl_Sync_Recovery_Scale (done).md>)
+records the selected bounded profile (S12.1.1v3, S12.4.4v4, D11.1.2).
+
+The new reuse protocol initially chose a cancelled maintenance job's physical
+storage generation again. Its uploaded keys remained in the registry: an open
+publication could reference those future keys, or the next deletion job could
+stop because a candidate used its current generation. Reproduction:
+`sync_reuse_fencing.ls` aborts generation 1 after upload, starts a new cut, and
+replays old requests. Allocation now advances `next_epoch` even on abort;
+publication rejects abandoned generations. The next cut skips to generation 2
+and can reclaim the abandoned keys. Later cuts/reapers cannot affect retained
+old copies or newly uploaded paths. This is a new script integration fix;
+the committed legacy profile already filtered future keys from its old-key list.
+
+The existing scheduled client could also treat an aborted job as a committed
+cut, then repeatedly try to prune it. It now returns to selection after seeing
+its job's explicit abort. The real-S3 recovery gate covers this transition on
+AUTO, interpreter and JIT with unchanged deadlines. No lease-based
+cancellation or automatic release of another writer's pending uploads is added.
+
+A release 16 MiB capture/external-edit/restore workflow exposed excessive typed
+codec allocation: about 5.88 GB maximum RSS / 10.34 GB peak footprint before the
+fix. Native hash streaming alone used about 59.8 MB maximum RSS, and incremental
+script chunking about 76.8 MB. Per-scalar Mark parsing and text-encoded chunk
+payloads repeatedly created Input-owned values; D5.1.1–D5.1.3 deliberately keep
+those outside GC. Batch scalar validation preserves canonical wire bytes, and
+new streamed `chunk_raw` objects use raw plaintext and raw domain contexts.
+The revised JIT workflow passed exact restores with about 489 MB peak footprint;
+interpreter passed with about 298 MB. Final source/binary identities and all-tier
+qualification are recorded in the implementation record. This is a confirmed package hot
+path fix; the cause of the earlier concurrent JIT document SIGKILL remains
+unconfirmed. No native/vendor lifetime change or general SIGKILL fix is claimed.
+
+The large interpreter peer test also exposed a pre-existing scheduling problem:
+initial server capture ran after handshake, consuming a peer's fixed deadline.
+The agent now captures before advertising readiness; subsequent scans reuse only
+exact unchanged inode/revision observations. Deadlines are unchanged.
+
+Aggregate verification returned 7,573/7,574. `eps_fonts`
+(`test/lambda/eps/fonts.ls`) returned script status 1 in its baseline batch;
+three isolated GTest retries passed with unchanged fixture, golden and deadline.
+Cause is unconfirmed; no EPS/input/runtime fix or complete aggregate pass is
+claimed. This observation does not block the sync milestone. Evidence:
+`temp/sync-recovery-scale/baseline.log`, `eps-fonts-retry*.log` and final
+source/binary identities. All 70 sync goldens and five focused GC/poison cases
+pass on every tier; real-S3 recovery and retention/cache/crash gates also pass.
+
+## Retention integration findings — 2026-11-12
+
+<a id="sync-retention-safety"></a>
+
+**Status:** FIXED in the script integration; no new native-runtime defect is
+claimed. Specification boundaries remain S12.1.1v3, S12.4.4v4 and D11.1.2.
+The [retention implementation record](<impl/Lambda_Impl_Sync_Retention (done).md>) carries
+qualification and bounded scope. Findings and reproductions:
+
+- A partial workspace checkpoint after retirement still held the old replica.
+  Rechecking its dependencies against the new retired set rejected offline return.
+  Validate changed accepted replicas, retaining partial-frame progress. The
+  four-device retention process gate merges unsaved edits after base purge.
+- Equal-frontier concurrent saves could bind different timestamps to one saved
+  ID. New IDs bind timestamp and unique persisted intent (`lambda-save-2`);
+  history tests require distinct valid endpoints and complete ancestry heads.
+- Opening a deferred SQLite scope did not acquire writer ownership before file
+  deletion. A real pending head write now acquires the lock before effects;
+  cursor commit follows deletion. The process gate pauses after one removal,
+  rejects another writer, kills the first process and resumes the exact plan.
+- Unindexed recovery state and rolled-back cache eviction could lose dependency
+  provenance. Reachability now traverses each recovery state's own retention
+  context; locator rebuild quarantines orphans; verified durable cache intent
+  reconstructs missing-chunk availability. Offline/repository/process fixtures
+  cover orphan snapshots, resumed pruning and cache recovery.
+- Missing publication catalogs could otherwise recreate epoch zero. A durable
+  protocol marker and signed bootstrap profile now fail closed. Immutable
+  catalog backups allow explicit owner recovery with dependency validation;
+  destructive maintenance remains audit-blocked. `sync_retention_cloud.ls`
+  removes the catalog, requires rejection, restores its known backup, and
+  requires the audit barrier. No automatic disaster audit is claimed.
+
+Qualification residue: the concurrent aggregate baseline passed 7,542/7,543;
+`latex_test_tex_script_digest` returned status 124 at its 60-second deadline.
+Its focused default-deadline retry passed in 58.7 seconds. Concurrent LaTeX
+sources are outside this sync change; no timeout/golden/source was adjusted.
+A final JIT document peer exchange also exited by SIGKILL (`82-sync`, no native
+diagnostic) during that aggregate run. Kernel diagnostics did not identify a
+Lambda memory kill; resource contention is only a hypothesis. The isolated
+process retry passed all 18 checks without code/deadline changes. Its late-stage
+observed process-tree peak was about 5.2 GiB; that does not establish the original
+kill cause. Evidence and exact identities remain in
+`temp/sync-retention/final/`; preserve the failed run as qualification residue,
+not a fixed runtime bug or a claim of production workload capacity.
+
+Existing [LR01-24](Lambda_Issue_Ledger.md#lr01-24) and sibling LI-015 remain open and separate.
+No owner source or native test timeout was changed to pass these checks.
+
+## Durable document integration findings — 2026-11-12
+
+<a id="sync-document-coverage"></a>
+
+**Status:** FIXED in the new script host; no new core-runtime defect is claimed.
+During integration, using the protocol's causal-clock status as whole-document
+durability would report an empty Text document as covered before its root was
+published. A newly saved version can also change shared metadata without changing
+the live edit clock. The protocol status is a causal-frontier predicate; the host
+must supply publication evidence (D11.1.2, S12.1.1v3).
+
+`document_state.coverage` therefore requires a receipt for the current immutable
+document root in addition to the causal frontier. Local persistence records the
+root before reply; peer ACK and verified cloud publication retain their separate
+root receipts. An empty-document regression in `sync_document_repository.ls`
+requires local coverage and rejects premature peer/cloud coverage.
+Agent-level status also combines workspace and document receipts;
+`sync_document_coverage.ls` supplies workspace-only evidence, requires the overall
+flag to remain false, then admits the document root and verifies that a later live
+edit invalidates it. Configured cloud status checks its selected provider. Existing
+same-epoch CRDT semantics are unchanged. The
+[document implementation record](<impl/Lambda_Impl_Sync_Documents (done).md>) holds final
+verification, source identities and remaining scope. The first sandboxed sync
+sweep's listener failures were environmental (`cannot bind the listener`);
+the loopback-enabled sweep passed without changing fixtures or the runtime.
+
+<a id="computed-element-names"></a>
+
+## Computed element names needed by the script LaTeX digester — 2026-11-11
+
+**Status:** FIXED — the user selected `<[tag] ...>` and S16.8.10 now rules
+computed element tags. Both parser conformance suites and interpreter/JIT
+regression tests pass, including forced precise garbage collection. The script
+LaTeX digester can now construct arbitrary named nodes. **Dependent task
+blocked:** no for element construction; full LaTeX parity remains unfinished.
+
+The native LaTeX digester builds an element whose tag is the input command or
+environment name (for example `\\custom` produces `<custom ...>`). The script
+prototype can construct only its explicitly named literal tags and reports an
+unknown command as unsupported. Reproduce the missing general construction by
+running `let tag = "custom"; <[tag]>`: the current parser rejects it with E100,
+`expected an element tag` before the fix. S16.8.9v2 covers computed *attribute keys*, not tags;
+`vibe/Lambda_Pkg_Readability.md` RD-O1 records computed tags as needing a user
+ruling at the time. The user's requested full script TeX/LaTeX port needs a general
+construction operation that preserves element value, attribute, content and
+precise-rooting semantics. A computed-tag literal and a runtime constructor are
+possible designs; S16.8.10 adopts the computed-tag literal.
+
+<a id="decimal-trunc-precision"></a>
+
+## Decimal `trunc` narrowed through binary floating point — 2026-11-11
+
+**Status:** FIXED. **TeX-port blocker:** no after the fix; this defect blocked
+accurate 16-significant-digit expl3 floating-point evaluation.
+
+On interpreter and JIT, `let x = decimal("9999999999999999.9")^;
+[string(trunc(x)), type(trunc(x))]` returned `["1e+16", float]` instead of
+`["9999999999999999", decimal]`. Similarly, truncating decimal
+`-0.999999999999999999` returned `-1` instead of `-0`. The scalar `trunc`
+implementation converted its argument through binary double, losing decimal
+precision and sometimes rounding across an integer boundary.
+
+The fix uses the shared numeric rounding implementation and `decimal_trunc`,
+preserving decimal values and supporting vectors through the shared numeric
+vector path. `test/lambda/trunc_decimal_precision.ls` covers precision, signs,
+null, vectors and dynamic types; it passes on both backends with forced precise
+garbage collection and freed-memory poisoning. The existing `numeric_sys_func`,
+`vector_sys_func` and `typed_array_vectorized_math` goldens also pass on both
+backends. S7.1.1v3 covers null propagation and S7.10.5v3 covers sequence input
+and array output.
+
+<a id="vmap-embedded-nul"></a>
+
+## Map spread loses lookup for an embedded-NUL key — 2026-11-11
+
+**Status:** FIXED in Lambda runtime source and verified with an isolated debug
+executable. The existing shared executable was not overwritten.
+
+Previously `k = chr(0)`, `m = map([k, 12])`, `n = {*:m}` gave `m[k] == 12`
+but `n[k] == null`; `for (k, v in m)` also yielded null for that value. VMap
+iteration and spread reified a length-bearing key as a symbol and then called
+`vmap_get_by_str`, which derives the length with `strlen`. The shared
+`vmap_get_by_symbol` now preserves embedded-NUL keys through length-aware
+lookup while retaining the existing synthetic numeric-key path for ordinary
+names (S8.3.1, S2.3.1). Installed `test/lambda/vmap_embedded_nul` covers leading and internal
+NUL, iteration, direct and nested spreads, ordinary keys and numeric-key
+projections. It passes interpreter and JIT with forced GC and freed-memory
+poisoning; seven existing VMap/map suites pass both backends. The isolated
+reconstruction prototype also now matches native on the NUL diagnostic cases.
+Evidence: `../lambda-input/temp/expl3-script/nul-map-fix/`.
+
+## Online callback initialization repairs — 2026-11-14
+
+<a id="online-console-group-bindings"></a>
+
+**Status:** FIXED for the selected console group methods. Host-native operation
+ownership **D9.5.6**, complete argument spans **D7.2.2**, realm ownership
+**D6.3**. Native Canvas matrix operations are separately recorded as
+[RI-075](Radiant_Issue_Ledger.md#ri-075).
+
+Maven's slider initialization throws on `console.group`, before breakpoint
+setup. The console group implementation already exists, but the MVP host
+namespace installs only five stream methods and count/timer labels. Its
+canonical namespace therefore omits group/groupEnd; the fallback native
+console object cannot restore properties on that existing namespace.
+The host now publishes group, groupCollapsed and groupEnd, sharing existing
+context-owned group state. Both host and native group functions preserve the
+full argument span through their existing output paths. No inert shim,
+exception suppression, page script edit or renderer visibility change is added.
+Existing textual group formatting remains limited; full Console UI is not claimed.
+
+The new document-initialization PNG control fails before and passes after.
+Eight new/existing console goldens pass across AST and MIR: groups, log, label
+registry and document console/performance. Maven's unchanged saved callback
+now reaches its breakpoint check without the previous exception. The main
+hero has independent visibility/timing gaps, so no page clearance is claimed.
+Canvas and console focused render suites pass 11 cases together. Broad
+baseline and catalog recapture are deferred under the user's instruction.
+
+Evidence: `temp/online-visual-round27/console-before.log`,
+`batch-focused.log`, `console-goldens.json`, Maven callback before/after logs;
+`test/js/console_groups.js` and its golden, and
+`test/online/render_console_groups.test.cjs`.
+
+<a id="sync-capture-sqlite-staging"></a>
+
+## Large workspace capture fails during a SQLite statement — 2026-11-17
+
+**Status:** FIXED by descriptor-only SQL staging and scoped file spools. The
+release 80 MiB / 128-file publication completes in 8.328 s and restores exactly;
+see [streaming packs](impl/Lambda_Impl_Sync_Streaming_Packs.md). Original failure:
+a release capture of 128 random files totaling 80 MiB fails
+before cloud publication. A separately copied and instrumented package confirms
+that `pack_store.flush` requests 17,066,092 ciphertext bytes plus 3,091 ID and
+kind bytes in one query, exceeding the SQLite result's 16,777,216-byte aggregate
+limit. Its 16 MiB pack threshold is checked after staging an object. The earlier
+attribution to the 64 MiB create/clone image limit was incorrect: capture uses
+an existing file-backed transaction (D11.1.2). The 1.17 s failure provides no
+sync timing. Fix the batching and preserve recovery; diagnostic output:
+`temp/sync-80-diagnosis/run2/err`.
+
+## Online StorageEvent bootstrap interface — 2026-11-17
+
+<a id="online-storage-event"></a>
+
+**Status:** FIXED for synthetic StorageEvent construction and payload access.
+Shared constructor behavior follows **D8.4.4 / D7.2.2** and traced event state
+**D6.3.3**. No capture-clock or script-admission change (**D10.1.7**).
+
+Coda and Superhuman's admitted classic Transcend bootstrap reads
+StorageEvent.prototype while collecting native property descriptors. The
+constructor was absent from the intrinsic catalog, causing an immediate
+ReferenceError before consent setup. The event now uses the existing typed
+Event host, with branded readonly payload getters, nullable DOMString members,
+USVString URL conversion, validated Storage identity and legacy initialization.
+Common payload validation, EventInit flags, tags and constructor wrappers are
+shared with the existing MessageEvent/CSP machinery. This follows the
+[HTML StorageEvent interface](https://html.spec.whatwg.org/multipage/webstorage.html#the-storageevent-interface);
+it does not add automatic cross-window storage broadcasting.
+
+Three new focused JsFormalMir cases cover defaults, dictionary order, coercion,
+invalid receivers/areas, readonly payloads, GC and initialization during dispatch.
+The identical three cases pass in Chromium headless shell; all **five** selected
+native cases, including two existing dispatch/message controls, pass. A startup
+reduction that previously threw ReferenceError now reveals its green panel.
+No baseline is repeated after the green round51 milestone.
+
+Both selected live captures load successfully. The StorageEvent error is gone,
+but the bootstrap now reaches a later TypeError. Coda's PNG is unchanged and
+Superhuman changes slightly; both remain high severity. The report remains
+159 high, one critical and 907 low. Evidence: `temp/online-visual-round52/`,
+qualified release pin
+`9ddf7cfb1c20d01f80e58d5affb1215b2e918ad60440882f164d68246f480c31`.
+The later exception is reproduced by the captured bootstrap in a minimal HTML
+host after retaining its script URL; its root cause remains unconfirmed.
+
+**2026-11-20 recheck:** the exact retained consent bootstrap with its original
+script URL now completes with `airgap.initialized === true` on the installed
+renderer. The former later TypeError is no longer reproducible in that reduction;
+it is not an outstanding diagnosis target. Coda's retained native page instead
+shows an API 403 response. This recheck does not establish the cause of that
+response or clear its visual comparison. Evidence:
+`temp/online-visual-round113/airgap-state.log` (**D8.4.4 / D9.1.3v2**).
+
+<a id="lr12-65"></a>
+
+## LR12-65 — Form validity scan blocks the Lambda host build
+
+**Fixed 2026-11-21.** Reproduced the same day at Lambda `017c686351` with Input
+`3b18322` and Radiant `4871cce` (D9.5.6v2). Compiling `lambda-rt-cpp` in
+`release_native` fails in `dom_form_user_validity_visit` because the callback
+calls `form_storage()` on `DomFormUserValidityScan`. The scan stores its target
+element in the `form` member. The original sources and the extension rename
+both fail at the same line. The mismatch blocked linking the host for verification.
+[Form validity scan](../lambda/dom/dom.cpp#L9688)
+
+The merged `DomFormUserValidityScan` is a local scan record with a `form`
+pointer. A mechanical accessor rename changed its comparison to the nonexistent
+`scan->form_storage()` method. Restoring the pointer access fixes compilation;
+the existing `ValiditySelectorsUseInitialAndLiveConstraints` render control
+passes against the rebuilt host. Input's missing geometry-structure brace is
+recorded separately as LI-082. Stale generated makefiles also omitted the new
+server backend; regenerating them from the JSON source manifest and applying
+the documented sibling-archive generator restores linking. Ownership/build
+boundaries remain **D9.1.1v4 / D9.1.3v2 / D9.1.5**. No generated build files or
+vendor source were hand-edited. Evidence: `temp/online-visual-round120/`.
+
+<a id="reader-record-admission"></a>
+
+## Reader record admission repair — 2026-11-17
+
+**Admission repair: IMPLEMENTED; focused qualification passed.**
+The typed TeX reader exposed false ordinary-error effects under S7.7.2v2 /
+S11.4.1v5. A function returning a record assembled from a completed typed call
+or a known record spread acquired a deferred-return error: the checker read
+the literal's conservative storage recipe instead of its final field values.
+An annotated spread literal also reported required fields missing because
+its runtime-built shape has no static slots. The checker now proves return
+membership from field expressions and ordered spreads, and recognizes the
+dynamic shape when checking missing fields. Unknown keys, open sources and
+optional overwrites retain runtime admission; storage compatibility stays
+separate (D3.4.6, D7.1.3). Failed direct and nested spreads retain their error
+completion even when later fields satisfy the target shape.
+`record_return_boundary` covers accepted records and rejected dynamic data;
+paired negative fixtures require E208 at a clean relay of a failed builder.
+
+Explicit any fields admit contained errors under S11.4.3. Return proofs now
+retain that top-type membership. The interpreter also repeated a validator
+walk after successfully admitting every field, and that second walk rejected
+valid error data in any. Plain records now retain the completed field proof;
+nominal, binary, namespace and JavaScript-specific contracts keep additional
+validation, and conversion/layout checks remain. Positive interpreter/JIT/AUTO
+cases cover both nested map data and contained errors. IME, paint and sketch
+helpers with clean map returns now require map spread sources instead of
+concealing possible failures from untyped sources.
+
+The final release host passes 782 reader differential comparisons, 23 focused
+checks including scheduled GC, all 285 LaTeX compile checks, and the six
+negative interpreter/JIT/AUTO cases. Test262 is 40,261/40,261 fully passing.
+The Lambda aggregate remains non-green: exposed caller contracts pass focused
+rechecks, while a native PDF allocation abort, an editor assertion and the
+unavailable WebRTC dependency remain recorded qualification limits. Full
+corpus/recheck provenance is in the
+[reader implementation record](impl/Lambda_Impl_Latex_Script_Engine.md#reader-records-and-error-boundaries--2026-11-17).
+
+<a id="total-query-input-handling"></a>
+
+## Total query input handling — 2026-11-17
+
+The user ratified total query input handling under S7.1.2v2 / S7.10.7. The
+original 66 audit observations agree between the interpreter and JIT on the
+pre-migration host. The migration covers the six query functions' input rejection
+paths, nullable result metadata and error effects. It passes 60 focused
+interpreter/JIT/GC runs. See the
+[numerical/query convention audit](impl/Lambda_Impl_Numerical_Query_Conventions.md).
+
+<a id="numerical-domain-outcomes"></a>
+
+## Numerical domain outcomes and integer power overflow
+
+**Fixed 2026-11-24.** Under S4.2.5, decimal rounding preserves NaN, signed
+infinity and already-integral wide decimal values. Norm and the statistical
+reductions treat NaN as a numerical value. Unary vector math, sign and clip
+use checked real-number admission. Incompatible types and unsupported
+reduction sources now report an ordinary error. Sign uses the int lane's
+NaN encoding and the function retains the vector shape (S7.10.5v3).
+
+The int53 power kernel computes integral powers exactly in band and saturates
+overflow to signed integer infinity under S4.1.2. Both the vector operator and
+`math.pow` use the same boxed power dispatch.
+
+Before the fix, `sign(nan)` returned zero, and `9007199254740991 ** 2`
+returned a finite float. The new
+[domain regression](../test/lambda/numeric_domain_outcomes.ls) covers those
+cases, integer rounding, reduction NaN, and wrong-type rejection on both
+tiers. See the [numerical audit](impl/Lambda_Impl_Numerical_Query_Conventions.md#numerical-findings).
+
+<a id="cli-result-embedded-nul"></a>
+
+## CLI result output truncates at embedded NUL
+
+**Fixed 2026-11-24.** Running `"before"; "a" ++ chr(0) ++ "b"; "after"`
+previously exited successfully with stdout ending at `"beforea`. The
+script and procedure CLI paths now write the formatted buffer by byte count.
+The interactive result echo also writes by byte count under S16.7.4. The fix
+preserves the formatter's original bytes, including the NUL and the suffix.
+
+The release probes match the exact bytes on interpreter and JIT with normal
+and forced garbage collection. The
+[REPL test](../test/test_lambda_repl_gtest.cpp) checks the NUL and its suffix.
+See `temp/ruling-free-audit/focused.log`.
+
+<a id="empty-binary-results"></a>
+
+## Zero-length binary payloads escaped into Lambda values
+
+**Fixed 2026-11-24.** S2.2.2v2 requires `null` when a binary result would
+have zero bytes. Previously, `binary("")` produced an observable length-zero
+Binary. Conversions, binary slices, boxed native bytes and the arena builder
+now apply the solid type contract. Empty SQLite and RDB BLOBs remain BLOBs
+in the database and become null when materialized as Lambda rows. Empty text
+remains a genuine string. UTF-8 and indexed line readers handle zero-byte
+inputs and results, and spelling and IME preserve empty-key lookups.
+The package staging bridge checks the presence of the byte field and sends
+a zero-length payload for null (D11.2.4).
+
+The [binary regression](../test/lambda/binary_empty_result.ls) covers empty
+text, symbol and array conversions, slices and filtering. The SQLite and RDB
+session/spool tests exercise real zero-byte BLOBs alongside nonempty binary
+data and empty text. The focused debug and release replays each pass 72/72
+on interpreter and JIT, including forced GC. The Lambda runtime unit suite
+passes 343/343, and the confined package stage passes 53/53. The Input baseline reports
+5,363 passed, 3 skipped, and the same three failures recorded for LI-109.
+See `temp/ruling-free-audit/{focused-debug-final,focused-release-final,binary-schema,package-stage-final,input-baseline}.log`.
+
+The three repairs pass the full Lambda baseline at 6,128/6,128. The Test262
+repeat on the pinned release records 40,258/40,261 fully passing and zero
+regressions. Three RegExp cases exceeded the batch-time threshold and passed
+on isolated retry. See
+`temp/ruling-free-audit/{lambda-baseline-final,test262-final}.log`.

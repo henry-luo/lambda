@@ -63,6 +63,7 @@ typedef enum SysFuncResultKind {
     // unconditional `float` would make the emitter take the native scalar
     // lane for a complex/array argument and produce nan (SI14).
     SYS_RESULT_REAL_TO_FLOAT,
+    SYS_RESULT_REAL_TO_INT,     // a proven real scalar produces a Lambda int
     // Text transforms preserve their argument's text family: a string yields a
     // string and a symbol yields a symbol. Anything else keeps the row's open
     // type — these rows accept only text, so a non-text argument is a runtime

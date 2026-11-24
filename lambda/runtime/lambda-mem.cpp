@@ -1008,6 +1008,14 @@ extern "C" Binary* heap_binary_from_bytes(const char* src, int64_t len) {
     return binary;
 }
 
+extern "C" Item heap_binary_value_from_bytes(const char* src, size_t len) {
+    // S2.2.2v2: an empty payload is absence at the Lambda value boundary.
+    if (len == 0) return ItemNull;
+    if (len > UINT32_MAX) return ItemError;
+    Binary* binary = heap_binary_from_bytes(src, (int64_t)len);
+    return binary ? (Item){.item = x2it(binary)} : ItemError;
+}
+
 extern "C" Binary* heap_binary_slice(Binary* source, size_t offset, size_t length) {
     if (!source || offset > source->len || length > source->len - offset) return NULL;
     RootFrame roots(1);

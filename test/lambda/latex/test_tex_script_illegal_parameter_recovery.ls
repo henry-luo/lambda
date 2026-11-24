@@ -50,5 +50,6 @@ let native_ast=input(path,"latex")^;
     diagnostics_match:script.diagnostic_records==native.diagnostics,
     digest_issue:result.issue,ast_match:if(result.ast==null)null else result.ast==native_ast}
 
-let guarded=profile.expand_with_kernel("\\def\\z{}\\edef\\m{#\\z 1}\\m",kernel,options,100000)^;
-{changed_token_stream_issue:guarded.issue}
+let recovered=check("\\def\\z{}\\edef\\m{#\\z 1}\\m")^;
+{changed_token_stream_issue:recovered.issue,text_match:recovered.text_match,
+ diagnostics_match:recovered.diagnostics_match}

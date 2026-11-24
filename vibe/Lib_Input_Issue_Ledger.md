@@ -15,6 +15,9 @@ Resolved records are in the [fixed issue ledger](<Lib_Input_Issue_Ledger (fixed)
 
 ## Open issues
 
+<a id="li-114"></a>
+
+- [LI-114 — Native JSX and LaTeX writers silently omitted large strings](<Lib_Input_Issue_Ledger (fixed).md#li-114>).
 <a id="li-112"></a>
 
 - [LI-112 — Explicit epoch-zero cookie expiry is stored as a session cookie](<Lib_Input_Issue_Ledger (fixed).md#li-112>).
@@ -34,6 +37,7 @@ Resolved records are in the [fixed issue ledger](<Lib_Input_Issue_Ledger (fixed)
 <a id="li-108"></a>
 
 - [LI-108 — Text adapters truncate at embedded NUL](<Lib_Input_Issue_Ledger (fixed).md#li-108>).
+
 
 <a id="li-107"></a>
 

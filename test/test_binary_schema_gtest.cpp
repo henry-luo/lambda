@@ -323,8 +323,7 @@ TEST_F(BinarySchemaTest, ScalarSpansAndOwnedByteCopiesUseTheSameBindings) {
     ASSERT_EQ(get_type_id(empty), LMD_TYPE_VARRAY);
     EXPECT_EQ(varray_count(empty.varray), 0);
     Item present_bytes = field(view.get(), "nullable_bytes");
-    ASSERT_EQ(get_type_id(present_bytes), LMD_TYPE_BINARY);
-    EXPECT_EQ(present_bytes.get_len(), 0u);
+    EXPECT_EQ(present_bytes.item, ItemNull.item);  // S2.2.2v2
     native.nullable_bytes = nullptr;
     EXPECT_EQ(field(view.get(), "nullable_bytes").item, ItemNull.item);
     binary_schema_owner_invalidate(owner);

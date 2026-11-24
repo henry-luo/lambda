@@ -1,0 +1,6 @@
+{
+  supported: true,
+  tree: true,
+  text: true,
+  diagnostics: true
+}

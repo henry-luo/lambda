@@ -49,8 +49,8 @@ let native = input(root ++ "raw_commands_main.tex", "tex")^;
     actual: if (built.text == native.text) null else built.text,
     native: if (built.text == native.text) null else native.text}
 
-let raw = profile.expand_with_kernel("\\begin{document}\\directlua{code}\\end{document}", kernel,
+let raw_source = "\\begin{document}\\directlua{code}\\end{document}";
+let raw = profile.expand_with_kernel(raw_source, kernel,
     {resources: {local: {}, bundled: {}}}, 100000)^;
 let pending = digest.digest(raw)^;
-{digestion_guarded: pending.ast == null and pending.issue == "latex-digest-unsupported" and
-    pending.unsupported == "raw inline source mapping"}
+{digestion_matches_native: pending.issue == null and pending.ast == (parse(raw_source, {type: "latex"})^)}

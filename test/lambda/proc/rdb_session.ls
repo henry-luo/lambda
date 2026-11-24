@@ -44,7 +44,7 @@ pn main() {
         rdb.finish(session)^
         rdb.execute(session,"SELECT X'00FF', X'', NULL")^
         let binaries=rdb.fetch(session,1)^
-        print(binaries[1]==[[b'\x00FF',binary(""),null]]); print("\n")
+        print(binaries[1]==[[b'\x00FF',null,null]]); print("\n")
         rdb.finish(session)^
         rdb.execute(session,"SELECT a FROM items ORDER BY a")^
         let partial=rdb.fetch(session,1)^

@@ -138,6 +138,8 @@ pub fn lookup(vocabulary: map, word: string) int?^ {
     // a structural array contract here would revisit the entire offset index per word.
     let raw: binary = vocabulary.bytes
     let key = normalize(word,"nfc")
+    // the format admits nonempty words, and an empty key has no Binary value.
+    if (key == "") { return null }
     let bytes = binary(key)^
     let at = search.lower_bound(vocabulary.offsets,0,0,null,
         (offset: int) any^ => first_compare(raw,offset,bytes));

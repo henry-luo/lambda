@@ -29,12 +29,13 @@ extern "C" {
 struct test_result {
     char* output;
     int exit_code;
+    size_t output_len;
 };
 
 // `session_args` (NULL-terminated, may be NULL) go after --no-log, so `run`
 // opens a procedural session and `--tier=...` selects the satellite tier.
 test_result run_lambda_repl_with(const char* input, const char* const* session_args) {
-    test_result result = {nullptr, -1};
+    test_result result = {nullptr, -1, 0};
 
     // Create a temporary file for input
     const char* temp_file = "temp/temp_repl_input.txt";
@@ -62,7 +63,12 @@ test_result run_lambda_repl_with(const char* input, const char* const* session_a
     // File-backed stdin preserves REPL input without invoking a redirection shell.
     ShellResult shell_result = shell_exec(LAMBDA_EXE, args, &options);
     result.exit_code = shell_result.exit_code;
-    result.output = shell_result.stdout_buf ? strdup(shell_result.stdout_buf) : strdup("");
+    result.output_len = shell_result.stdout_len;
+    result.output = (char*)malloc(result.output_len + 1);
+    if (result.output) {
+        if (result.output_len) memcpy(result.output, shell_result.stdout_buf, result.output_len);
+        result.output[result.output_len] = '\0';
+    }
     shell_result_free(&shell_result);
 
     unlink(temp_file);
@@ -81,6 +87,21 @@ void free_test_result(test_result* result) {
 }
 
 // Test basic REPL functionality
+TEST(LambdaReplTests, echoesBytesAfterEmbeddedNul) {
+    test_result result = run_lambda_repl("\"prefix\" ++ chr(0) ++ \"suffix\"\nquit");
+    EXPECT_EQ(result.exit_code, 0);
+    const char expected[] = "\"prefix\0suffix\"";
+    bool found = false;
+    for (size_t i = 0; result.output && i + sizeof(expected) - 1 <= result.output_len; i++) {
+        if (memcmp(result.output + i, expected, sizeof(expected) - 1) == 0) {
+            found = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(found);
+    free_test_result(&result);
+}
+
 TEST(LambdaReplTests, test_help_command) {
     test_result result = run_lambda_repl("help");
     ASSERT_NE(result.output, nullptr);

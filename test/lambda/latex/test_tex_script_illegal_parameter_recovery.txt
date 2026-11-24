@@ -188,5 +188,7 @@
   ast_match: true
 }
 {
-  changed_token_stream_issue: "tex-illegal-param"
+  changed_token_stream_issue: null,
+  text_match: true,
+  diagnostics_match: true
 }

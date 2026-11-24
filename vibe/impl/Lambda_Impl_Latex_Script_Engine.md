@@ -33,6 +33,732 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Definition source-mapping regression, 2026-11-24:** The installed JIT
+  corpus reports `definition command source mapping` instead of the existing
+  `environment option token boundary` guard. The pre-session digest matches
+  the unchanged golden; the installed and staged packages do not. The added
+  native-name normalization rejects a `]` embedded in a TeX control word.
+  A broad bracket split restored the golden but lost consumed whitespace and
+  produced incorrect ASTs, so it was rejected. An isolated narrower snapshot
+  restores the consumed source gap and preserves the golden
+  (`native-brackets-v2-test_tex_script_environment_options.out`); it remains
+  uninstalled. In a 60-case punctuation and whitespace matrix, text and
+  diagnostics match native in each tier; 48 ASTs match and twelve comment-gap
+  cases remain explicitly guarded (`definition-gap-{ast,text}-{jit,interp}.out`).
+  Separate probes also found pre-existing incorrect ASTs for bracket-bearing
+  control words inside formatting commands; they remain open. A 12-case focused
+  regression and the 21-case macro-prefix regression pass on the combined
+  snapshot in both tiers, normally and with forced GC and freed-memory
+  poisoning (`{definition-gap,macro-prefix}-regression-{normal,gc}-{jit,interp}.out`).
+  Seven neighboring JIT GTests now pass their unchanged goldens on the combined
+  snapshot, as do the corresponding interpreter GTests
+  (`combined-neighbor-gtest-{jit,interp}.log`). The generic expansion script's
+  only JIT golden difference is the intended native-compatible macro-prefix
+  recovery. Four combined raw-text regressions pass in both tiers
+  (`combined-raw-regressions.log`). Three interleaved release pairs had mean
+  baseline/candidate CPU seconds of 6.435/6.381 for general text and
+  6.349/6.376 for the control; macro-prefix pairs comparing the earlier
+  raw-text snapshot with the combined candidate averaged 6.376/6.392. All
+  outputs matched native text, diagnostics and ASTs
+  (`bench-combined-{general-text,general-control,macro-prefix}.log`). The
+  combined candidate is still uninstalled (S1.8, D10.2.2).
+
+- **Empty captured resources, 2026-11-24:** The in-progress JIT corpus's
+  profile, read and readline scripts returned E201 at `decode_source`: an empty
+  captured source reaches a binary-only parameter as null. `binary("")` is null under
+  **S2.2.2v2**; captured resources currently convert their validated data to
+  binary without preserving the empty case. An untested `resource-empty-lmd`
+  snapshot retains empty text for zero bytes and lets the shared decoder
+  accept that representation; it also retains the staged prefix changes. Eight
+  JIT cases match native text and diagnostics across package, class, input,
+  stream and PDF file consumers in each tier; five trees match and the three
+  stream cases retain explicit digester guards
+  (`empty-resource-matrix-{jit,interp}.out`). The three failing profile, read
+  and readline GTests now pass with their unchanged goldens in both tiers on
+  the snapshot (`empty-resource-focused-{jit,interp}.log`). An eight-case native
+  comparison also passes in both tiers with and without forced GC and memory
+  poisoning (`empty-resource-regression-{normal,gc}-{jit,interp}.out`). The
+  change remains uninstalled; combined qualification remains pending
+  (D10.2.2, D11.1.2).
+
+- **Macro-prefix recovery, 2026-11-24:** A 21-case comparison against the
+  native TeX engine reproduces fatal `tex-macro-mismatch` where native backs up
+  the unmatched token, records a diagnostic and continues. End of input while
+  matching a prefix instead returns without that diagnostic. An isolated
+  `macro-prefix-lmd` snapshot based on the staged raw-text scanner matches all
+  21 texts and diagnostic sets in each tier (`macro-prefix-candidate-{jit,interp}.out`).
+  Eighteen ASTs match and three cases have explicit existing digester guards;
+  an included-file case matches native text, tree and diagnostic location in
+  both tiers (`macro-prefix-{ast,foreign}-{jit,interp}.out`). Its focused
+  regression passes normally and under forced GC in both tiers on the combined
+  snapshot. Neighboring goldens and release qualification remain pending;
+  the change is not installed (S1.8, D10.2.2).
+
+- **TeX Script JIT corpus, 2026-11-24:** The installed package's GTest run
+  passed 220 of 237 tests (`tex-corpus-jit.log`). Thirteen exceeded the
+  harness's unchanged 60-second limit; three failed at the empty-resource
+  decoder and one reported an environment-option guard mismatch: expected
+  `environment option token boundary`, got `definition command source mapping`.
+  The 2,046 package, test and executable hashes and seven separate reference
+  fixture hashes remained unchanged. Timed-out cases require isolated replays,
+  without changing this aggregate result. All thirteen also timed out in the
+  earlier two-worker sweep.
+  The prefix probes overlapped the corpus, and lowering their scheduling
+  priority was denied; this contention may have contributed to the tenth
+  timeout. Further qualification probes are deferred until the corpus ends.
+  A subsequent isolated release replay of `declaration_definition_gap`
+  completed with the exact golden (`profile-timeout-sample.log`); macOS
+  sampling could not inspect that process in the sandbox
+  (`profile-timeout-sample.err`). The thirteen-case GTest and release replays
+  remain pending.
+
+- **Combined-source baseline, 2026-11-24:** `make test-lambda-baseline` now
+  builds successfully with the paired Radiant revision, then reports 6,111 of
+  6,128 tests passing (`lambda-baseline-paired.log`). The JavaScript suite
+  reports 576/577: the
+  `dom_media_playback` JS case stops after ten `true` lines before its media
+  playback continuation; the media fixture exists. The serve suite also has
+  three failures, all reporting that loopback listener binding was not
+  permitted by the sandbox. The exact media GTest and all three serve GTests
+  pass when rerun outside the sandbox (`media-gtest-unsandboxed.log`,
+  `serve-gtest-unsandboxed.log`); the aggregate still records its four failures.
+  Individual baseline results and logs are saved as
+  `lambda-baseline-{js,serve}-{results.json,log}`. Radiant lint passes
+  (D9.1.3v2). The 13 remaining network, discovery and filesystem-watch
+  scripts also pass outside the sandbox (`lambda-baseline-13-unsandboxed.log`).
+  The sandboxed aggregate remains failed. A full unrestricted rerun with its
+  own results directory passed all 6,128 tests
+  (`lambda-baseline-unsandboxed.log`). The Test262 baseline passed all 40,261
+  baseline entries, with 2,652 skips and no regressions (`test262-baseline.log`).
+  The unrestricted Radiant baseline completed with no failed layout cases,
+  but its DevTools and render suites could not start because the render corpus
+  lacks `pngjs` (`radiant-baseline.log`). The layout report contains 292
+  partial and 12 skipped cases; one Radiant View speech smoke is skipped. The
+  lockfile-pinned `pngjs` 7.0.0 was recovered from the local npm cache, verified
+  against its SHA-512 integrity, and placed under `temp/` without changing the
+  corpus. An unrestricted aggregate rerun passed all 25 DevTools protocol
+  cases, but render startup then exposed the additional missing ESM dependency
+  `pixelmatch` (`radiant-baseline-with-deps.log`). The lockfile-pinned version
+  6.0.0 was also verified from the local cache; a temporary ESM resolver keeps
+  both dependencies outside the corpus. The focused render baseline passed:
+  207 passes, four expected failures, one skip and no regressions
+  (`radiant-render-deps.log`). The complete aggregate is being rerun with both
+  dependencies passed: 8,179 passes, 296 partial, 20 skipped and no failures
+  (`radiant-baseline-complete.log`). The linked `lambda-test` corpus remains
+  clean.
+
+- **Production boundary inventory, 2026-11-24:** `fn_parse2` dispatches through
+  `input_from_source_n_with_name_parent`, and the CLI conversion path calls
+  `input_from_url`; Input's format table still routes `latex`, `latex-ts` and
+  `tex` to native parsers. The document-transform registry already invokes
+  Lambda package exports, but the LaTeX package's `parse_source` still calls
+  native `parse`. `interp_call_module_export` provides an existing runtime-side
+  call path, not a drop-in Input dependency. Any migration must preserve
+  resource authorization and native-client ownership, root values over nested
+  evaluation, and retain equivalent diagnostics and ASTs (S1.8, D9.1.3v2,
+  D10.2.2, D11.1.2). Public dispatch remains native until those gates pass.
+
+- **Expanded-definition recovery:** Before this change the scanner checked
+  completed replacement lists, while native checks `#` during expansion
+  and can diagnose it before later tokens expand. The prior exploratory
+  candidate is not present in the current scratch tree. A fresh reproduction
+  matrix is `temp/latex-port-resume/expanded-param-reprobe.ls`. Both tiers
+  reproduce fatal `tex-illegal-param` on changed token streams where native
+  continues, including the missing-number diagnostic order. A separate
+  `\detokenize` case emits the correct expansion but drops the echoed
+  definition while native retains it (`expanded-param-reprobe-{jit,interp}.out`).
+  An exploratory `expanded-param-lmd` snapshot scans expanded-definition
+  parameter markers while tokens are read, preserving the distinction between
+  ordinary expansion lookahead and direct token-list insertion. The ongoing
+  baseline used the installed source. The snapshot fixes the reproduced
+  expanded-definition text and diagnostic-order cases in JIT; an ordinary
+  macro-generated `\def` remains fatal and the separate detokenize echo loss
+  remains (`expanded-param-candidate-jit.out`). The 31-case expanded-parameter
+  matrix gives identical JIT and interpreter results: 27 text and 29 diagnostic
+  matches. The four text mismatches comprise the separate detokenize echo gap,
+  two ordinary macro-generated definitions and a runaway definition
+  (`expanded-param-matrix-{jit,interp}.out`). All six neighboring
+  JIT goldens pass (`expanded-param-neighbors.log`). A combined snapshot
+  (`combined-param-lmd`) passes 28 text and 29 diagnostic checks out of 31 in
+  both tiers; only the two ordinary-definition and runaway-definition text
+  gaps remain. Included-file text, diagnostics and tree match in both tiers,
+  and `test_tex_script_expanded_param_order` passes in both tiers, including
+  forced GC and freed-memory poisoning (`expanded-param-gc-{jit,interp}.out`).
+  The combined JIT and interpreter runs match native text and diagnostics
+  across all 20 extended detokenize cases, with one explicitly guarded tree
+  (`combined-detokenize-extended-{jit,interp}.out`). The echo loss appears to come from
+  generated tokens marking the definition trace as foreign: unlike numeric
+  `\the` tokens, they lack `trace_internal`. An independent
+  `detokenize-trace-lmd` snapshot reuses the existing generated-text helper;
+  its first 18 cases match native text, diagnostics and ASTs in both tiers
+  (`detokenize-trace-candidate-{jit,interp}.out`). An included-source probe
+  also matches native text, tree and diagnostic file/line in both tiers
+  (`detokenize-foreign-{jit,interp}.out`). The combined regression matches in
+  both tiers and failed against the pre-change parser; all six neighboring JIT
+  goldens pass. A preliminary empty-output observation was a polling error:
+  the output file was read before the process finished. The 20-case extended
+  matrix matches text and diagnostics in 19 cases in both tiers; the remaining
+  `\noexpand` parameter-recovery failure also occurred with the pre-change
+  parser; the independent expanded-parameter candidate matches native text and
+  diagnostics for three `\noexpand\detokenize` variants in JIT
+  (`expanded-param-noexpand-jit.out`). One `\meaning` case retains the
+  generated-text source-mapping guard.
+  The combined regression also matches with `LAMBDA_GC_FORCE_EVERY=1000` and
+  freed-memory poisoning in both tiers (`detokenize-gc-{jit,interp}.out`).
+  Three interleaved release pairs on an expanded-definition detokenize workload
+  had baseline CPU seconds 5.294/5.275/5.244 and candidate
+  5.276/5.309/5.267, with identical native-checked output hashes
+  (`bench-detokenize-inner-pairs.json`). Parameter-scanning baseline CPU seconds
+  were 6.216/6.242/6.242 and combined-candidate seconds 6.259/6.229/6.238,
+  with identical native-checked text, diagnostic and AST output hashes
+  (`bench-parameter-pairs.json`). Both changes are installed. Six focused
+  repository tests pass against the installed package in each tier
+  (`installed-combined-focused-{jit,interp}.log`); the session-end aggregate
+  remains pending (S1.8, D10.2.2). The pre-existing illegal-parameter recovery
+  test now checks native text and diagnostics for the formerly guarded case;
+  its updated golden matches both tiers
+  (`illegal-parameter-installed-{jit,interp}.out`).
+
+- **Ordinary macro-generated definitions:** A 26-case reproduction has 15
+  text and diagnostic mismatches in the installed engine
+  (`raw-param-baseline-jit.out`). An isolated `raw-param-lmd` snapshot scans
+  ordinary definition bodies with the same parameter logic at token-read time;
+  its matrix matches 24 cases in both tiers. The remaining cases expose a separate macro
+  argument mismatch and runaway-definition recovery. A foreign-file probe
+  matches native text, diagnostic locations and tree in both tiers
+  (`raw-param-foreign-{jit,interp}.out`). A separate 16-case mixed-source
+  probe revealed five incorrect diagnostic offsets for buffered arguments.
+  A revised snapshot uses the reader position when tokens are buffered; both
+  tiers now match 15 cases, with the existing macro mismatch remaining
+  (`raw-param-cross-v2-{jit,interp}.out`). Its 23-case regression and foreign
+  source probe pass in both tiers. The earlier 31-case expanded-definition
+  matrix now matches 30 texts and all 31 diagnostic sets in both tiers; the
+  only text mismatch is the pre-existing runaway-definition case
+  (`raw-param-v2-expanded-{jit,interp}.out`). The 23-case regression passes
+  with forced GC and freed-memory poisoning in both tiers
+  (`raw-param-v2-gc-{jit,interp}.out`). The extended 25-case regression,
+  including CRLF and Unicode, also passes with and without forced GC in both
+  tiers (`raw-param-v2-regression-*`). Sixteen neighboring goldens and the
+  `\scantokens` source test pass on the frozen source; the 32 source and
+  golden files stayed unchanged (`raw-param-v2-neighbors.json`,
+  `raw-param-v2-test-manifest.json`, `raw-param-v2-sha256.txt`). Three
+  interleaved release pairs on ordinary definitions produced baseline CPU
+  seconds 6.224/6.218/6.212 and candidate 6.230/6.257/6.239, with identical
+  native-checked text, diagnostics and AST hashes
+  (`bench-raw-parameter-pairs.json`). The recovery change and its 25-case
+  regression are installed; four installed-package focused tests pass in both
+  tiers (`installed-raw-param-focused-{jit,interp}.log`). The unrestricted
+  Lambda aggregate passed 6,128/6,128 (`lambda-baseline-final.log`), but its
+  selected scripts do not include these LaTeX fixtures; the focused results
+  above remain a separate gate (S1.8, D10.2.2).
+
+- **Incomplete definitions:** The installed scanner stops with an issue at
+  end of input, while native retains the partial definition and, for an open
+  body, records `tex-runaway`. On a 20-case JIT reproduction, all texts and
+  17 diagnostic sets differ (`runaway-baseline-jit.out`). An isolated
+  `runaway-lmd` snapshot retains the scanned body or signature and records
+  the native EOF diagnostic. It matches native text and diagnostics for all
+  20 body probes and all 21 signature probes in JIT
+  (`runaway-v2-jit.out`, `signature-eof-v2-jit.out`). An expanded-text EOF
+  audit found different partial-source behavior for the shared `\expanded`
+  scanner (`expanded-eof-v2-jit.out`); the revised candidate limits recovery
+  to definition bodies and leaves incomplete general expanded text guarded.
+  JIT output for 20 incomplete expanded-text cases is byte-identical to the
+  installed engine (`expanded-eof-v3-{baseline,candidate}-jit.out`). An AST
+  audit exposed an existing missing `index` when an incomplete echoed
+  definition's error propagates through the digester; the scratch change adds
+  that index, returning a guarded unclosed-group or unsupported issue rather
+  than E201 (`runaway-ast-v4-jit.out`). A definition opened in an included
+  file and closed in its parent matches native text, diagnostics and AST; an
+  unclosed case matches text and diagnostics with an unclosed-environment guard
+  (`runaway-{closed-,}foreign-v3-jit.out`). The frozen two-file candidate
+  matches JIT and interpreter outputs for the body, signature, AST and
+  included-file matrices, and preserves the expanded-text cases unchanged
+  (`runaway-v4-sha256.txt`, `*-v4-{jit,interp}.out`). Its 14-case regression
+  with both foreign-file controls passes in both tiers and with forced GC and
+  freed-memory poisoning (`runaway-regression-v4-{jit,interp}.out`,
+  `runaway-v4-gc-{jit,interp}.out`). All 25 neighboring goldens pass, with 50
+  source and golden hashes unchanged (`runaway-v4-{neighbors,extra}.json` and
+  their manifests). Three interleaved release pairs had baseline CPU seconds
+  5.826/6.132/6.122 versus 6.161/6.274/6.331 for the candidate. A reversed
+  order repeat had baseline 6.089/6.133/6.170 versus 6.164/6.305/6.314;
+  all samples retained the same native-checked output hash
+  (`bench-runaway-control{,-repeat}-pairs.json`). Removing a repeated lookup
+  did not show a clear improvement: the original candidate measured
+  6.486/6.371/6.330 CPU seconds and the alternative 6.451/6.315/6.358
+  (`bench-runaway-opt-pairs.json`). The fully qualified original candidate,
+  including its digester error-shape repair and regression fixtures, is now
+  installed. Three installed-package focused tests pass in both tiers
+  (`installed-runaway-focused-{jit,interp}.log`). The complete 237-script TeX
+  JIT GTest corpus is running in session 92518 with two workers and the
+  unchanged 60-second per-script timeout (`tex-corpus-jit.log`). The package,
+  fixture and executable snapshot contains 2,046 hashes
+  (`tex-corpus-manifest.json`); a later fixture-path audit added the seven
+  TeX reference files, all older than the corpus start
+  (`tex-corpus-extra-manifest.json`). Verify both after the run. At 135/237, the
+  unchanged timeout has been reached by `declaration_definition_gap`,
+  `expl3_tl_tail`, `expl3_seq_in`, `raw_environment_digest` and
+  `numeric_conditional`, `digest`, `engine_identity`, `expl3_seq_item` and
+  `expl3_seq_left_macro`.
+  The harness is replaying missing batch records;
+  replay the timeouts in isolation after the aggregate. The separate native
+  six-fixture TeX conformance test passes in both tiers
+  (`native-tex-conformance-{jit,interp}.log`); the script-port reference test
+  is part of the ongoing corpus. This filter covers
+  `latex_test_tex_script_*`, not all `latex_*` scripts. The interpreter corpus
+  and the broader `make test-lambda-full` gate required by `test/README.md`
+  remain pending (S1.8, D10.2.2).
+
+- **Expanded token source and EOF:** Native `back_list_copy` clears direct-source
+  flags on `\expanded` results. The installed script path retained them: a
+  22-case complete-input audit has nine text and eight AST mismatches
+  (`expanded-valid-baseline-jit.out`). The isolated `expanded-eof-v6-lmd`
+  snapshot clears those flags and limits partial-EOF recovery to `\expanded`;
+  it matches all 22 texts and diagnostics, 21 ASTs and one source-mapping guard
+  in both tiers (`expanded-valid-v6-jit.out`,
+  `expanded-valid-matrix-v6-interp.out`). Its EOF matrix matches 16/20 texts
+  and 15/20 diagnostic sets; the other cases concern missing opening braces
+  or separate `\unexpanded`/`\detokenize` recovery
+  (`expanded-eof-v6-jit.out`). An AST probe exposed a second digester error
+  whose group-scan result lacked an inline token index. The isolated v7
+  snapshot adds that index: its EOF AST audit has 13 native matches and seven
+  explicit guards, with no E201 (`expanded-eof-ast-v7-jit.out`). A separate
+  v9 snapshot also implements native missing-brace scanning, skips temporary
+  relax meanings and handles active and `\noexpand` aliases. It matches all
+  27 opening-brace probes in JIT, including native ASTs
+  (`expanded-opening-regression-v9-jit.out`). Three staged source, EOF and
+  opening regressions pass in both tiers, including included-file controls;
+  all 10 neighboring JIT goldens pass with unchanged source/golden hashes
+  (`expanded-v9-neighbors.json`, `expanded-v9-test-manifest.json`). All three
+  regressions also pass forced GC and freed-memory poisoning in both tiers
+  (`expanded-*-regression-v9-gc-{jit,interp}.out`). The 27 opening and alias
+  cases also match in constructor mode in both tiers
+  (`expanded-opening-constructor-v9-{jit,interp}.out`). The source snapshot is
+  frozen in `expanded-eof-v9-sha256.txt`. It remains uninstalled; release
+  performance qualification is pending (S1.8, D10.2.2).
+
+- **Raw general-text recovery:** Native `\unexpanded`, `\detokenize` and
+  `\scantokens` use the same brace and EOF scanner. A 25-case JIT probe has
+  17 text and diagnostic mismatches on v9 (`raw-text-v9-jit.out`). An
+  isolated v10 snapshot factors that common scan and matches all 25 texts and
+  diagnostic sets (`raw-text-v10-jit.out`). Its JIT AST audit has 19 native
+  matches and six explicit unclosed-structure guards, with no E201
+  (`raw-text-ast-v10-jit.out`). A complete included-file example and three
+  child-to-parent group boundaries match native text, diagnostics and AST
+  (`raw-text-source-v10-jit.out`, `raw-text-boundary-v10-jit.out`). Its two
+  changed source hashes are recorded in `raw-text-v10-sha256.txt`. Its 25-case
+  regression and the three earlier expanded-token regressions pass in both
+  tiers (`*-regression*-v10-{jit,interp}.out`). All four regressions also pass
+  forced GC and freed-memory poisoning in both tiers
+  (`*-regression*-v10-gc-{jit,interp}.out`); the final interpreter case was
+  repeated with a captured exit status (`expanded-eof-regression-v10-gc-confirm-interp.out`).
+  All 14 neighboring JIT goldens pass with unchanged test hashes
+  (`raw-text-v10-neighbors.json`, `raw-text-v10-test-manifest.json`). The
+  25-case raw-text and cross-file regression passes in constructor mode in
+  both tiers (`raw-text-constructor-v10-{jit,interp}.out`). An additional 48
+  complete-input combinations of the three primitives match native text and
+  diagnostics in both tiers (`raw-text-fuzz-v10-{jit,interp}.out`); all 48
+  ASTs also match in both tiers (`raw-text-fuzz-ast-v10-{jit,interp}.out`).
+  The existing six-fixture script reference test matches its full golden,
+  including all 151 reference messages, in both tiers
+  (`tex-reference-v10-{jit,interp}.out`).
+  It is not installed; uncontended release performance
+  checks remain open (S1.8, D10.2.2).
+
+- **Constructor sweep result, 2026-11-24:** The frozen 231-test JIT harness
+  completed with 186 passes, 36 timeouts and nine output mismatches
+  (`default-sweep/jit.log`). All 1,745 executable, package and fixture hashes
+  in the manifest remain unchanged. The timeout list is in
+  `default-sweep/timed-out.txt`. The single-worker GTest rerun passed 25 and
+  still timed out on 11, with no other output mismatch
+  (`default-sweep/isolated-jit.log`). All 72 source and golden files for the
+  36 selected cases still match the original manifest despite later test
+  additions. `default-persistent-release.py` compared the 11 persistent
+  cases against the original default on the release host without altering
+  the harness or its deadline.
+  The first case, declaration-definition-gap, passes its golden on both
+  release snapshots, with identical output hashes. Original-default runtime
+  was 70.51 s (68.96 CPU s) and candidate runtime 69.08 s (68.67 CPU s), both
+  beyond the harness limit (`default-sweep/persistent-release.log`).
+  The second case, digest, also passes with identical output hashes in both
+  release snapshots, taking 62.63 s and 63.39 s respectively.
+  The third case, `expl3_cs_exist_c`, passes with identical output, but one
+  release pair took 50.73 s on the original default and 67.42 s on the candidate
+  (49.72 vs 64.02 CPU s). That difference did not reproduce: three interleaved
+  baseline CPU samples were 47.848/47.234/47.230 s and candidate samples were
+  47.230/47.097/47.356 s, with the same output hash (`bench-exist-c-pairs.json`).
+  All 11 release comparisons pass their goldens with identical output hashes
+  in both versions (`default-sweep/persistent-release-results.json`). GTest
+  still records the 11 fixed-deadline timeouts. The original-default
+  integer-helper run took 173.10 s wall and 102.02 s CPU, showing substantial
+  off-CPU time.
+  The explicitly mode-selected paragraph-gap fixture took 111.38 s vs 146.92 s
+  wall (110.24 vs 137.52 CPU s) despite identical output; avoid causal
+  performance conclusions from individual pairs.
+  The declaration-definition-gap fixture explicitly runs both constructor
+  modes for all 108 combinations, and length-digestion likewise passes an
+  explicit mode for each expansion; the candidate's absent-option default
+  cannot change those configured modes. Compare their harness outcomes with the
+  installed snapshot and use the release host for timing. Classify other
+  persistent timeouts individually.
+  Compare each mismatch with the installed default and native before considering a default
+  change. The user-visible default remains unchanged (S1.8, D10.2.2).
+  Direct follow-ups for foreign generic commands, unexpanded unknown commands
+  and generated parenthesized arguments match native text, diagnostics and
+  trees in both tiers (`default-mismatch-detail-{jit,interp}.out`). An initial
+  counters comparison used mismatched adapter configurations and is not a
+  parity result; the earlier aligned adapter comparison remains the evidence
+  for that fixture.
+  The sweep output itself checks native trees for the expl3 predicate and
+  two font cases; the paragraph case was checked separately with aligned
+  options. The parenthesized fixture's newly supported case has equal trees.
+  The environment-option case remains explicitly unsupported, but reports a
+  different source-mapping guard. These observations do not qualify the 36
+  timed-out cases or establish corpus-wide parity.
+
+- **Raw Lua document trees, installed 2026-11-24:** Native reparses a direct `\\directlua`
+  or `\\luaexec` group into a command element with a `source` attribute. The
+  installed script expansion preserves its bytes but the digester rejects the
+  tree. An exploratory `raw-lua-lmd` snapshot tags captured Lua groups and
+  parses reconstructed spans, reusing the existing raw-group and environment
+  safety scanners. The first 20-case native comparison exposed a missing
+  reconstruction trigger; the revised 20-case JIT comparison has 13 native
+  text, diagnostics and tree matches and seven explicit guards in both tiers,
+  with no silent tree mismatch (`raw-lua-tree-v2-{jit,interp}.out`). A JIT
+  included-file comparison also matches all three and the mapped offsets
+  (`raw-lua-foreign-v2-jit.out`). A 40-case audit has 30 native matches,
+  ten guards and no mismatches in both tiers (`raw-lua-audit-v2-{jit,interp}.out`);
+  the included-file case also matches under poisoned GC in interpreter
+  (`raw-lua-foreign-v2-gc-interp.out`). That initial version was not installed.
+  The existing explicitly guarded no-group and ambiguous
+  environment cases must remain guarded until proven safe (S1.8, D10.2.2).
+  The neighboring raw-inline capture golden matches. Raw-inline digestion has
+  one changed golden row: a direct Lua command followed by `\\lstinline`
+  improves from a guard to native text, diagnostics and AST equality
+  (`raw-lua-neighbor-test_tex_script_raw_inline_digest.out`). The other four
+  neighboring goldens match (`raw-lua-neighbors.log`). A separate v3 prototype checks
+  reconstructed lookahead and retains whitespace when a Lua command has no
+  group. Its 24-case JIT matrix has 20 native matches, four explicit guards,
+  and no silent mismatch in either tier (`raw-lua-no-group-v3-{jit,interp}.out`).
+  V3 retains the 40-case JIT audit results and passes the included-file
+  interpreter poisoned-GC check. A subsequent lexical-boundary audit found
+  four silent AST whitespace mismatches in both tiers
+  (`raw-lua-lexical-v3-{jit,interp}.out`): reconstructed separators and
+  comment-following whitespace after the captured raw span were dropped. A
+  v4 prototype reuses reconstructed gap parsing. Its 25-case JIT lexical
+  audit now has 20 native matches and five guards, with no mismatches in both
+  tiers (`raw-lua-lexical-v4-{jit,interp}.out`). Its 16-case paragraph-gap
+  audit has 15 native matches and one guard in both tiers
+  (`raw-lua-gaps-v4-{jit,interp}.out`); the earlier 40-case JIT audit remains
+  30 matches and ten guards. The 24-case unbraced-command audit remains 20
+  matches and four guards in both tiers; the included-file case matches with
+  poisoned GC in both tiers. Of three v4 neighbor checks, verbatim and
+  definition-joining goldens match; the mixed Lua/listings row changes to the
+  previously verified native match (`raw-lua-v4-neighbors.log`). The Lua gap
+  audit also reproduces the debug results on the fresh release host
+  (`raw-lua-gaps-v4-release.out`). A 15-case focused regression passes in both
+  tiers (`raw-lua-digest-regression-{jit,interp}.out`). Three interleaved
+  baseline CPU samples were 6.146/6.167/6.138 s and candidate samples were
+  6.147/6.160/6.187 s; all native-checked output hashes match
+  (`bench-raw-isolated-pairs.json`). V4 is installed in `tex_engine/digest.ls` and its
+  capture tag is merged into `tex_engine/expansion.ls` beside the integer fix.
+  The paired `test_tex_script_raw_lua_digest.{ls,txt}` includes direct,
+  guarded and included-file cases. Existing guards are updated only where the
+  resulting tree was checked against native. The combined installed source
+  passes all four focused GTests in both tiers (`installed-port-focused-{jit,interp}.log`);
+  both new regressions also match their goldens under poisoned GC in both tiers
+  (`installed-{expression_recovery,raw_lua_digest}-gc-{jit,interp}.out`). A
+  mixed Lua/expl3 source probe matches native text, diagnostics and the
+  integer source-mapping guard in both tiers (`combined-port-{jit,interp}.out`).
+  Three interleaved
+  release pairs on the frozen combined package retain native-checked output
+  hashes: integer baseline CPU 9.930/10.081/10.073 s, combined
+  10.394/10.177/10.162 s; raw baseline 6.186/6.177/6.182 s, combined
+  6.188/6.201/6.202 s (`bench-{integer,raw}-combined-pairs.json`).
+
+- **expl3 integer terminators, installed 2026-11-24:** Reproduced four explicit
+  `\relax` differences on installed modules (`expl3-relax-probe.out`). A
+  separate `expl3-v2-lmd` snapshot implements the bundled expl3 macro flow
+  for absolute value, minimum, maximum and rounded division, and changes the
+  shared expression scanner to diagnose an inserted closing parenthesis while
+  retaining its value and triggering token. All four original text and full
+  diagnostic comparisons match native on that snapshot
+  (`expl3-macro-v2-recovery.out`). The candidate is installed in
+  `tex_engine/expansion.ls`, with paired regression
+  `test_tex_script_expression_recovery.{ls,txt}` (S1.8, D10.2.2). The 13-case
+  integer/dimension/glue and helper matrix plus 12 EOF, nested, macro,
+  overflow and division edge cases match native text and diagnostic records
+  in JIT (`expr-recovery-{v2,edges}-jit.out`). The earlier absolute-value-only
+  snapshot matched the integer-helper golden in both tiers. The full v2
+  integer-helper golden also matches in both JIT and interpreter; the 13-case
+  interpreter matrix matched JIT exactly. `\meaning` for
+  all four staged helpers also matches native text and diagnostics
+  (`expl3-meaning-v2.out`). The v2
+  expansion hash is
+  `dec439474573ccd5225ab75ed842b1001105fe2d29d56c30f29b1adeab17f48f`.
+  The existing division golden matches against v2 in JIT. The 12 EOF and
+  malformed-expression edge cases also match the JIT output in interpreter.
+  Five direct and aliased helper probes retain the existing integer
+  source-mapping guard and match native text and diagnostics
+  (`expl3-v2-guard.out`). The division golden also matches in interpreter.
+  Eight random-state, alias and expanded-definition comparisons match native
+  text and diagnostic records in JIT and interpreter
+  (`expl3-v2-sideeffects-{jit,interp}.out`). An
+  included-file case matches native text and both diagnostic records in JIT
+  and in interpreter with scheduled poisoned GC
+  (`expr-recovery-foreign-{jit,gc-interp}.out`). Six
+  neighboring numeric, dimension and expl3 fixtures were checked;
+  missing-number recovery, numeric conditionals, dimension-unit recovery and
+  expl3 integer comparison, comparison-expression and integer overflow have
+  all matched (`expl3-v2-neighbors.log`). The 13-case integer/dimension/glue matrix also
+  matches native under forced poisoned GC in JIT (`expr-recovery-v2-gc-jit.out`).
+  A separate-output release build advanced past the DOM error
+  after Radiant was moved to `b0a225b`, but found the document-preview adapter
+  requires Radiant `ad7fdc8` (`release-build.log`). That existing descendant is
+  paired with Lambda commit `68c875a10`; the clean Radiant checkout was moved
+  there, leaving the gitlink unstaged. The single-job split release build then
+  passed with zero errors and 110 executable-link warnings
+  (`release-build-paired.log`). Its separate executable has SHA-256
+  `3adb338414df9582368d9dc5d98b132b62b72e1845eb8ec77927819706ecd252` and did
+  not replace the sweep's `lambda.exe`. It includes concurrent input-owner
+  edits, whose hashes and source revisions are in `release-current-provenance.json`.
+  The Radiant gitlink also changes owner layout sources; its integer-cast lint
+  passes (`radiant-lint.log`) and its baseline runs in session 88575.
+  The combined 25-case scanner regression matches native text and diagnostics
+  on this release host (`expr-recovery-v2-release.out`). Three interleaved
+  baseline CPU samples were 10.084/10.030/10.063 s and candidate samples were
+  10.112/10.108/10.125 s, with identical native-checked output hashes
+  (`bench-integer-isolated-pairs.json`). The combined installed-source harness passes
+  all four focused tests and the new regression under poisoned GC in both tiers.
+  The integer
+  and existing-raw workloads have identical baseline/candidate output with
+  successful native checks (`bench-{integer,raw}-smoke-{baseline,candidate}.out`).
+  The frozen package trees differ only in the tested engine files.
+  A previously pinned 2026-11-19 release host (`c43bc5f0...`, provenance in
+  `temp/lambda_frontend_profile/provenance.json`) can run the four ordinary
+  helper probes and matches the current debug-host output. It is older than
+  the current runtime and cannot establish current-release qualification.
+
+- **Concurrent input-owner work:** New edits appeared in
+  `lambda-input/lambda/format/format-utils.cpp`, its markup formatter test, and
+  `vibe/Lib_Input_Issue_Ledger (fixed).md` while this sweep ran. They are outside
+  this port and must be preserved. Account for them when qualifying a fresh
+  build; the frozen script sweep still uses its pinned executable and package.
+
+- **Constructor-mode default qualification, 2026-11-24:** In the included
+  nested-definition reproduction, the installed default executes and removes
+  the definition inside a command argument; native preserves it. Explicit
+  constructor mode matches native text and tree (`constructor-modes.out`). A
+  frozen `default-lmd` snapshot changes only the LaTeX profile's absent-option
+  default to true and retains an explicit false option. The default and true
+  probes match native; false retains the existing difference
+  (`default-options{,-interp}.out`). Five explicit-false scripts produce
+  byte-identical output, diagnostics, issues and ASTs on the installed and
+  candidate packages in JIT and interpreter; all four outputs hash to
+  `ae304bb2547cba92aec9d3ceb0093bea8d65ee90b4a8c7a657ec3d4fbe74ec88`.
+  The real GTest harness is sweeping 231 discovered
+  script-engine fixtures on JIT with two workers in session 6972; source,
+  host, harness and package hashes are in `default-sweep/manifest.json` and
+  the full log is `default-sweep/jit.log`. Poll the existing run, classify
+  every changed result against native with aligned resource and adapter
+  options, and qualify interpreter and explicit-false behavior before any
+  default change. Several rows have exceeded the unchanged 60-second deadline
+  under concurrent load so far; rerun them independently after the sweep.
+  (S1.8, D10.2.2).
+
+- **Generated length and definition source mapping, 2026-11-24:** Installed
+  the staged parser after the nine definition goldens matched the same
+  candidate snapshot (`definition-goldens-final.log`). It aligns verified
+  serialized token spans, preserves mapped group-edge whitespace and parses
+  echoed definition command names using native lexical boundaries. TeX
+  expansion remains governed by its original tokens (S1.8, D10.2.2). The
+  nine-case native-tree parity fixture and the earlier guarded reproduction
+  match their goldens against installed modules in JIT and interpreter. The
+  installed digest SHA-256 is
+  `8b9c81f49e7c84699ec714d3a219f19d9346721375e7f756bdcec6d7204f99ce`;
+  it differs from the qualified snapshot only in a marker name and comment.
+  The
+  milestone `make test-lambda-baseline` stopped before tests: the split-runtime
+  build reports that `lambda/dom/dom.cpp:735` passes seven arguments to the
+  selected Radiant declaration of `radiant_dom_mutation_begin`, which accepts
+  six. The full compiler diagnostic is in `temp/build_split-runtime.log` and
+  the gate log is `temp/latex-port-resume/lambda-baseline.log`. The wider TeX
+  corpus and production migration remain open. The DOM call was paired with
+  a Radiant revision whose seven-argument overload uses the old value for
+  relational-style invalidation; see [LR12-72](../Lambda_Issue_Ledger.md#lr12-72).
+  The Test262 baseline was not run; its target also builds the split runtime.
+
+- **Nested definition mapping, 2026-11-24:** After definition tokens were
+  normalized for native document parsing, the nested parser still compared
+  them to unnormalized TeX-reader tokens. A staged change in
+  the script digester normalizes the reread with the same
+  scanner before comparison, preserving the independent native-token check.
+  Six constructor-mode cases match native expansion, diagnostics and trees
+  in JIT and interpreter; their false-mode counterparts remain guarded. The
+  existing nested-definition and foreign-definition goldens match both tiers,
+  and scheduled poisoned GC matches the matrix in both tiers. An included
+  nested-source probe still stops at the explicit source-mapping guard.
+  The 12-case installed regression matches its golden in both tiers.
+  The pinned host used for this investigation has SHA-256
+  `26e6c872e5cab1e50d482fb95e096c3928b21447804d5c4754a4dd399242b97d`.
+  Further included-source qualification remains (S1.8, D10.2.2).
+
+- **Included nested definitions, 2026-11-24:** The included-source guard
+  compared a raw token slice with a normalized reread. The installed change
+  normalizes both comparison inputs
+  and retains the independent native-token and emitted-byte checks. An
+  eight-file constructor-mode matrix then exposed an adjacent optional group
+  that native attaches to a nested definition; the parser now attaches
+  those groups using the generic argument scanner and a shared node merger.
+  All eight trees, expansion texts and diagnostics matched on the staged
+  implementation and after the merger refactor, in both JIT and interpreter.
+  Eight following required, optional, parenthesized and whitespace/comment
+  forms also match in constructor mode in both tiers (`following-matrix-*`).
+  The prior engine guarded six of these eight; all eight non-constructor-mode
+  expansion differences reproduce on that engine (`nested-foreign-installed.out`)
+  and remain open. The adjacent nested, foreign-definition, definition-join,
+  definition-continuation and nested-native-name goldens match. A combined
+  included-source probe matches under poisoned GC in interpreter, and the
+  following-group probe matches under poisoned GC in JIT. The new installed
+  `test_tex_script_nested_native_foreign` matches in both tiers. Installed
+  digest SHA-256 is
+  `0421d4411e10a3cdab745e439464828fe248dc5c7b564fd25d7a843e224d6da2`
+  (S1.8, D10.2.2).
+
+- **Correction, 2026-11-24:** The exact-span installation described below
+  was reverted after an independent echoed definition containing `\a@b`
+  produced a silently different native tree alongside a simple generated
+  `addtolength`. The restored engine reports `command source mapping` on
+  that reproducer (`temp/latex-port-resume/unrelated-definition-reverted.out`).
+  The experimental fix and its regression are retained under
+  `temp/latex-port-resume/`, not installed. The staged parser joins and splits
+  source-backed definition-body names at native lexical boundaries and
+  restores mapped group-edge spaces. It matches the unrelated-definition
+  reproduction, 40 lexical comparisons, 16 generated-command comparisons,
+  and six changed-category comparisons in JIT. Of four leading-punctuation
+  comparisons, escaped underscore now matches; the other three stop at
+  an existing lexical guard. Foreign-command, generated-name and direct-name
+  adjacent goldens match on the candidate in JIT. Source-backed and
+  reconstructed word joins now share one scanner. The 24-case definition
+  matrix matches 11 native trees in constructor mode, explicitly guards one
+  nested definition, and guards all 12 cases with constructor mode off;
+  all expansion texts and diagnostics match. Six changed-category cases also
+  match in interpreter. Three additional leading-punctuation definition
+  cases match in constructor mode. The installed guard has a permanent
+  regression in `test_tex_script_generated_definition_guard`. Finish wider
+  lexical, definition and both-tier qualification before installing
+  (S1.8, D10.2.2).
+  The current candidate additionally rejects unmappable group edges. Its
+  prior snapshot matched 48 generated-value and following-argument cases in
+  JIT, and eight in interpreter, with an unrelated `\a@b` definition in
+  each source; the original unrelated-definition comparison also matches
+  under scheduled poisoned GC in JIT. After the edge check, candidate length,
+  and direct-name goldens completed and matched, as did the generated-name
+  golden and a 16-value interpreter regression. The candidate is still under
+  `temp/`.
+
+- **Definition targets, 2026-11-24:** Further qualification found five
+  successful but differing candidate trees when native command boundaries
+  changed the definition target (`targets-matrix.out`). The installed engine
+  remains guarded. The staged parser now normalizes command tokens across
+  the echoed definition before parsing its target and body, using the same
+  native name scanner; TeX expansion still uses the original tokens. All
+  five target trees match in constructor mode in JIT and interpreter, and the
+  other mode remains guarded (`targets-native{,-interp}.out`). The 24-case
+  definition matrix retains its 11 matches and explicit guards, and all 48
+  generated-value comparisons match (`definitions-native.out` and
+  `value-native.out`). The staged length, direct-name and generated-name
+  goldens matched before this latest change. The definition-option and
+  direct-name goldens were rerun and both match. Four superscript-source cases also
+  match native in constructor mode, with explicit guards in the other mode.
+  Changed-escape probes retain guards where serialization cannot be mapped;
+  two native inputs also fail their own LaTeX parse (`escape-matrix2.out`).
+  Qualify other source-boundary cases before installation (S1.8, D10.2.2).
+
+- **Active letters in definition names, 2026-11-24:** A follow-up found
+  that `@` or an ASCII letter with TeX category 13 could be split out of a
+  source-backed command name, yielding a different native tree. The staged
+  shared join scanner now includes verified active source characters; three
+  target/body probes match in constructor mode in both tiers, and the other
+  mode remains guarded (`targets-active2.out`, `targets-active-interp.out`).
+  Candidate digest SHA-256 is
+  `35d8cd513bb19ea05a2d2763d854615d74b2f620f33a78b25eb948059d3599fa`.
+  A nine-fixture JIT definition sweep is running in session 22442. Its first
+  fixture failed to import a helper before that helper was copied into the
+  staged tree; its retry matches the golden. The candidate changed during
+  the sweep; final-snapshot nested-definition and continuation retries run in
+  sessions 37159 and 50319. The 16-value
+  regression now matches native trees, text and diagnostics in both JIT and
+  interpreter (`v2-port-{jit,interp}.out`).
+  Qualification remains required before installation (S1.8, D10.2.2).
+
+- **Definition regression sweep, 2026-11-24:** The candidate definition
+  sweep matched seven fixtures after retrying the initially missing local
+  helper, but active-definition and group-source-gap goldens differed. The
+  active failure is the blank-line case: a synthetic `par` token was joined
+  with the following `Y` as if it had a literal control-word source. The
+  staged scanner now verifies the source spelling before joining or splitting;
+  the isolated native tree matches (`active-tree-fixed.out`). The full active
+  fixture also matches its golden. Group-gap isolation identified four blank-
+  line cases in definition bodies and defaults; all four match after the same
+  fix (`group-short.out`). The full definition-join golden and 16-value
+  interpreter comparison match on the corrected snapshot; the full group-gap
+  golden also matches. The original incorrect-tree reproduction matches in
+  both tiers with scheduled poisoned GC (`v3-gc-{jit,interp}.out`). A
+  24-case interpreter definition matrix retains 11 matches and the expected
+  guards, with matching expansion and diagnostics. A focused nine-case parity
+  fixture also matches in both tiers (`parity-{jit,interp}.out`). The
+  nine-fixture definition sweep against the same snapshot runs in session
+  35539; poll it before installation.
+  The staged digest now hashes to
+  `286cdfbac0c57bf5b5b5cd63d1816743bd58f9f52809e9ab885613aff38c7f3e`;
+  earlier candidate receipts do not qualify this changed snapshot
+  (S1.8, D10.2.2).
+
+- **Resume check, 2026-11-24:** The staged `temp/tex-addlength-digest/`
+  snapshot and its recorded probe artifacts are absent from this checkout, so
+  their results cannot be used to install the change. A fresh reproducer at
+  `temp/latex-port-resume/probe.ls` expands a macro-generated `addtolength`;
+  Script and native expansion text agree, but digestion stops at `command
+  source mapping` while native returns a tree. Reconstruct and qualify the
+  emitted-token mapping and native lexical boundaries before installing a fix
+  (S1.8, D10.2.2). The existing `setlength` mapping is a starting point, but
+  `addtolength` produces a generic command node with argument-group offsets.
+  A follow-up marks the interior of coalesced synthetic output only when
+  every token's spelling exactly matches the serialized span. Those marked
+  control tokens can use their emission origin in constructor mode; other
+  generated spans remain guarded. A 16-case JIT probe matches native text,
+  diagnostics and full trees for 12 cases; four `dimexpr` cases still stop
+  at the guard because serialization inserts control-word spaces. The new
+  12-case `test_tex_script_addlength_digest` matches its golden in direct JIT
+  and interpreter runs. A combined length
+  fixture exceeded the 60-second harness deadline under concurrent load;
+  the new checks now have a separate fixture. The original combined direct
+  interpreter run completed and matched all 112 original, 12 generated and
+  two foreign checks plus the 12 new checks. A subsequent alignment prototype
+  admitted one serialized space after a control token. Its four `dimexpr`
+  cases produced different complete trees despite matching expansion text and
+  diagnostics, so it was removed. A later staged candidate restores the
+  mapped group boundary as described below. Reparse the emitted
+  bytes with native lexical rules, including definition boundaries, rather
+  than inferring token positions from spelling alone. The adjacent direct-name,
+  generated-name and foreign-command harness fixtures pass in JIT (3/3;
+  `temp/latex-port-resume/neighbors-jit.log`). Further source-mapping and
+  corpus qualification remains before considering this change complete.
+
+- **Serialized group boundaries, 2026-11-24:** A candidate under
+  `temp/latex-port-resume/engine/` aligns serialized tokens and restores the
+  output gap before a closing group delimiter. The original 16 generated
+  comparisons now match native trees, expansion text and diagnostics,
+  including all four `dimexpr` cases (`matrix-candidate2.out`). A further
+  40-case lexical probe exposed four silent tree differences for `\a@b`
+  in an echoed definition (`lex-matrix.out`, `compare-at.out`): the TeX
+  reader splits that name at `@`, while the native document scanner keeps it
+  in one control word. The installed engine guards this sample. The candidate
+  must reparse definition-body names using native lexical boundaries without
+  changing TeX definition target and parameter scanning, and qualify the
+  full lexical matrix before installation (S1.8, D10.2.2).
+
 - **Generated `addtolength` digestion, 2026-11-18:** generated length
   expansion matches native text, but its document node previously stopped at
   `command source mapping` (**S1.8**, **D10.2.2**). The staged digester in
@@ -2278,22 +3004,19 @@ release qualification.
 
 ## Script digester rejects bracket text after unknown environment start — 2026-11-11
 
-**Status:** OPEN — the generic environment guard rejects a leading bracket.
-**Full script TeX-port blocker:** yes for documents using this syntax. Native
-parsing is unaffected.
-
-For `\begin{document}\begin{strange}[x]Hello\end{strange}\end{document}`,
-the script reports `latex-digest-unsupported` for `environment options`;
-native places `[x]Hello` in the `strange` environment's body. The existing
-`test_tex_script_digest` golden records this case as pending. Evidence:
-`../lambda-input/temp/expl3-script/reparse-digest-v2-interp.out`. This remains
-a visible unsupported case; no reference result has been altered.
+**Status:** FIXED for the tested ordinary-environment body brackets. The
+earlier guard rejected `\begin{strange}[x]Hello`; the installed parser treats
+the bracket as body text, matching native. The existing document-bracket and
+digest fixtures both assert native AST equality. A fresh direct comparison of
+text, diagnostics and tree matches in JIT and interpreter
+(`temp/latex-port-resume/generic-bracket{,-interp}.out`). The current checkpoint
+records the broader environment-option limits (S1.8, D10.2.2).
 
 
 ## Script digester rejects leading bracket text in document — 2026-11-11
 
-**Status:** FIXED for the document environment; generic environment brackets
-remain separately OPEN. Native parsing is unaffected.
+**Status:** FIXED for the tested document environment and ordinary environment
+brackets. Native parsing is unaffected (S1.8, D10.2.2).
 
 Previously `\begin{document}[A]\end{document}` returned
 `latex-digest-unsupported` for `environment options`, while native treated

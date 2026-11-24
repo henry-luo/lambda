@@ -13,5 +13,6 @@ pub fn line_end(table, line: int) int^ =>
     if (line + 1 < len(table.offsets)) int(table.offsets[line + 1]) - 1
     else len(table.bytes) - 1
 
-pub fn line_bytes(table, line: int) binary^ =>
+// S2.2.2v2: an empty indexed line has no Binary value.
+pub fn line_bytes(table, line: int) binary?^ =>
     slice(table.bytes,int(table.offsets[line]),line_end(table,line))^

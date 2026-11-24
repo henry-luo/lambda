@@ -1001,12 +1001,12 @@ static Type* sys_func_success_shape_type(Transpiler* tp, SysFuncInfo* info,
             return (Type*)out;
         }
         break;
-    case SYS_RESULT_REAL_TO_FLOAT: {
+    case SYS_RESULT_REAL_TO_FLOAT:
+    case SYS_RESULT_REAL_TO_INT: {
         // Complex and vector arguments keep the row's open type: these builtins
         // are polymorphic and return the argument's own shape for them, and a
         // null argument makes the result null (S7.10.5v3). Every argument
-        // decides, not only the selected one: `math.atan2(1, null)` is null
-        // and `math.pow(2, [1, 2])` an array, yet both were typed `float`.
+        // decides, not only the selected one: `math.atan2(1, null)` is null.
         bool real = true;
         for (int i = 0; real; i++) {
             AstNode* argument = sys_func_argument_at(arguments, injected_argument, i);
@@ -1014,7 +1014,7 @@ static Type* sys_func_success_shape_type(Transpiler* tp, SysFuncInfo* info,
             real = argument->type && argument->type->type_id != LMD_TYPE_COMPLEX &&
                 is_magnitude_numeric_type(argument->type->type_id);
         }
-        if (real) return &TYPE_FLOAT;
+        if (real) return info->result_kind == SYS_RESULT_REAL_TO_INT ? &TYPE_INT : &TYPE_FLOAT;
         break;
     }
     case SYS_RESULT_ELEM_OF_ARGUMENT: {

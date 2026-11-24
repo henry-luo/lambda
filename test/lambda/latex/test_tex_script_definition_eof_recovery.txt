@@ -1,0 +1,19 @@
+{
+  cases: 14,
+  ok: true,
+  text: true,
+  diagnostics: true,
+  guard: true
+}
+{
+  ok: true,
+  text: true,
+  diagnostics: true,
+  tree: true
+}
+{
+  ok: true,
+  text: true,
+  diagnostics: true,
+  tree: true
+}
