@@ -14,6 +14,25 @@ are unchanged. Full evidence is under `../../lambda/temp/kianhup-style/`.
 
 ## Fixed issues
 
+<a id="ri-235"></a>
+
+### RI-235 — Late positioning stretches intrinsic popovers
+
+**Fixed, 2026-11-25.** Run `make layout test=overlay-transition-backdrop`.
+The late vertical pass stretched the popover to 800px at y=0. The browser
+reference measures 14px at y=393. The positioned axis classifier treated the
+native `fit-content` default as automatic because that default has no
+declaration and no resolved length. It now checks the intrinsic size keyword
+before falling back to automatic sizing. Radiant owns layout under
+**D9.1.1v4 / D9.1.3v2**. [HTML rendering rules](https://html.spec.whatwg.org/multipage/rendering.html#hidden-elements)
+
+The original layout case matches all three reference boxes. The reduced
+fixture also verifies authored `fit-content`, an authored `auto` override,
+and stretching against a root whose height comes from flow. All 139 position
+cases pass. The full Radiant baseline exits 0 with 8,177 passed, 298 partial
+and 20 skipped under native macOS graphics access. Integer layout lint
+passes. Evidence is in `temp/radiant-wpt-css-position/`.
+
 <a id="ri-234"></a>
 
 ### RI-234 — Native edge scrolling retains a retired text row
