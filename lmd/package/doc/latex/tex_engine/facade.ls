@@ -21,10 +21,16 @@ fn expand_once(source, configured, budget, preload = null) any^ {
 
 fn expand(source, options, budget, echo_definitions = true, preload = null) any^ {
     let configured = {*:expansion.options_map(options), echo_definitions:echo_definitions, auto_expl3:true};
-    let first = expand_once(source, configured, budget, preload)^;
-    if (first.issue == "tex-expl3-restart")
-        expand_once(source, {*:configured, script_expl3:true}, budget, preload)
-    else first
+    // Ask the host for the expl3 snapshot only when this document needs it.
+    if (configured.script_expl3 == true and preload is map and preload.request_expl3 == true)
+        failure("tex-expl3-preload-needed")
+    else {
+        let first = expand_once(source, configured, budget, preload)^;
+        if (first.issue == "tex-expl3-restart")
+            if (preload is map and preload.request_expl3 == true) failure("tex-expl3-preload-needed")
+            else expand_once(source, {*:configured, script_expl3:true}, budget, preload)
+        else first
+    }
 }
 
 fn complete_diagnostics(expanded) bool^ => len(expanded.diagnostics) == len(expanded.diagnostic_records)
@@ -58,19 +64,22 @@ pub fn host_capture(options: map, scope: string, name: string, data, no_base = f
 // Only resource-free preloads can be reused without retaining a file grant.
 fn reusable_preload(loaded) bool^ => loaded is map and loaded.issue == null and len(loaded.resources_seen) == 0
 
+fn host_preload_options(options: map, math: bool) map =>
+    {*:options, *:if (math) {math_mode:true} else {}, echo_definitions:not math, auto_expl3:true}
+
 pub fn host_kernel_preload(options: map, math: bool) any^ {
     if (options.ini == true or not (options.kernel_source is string)) null
     else {
-        let configured = {*:options, *:if (math) {math_mode:true} else {},
-            echo_definitions:not math, auto_expl3:true};
+        let configured = host_preload_options(options, math);
         let ordinary = profile.preload_kernel(options.kernel_source, configured)^;
         if (not reusable_preload(ordinary)^) null
-        else {
-            // A restart uses a separately expanded kernel with expl3 enabled.
-            let expl3 = profile.preload_expl3_kernel(options.kernel_source, configured) ^ { null };
-            {ordinary:ordinary,expl3:if (reusable_preload(expl3)^) expl3 else null}
-        }
+        else {ordinary:ordinary,expl3:null,request_expl3:true}
     }
+}
+
+pub fn host_expl3_preload(options: map, math: bool, preload: map) map^ {
+    let expl3 = profile.preload_expl3_kernel(options.kernel_source, host_preload_options(options, math)) ^ { null };
+    {*:preload, expl3:if (reusable_preload(expl3)^) expl3 else null, request_expl3:false}
 }
 
 // Native TeX returns diagnostics and local package names alongside expanded text.

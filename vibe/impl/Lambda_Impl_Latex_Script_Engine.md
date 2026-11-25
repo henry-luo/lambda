@@ -34,6 +34,20 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Resource restarts and expl3 preload, 2026-11-25:** Repeated parses no
+  longer evict their initial kernel snapshot when the host captures a package
+  resource, and the separate expl3 snapshot is prepared only when requested.
+  Both snapshots remain keyed by all options and the host still authorizes each
+  kernel and resource read (D6.4.2, D10.2.2v2, D11.1.2). A resource-plus-expl3
+  regression passes in interpreter and JIT with forced GC and poisoning; eight
+  captured-member and revoked-authority checks pass across both tiers. The
+  bibliography phase-two golden matched in isolated release runs before and
+  after the change, taking 66.98 and 10.21 seconds respectively. These are
+  single samples, not a statistical benchmark. Release binaries and output are
+  retained under `temp/latex-retirement/`. The phase-two bibliography and
+  phase-five math fixtures also pass the existing 60-second GTest limit in an
+  isolated debug-host run.
+
 - **Unicode math arguments, 2026-11-25:** Script now consumes one complete
   Unicode code point in an unbraced math superscript or subscript, preserving
   subsequent characters and generated-token source mapping (S2.5.8,
@@ -95,7 +109,7 @@ The existing native engine design and historical Phase IV work are in
   the evaluator's precisely rooted realm capsule and reused only for equal
   options; each parse still authorizes and reads the kernel. The metrics and
   HTML tests now pass within the existing limit, and the complete 56-case math
-  suite passes. Definition isolation and changing captured resources pass in
+  suite passes (57/57 after the Unicode argument regression). Definition isolation and changing captured resources pass in
   both tiers and under forced GC with freed-memory poisoning. The eight scoped
   authorization regressions pass, including a cached math parse before kernel
   read authority is revoked (S1.8, D10.2.2v2, D6.4.2, D11.1.2).

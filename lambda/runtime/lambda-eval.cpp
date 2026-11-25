@@ -7383,9 +7383,10 @@ struct TexKernelCacheEntry {
     bool rooted;
 };
 enum TexKernelProfile { TEX_KERNEL_TEX, TEX_KERNEL_LATEX, TEX_KERNEL_MATH, TEX_KERNEL_PROFILE_COUNT };
+enum TexKernelPhase { TEX_KERNEL_INITIAL, TEX_KERNEL_CAPTURED, TEX_KERNEL_PHASE_COUNT };
 struct TexKernelCache {
     EvalContext* owner;
-    TexKernelCacheEntry entries[TEX_KERNEL_PROFILE_COUNT];
+    TexKernelCacheEntry entries[TEX_KERNEL_PROFILE_COUNT][TEX_KERNEL_PHASE_COUNT];
 };
 static const uint32_t tex_kernel_cache_owner = 0x5445584B; // TEXK
 
@@ -7400,7 +7401,8 @@ static void tex_kernel_cache_clear_entry(TexKernelCache* cache, TexKernelCacheEn
 
 static void tex_kernel_cache_clear(void* data) {
     TexKernelCache* cache = (TexKernelCache*)data;
-    for (int i = 0; i < TEX_KERNEL_PROFILE_COUNT; i++) tex_kernel_cache_clear_entry(cache, &cache->entries[i]);
+    for (int i = 0; i < TEX_KERNEL_PROFILE_COUNT; i++)
+        for (int j = 0; j < TEX_KERNEL_PHASE_COUNT; j++) tex_kernel_cache_clear_entry(cache, &cache->entries[i][j]);
 }
 
 static void tex_kernel_cache_destroy(void* data) {
@@ -7494,7 +7496,9 @@ static Item parse_tex_script(Item source, Item options, const char* format, cons
         bool math = !strcmp(format, "math");
         TexKernelCache* cache = tex_kernel_cache();
         TexKernelProfile profile = math ? TEX_KERNEL_MATH : !strcmp(format, "tex") ? TEX_KERNEL_TEX : TEX_KERNEL_LATEX;
-        TexKernelCacheEntry* cache_entry = cache ? &cache->entries[profile] : nullptr;
+        // Preserve the initial snapshot when a resource request changes the options.
+        TexKernelPhase phase = requests ? TEX_KERNEL_CAPTURED : TEX_KERNEL_INITIAL;
+        TexKernelCacheEntry* cache_entry = cache ? &cache->entries[profile][phase] : nullptr;
         if (cache_entry && cache_entry->rooted && item_deep_equal(cache_entry->options, settings.get())) {
             preload.set(cache_entry->preload);
         } else if (cache) {
@@ -7504,12 +7508,24 @@ static Item parse_tex_script(Item source, Item options, const char* format, cons
                 tex_kernel_cache_store(cache, cache_entry, settings.get(), preload.get());
             else preload.set(ItemNull);
         }
-        bool reused = get_type_id(preload.get()) == LMD_TYPE_MAP;
-        Item args[] = {text.get(), settings.get(), math ? preload.get() : (Item){.item = i2it(20000000)}, preload.get()};
-        const char* entry = !strcmp(format, "tex") ? "tex" : math && reused ? "host_math" : math ? "math" : "latex";
-        result.set(interp_call_package_export(runtime, package, entry, args, reused ? (math ? 3 : 4) : 2));
-        if (get_type_id(result.get()) != LMD_TYPE_MAP)
-            return runtime_error_itemf(ERR_PARSE_ERROR, "parse: Script %s engine failed", format);
+        bool expl3_requested = false;
+        for (;;) {
+            bool reused = get_type_id(preload.get()) == LMD_TYPE_MAP;
+            Item args[] = {text.get(), settings.get(), math ? preload.get() : (Item){.item = i2it(20000000)}, preload.get()};
+            const char* entry = !strcmp(format, "tex") ? "tex" : math && reused ? "host_math" : math ? "math" : "latex";
+            result.set(interp_call_package_export(runtime, package, entry, args, reused ? (math ? 3 : 4) : 2));
+            if (get_type_id(result.get()) != LMD_TYPE_MAP)
+                return runtime_error_itemf(ERR_PARSE_ERROR, "parse: Script %s engine failed", format);
+            Item issue = MapReader(result.get().map).get("issue").item();
+            if (!is_text_type_id(get_type_id(issue)) || strcmp(issue.get_chars(), "tex-expl3-preload-needed")) break;
+            if (expl3_requested || !reused) return ItemError;
+            expl3_requested = true;
+            Item preload_args[] = {settings.get(), (Item){.item = b2it(math)}, preload.get()};
+            preload.set(interp_call_package_export(runtime, package, "host_expl3_preload", preload_args, 3));
+            if (get_type_id(preload.get()) != LMD_TYPE_MAP) return ItemError;
+            if (cache_entry && cache_entry->rooted && item_deep_equal(cache_entry->options, settings.get()))
+                cache_entry->preload = preload.get();
+        }
         MapReader reply(result.get().map);
         Item issue = reply.get("issue").item();
         if (get_type_id(issue) == LMD_TYPE_NULL) return reply.get("root").item();
