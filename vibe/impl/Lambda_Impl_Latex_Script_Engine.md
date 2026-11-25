@@ -33,8 +33,21 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
-- **Native-engine retirement, 2026-11-25:** The user requested retirement of
-  both native engines. Production `tex`, `latex` and `latex-ts` still dispatch
+- **Retirement ordered before parity, 2026-11-25:** The user explicitly
+  directed retirement first and repair of failing Script tests afterwards.
+  Runtime `parse` for explicit `tex`, `latex` and `latex-ts` and `input` with
+  an explicit type now invoke the Script facade after authorized acquisition.
+  The archived native cases match through `parse`. Includes from `input`
+  currently fail at the explicit resource boundary; source-relative authorized
+  acquisition remains to be implemented. Automatic type detection, captured
+  archive members, native Input clients, math and embedded math still use the
+  native provider, so it has not yet been removed. Existing tests that compare
+  `parse` against Script now compare the same implementation; preserve their
+  native expected results separately before relying on them. D10.2.2v2 assigns
+  the final parser to Script in the runtime, retaining D9.1.3v2 and S1.8.
+
+- **Earlier retirement checkpoint, 2026-11-25:** The user requested retirement of
+  both native engines. At this checkpoint `tex`, `latex` and `latex-ts` still dispatched
   to `lambda-input`'s TeX expander and direct digester. The existing
   `InputScriptParser` host boundary, used by graph and TikZ, is a possible
   integration point, but the earlier direction to avoid a native-to-Script
@@ -45,7 +58,7 @@ The existing native engine design and historical Phase IV work are in
   production and native-client entry point and qualify the full corpus before
   removing the native provider. TeX remains data (S1.8); resource acquisition
   and capabilities remain governed by D9.1.2v2 and D11.1.2. This migration is
-  in progress and neither production dispatch nor the native engine is retired.
+  was in progress and neither production dispatch nor the native engine was retired.
   A new Script-owned facade returns TeX output or LaTeX trees with explicit
   unsupported results and accepts captured resources. Initial text, tree,
   diagnostic and included-file comparisons match native. Shared expanded-text

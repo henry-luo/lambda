@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 71.0.0 (2026-11-24)
+**Spec version:** 72.0.0 (2026-11-25)
 
 **Status:** normative. This document is the single source of truth for the
 design decisions that implement
@@ -1699,8 +1699,10 @@ loosely.
   User input and legacy commands use one operation model. The gates are the
   WPT editing suites and the pinned Chromium editing corpus.
   [Radiant_Design_Editable §20]
-- **D10.2.2* — LaTeX is read by TeX expansion, never by TeX typesetting.**
-  Every LaTeX parse runs the Lambda TeX expansion engine at the input boundary.
+- **D10.2.2v2* — LaTeX is read by TeX expansion, never by TeX typesetting.**
+  Every LaTeX parse runs the Lambda Script TeX expansion engine in the runtime.
+  Native applications use the runtime's document parser for TeX and LaTeX.
+  The input library does not import the runtime (D9.1.3v2).
   Then one digester builds the Mark AST. Thus one source gives one AST at
   every entry point. The engine executes TeX programming: catcodes, macros,
   registers, groups, conditionals, e-TeX and expl3. Document constructs go to
@@ -1890,7 +1892,7 @@ the [implementation history §2](../vibe/impl/Lambda_Impl_Formal_Design_History.
 | D10.1.8 | Local filesystem implementation on interpreter and MIR, 2026-11-18. Scoped tests confirm a file-kind check reads zero payloads. [Path node access](../vibe/impl/Lambda_Impl_Path_Node_Access.md). |
 | D10.1.7 | In place for the current inventory (2026-10-18). |
 | D10.2.1 | In place (2026-09-07). |
-| D10.2.2 | Partial: expansion is the only front end. The layout-metrics hook is pending. |
+| D10.2.2v2 | Partial: Script dispatch and retirement of the native engine are in progress. The layout-metrics hook is pending. |
 | D10.2.3 | Partial: export and strict input are in place. The MathML box builder is pending. |
 | D10.2.5 | Partial: supported valid documents have graphical surfaces; isolated syntax-error recovery and read-only error spans are pending. |
 | D11.1.1 | T1 verification layers are staged. T2 and T3 are not built. |

@@ -12,7 +12,8 @@ let cases=[
  {kind:"latex",ini:false,source:"\\begin{document}Hello\\end{document}"},
  {kind:"latex",ini:false,source:"\\begin{document}A \\textbf{bold} B\\end{document}"},
  {kind:"latex",ini:false,source:"\\begin{document}$x+1$\\end{document}"},
- {kind:"latex",ini:false,source:"\\def\\x{Hi}\\begin{document}\\x\\end{document}"}
+ {kind:"latex",ini:false,source:"\\def\\x{Hi}\\begin{document}\\x\\end{document}"},
+ {kind:"tex",ini:false,source:"Hello\n"}
 ];
 let captured=[for(item in cases) {*:item,
     expected:format(parse(item.source,{type:item.kind,ini:item.ini})^,'json')^}];

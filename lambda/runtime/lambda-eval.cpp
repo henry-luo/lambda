@@ -5927,6 +5927,8 @@ static bool input_schema_prepare_name_parent(Type* schema_type, NamePool* name_p
     return ok;
 }
 
+static Item parse_tex_script(Item source, Item options, const char* format);
+
 static Item input_resource(Item target_item, Item type, bool template_url_only) {
     GUARD_ERROR2(target_item, type);
     RootFrame input_roots(4);
@@ -6084,6 +6086,29 @@ static Item input_resource(Item target_item, Item type, bool template_url_only) 
         Item failure = runtime_error_itemf(ERR_INVALID_STATE, "input: runtime context is not initialized");
         target_free(target);
         return failure;
+    }
+
+    if (!fs_target && type_str && (!strcmp(type_str->chars, "tex") ||
+            !strcmp(type_str->chars, "latex") || !strcmp(type_str->chars, "latex-ts"))) {
+        // Acquire bytes through the normal security client before invoking the Script engine.
+        RootFrame roots(2);
+        Rooted<String*> text_type(roots, heap_strcpy("text", 4));
+        Rooted<Item> source(roots, ItemNull);
+        Input* text_input = text_type.get() ? input_from_target_with_io(target, text_type.get(), nullptr,
+            nullptr, eval_context_security_io(context), nullptr) : nullptr;
+        target_free(target);
+        if (!text_input) return runtime_error_itemf(ERR_IO_ERROR, "input: failed to load TeX source");
+        if (text_input->parse_failed) return input_parse_error_item("input", text_input, type_str);
+        Item raw = text_input->root;
+        if (get_type_id(raw) != LMD_TYPE_STRING)
+            return runtime_error_itemf(ERR_PARSE_ERROR, "input: TeX source is not text");
+        String* copy = heap_strcpy(raw.get_chars(), raw.get_len());
+        if (!copy) return ItemError;
+        source.set((Item){.item = s2it(copy)});
+        Item parsed = parse_tex_script(source.get(), input_options_root.get(), type_str->chars);
+        if (schema_type && get_type_id(parsed) != LMD_TYPE_ERROR)
+            return lambda_type_check(parsed, schema_type, "input schema");
+        return parsed;
     }
 
     const InputScriptParser parser = lambda_input_script_parser(context->runtime);
@@ -7190,6 +7215,34 @@ public:
     ScopedValueParse& operator=(const ScopedValueParse&) = delete;
 };
 
+static Item parse_tex_script(Item source, Item options, const char* format) {
+    RootFrame roots(3);
+    Rooted<Item> text(roots, source);
+    Rooted<Item> settings(roots, get_type_id(options) == LMD_TYPE_MAP ? options : ItemNull);
+    Rooted<Item> result(roots, ItemNull);
+    if (get_type_id(source) == LMD_TYPE_BINARY) {
+        Binary* bytes = source.get_safe_binary();
+        String* converted = heap_strcpy((const char*)binary_data(bytes), binary_length(bytes));
+        if (!converted) return ItemError;
+        text.set((Item){.item = s2it(converted)});
+    }
+    // TeX input cannot accept a literal NUL, including in file-loaded text.
+    if (memchr(text.get().get_chars(), 0, text.get().get_len()))
+        return runtime_error_itemf(ERR_PARSE_ERROR, "parse: Input format does not accept a literal NUL byte");
+    // The Script engine receives source as data and reports unsupported work explicitly.
+    Item args[] = {text.get(), settings.get()};
+    result.set(interp_call_package_export(context ? context->runtime : NULL,
+        "lambda.doc.latex.tex_engine.facade", !strcmp(format, "tex") ? "tex" : "latex", args, 2));
+    if (get_type_id(result.get()) != LMD_TYPE_MAP)
+        return runtime_error_itemf(ERR_PARSE_ERROR, "parse: Script %s engine failed", format);
+    MapReader reply(result.get().map);
+    Item issue = reply.get("issue").item();
+    if (get_type_id(issue) != LMD_TYPE_NULL)
+        return runtime_error_itemf(ERR_PARSE_ERROR, "parse: Script %s engine: %s", format,
+            is_text_type_id(get_type_id(issue)) ? issue.get_chars() : "unsupported input");
+    return reply.get("root").item();
+}
+
 Item fn_parse2(Item str_item, Item type) {
     GUARD_ERROR2(str_item, type);
     // symbol-to-string option conversions allocate; retain earlier conversions through parser dispatch.
@@ -7342,6 +7395,10 @@ Item fn_parse2(Item str_item, Item type) {
     Binary* binary = str_type == LMD_TYPE_BINARY ? str_item.get_safe_binary() : nullptr;
     if (!str && !binary) {
         return runtime_error_itemf(ERR_INVALID_STATE, "parse: string value is unavailable");
+    }
+    if (type_str && (!strcmp(type_str->chars, "tex") || !strcmp(type_str->chars, "latex") ||
+            !strcmp(type_str->chars, "latex-ts"))) {
+        return parse_tex_script(parse_source_root.get(), parse_options_root.get(), type_str->chars);
     }
     // plain text has no parser state or Input-owned objects to retain.
     if (type_str && strcmp(type_str->chars, "text") == 0) {

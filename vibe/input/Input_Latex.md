@@ -2,6 +2,13 @@
 
 ## 2026-11-11: requested full script port
 
+On 2026-11-25 the user directed retirement before fixing remaining Script test
+failures. D10.2.2v2 assigns TeX and LaTeX parsing to the Lambda Script engine
+in the runtime; native clients migrate to the runtime document parser, and Input
+does not import the runtime (D9.1.3v2). The migration remains incomplete:
+standalone Input dispatch, embedded math, resource acquisition, and the native
+engine build and tests still require migration.
+
 The Lambda-owned [script TeX engine implementation plan](../impl/Lambda_Impl_Latex_Script_Engine.md) tracks package-specific progress and issues. General Lambda language and runtime issues remain in the Lambda issue ledger.
 
 The requested direction supersedes the partial expl3 port below: move the TeX
