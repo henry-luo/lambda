@@ -65,6 +65,17 @@ The existing native engine design and historical Phase IV work are in
   The earlier Lambda baseline did not complete because
   an aborting test child hung in `pthread_kill`; it is not a passing baseline.
 
+- **Math source forms, 2026-11-25:** The 35-case captured native source-format
+  golden now passes. Script digestion preserves binomial, general and infix
+  fractions, sized delimiters, arrows, colors, images and unknown generic
+  commands; matrix rows retain their optional gaps and each cell owns its math
+  list. Focused fraction, arrow, AMS primitive and rich-text regressions pass
+  (D10.2.2v2). `test_math_text_escapes` remains failing: an unmatched dollar
+  after a row break inside `\\text` causes the expander to report an extra
+  closing group, although the text digester recovers the literal dollar. The
+  broader math sweep is running against the settled parser; an earlier sweep
+  overlapped edits and its aggregate failures are not qualification evidence.
+
 - **Earlier HTTP Path checkpoint:** The baseline did not finish:
   `ValueRepresentationTest.UnsupportedDirectTransitionFailsClosed` timed out
   at 180 seconds and also hung in an isolated rerun. Both aborting children

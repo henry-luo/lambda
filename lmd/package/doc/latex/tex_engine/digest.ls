@@ -707,6 +707,45 @@ fn math_arguments(tokens, index, count, items = []) any^ {
     }
 }
 
+fn math_dimension_signs(tokens, index) any^ =>
+    if (index < len(tokens) and tokens[index].kind == "char" and contains(["+", "-"], tokens[index].value))
+        math_dimension_signs(tokens, math_nonspace(tokens,index + 1)^) else index
+fn math_dimension_digits(tokens, index) any^ =>
+    if (index < len(tokens) and (math_digit(tokens[index]) or
+        (tokens[index].kind == "char" and tokens[index].value == ".")))
+        math_dimension_digits(tokens,index + 1) else index
+fn math_dimension_tail(tokens, index) any^ =>
+    if (index < len(tokens) and not (tokens[index].kind == "char" and tokens[index].cat == 10))
+        math_dimension_tail(tokens,index + 1) else index
+
+fn math_dimension_argument(tokens, index) any^ {
+    let at = math_nonspace(tokens, index)^;
+    if (at >= len(tokens)) unsupported(at, "math dimension argument")
+    else if (opening(tokens[at])) {
+        let group = read_group(tokens, at)^;
+        if (group.issue != null) group
+        else {
+            let raw = output_between(tokens[at], tokens[group.end - 1])^;
+            if (raw == null) unsupported(at, "math dimension source mapping")
+            else {issue:null, index:group.end, value:raw}
+        }
+    }
+    else {
+        let numeric_start = math_dimension_signs(tokens,at)^;
+        let digits = math_dimension_digits(tokens,numeric_start)^;
+        let unit = if (digits > numeric_start) math_nonspace(tokens,digits)^ else digits;
+        let end = if (digits == numeric_start) math_dimension_tail(tokens,at)^
+            else if (unit + 1 < len(tokens) and math_letter(tokens[unit]) and math_letter(tokens[unit + 1])) unit + 2
+            else unit;
+        let first = tokens[at];
+        let final_token = if (end > at) tokens[end - 1] else null;
+        if (final_token == null or first.output_text == null or first.output_start == null or final_token.output_end == null)
+            unsupported(at, "math dimension source mapping")
+        else {issue:null, index:end,
+            value:utf8.decode(slice(binary(first.output_text)^,first.output_start,final_token.output_end))^}
+    }
+}
+
 // generic math commands consume adjacent or space-separated groups as children.
 fn math_generic_arguments(tokens, index, items = []) any^ {
     let at = math_nonspace(tokens, index)^;
@@ -727,6 +766,49 @@ fn math_generic_arguments(tokens, index, items = []) any^ {
         }
     }
     else {issue: null, index: at, items: items}
+}
+
+// Matrix separators delimit independent math lists; nested environments own
+// their own separators and a row break can carry a raw spacing argument.
+fn math_matrix_boundary(tokens, index, braces = 0, environments = 0) any^ {
+    if (index >= len(tokens)) {kind:"end", index:index}
+    else {
+        let token = tokens[index];
+        if (braces == 0 and token.kind == "control" and contains(["begin", "end"], token.value)) {
+            let at = math_nonspace(tokens,index + 1)^;
+            let group = read_group(tokens,at)^;
+            if (group.issue != null) group
+            else math_matrix_boundary(tokens,group.end,braces,environments + if (token.value == "begin") 1 else -1)
+        }
+        else if (braces == 0 and environments == 0 and token.kind == "char" and token.value == "&")
+            {kind:"column", index:index}
+        else if (braces == 0 and environments == 0 and token.kind == "control" and
+                (token.value == "\\" or token.value == "cr")) {kind:"row", index:index}
+        else math_matrix_boundary(tokens,index + 1,
+            braces + if (opening(token)) 1 else if (closing(token)) -1 else 0,environments)
+    }
+}
+fn math_matrix_items(tokens, index = 0, items = []) any^ {
+    let boundary = math_matrix_boundary(tokens,index)^;
+    if (boundary.issue != null) boundary
+    else {
+        let cell = math_list(slice(tokens,index,boundary.index))^;
+        if (cell.issue != null) cell
+        else if (boundary.kind == "end") {issue:null,items:[*items,*cell.items]}
+        else if (boundary.kind == "column")
+            math_matrix_items(tokens,boundary.index + 1,[*items,*cell.items,'col_sep'])
+        else {
+            let at = math_nonspace(tokens,boundary.index + 1)^;
+            let opt = read_optional(tokens,at)^;
+            if (opt.issue == "latex-digest-unclosed-optional")
+                math_matrix_items(tokens,at,[*items,*cell.items,'row_sep'])
+            else if (opt.issue != null) opt
+            else {
+                let separator = if (opt.present) <row_sep gap:group_text(opt)> else 'row_sep';
+                math_matrix_items(tokens,opt.end,[*items,*cell.items,separator])
+            }
+        }
+    }
 }
 
 // Text arguments retain nested groups and math switches instead of parsing all
@@ -864,7 +946,7 @@ fn math_environment(tokens, index) any^ {
                     let finish = math_environment_end(tokens, begin, env, 0, false)^;
                     if (finish.issue != null) finish
                     else {
-                        let body = math_atoms(slice(tokens, begin, finish.index))^;
+                        let body = math_matrix_items(slice(tokens, begin, finish.index))^;
                         if (body.issue != null) body
                         else {
                             let attrs = if (arg != null and pairs) {pairs:group_text(arg)}
@@ -881,9 +963,16 @@ fn math_environment(tokens, index) any^ {
     }
 }
 
+// These native special forms must not be mistaken for generic commands.
+fn math_unported_special(name) => contains(["Braket", "Set", "above", "allowbreak", "angl", "anglk", "angln", "anglr",
+    "atop", "bcancel", "brace", "brack", "cancel", "cancelto", "ce", "choose", "class", "cssId", "hdashline", "hline",
+    "hskip", "hspace", "htmlData", "kern", "mathreflectbox", "middle", "mkern", "newline", "nicefrac", "nobreak",
+    "nonumber", "notag", "over", "phase", "pmb", "pu", "right", "sfrac", "sout", "substack", "vskip", "vspace", "xcancel"], name)
+
 fn math_command(tokens, index) any^ {
     let name = tokens[index].value;
-    if (contains(["{", "}", "[", "]", "(", ")", "$", "%", "#", "&", "_"], name)) {
+    if (name == " " or name == "\t" or name == "\n") {issue:null, index:index + 1, value:" "}
+    else if (contains(["{", "}", "[", "]", "(", ")", "$", "%", "#", "&", "_"], name)) {
         let token = tokens[index];
         let parsed = if (not math_positioned(token)) unsupported(index, "math escaped symbol source mapping")
             else if (name == "_") {issue: null, index: index + 1, text: name}
@@ -962,6 +1051,41 @@ fn math_command(tokens, index) any^ {
                 *:if (opt.present) {options:<brack_group group_text(opt)>} else {}, content:arg.value>}
         }
     }
+    else if (contains(["bbox", "boxed", "fbox", "llap", "rlap", "clap", "mathllap", "mathrlap", "mathclap"], name)) {
+        let at = math_nonspace(tokens,index + 1)^;
+        let opt = if (name == "bbox") read_optional(tokens,at)^ else {issue:null,present:false,end:at};
+        let content = if (opt.issue != null) opt else math_script_arg(tokens,opt.end)^;
+        if (content.issue != null) content
+        else {issue:null,index:content.index,value:<box_command cmd:"\\" ++ name,
+            *:if (opt.present) {options:<brack_group group_text(opt)>,options_raw:group_text(opt)} else {},
+            content:content.value>}
+    }
+    else if (contains(["color", "textcolor", "colorbox"], name)) {
+        let opt = read_optional(tokens,math_nonspace(tokens,index + 1)^)^;
+        let at = if (opt.issue == null) math_nonspace(tokens,opt.end)^ else index;
+        let raw = if (opt.issue != null) opt else if (at < len(tokens) and opening(tokens[at]))
+            math_dimension_argument(tokens,at)^ else {issue:null,value:null};
+        let color = if (raw.issue != null) raw else math_script_arg(tokens,at)^;
+        let body = if (color.issue != null) color else if (name == "color") {issue:null,index:color.index}
+            else if (name == "colorbox") math_text_argument(tokens,color.index)^
+            else math_script_arg(tokens,color.index)^;
+        if (body.issue != null) body
+        else {
+            let attrs = {cmd:"\\" ++ name, color:color.value,
+                *:if (raw.value != null) {color_raw:raw.value} else {},
+                *:if (opt.present) {options:<brack_group group_text(opt)>} else {},
+                *:if (name == "color") {} else {content:body.value}};
+            {issue:null,index:body.index,value:if (name == "color") <color_switch *:attrs> else <color_command *:attrs>}
+        }
+    }
+    else if (name == "fcolorbox") {
+        let border = math_dimension_argument(tokens,index + 1)^;
+        let background = if (border.issue != null) border else math_dimension_argument(tokens,border.index)^;
+        let body = if (background.issue != null) background else math_text_argument(tokens,background.index)^;
+        if (body.issue != null) body
+        else {issue:null,index:body.index,value:<color_command cmd:"\\fcolorbox",
+            border_color:border.value,color_raw:background.value,content:body.value>}
+    }
     // stackrel uses the same native AST command as overset.
     else if (contains(["overset", "underset", "stackrel"], name)) {
         let args = math_arguments(tokens, index + 1, 2)^;
@@ -970,11 +1094,78 @@ fn math_command(tokens, index) any^ {
             cmd: if (name == "stackrel") "\\overset" else "\\" ++ name,
             annotation: args.items[0], base: args.items[1]>}
     }
-    else if (contains(["frac", "dfrac", "tfrac"], name)) {
-        let args = math_arguments(tokens, index + 1, 2)^;
+    else if (contains(["frac", "dfrac", "tfrac", "cfrac", "binom", "dbinom", "tbinom"], name)) {
+        let at = math_nonspace(tokens,index + 1)^;
+        let opt = if (name == "cfrac") read_optional(tokens,at)^ else {issue:null, present:false, end:at};
+        let args = if (opt.issue != null) opt else math_arguments(tokens, opt.end, 2)^;
         if (args.issue != null) args
-        else {issue: null, index: args.index,
-            value: <fraction cmd: "\\" ++ name, numer: args.items[0], denom: args.items[1]>}
+        else {
+            // Both forms share the renderer's numerator and denominator contract.
+            let value = if (contains(["binom", "dbinom", "tbinom"], name))
+                <binomial cmd:"\\" ++ name, numer:args.items[0], denom:args.items[1]>
+                else <fraction cmd:"\\" ++ name, *:if (opt.present) {options:<brack_group group_text(opt)>} else {},
+                    numer:args.items[0], denom:args.items[1]>;
+            {issue:null, index:args.index, value:value}
+        }
+    }
+    else if (name == "genfrac") {
+        let left = math_delimiter_token(tokens, index + 1, false, true)^;
+        let right = if (left.issue != null) left else math_delimiter_token(tokens, left.index, false, true)^;
+        let thickness = if (right.issue != null) right else math_dimension_argument(tokens, right.index)^;
+        let style = if (thickness.issue != null) thickness else math_dimension_argument(tokens, thickness.index)^;
+        let args = if (style.issue != null) style else math_arguments(tokens, style.index, 2)^;
+        if (args.issue != null) args
+        else {issue:null, index:args.index, value:<genfrac left_delim:left.value, right_delim:right.value,
+            thickness:thickness.value, style:style.value, numer:args.items[0], denom:args.items[1]>}
+    }
+    else if (name == "includegraphics") {
+        let at = math_nonspace(tokens,index + 1)^;
+        let opt = if (at < len(tokens) and tokens[at].kind == "char" and tokens[at].value == "[")
+            {*:read_generic_delimited(tokens,at,"[","]","latex-digest-unclosed-optional")^, present:true}
+            else {issue:null, present:false, end:at};
+        let next = if (opt.issue == null) math_nonspace(tokens,opt.end)^ else at;
+        if (opt.issue != null) opt
+        else if (next >= len(tokens) or not opening(tokens[next])) unsupported(index,"includegraphics source")
+        else {
+            let path = math_dimension_argument(tokens,next)^;
+            let options = if (opt.present) output_between(tokens[at],tokens[opt.end - 1])^ else null;
+            if (path.issue != null) path
+            else if (opt.present and options == null) unsupported(index,"includegraphics options source mapping")
+            else {issue:null, index:path.index, value:<image_command cmd:"\\includegraphics", src:path.value,
+                *:if (opt.present) {options:options} else {}>}
+        }
+    }
+    else if (contains(["xrightarrow", "xleftarrow", "xleftrightarrow", "xRightarrow", "xLeftarrow",
+        "xLeftrightarrow", "xhookrightarrow", "xhookleftarrow", "xtwoheadrightarrow", "xtwoheadleftarrow",
+        "xmapsto", "xrightleftharpoons", "xleftrightharpoons", "xrightleftarrows", "xrightequilibrium", "xleftequilibrium"], name)) {
+        let opt = read_optional(tokens, math_nonspace(tokens,index + 1)^)^;
+        let lower = if (opt.issue != null or not opt.present) opt else math_atoms(opt.tokens)^;
+        let upper = if (lower.issue != null) lower else math_script_arg(tokens, opt.end)^;
+        if (upper.issue != null) upper
+        else {issue:null, index:upper.index, value:<extended_arrow cmd:"\\" ++ name, upper:upper.value,
+            *:if (opt.present) {lower:<brack_group *math_content(lower.items)^>} else {}>}
+    }
+    else if (contains(["bmod", "pmod", "mod", "pod"], name)) {
+        let body = if (name == "bmod") {issue:null, index:index + 1} else math_script_arg(tokens, index + 1)^;
+        if (body.issue != null) body
+        else {issue:null, index:body.index, value:<mod_command cmd:"\\" ++ name,
+            *:if (name == "bmod") {} else {body:body.value}>}
+    }
+    else if (contains(["tiny", "sixptsize", "scriptsize", "footnotesize", "small", "normalsize",
+        "large", "Large", "LARGE", "huge", "Huge"], name))
+        {issue:null, index:index + 1, value:<size_command cmd:"\\" ++ name>}
+    else if (contains(["big", "bigl", "bigr", "bigm", "Big", "Bigl", "Bigr", "Bigm",
+        "bigg", "biggl", "biggr", "biggm", "Bigg", "Biggl", "Biggr", "Biggm"], name)) {
+        let at = math_nonspace(tokens,index + 1)^;
+        let next = if (at < len(tokens)) tokens[at] else null;
+        let has_delimiter = next != null and
+            ((next.kind == "char" and contains(["(", ")", "[", "]", "{", "}", "|", "<", ">", "/", "."],next.value)) or
+             (next.kind == "control" and math_delimiter_control(next.value)));
+        let delimiter = if (has_delimiter) math_delimiter_token(tokens,at,false,true)^
+            else {issue:null,index:at};
+        if (delimiter.issue != null) delimiter
+        else {issue:null,index:delimiter.index,value:<sized_delimiter size:"\\" ++ name,
+            *:if (has_delimiter) {delim:delimiter.value} else {}>}
     }
     // Native math digestion treats the vcenter body as a script argument.
     else if (name == "vcenter") {
@@ -1035,6 +1226,17 @@ fn math_command(tokens, index) any^ {
     }
     else if (name == "ne" or name == "neq")
         {issue: null, index: index + 1, value: <not_overlay target: "=">}
+    else if (name == "not") {
+        let at = math_nonspace(tokens,index + 1)^;
+        if (at + 1 < len(tokens) and opening(tokens[at]) and closing(tokens[at + 1]) and
+                math_adjacent(tokens[at],tokens[at + 1]))
+            {issue:null,index:at + 2,value:<not_empty>}
+        else {
+            let target = math_script_arg(tokens,at)^;
+            if (target.issue != null) target
+            else {issue:null,index:target.index,value:<not_overlay target:target.value>}
+        }
+    }
     else if (name == "sqrt") {
         let at = math_nonspace(tokens, index + 1)^;
         let opt = read_optional(tokens, at)^;
@@ -1071,15 +1273,12 @@ fn math_command(tokens, index) any^ {
         "sech", "csch", "coth", "lg", "max", "min", "arg", "det", "gcd", "lcm", "deg", "dim", "ker", "hom",
         "limsup", "liminf", "sup", "inf"], name))
         {issue: null, index: index + 1, value: <command name: name>}
-    // these common symbols use native's generic math command shape.
-    else if ((math_delimiter_control(name) and not contains(["{", "}"], name)) or
-        contains(["label", "subseteq", "supseteq", "subsetneq", "supsetneq", "nsubseteq", "nsupseteq",
-            "varnothing", "emptyset", "varphi", "varepsilon", "vartheta", "varkappa", "varpi", "varrho", "varsigma",
-            "aleph", "imath", "jmath", "Re", "Im", "dagger", "ddagger", "ell", "hbar", "wp", "Box"], name)) {
+    else if (math_unported_special(name)) unsupported(index, "math command " ++ name)
+    // Native math preserves unknown commands and their adjacent argument groups.
+    else {
         let args = math_generic_arguments(tokens, index + 1)^;
         if (args.issue != null) args else {issue: null, index: args.index, value: <command name: name, *args.items>}
     }
-    else unsupported(index, "math command " ++ name)
 }
 
 // the native math scanner shares punctuation rules between atoms and script arguments.
@@ -1108,7 +1307,7 @@ fn math_script_arg(tokens, index) any^ {
         let group = read_group(tokens, at)^;
         if (group.issue != null) group
         else {
-            let contents = math_atoms(group.tokens)^;
+            let contents = math_list(group.tokens)^;
             if (contents.issue != null) contents
             else {issue: null, index: group.end, value: <group *math_content(contents.items)^>}
         }
@@ -1228,6 +1427,33 @@ fn math_atoms(tokens, index = 0, items = []) any^ {
     }
 }
 
+// TeX's infix fraction consumes the enclosing math list, not only the next atom.
+fn math_infix_index(tokens, index = 0, depth = 0) any^ {
+    if (index >= len(tokens)) null
+    else {
+        let token = tokens[index];
+        if (depth == 0 and token.kind == "control" and
+                contains(["over", "atop", "above", "choose", "brace", "brack"], token.value)) index
+        else math_infix_index(tokens,index + 1,depth + if (opening(token)) 1 else if (closing(token)) -1 else 0)
+    }
+}
+fn math_list(tokens) any^ {
+    let at = math_infix_index(tokens)^;
+    if (at == null) math_atoms(tokens)
+    else {
+        let name = tokens[at].value;
+        let thickness = if (name == "above") math_dimension_argument(tokens,at + 1)^
+            else {issue:null, index:at + 1};
+        let numer = if (thickness.issue != null) thickness else math_atoms(slice(tokens,0,at))^;
+        let denom = if (numer.issue != null) numer else math_atoms(slice(tokens,thickness.index,len(tokens)))^;
+        if (denom.issue != null) denom
+        else {issue:null, items:[<infix_frac cmd:"\\" ++ name,
+            numer:<group *math_content(numer.items)^>,
+            *:if (name == "above") {thickness:thickness.value} else {},
+            denom:<group *math_content(denom.items)^>>]}
+    }
+}
+
 fn math_element(tokens, sources, index) any^ {
     let named = control(tokens[index], "(") or control(tokens[index], "[");
     let display = if (named) control(tokens[index], "[") else index + 1 < len(tokens) and dollar(tokens[index + 1]);
@@ -1262,7 +1488,7 @@ fn math_element(tokens, sources, index) any^ {
             // formula otherwise uses direct source spans.
             let math_output = rebuild.reconstruct({output:body, sources:sources, main_file:start.file}, true)^;
             let math_tokens = if (math_output.issue == null) mark_output_tokens(body, math_output, false)^ else body;
-            let atoms = math_atoms(math_tokens)^;
+            let atoms = math_list(math_tokens)^;
             if (source == null) unsupported(index, "math source mapping")
             else if (atoms.issue != null) atoms
             else {
@@ -3207,7 +3433,7 @@ fn parse_math_environment(tokens, sources, index, arg) any^ {
             let end = math_trim_end(bytes, begin, len(bytes))^;
             let source = utf8.decode(slice(bytes, begin, end))^;
             let math_tokens = mark_output_tokens(body, reconstructed, false)^;
-            let atoms = math_atoms(math_tokens)^;
+            let atoms = math_matrix_items(math_tokens)^;
             if (atoms.issue != null) atoms
             else {issue: null, index: finish.end, tokens: tokens,
                 node: environment_node(name, environment_offset(token)^, [], {source: source, ast: <math *math_content(atoms.items)^>})}
@@ -3382,7 +3608,7 @@ pub fn math(expanded: map) Digested^ {
     if (built.issue != null) {ast:null, issue:built.issue}
     else {
         let tokens = mark_output_tokens(expanded.output, built, expanded.constructor_argument_mode)^;
-        let atoms = math_atoms(tokens)^;
+        let atoms = math_list(tokens)^;
         if (atoms.issue != null) {ast:null, issue:atoms.issue, unsupported:atoms.unsupported}
         else {
             let content = math_content(atoms.items)^;
