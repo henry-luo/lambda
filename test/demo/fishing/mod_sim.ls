@@ -1,6 +1,6 @@
 // The game as a pure step over scene-clock time: rowing, the fishing sequence (cast, wait,
 // nibbles, a bite, the strike and release), fish that wander, school, shy from the boat and
-// come to the bobber, an otter that keeps the angler company, and a camera that follows. Each
+// come to the bobber, a beaver that keeps the angler company, and a camera that follows. Each
 // step also lists what the host must do this frame: clips to switch, fish swim rates to change,
 // and ripples and splashes to spawn. Headings are radians about +Y with forward [sin h, cos h].
 import t: lambda.scene3d.transform
@@ -8,11 +8,12 @@ import u: ~~.midtown.mod_util
 import w: .mod_world
 import fish: .mod_fish
 import angler: .mod_angler
-import otter: .mod_otter
+import beaver: .mod_beaver
 
 pub let NO_KEYS = {up: false, down: false, left: false, right: false}
 fn hash(a, b) => (let v = sin(a * 12.9898 + b * 78.233) * 43758.5453, v - floor(v))
-fn steer(h, target, rate, dt) any^ => h + u.clamp(u.wrap(target - h), 0.0 - rate * dt, rate * dt)
+// turn toward a heading: proportional near it, capped at `rate`, so the turn rate eases in and out
+fn steer(h, target, rate, dt) any^ => (let d = u.wrap(target - h)^, h + u.clamp(d * min(1.0, 3.0 * dt), 0.0 - rate * dt, rate * dt)^)
 // boat space to world: the boat sits at (x, y, z) facing h
 pub fn to_world(b, p) any^ => (let c = cos(b.h), let sn = sin(b.h), [b.x + p[0] * c + p[2] * sn, b.y + p[1], b.z - p[0] * sn + p[2] * c])
 fn on_water(p) => [p[0], 0.02, p[2]]
@@ -21,22 +22,30 @@ fn splash(p, size) => [spawn("splash", p, size), spawn("foam", p, 1), spawn(if (
 
 // ---- starting state
 fn place_fish(r, i) any^ {
-    let school = r.kind == "minnow"
-    let a = (if (school) 0.8 else w.roll(3000 + i, 0)^ * u.TAU), d = if (school) 0.35 else 0.15 + 0.6 * sqrt(w.roll(3000 + i, 1)^)
-    let x = cos(a) * w.RX * d + (if (school) (w.roll(3000 + i, 2)^ - 0.5) * 2.0 else 0.0)
-    let z = sin(a) * w.RZ * d + (if (school) (w.roll(3000 + i, 3)^ - 0.5) * 2.0 else 0.0)
-    let sp = fish.SPECIES[r.kind];
-    {id: r.id, i: i, kind: r.kind, L: r.length, x: x, z: z, y: 0.0 - (sp.depth[0] + sp.depth[1]) / 2.0, h: w.roll(3000 + i, 4)^ * u.TAU,
+    let school = (fish.schools(r.kind) ^ { false })
+    // each school starts together in its own corner of the cove
+    let a = (if (school) (if (r.kind == "tang") 2.6 else 0.8) else w.roll(3000 + i, 0)^ * u.TAU), d = if (school) 0.38 else 0.15 + 0.6 * sqrt(w.roll(3000 + i, 1)^)
+    // most loners start in view, just past the boat's shy radius and on the open-water side of the jetty (the
+    // bank behind it is too shallow), so the cove opens with life around the player
+    let near = not school and w.roll(3000 + i, 5)^ < 0.65
+    let nd = 2.2 + 3.4 * w.roll(3000 + i, 1)^
+    let nx = w.START.x + cos(a) * nd, nz = w.START.z - 0.8 - abs(sin(a)) * nd * 0.8
+    let wet = near and (habitat(nx, nz) ^ { false })
+    let x = if (wet) nx else cos(a) * w.RX * d + (if (school) (w.roll(3000 + i, 2)^ - 0.5) * 2.0 else 0.0)
+    let z = if (wet) nz else sin(a) * w.RZ * d + (if (school) (w.roll(3000 + i, 3)^ - 0.5) * 2.0 else 0.0)
+    let sp = fish.SPECIES[r.kind]
+    let y = if ((fish.bottom(r.kind) ^ { false })) (w.floor_y(x, z) ^ { -1.5 }) + 0.28 else 0.0 - (sp.depth[0] + sp.depth[1]) / 2.0;
+    {id: r.id, i: i, kind: r.kind, L: r.length, x: x, z: z, y: y, h: w.roll(3000 + i, 4)^ * u.TAU,
      v: 0.0, pitch: 0.0, roll: 0.0, mode: if (school) "school" else "wander", goal: [x, -0.6, z], until: 0.0, pace: 0.8, band: 1, cruise: sp.speed}
 }
 pub fn initial() any^ {
     let b = {x: w.START.x, z: w.START.z, h: w.START.heading, y: 0.0, v: 0.0, turn: 0.0, pitch: 0.0, roll: 0.0, rock: 0.0}
-    let o = {x: w.START.x - 2.2, y: -0.05, z: w.START.z + 1.4, h: w.START.heading, v: 0.0, roll: 0.0, pitch: 0.0, mode: "follow", since: 0.0, spin: 0.0};
+    let o = {x: w.START.x - 2.2, y: -0.1, z: w.START.z + 1.4, h: w.START.heading, v: 0.0, roll: 0.0, pitch: 0.0};
     {t: 0.0, frame: 0, boat: b, keys: NO_KEYS, press: false, assist: false, mode: "idle", since: 0.0, clip: "idle", after: null,
      fish: [for (i, r in fish.ROSTER) place_fish(r, i)^], target: null, nibbles: 0, next_nibble: 0.0, alone_since: 0.0, cooldown: 0.0,
-     otter: o, otter_clip: "otter-swim", still_since: 0.0,
+     beaver: o, beaver_clip: "beaver-swim", still_since: 0.0,
      camera: camera_rig(b, null, 1.0), zoom: 1.0, catches: 0, best: {}, toast: "", toast_until: 0.0, celebrate: null,
-     next: {wake: 0.0, bow: 0.0, hull: 1.0, bob: 0.0, rise: 5.0, ambient: 1.0, otter: 0.0},
+     next: {wake: 0.0, bow: 0.0, hull: 1.0, bob: 0.0, rise: 5.0, ambient: 1.0, beaver: 0.0},
      plan: [], rates: [], spawns: []}
 }
 
@@ -175,10 +184,20 @@ fn boat_rings(st, now, dt) any^ {
 
 // ---- fish
 fn habitat(x, z) any^ => (w.depth(x, z) ^ { 0.0 }) > 0.5 and (w.shore(x, z) ^ { 2.0 }) < 0.88
-fn wander_goal(f, now) any^ => (let a = hash(f.i * 7.1, now) * u.TAU, let d = 2.0 + 5.0 * hash(f.i * 3.3, now + 1.7),
-    let x = f.x + cos(a) * d, let z = f.z + sin(a) * d, let sp = fish.SPECIES[f.kind],
+// where a wandering fish heads next: usually a spot just outside the boat's shy radius (fish are curious,
+// and the cove's life stays where the player is looking), otherwise somewhere near itself
+fn wander_goal(f, b, now) any^ => (let a = hash(f.i * 7.1, now) * u.TAU, let near_boat = hash(f.i * 5.3, now + 0.9) < 0.72,
+    let d = if (near_boat) 2.2 + 3.4 * hash(f.i * 3.3, now + 1.7) else 2.0 + 5.0 * hash(f.i * 3.3, now + 1.7),
+    let cx = if (near_boat) b.x else f.x, let cz = if (near_boat) b.z else f.z,
+    let x = cx + cos(a) * d, let z = cz + sin(a) * d, let sp = fish.SPECIES[f.kind],
     let deep = sp.depth[0] + (sp.depth[1] - sp.depth[0]) * hash(f.i, now + 4.2),
-    let ok = habitat(x, z)^, [if (ok) x else f.x * 0.7, 0.0 - min(deep, max(0.25, (w.depth(x, z) ^ { 1.0 }) - 0.18)), if (ok) z else f.z * 0.7])
+    // a spot that lands in the shallows or on the bank swings to the same distance on the cove side, so a
+    // boat moored near the beach still draws fish instead of sending them back to the middle
+    let n = max(0.5, sqrt(cx * cx + cz * cz)), let x2 = cx - cx / n * d + sin(a) * 0.8, let z2 = cz - cz / n * d + cos(a) * 0.8,
+    let ok = habitat(x, z)^, let ok2 = habitat(x2, z2)^,
+    let gx = if (ok) x else if (ok2) x2 else f.x * 0.7, let gz = if (ok) z else if (ok2) z2 else f.z * 0.7,
+    // rays glide a hand's breadth above the floor; the rest keep to their depth band
+    [gx, if ((fish.bottom(f.kind) ^ { false })) (w.floor_y(gx, gz) ^ { -1.5 }) + 0.25 else 0.0 - min(deep, max(0.25, (w.depth(x, z) ^ { 1.0 }) - 0.18)), gz])
 fn avoid(f, h) any^ => (let close = [for (r in w.OBSTACLES where (u.dist(f.x + sin(h) * 0.9, f.z + cos(h) * 0.9, r.x, r.z) ^ { 1000.0 }) < r.r + 0.5) r],
     if (len(close) == 0) h else (let r = close[0], let away = math.atan2(f.x - r.x, f.z - r.z), h + u.wrap(away - h) * 0.6))
 // what a fish wants this frame: a point to swim to and a speed
@@ -203,16 +222,20 @@ fn intent(f, st, leader, now) any^ {
     }
     return {goal: f.goal, speed: sp.speed * f.pace}
 }
+fn first_schooling(all, kind) => (let found = [for (f in all where f.mode == "school" and f.kind == kind) f], if (len(found) > 0) found[0] else null)
 fn step_fish(f, st, leader, now, dt) any^ {
     if (f.mode == "hooked") { return f }
     let sp = fish.SPECIES[f.kind]
     let b = st.boat
     let near_boat = u.dist(f.x, f.z, b.x, b.z) < 1.9
     let calm = f.mode == "wander" or f.mode == "school" or f.mode == "rise"
-    let mode = if (calm and near_boat and st.target != f.id) "flee" else if (f.mode == "flee" and now > f.until) "wander" else f.mode
+    // a startled schooler rejoins its school afterwards; otherwise every pass of the boat thinned the schools for good
+    let settled = if ((fish.schools(f.kind) ^ { false })) "school" else "wander"
+    let mode = if (calm and near_boat and st.target != f.id) "flee" else if (f.mode == "flee" and now > f.until) settled else f.mode
     let f1 = if (mode != f.mode) {*: f, mode: mode, until: now + 2.0} else f
     let arrived = u.dist(f1.x, f1.z, f1.goal[0], f1.goal[2]) < 0.6
-    let f2 = if (f1.mode == "wander" and (arrived or now > f1.until)) {*: f1, goal: wander_goal(f1, now)^, until: now + 5.0 + 6.0 * hash(f1.i, now),
+    let leading = f1.mode == "school" and leader != null and leader.id == f1.id
+    let f2 = if ((f1.mode == "wander" or leading) and (arrived or now > f1.until)) {*: f1, goal: wander_goal(f1, st.boat, now)^, until: now + 5.0 + 6.0 * hash(f1.i, now),
         pace: if (hash(f1.i + 0.5, now) < 0.25) 0.15 else 0.6 + 0.4 * hash(f1.i + 0.9, now)} else f1
     let want = intent(f2, st, leader, now)^
     let dx = want.goal[0] - f2.x, dz = want.goal[2] - f2.z
@@ -225,15 +248,22 @@ fn step_fish(f, st, leader, now, dt) any^ {
     let nx = f2.x + sin(h) * v * dt, nz = f2.z + cos(h) * v * dt
     let ok = habitat(nx, nz)^ or f2.mode == "approach" or f2.mode == "nibble" or f2.mode == "bite" or f2.mode == "rise"
     let floor_y = w.floor_y(nx, nz) ^ { -1.0 }
-    let y = u.clamp(f2.y + u.clamp(want.goal[1] - f2.y, -0.25 * dt, 0.25 * dt) * (if (f2.mode == "rise") 3.0 else 1.0), floor_y + 0.12, -0.05)
-    let turning = u.wrap(h - f2.h) / max(dt, 0.001);
+    let climb = (if (f2.mode == "rise") 3.0 else 1.0) * 0.25 * dt
+    let y = u.clamp(f2.y + u.clamp((want.goal[1] - f2.y) * min(1.0, 1.5 * dt), 0.0 - climb, climb), floor_y + 0.12, -0.05)
+    // the body tilts with its climb and banks into turns, eased so neither snaps between frames
+    let turning = u.wrap(h - f2.h) / max(dt, 0.001)
+    let pitch_goal = u.clamp(0.0 - math.atan2((y - f2.y) / max(dt, 0.001), max(v, 0.15)), -0.35, 0.35)
+    let roll_goal = u.clamp(0.0 - turning * 0.1, -0.3, 0.3);
     {*: f2, x: if (ok) nx else f2.x, z: if (ok) nz else f2.z, y: y, h: if (ok) h else h + 1.2 * dt, v: if (ok) v else v * 0.5,
-     pitch: u.clamp(0.0 - (y - f2.y) / max(dt * max(v, 0.1), 0.001) * 0.6, -0.4, 0.4), roll: u.clamp(0.0 - turning * 0.12, -0.35, 0.35),
-     goal: if (ok) f2.goal else [f2.x * 0.6, f2.goal[1], f2.z * 0.6], band: if (v < 0.12) 0 else if (v > sp.speed * 1.6) 2 else 1}
+     pitch: f2.pitch + (pitch_goal - f2.pitch) * u.ease(4.0, dt), roll: f2.roll + (roll_goal - f2.roll) * u.ease(3.0, dt),
+     goal: if (ok) f2.goal else [f2.x * 0.6, f2.goal[1], f2.z * 0.6], band: speed_band(f2.band, v, sp.speed)}
 }
 // a tail-beat that suits the speed: sculling at a hover, quick strokes in a dash
+// speed bands with hysteresis, so a fish cruising near a threshold does not flip its tail-beat every frame
+fn speed_band(was, v, cruise) => if (was == 0) (if (v > 0.18) 1 else 0) else if (was == 2) (if (v < cruise * 1.3) 1 else 2)
+    else (if (v < 0.1) 0 else if (v > cruise * 1.6) 2 else 1)
 fn swim_rates(before, after) any^ => [for (i, f in after where f.band != before[i].band and f.mode != "hooked")
-    {clip: "swim-" ++ f.id, rate: [0.55, 1.0, 2.2][f.band], weight: [0.35, 1.0, 1.0][f.band]}]
+    {clip: "swim-" ++ f.id, rate: [0.55, 1.0, 2.2][f.band], weight: [0.45, 1.0, 1.0][f.band]}]
 
 // the bobber draws one fish at a time: it swims up, nibbles once or twice, then takes it
 fn fishing(st, now) any^ {
@@ -241,11 +271,11 @@ fn fishing(st, now) any^ {
     let bob = bobber_world(st)^
     if (st.target == null) {
         if (st.mode != "wait" or now < st.cooldown) { return st }
-        // minnows school past but are too small to take the hook
-        let close = [for (f in st.fish where f.mode == "wander" and f.kind != "minnow" and (u.dist(f.x, f.z, bob[0], bob[2]) ^ { 1000.0 }) < 6.5) f]
+        // schools and rays pass by; only the biting species take the hook
+        let close = [for (f in st.fish where f.mode == "wander" and (fish.bites(f.kind) ^ { false }) and (u.dist(f.x, f.z, bob[0], bob[2]) ^ { 1000.0 }) < 6.5) f]
         // a lone bobber draws the nearest fish over after a few seconds; until then any fish close by may wander up
         let lured = now - st.alone_since > 4.0
-        let pool = if (len(close) > 0 and not lured) close else [for (f in st.fish where f.mode == "wander" and f.kind != "minnow") f]
+        let pool = if (len(close) > 0 and not lured) close else [for (f in st.fish where f.mode == "wander" and (fish.bites(f.kind) ^ { false })) f]
         if (len(pool) == 0 or (not lured and hash(st.frame, 3.0) > 0.03)) { return st }
         let ranked = [for (f in pool) {f: f, d: u.dist(f.x, f.z, bob[0], bob[2]) ^ { 1000.0 }}]
         let pick = if (lured) reduce(ranked, (a, r) => if ((r.d < a.d) ^ { false }) r else a).f else pool[int(floor(hash(st.frame, 7.0) * len(pool)))]
@@ -277,30 +307,31 @@ fn rises(st, now) any^ {
      next: {*: s1.next, ambient: if (len(ambient) > 0) now + 1.2 + 2.0 * hash(st.frame, 13.0) else s1.next.ambient}}
 }
 
-// ---- the otter: keeps the boat company, floats on its back when the boat rests, rolls for joy at a catch
-fn step_otter(st, now, dt) any^ {
-    let o = st.otter, b = st.boat
+// ---- the beaver: keeps the boat company, gnaws its twig while the boat rests, slaps its tail for joy at a catch
+fn step_beaver(st, now, dt) any^ {
+    let o = st.beaver, b = st.boat
     let still = now - st.still_since
     let side = [b.x + cos(b.h) * 2.2 - sin(b.h) * 1.0, b.z - sin(b.h) * 2.2 - cos(b.h) * 1.0]
     let dx = side[0] - o.x, dz = side[1] - o.z
     let dist = sqrt(dx * dx + dz * dz)
-    let floating = still > 5.0 and dist < 2.5 and st.mode != "strike"
-    let joy = st.celebrate != null and now - st.celebrate < 1.1
-    let speed = if (floating) 0.08 else u.clamp(dist * 0.9, 0.0, 2.0)
-    let target_h = if (floating) o.h + 0.15 * dt else if (dist > 0.3) math.atan2(dx, dz) else b.h
-    let h = steer(o.h, target_h, 2.2, dt)^
-    let v = u.approach(o.v, speed, 1.5 * dt)
+    let resting = still > 5.0 and dist < 2.5 and st.mode != "strike"
+    let slapped = if (st.celebrate == null) 99.0 else now - st.celebrate
+    let slapping = slapped < beaver.SLAP_TIME
+    let speed = if (resting or slapping) 0.05 else u.clamp(dist * 0.9, 0.0, 1.8)
+    let target_h = if (resting) o.h + 0.1 * dt else if (dist > 0.3) math.atan2(dx, dz) else b.h
+    let h = steer(o.h, target_h, 2.0, dt)^
+    let v = u.approach(o.v, speed, 1.4 * dt)
     let nx = o.x + sin(h) * v * dt, nz = o.z + cos(h) * v * dt
     let wet = (w.shore(nx, nz) ^ { 2.0 }) < 0.97 and (w.depth(nx, nz) ^ { 0.0 }) > 0.25
-    let roll_goal = if (joy) o.roll + 9.0 * dt else if (floating) math.pi else 0.0
-    let roll = if (joy) roll_goal else o.roll + u.clamp(u.wrap(roll_goal - o.roll), -3.0 * dt, 3.0 * dt)
-    let clip = if (floating and abs(u.wrap(roll - math.pi)) < 0.6) "otter-float" else "otter-swim"
-    let rings = if (now >= st.next.otter) [spawn("ring-s", [o.x + sin(o.h) * 0.4, 0.0, o.z + cos(o.h) * 0.4], 1)] else []
-    let joy_splash = if (st.celebrate != null and now - st.celebrate < dt * 1.5) splash([o.x, 0.0, o.z], 9) else [];
-    {*: st, otter: {*: o, x: if (wet) nx else o.x, z: if (wet) nz else o.z, h: h, v: if (wet) v else 0.0, roll: roll,
-        y: if (floating) -0.075 else -0.085 + 0.01 * sin(now * 3.0), pitch: 0.0},
-     plan: if (clip != st.otter_clip) [*st.plan, {stop: st.otter_clip, play: clip}] else st.plan, otter_clip: clip,
-     spawns: [*st.spawns, *rings, *joy_splash], next: {*: st.next, otter: if (len(rings) > 0) now + (if (floating) 3.0 else if (v > 0.3) 0.45 else 2.0) else st.next.otter}}
+    let clip = if (slapping) "beaver-slap" else if (resting) "beaver-rest" else "beaver-swim"
+    let rings = if (now >= st.next.beaver) [spawn("ring-s", [o.x + sin(o.h) * 0.35, 0.0, o.z + cos(o.h) * 0.35], 1)] else []
+    // the tail cracks down on the water partway through the slap
+    let at = beaver.SLAP_AT * beaver.SLAP_TIME
+    let crack = if (slapped >= at and slapped - dt < at) splash([o.x - sin(o.h) * 0.55, 0.0, o.z - cos(o.h) * 0.55], 14) else [];
+    {*: st, beaver: {*: o, x: if (wet) nx else o.x, z: if (wet) nz else o.z, h: h, v: if (wet) v else 0.0, roll: 0.0,
+        y: (if (resting) -0.055 else -0.075 + 0.008 * sin(now * 3.0)), pitch: o.pitch + ((if (resting) -0.18 else 0.0) - o.pitch) * u.ease(2.0, dt)},
+     plan: if (clip != st.beaver_clip) [*st.plan, {stop: st.beaver_clip, play: clip}] else st.plan, beaver_clip: clip,
+     spawns: [*st.spawns, *rings, *crack], next: {*: st.next, beaver: if (len(rings) > 0) now + (if (resting) 3.0 else if (v > 0.3) 0.45 else 2.0) else st.next.beaver}}
 }
 
 // ---- one frame
@@ -312,12 +343,12 @@ pub fn step(st, now, dt) any^ {
     let s2 = rowing_mode(s1, now)^
     let s3 = timeline(s2, now, now - dt)^
     let s4 = {*: s3, boat: row_boat(s3, dt)^, still_since: if (abs(s3.boat.v) > 0.15 or moving(s3.keys)) now else s3.still_since}
-    let leaders = [for (f in s4.fish where f.mode == "school") f]
-    let leader = if (len(leaders) > 0) leaders[0] else null
-    let fishes = [for (f in s4.fish) step_fish(f, s4, leader, now, dt)^]
+    // each school follows its first member still schooling
+    let leads = {minnow: first_schooling(s4.fish, "minnow"), tang: first_schooling(s4.fish, "tang")}
+    let fishes = [for (f in s4.fish) step_fish(f, s4, if (f.kind == "minnow" or f.kind == "tang") leads[f.kind] else null, now, dt)^]
     let s5 = fishing({*: s4, fish: fishes, rates: [*s4.rates, *swim_rates(s4.fish, fishes)^]}, now)^
     let s6 = rises(boat_rings(s5, now, dt)^, now)^
-    let s7 = step_otter(s6, now, dt)^
+    let s7 = step_beaver(s6, now, dt)^
     let focus = if (line_out(s7.mode) or s7.mode == "cast") bobber_world(s7)^ else null
     let zoom = u.approach(s7.zoom, if (s7.mode == "strike") 0.78 else 1.0, 0.5 * dt);
     {*: s7, zoom: zoom, camera: follow(s7.camera, camera_rig(s7.boat, focus, zoom), u.ease(2.4, dt))}

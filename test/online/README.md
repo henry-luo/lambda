@@ -110,6 +110,7 @@ node --test test/online/render_readable_stream.test.cjs test/online/render_reada
 node --test test/online/render_base64.test.cjs test/online/render_service_worker_events.test.cjs
 node --test test/online/render_selector_roots.test.cjs test/online/render_selector_identifiers.test.cjs
 node --test test/online/render_direction_mutations.test.cjs test/online/render_relational_mutations.test.cjs
+node --test test/online/render_load_frames.test.cjs test/online/render_load_clock.test.cjs
 node --test test/online/render_dataset_metadata.test.cjs
 node --test test/online/render_error_stack.test.cjs test/online/render_document_title.test.cjs
 node --test test/online/render_grid.test.cjs

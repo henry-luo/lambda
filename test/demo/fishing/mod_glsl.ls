@@ -50,7 +50,7 @@ void main() {
     vec3 v = normalize(camera_position - world);
     float depth = smoothstep(0.0, 1.0, info.r);
     vec3 tint = mix(shallow, deep, depth);
-    float alpha = mix(0.08, 0.52, depth);
+    float alpha = mix(0.07, 0.42, depth);
     // the sky reflected at grazing angles, and slow broad sheen patches
     float fresnel = pow(1.0 - max(dot(n, v), 0.0), 4.0);
     float sheen = smoothstep(0.55, 0.85, noise(p * 0.12 + vec2(t * 0.015, -t * 0.01)));

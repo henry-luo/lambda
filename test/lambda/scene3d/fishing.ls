@@ -1,4 +1,4 @@
-// Fishing model golden: the cove's layout, the fish roster and their skinned buffers, the angler's
+// Fishing model golden: the cove's layout and flora, the fish roster and their skinned buffers, the angler's
 // pose geometry and clips, and the pure game step through rowing, a cast, a reel-in, and a staged
 // bite that the strike assist lands and releases. The step runs at a fixed 1/60 s with no host, so
 // it is deterministic; values are rounded so interpreter and JIT tiers print the same text.
@@ -12,12 +12,13 @@ fn v2(p) => [for (x in p) r2(x)]
 let DT = 1.0 / 60.0
 let UP = {*: sim.NO_KEYS, up: true}
 fn run(st, seconds, keys) any^ => reduce([st, *[for (i in 1 to int(seconds * 60.0)^) i]], (s, i) any^ => sim.step({*: s, keys: keys}, s.t + DT, DT)^)
-fn kinds(st) => [for (k in ["koi", "trout", "perch", "bluegill", "minnow"]) len([for (f in st.fish where f.kind == k) f])]
+fn kinds(st) => [for (k in ["koi", "trout", "perch", "bluegill", "carp", "minnow", "tang", "ray"]) len([for (f in st.fish where f.kind == k) f])]
 
 // ---- the cove
 "cove";
 {rocks: len(w.ROCKS), emergent: len(w.OBSTACLES), pads: len(w.PADS), flowers: len([for (p in w.PADS where p.flower) p]),
  grass: len(w.GRASS_CLUMPS), tubes: len(w.TUBES), stars: len(w.STARS), urchins: len(w.URCHINS), reeds: len(w.REEDS),
+ lotus: len(w.LOTUS), lettuce: len(w.LETTUCE), kelp: len(w.KELP), fans: len(w.FANS), moss: len(w.MOSS_BALLS),
  centre_depth: r2(w.depth(0.0, 0.0) ^ { -1.0 }), start_shore: r2(w.shore(w.START.x, w.START.z)),
  start_navigable: w.navigable(w.START.x, w.START.z) ^ { false }, bank_navigable: w.navigable(0.0, 16.5) ^ { true }}
 

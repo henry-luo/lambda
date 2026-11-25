@@ -2,7 +2,7 @@
 
 A cozy top-down fishing game in native Lambda. Row a little boat around Willow
 Cove, cast, wait for a bite and strike. Everything is generated in code (the
-cove, the boat and angler, every fish and the otter), and the game runs in
+cove, the boat and angler, every fish and the beaver), and the game runs in
 Radiant using `lambda.scene3d`.
 
 ```sh
@@ -34,24 +34,52 @@ for you a beat after the bite.
   sheen, a broken foam lip at the beach, and toon sun glints cut from an
   animated wave normal, glittering in drifting bands. A second film lays thin
   drifting caustics on the floor, brightest in the shallows.
-- **Ripples**: four particle emitters (small, medium and large rings, and a foam
-  crown) plus splash droplets. The game spawns rings where the oar blades bite
-  and leave the water, behind the boat, at the bobber, under nibbles and bites,
-  where a hooked fish thrashes, where fish rise to sip, and behind the otter.
-- **Fish**: 24 skinned fish on five-bone spines: koi, rainbow trout, perch,
-  bluegill and a school of minnows, each painted by species. A looping clip of
-  travelling body waves drives each one, and its rate and weight follow
-  swimming speed (sculling at a hover, quick strokes in a dash). Fish wander,
-  school, shy from the boat, rise to the surface and come to the bobber. They
-  cast shadows on the floor.
-- **Otter**: one skinned body with a three-joint tail and four paddling legs. It
-  keeps the boat company, floats on its back with its paws on its chest when
-  the boat rests, and rolls for joy at a catch.
-- **Boat and angler**: a lofted rowboat with floorboards above the waterline, and
-  a round angler in a yellow slicker and knitted cap. Rowing, casting, nibbles,
-  bites, the strike and the release are clips sampled from pose functions. The
-  fishing line is a skinned ribbon whose bones ride at the rod tip, mid-line,
-  bobber and hook.
+- **Ripples**: natural water rings rather than circles. Each is one disc of
+  vertex colour and alpha: a bright leading crest with a darker trough behind
+  it, then weaker trailing rings. The edges wobble a little, the bands widen as
+  they spread, and they fade. Three ripple emitters (small, medium, large), a
+  foam crown and splash droplets are spawned where the oar blades bite and leave
+  the water, behind the boat, at the bobber, under nibbles and bites, where a
+  hooked fish thrashes, where fish rise to sip, behind the beaver and where its
+  tail slaps.
+- **Plants and stones**: 70 noise-sculpted boulders with shaded crevices, lichen
+  on top and algae below. 179 water-lily pads (notched, cupped, veined, fresh
+  green to old gold), about one in five carrying a white, pink or yellow lily.
+  Five lotus stands with round wavy leaves (some held above the water on
+  stems), tall layered pink flowers with seed pods, and buds. Under water:
+  lettuce-like rosettes, kelp, purple sea fans, moss balls, seagrass, tube
+  sponges, starfish and urchins. Instanced plants sway in shared wind clips and
+  stay below the surface.
+- **Fish**: 44 skinned fish of eight species: koi, rainbow trout, perch,
+  bluegill, common carp, and schools of minnows and blue tang. Each has a blunt
+  head with a darker mouth, a gill-cover line, a lateral line, scale shimmer,
+  eyes with iris, pupil and highlight, and fins with rays; carp have barbels. A
+  looping clip of travelling body waves drives each one, and its rate and
+  weight follow swimming speed in bands with hysteresis. Steering eases into
+  turns and depth changes, and the body's pitch and roll ease too, so nothing
+  snaps between frames. Three spotted rays glide near the floor on
+  flapping wings. Fish wander, school, shy from the boat, rise to the surface,
+  come to the bobber (biting species only), and cast shadows on the floor.
+  They cruise in the top half-metre or so, where the water is clear enough to
+  see them. Most loners start in view, and wanderers are curious: about three
+  times in four they pick their next spot just outside the boat's shy radius.
+  A spot that would land on the bank swings to the cove side, so wherever the
+  boat stops, fish gather round within a few seconds. A startled school
+  re-forms once the scare is over.
+- **Beaver**: one chubby skinned body with a round head, puffy cheeks, a pale
+  muzzle, a shiny black nose, orange buck teeth, beady eyes, round ears and
+  whiskers, little forepaws with claws holding a leafy twig, big webbed hind
+  feet and a flat scaly paddle of a tail. It swims head-up with alternating
+  hind strokes and the twig under its chin, keeps the boat company, gnaws the
+  twig with quick little nods while the boat rests, and slaps its tail on the
+  water with a splash at every catch.
+- **Boat and fisher**: a lofted rowboat with floorboards above the waterline,
+  and a seated adult as one skinned mesh: canvas bucket hat, bearded face, navy
+  sweater under a waxed vest, khaki trousers and boots. Rowing, casting,
+  nibbles, bites, the strike and the release are clips sampled from pose
+  functions, and a two-bone IK solve places the hands on the oar handles, the
+  rod grip or the reel. The fishing line is a skinned ribbon whose bones ride
+  at the rod tip, mid-line, bobber and hook.
 
 ## How it is built
 
@@ -60,7 +88,7 @@ Each frame the game steps as a pure function (**S12.1.1v5**) and hands the host
 three kinds of command through the explicit Radiant contracts (**D9.5.6v2**):
 
 - one physics command of pose targets for every kinematic body (boat, fish,
-  otter, camera rig);
+  beaver, camera rig);
 - an animation batch when a clip must switch or a fish's tail-beat changes;
 - a particle batch for the frame's ripples and splashes.
 
@@ -71,13 +99,16 @@ toast and badge pop through the presentation channel.
 | --- | --- |
 | `mod_world.ls` | Shore, floor depth and colour, rocks, pads, plants, jetty, navigation |
 | `mod_glsl.ls` | Water and caustic shader bodies |
+| `mod_rig.ls` | Shared skinning helpers: aim and two-bone IK, automatic weights, smooth surfaces, tubes, ellipsoids |
+| `mod_flora.ls` | Boulders, water lilies, lotus, and underwater rosettes, kelp, sea fans and moss balls |
 | `mod_lagoon.ls` | The cove's merged meshes, instanced plants, water films, wind and tide clips |
-| `mod_fish.ls` | Species, roster, skinned fish buffers, skeletons and swim clips |
-| `mod_otter.ls` | The otter's body, rig and swim/float clips |
-| `mod_boat.ls` | Hull, gear, angler parts, oars, rod, line rig and bobber |
-| `mod_angler.ls` | Pose functions, the catch path, and the clips sampled from them |
+| `mod_fish.ls` | Species, roster, skinned fish and ray buffers, skeletons and swim clips |
+| `mod_beaver.ls` | The beaver's body, rig and swim, gnaw and tail-slap clips |
+| `mod_fisher.ls` | The fisher's skinned body and rig, and IK tracks from hand targets |
+| `mod_boat.ls` | Hull, gear, oars, rod, line rig and bobber, and the boat body holding the fisher |
+| `mod_angler.ls` | Pose functions with hand targets, the catch path, and the clips sampled from them |
 | `mod_scene.ls` | Physics world, lights, emitters, camera rig, and the assembled scene |
-| `mod_sim.ls` | The game step: rowing, the fishing sequence, fish, otter and camera |
+| `mod_sim.ls` | The game step: rowing, the fishing sequence, fish, beaver and camera |
 | `mod_present.ls` | Pose targets, clip and particle batches, and HUD writes |
 | `mod_hud.ls`, `fishing.ls` | The page, input handlers and the frame loop |
 
@@ -103,8 +134,8 @@ LAMBDA_HEADLESS_GLFW_WINDOW=1 ./lambda.exe demo fishing --headless \
   --event-file test/demo/fishing/tests/catch.json --event-result temp/fishing-catch.json
 ```
 
-The model golden (`test/lambda/scene3d/fishing.ls`) checks the cove layout, the
-roster and its skinned buffers, the angler's rod tip, bobber, blades, catch path
+The model golden (`test/lambda/scene3d/fishing.ls`) checks the cove layout and
+flora counts, the roster and its skinned buffers, the angler's rod tip, bobber, blades, catch path
 and clips, and the pure game step. That covers rowing out, gliding to a stop, a
 cast, a reel-in, and a staged bite that the assist lands, counts and releases.
 `tests/desktop.json` rows, turns, casts, reels in and rows away, checking each

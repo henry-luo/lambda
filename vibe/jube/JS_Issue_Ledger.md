@@ -807,6 +807,43 @@ high review resolves; localized card and text differences remain.
 
 ## 13. Web Platform: DOM, CSSOM, Events & Fetch (JS13)
 
+<a id="js13-l86"></a>
+
+### JS13-L86 — Elapsed loading suppresses animation-frame opportunities — **FIXED in focused controls; online qualification pending**
+
+Found 2026-11-25 while reviewing remaining hidden startup content. With an
+admitted resource held for 1200ms, the preceding pinned native renderer runs
+zero rAF callbacks before window.load; Chromium runs about 73. The loader
+pumps resource completions and ready tasks but never the existing frame
+dispatcher. Its wait boundary now calls `js_event_loop_pump_loading`, which
+coalesces pending frames at current elapsed time, with a maximum 60 Hz cadence.
+It reuses the existing rooted queue, cancellation and microtask checkpoint
+(**D6.4.1 / D8.4.4 / D10.1.7**). Frozen and host-driven captures retain their
+boundaries; active callbacks/microtasks cannot recursively admit frames.
+No synthesized catch-up time, visibility override or budget increase.
+
+Both elapsed held-script/image groups fail before repair. The final correctly
+linked release candidate passes **seven AST** controls (four frame groups and
+three existing timer/CSS-age controls), **four MIR** frame groups, and the
+same fixture passes **two Chromium** controls. Native delivers 47–54 callbacks
+during these waits. Authored paused CSS and post-load CSS age stay unchanged.
+Chromium's CDP CSS pause also freezes its rAF timestamp while performance.now
+advances; these controls qualify lifecycle opportunities, not equality of
+that mixed capture timeline. Full timestamp alignment remains unqualified.
+
+The initial isolated links omitted `lambda-radiant-adapter-cpp`, which owns
+script_runner.cpp. Those page attempts do not qualify the final loader fix.
+A broader between-script hook was removed; an Anam startup crash from that
+experiment did not reproduce under the debugger, so its cause is not assigned
+here. No round 230 page frame is promoted, no major clearance claimed, and
+installed hosts/report 203 remain at 69 high. User cleared the goal during qualification;
+the concurrent submodule merge is untouched. Evidence:
+`temp/online-visual-round230/{loader-qualified-ast.log,loader-qualified-mir.log,
+load-frames-final-prior.log,load-frames-final-ast-chromium.log,checkpoint.md}`.
+Final candidate SHA256:
+`49c93174f6d5ea9bb514adfc99a34fab1cfbab610b6fabfe62da174ea4f51f73`.
+No broad baseline repeated after this bounded repair.
+
 <a id="js13-l85"></a>
 
 ### JS13-L85 — Empty service-worker container omits inherited event behavior — **FIXED for EventTarget; worker lifecycle remains unsupported**

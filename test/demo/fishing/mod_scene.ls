@@ -1,5 +1,5 @@
 // The whole Willow Cove scene, built once: physics world (only kinematic bodies move: the boat,
-// every fish, the otter and the camera rig), sun and sky light, the cove, the ripple and splash
+// every fish, the beaver and the camera rig), sun and sky light, the cove, the ripple and splash
 // emitters, and every clip. After this the host only sends pose targets, clip commands and
 // particle spawns; the scene's DOM never changes, so it is never re-projected.
 import s: lambda.scene3d
@@ -11,7 +11,7 @@ import lagoon: .mod_lagoon
 import boat: .mod_boat
 import angler: .mod_angler
 import fish: .mod_fish
-import otter: .mod_otter
+import beaver: .mod_beaver
 
 pub let NOBODY = {membership: 0, filter: 0}
 // rings: final diameter, lifetime, band width at full size
@@ -78,13 +78,13 @@ pub fn scene(st, attributes) any^ => s.scene([
         'cast-shadow': true, 'shadow-cascades': 2, 'shadow-distance': 40.0, 'shadow-map-size': 2048, 'shadow-normal-bias': 0.03, 'shadow-softness': 1.6}),
     s.light('hemisphere', {id: "sky", position: [0.0, 1.0, 0.0], color: "#cdebf0", 'ground-color': "#40583a", intensity: 0.62}),
     s.resources([*(lagoon.materials()^), *(boat.materials()^), s.material('lambert', {id: "m-fish", color: "#ffffff", side: 'double'}),
-        *(otter.materials()^)]),
+        *(beaver.materials()^)]),
     *(lagoon.elements()^),
     boat.body(st.boat.x, st.boat.z, st.boat.h)^,
     *[for (f in st.fish, let r = fish.ROSTER[f.i]) fish.body(r, f.x, f.y, f.z, f.h)^],
-    otter.body(st.otter.x, st.otter.y, st.otter.z, st.otter.h)^,
+    beaver.body(st.beaver.x, st.beaver.y, st.beaver.z, st.beaver.h)^,
     camera_body(st.camera)^,
     *[for (id, spec in RINGS) ring_emitter(string(id), spec)^], splash_emitter()^, foam_emitter()^,
-    *(lagoon.clips()^), *(angler.clips()^), *[for (r in fish.ROSTER) fish.swim_clip(r)^], *(otter.clips()^)
+    *(lagoon.clips()^), *(angler.clips()^), *[for (r in fish.ROSTER) fish.swim_clip(r)^], *(beaver.clips()^)
 ], {id: "cove", camera: "cam", width: 1280, height: 800, background: "#6f9a4a", 'max-pixel-ratio': 1.5, tabindex: "0",
     role: "img", 'aria-label': "Willow Cove: a rowboat on a clear lagoon. Arrow keys or WASD row; Space casts and strikes.", *: attributes})

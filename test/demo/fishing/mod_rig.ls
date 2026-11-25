@@ -1,4 +1,4 @@
-// Shared helpers for the skinned characters (otter, fisher, fish): quaternion aiming and a two-bone
+// Shared helpers for the skinned characters (beaver, fisher, fish): quaternion aiming and a two-bone
 // IK solve for posing limbs at targets, automatic skin weights from bone segments, smooth grid
 // surfaces whose normals come from the surface itself, and buffers that carry their bone blend.
 // A skinned buffer is {positions, normals, colors, indices, skin, weights}, four influences per
@@ -16,7 +16,7 @@ pub fn dot(a, b) any^ => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 pub fn length(a) any^ => sqrt(dot(a, a)^)
 pub fn unit(a) any^ => (let n = max(length(a)^, 0.000001), [a[0] / n, a[1] / n, a[2] / n])
 pub fn lerp3(a, b, k) any^ => [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k]
-pub fn qmul(a, b) any^ => t.quaternion_multiply(a, b)^
+pub fn qmul(a, b) any^ => t.quaternion_multiply(a, b)
 pub fn qrot(q, p) any^ => t.quaternion_rotate(q, p)^
 pub fn qinv(q) any^ => [0.0 - q[0], 0.0 - q[1], 0.0 - q[2], q[3]]
 pub let IDENTITY = [0.0, 0.0, 0.0, 1.0]
@@ -29,7 +29,7 @@ pub fn aim(a, b) any^ {
         let axis = unit(v.cross(x, side)^)^;
         return [axis[0], axis[1], axis[2], 0.0]
     }
-    let c = v.cross(x, y)^
+    let c = v.cross(x, y)
     return t.quaternion_normalize([c[0], c[1], c[2], 1.0 + d])^
 }
 // two-bone IK: where the middle joint goes for a chain of lengths l1, l2 from root reaching for target,
@@ -84,7 +84,7 @@ pub fn surface(rows, columns, sampler, bind, flip = false) any^ {
     let at = (r, k) => grid[min(rows, max(0, r)) * columns + (k + columns) % columns].p
     let verts = [for (r in 0 to rows, k in 0 to columns - 1, let g = grid[r * columns + k],
         let du = sub(at(r, k + 1), at(r, k - 1))^, let dv = sub(at(r + 1, k), at(r - 1, k))^,
-        let n0 = v.cross(du, dv)^, let n = if (length(n0)^ >= 0.0000001) unit(n0)^ else pole_normal(at, r, k, rows, dv)^)
+        let n0 = v.cross(du, dv), let n = if (length(n0)^ >= 0.0000001) unit(n0)^ else pole_normal(at, r, k, rows, dv)^)
         {p: g.p, n: if (flip) scale(n, -1.0)^ else n, c: g.c, b: bind(g.p)^}]
     let tris = [for (r in 0 to rows - 1, k in 0 to columns - 1, q in quad(r * columns + k, r * columns + (k + 1) % columns, columns, flip)^) q]
     return part(verts, tris)^
@@ -94,8 +94,8 @@ fn band(a, b, segments) any^ => [a, a + segments, b, b, a + segments, b + segmen
 // at a pole or a collapsed centre row the around-tangent vanishes: borrow the neighbouring row's
 fn pole_normal(at, r, k, rows, dv) any^ {
     let near = if (r == 0) 1 else r - 1
-    let n1 = v.cross(sub(at(near, k + 1), at(near, k - 1))^, dv)^
-    let n2 = if (length(n1)^ >= 0.0000001) n1 else v.cross(sub(at(near, k + 1), at(near, k - 1))^, sub(at(near, k), at(r, k))^)^
+    let n1 = v.cross(sub(at(near, k + 1), at(near, k - 1))^, dv)
+    let n2 = if (length(n1)^ >= 0.0000001) n1 else v.cross(sub(at(near, k + 1), at(near, k - 1))^, sub(at(near, k), at(r, k))^)
     return if (length(n2)^ >= 0.0000001) unit(n2)^ else [0.0, 1.0, 0.0]
 }
 // the winding faces the same way as the normal: (a, b, a + columns) runs du then dv
@@ -113,7 +113,7 @@ pub fn ellipsoid(c, r, q, colour, bind, ball = BALL) any^ {
 pub fn tube(points, radii, segments, colour, bind) any^ {
     let n = len(points)
     let frames = [for (i in 0 to n - 1, let d = unit(sub(points[min(n - 1, i + 1)], points[max(0, i - 1)])^)^,
-        let side = unit(v.cross(d, if (abs(d[1]) < 0.9) [0.0, 1.0, 0.0] else [1.0, 0.0, 0.0])^)^, let up = v.cross(side, d)^) {d: d, s: side, u: up}]
+        let side = unit(v.cross(d, if (abs(d[1]) < 0.9) [0.0, 1.0, 0.0] else [1.0, 0.0, 0.0])^)^, let up = v.cross(side, d)) {d: d, s: side, u: up}]
     let ring = [for (i in 0 to n - 1, j in 0 to segments - 1, let a = j * 6.283185307179586 / segments, let f = frames[i],
         let nrm = add(scale(f.s, cos(a))^, scale(f.u, sin(a))^)^, let p = add(points[i], scale(nrm, radii[i])^)^)
         {p: p, n: nrm, c: colour(i / float(n - 1), a)^, b: bind(p)^}]
