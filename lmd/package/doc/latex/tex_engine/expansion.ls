@@ -2952,6 +2952,32 @@ fn expl3_tl_assign(st: State, name, budget) State^ {
     }
 }
 
+// Replacement matches top-level token sequences without expanding either argument.
+fn expl3_tl_replace(st: State, name) State^ {
+    let target = nonspace(st.input)^;
+    let current = {*:st, input:target.stream};
+    if (not is_control(target.token)) fail(current, "tex-missing-cs")
+    else {
+        let search = stream.argument(current.input, true)^;
+        let replacement = if (search.error == null) stream.argument(search.stream, true)^
+            else {stream:search.stream, tokens:[], error:null};
+        let advanced = {*:current, input:replacement.stream};
+        let prior = meaning(advanced, target.token);
+        if (search.error != null) fail(advanced, search.error)
+        else if (replacement.error != null) fail(advanced, replacement.error)
+        else if (prior.kind == "undefined") fail(advanced, "expl3-undefined-variable")
+        else if (prior.kind != "macro" or prior.count != 0 or prior.protected_flag == true)
+            unsupported(advanced, "expl3 token-list target")
+        else if (len(search.tokens) == 0 or any([for (token in search.tokens) charcat(token,1) or charcat(token,2)]))
+            unsupported(advanced, "expl3 replacement search pattern")
+        else {
+            let body = expl3.replace_tokens(stored_tokens(prior.body), search.tokens,
+                stored_tokens(replacement.tokens), contains(name, "_once:"))^;
+            assign_meaning(advanced, key(target.token), expl3.token_list(body), effective_global(advanced, expl3.global(name))^)
+        }
+    }
+}
+
 fn expl3_tl_use(st: State, budget) State^ {
     if (st.expansions >= budget) fail(st, "tex-budget")
     else {
@@ -3159,12 +3185,6 @@ fn expl3_seq_assign(st: State, name) State^ {
     }
 }
 
-fn expl3_seq_join(items, separator, index = 0, output = []) any^ {
-    if (index >= len(items)) output
-    else expl3_seq_join(items, separator, index + 1,
-        [*output, *(if (index == 0) [] else separator), *items[index]])
-}
-
 // keep the synthetic terminator and any residual tokens inside the index scope.
 fn expl3_seq_index(st, tokens, budget) any^ {
     let end = {kind: "expl3-seq-index-end"};
@@ -3215,7 +3235,7 @@ fn expl3_seq_expand(st: State, name, budget) State^ {
                 let advanced = {*:marked, input: separator.stream};
                 if (separator.error != null) fail(advanced, separator.error)
                 else {
-                    let tokens = expl3_seq_join(items, separator.tokens)^;
+                    let tokens = stream.join_tokens(items, separator.tokens)^;
                     let result = if (advanced.token_text_scan) [for (t in tokens)
                         {*:t, noexpand: is_control(t), direct_toks: true}] else stored_tokens(tokens);
                     {*:advanced, input: stream.push(advanced.input, result)}
@@ -5958,6 +5978,8 @@ fn step(st: State, budget) State^ {
         after_assignment(current, expl3_cs_define(current, cmd, budget))
     else if (st.script_expl3 and expl3.token_assignment(cmd))
         after_assignment(current, expl3_tl_assign(current, cmd, budget))
+    else if (st.script_expl3 and expl3.token_replacement(cmd))
+        after_assignment(current, expl3_tl_replace(current, cmd))
     else if (st.script_expl3 and expl3.sequence_assignment(cmd))
         after_assignment(current, expl3_seq_assign(current, cmd))
     else if (st.script_expl3 and expl3.sequence_sort(cmd))

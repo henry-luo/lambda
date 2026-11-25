@@ -34,6 +34,23 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Expl3 token-list replacement, 2026-11-26:** Local and global `tl_replace`
+  operations now replace the first or all top-level matches without expanding
+  search or replacement tokens (D10.2.2v2). Ten cases match TeX Live,
+  including grouped text, control tokens, scope and empty replacements; empty
+  or grouped search patterns remain explicitly unsupported. The new fixture
+  and sequence regression pass with forced GC in interpreter and JIT. Four
+  focused GTests pass; an additional token-list equality matrix initially
+  timed out, then passed unchanged after sharing the existing immutable expl3
+  test preload. Generic variant generation and csvsimple remain open.
+
+- **Document suite, 2026-11-26:** The current isolated 86-case LaTeX GTest
+  run passed 84. The phase-three corpus exceeded the 60-second per-script
+  timeout but matches the full golden in the separate release run below; the
+  phase-five tables golden differs in csvsimple cases, whose expl3 variant
+  generator and other binding operations are still incomplete. See
+  `temp/latex-retirement/document-suite-current.log` (D10.2.2v2).
+
 - **Token and source reconstruction cost, 2026-11-26:** A symbolized optimized
   profile showed repeated nested contract admission while the output token
   array grew. Token emission and reconstructed segments now use concatenation

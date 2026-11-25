@@ -189,6 +189,12 @@ pub fn same_tokens(a, b, index = 0) bool^ {
     else same_token(a[index], b[index]) and same_tokens(a, b, index + 1)
 }
 
+pub fn join_tokens(items, separator, index = 0, output = []) any^ {
+    if (index >= len(items)) output
+    else join_tokens(items, separator, index + 1,
+        [*output, *(if (index == 0) [] else separator), *items[index]])
+}
+
 fn read_group(stream: Stream, depth: int, tokens: map[], long_ok: bool) Argument^ {
     let result = next(stream)^;
     let t = result.token;

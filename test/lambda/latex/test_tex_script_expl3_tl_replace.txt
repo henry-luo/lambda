@@ -1,0 +1,41 @@
+[{
+    text: "a+b+{c,d}+e",
+    issue: null
+  }, {
+    text: "XXa",
+    issue: null
+  }, {
+    text: "A\\other: B",
+    issue: null
+  }, {
+    text: "a-b-c",
+    issue: null
+  }, {
+    text: "a+b,c",
+    issue: null
+  }, {
+    text: "Xaaa",
+    issue: null
+  }, {
+    text: "a,b",
+    issue: null
+  }, {
+    text: "a+b",
+    issue: null
+  }, {
+    text: "ab",
+    issue: null
+  }, {
+    text: "a{z}b",
+    issue: null
+  }]
+[{
+    issue: "tex-unsupported-primitive",
+    unsupported: "expl3 replacement search pattern"
+  }, {
+    issue: "tex-unsupported-primitive",
+    unsupported: "expl3 replacement search pattern"
+  }, {
+    issue: "expl3-undefined-variable",
+    unsupported: null
+  }]

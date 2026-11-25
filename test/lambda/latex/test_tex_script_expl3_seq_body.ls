@@ -1,7 +1,7 @@
 import profile: lambda.doc.latex.tex_engine.profile
 import reconstruct: lambda.doc.latex.tex_engine.reconstruct
 import digest: lambda.doc.latex.tex_engine.digest
-import compare: ._tex_expl3_seq_compare
+import compare: ._tex_expl3_compare
 let kernel=compare.kernel;
 let baseline=compare.baseline;
 fn check(source) any^ => compare.check(source);
