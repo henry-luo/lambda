@@ -576,6 +576,8 @@ fn expand_one(st: State, t, budget) State^ {
     else if (meaning(st, t).kind == "macro") {
         let macro = meaning(st, t)^;
         if (st.expansions >= budget) fail(st, "tex-budget")
+        else if (macro.source_mapping_guard == "replicate_negative")
+            unsupported(st, "expl3 negative replication diagnostic")
         else if (st.latex and len(st.packages) > 0 and unresolved_package_cycle(st, macro)^)
             unsupported(st, "recursive package bootstrap")
         else {
@@ -593,6 +595,7 @@ fn expand_one(st: State, t, budget) State^ {
                 else if (macro.source_mapping_guard == "str_case") {*:st, expl3_str_case_seen:true}
                 else if (macro.source_mapping_guard == "seq_map") {*:st, expl3_seq_map_seen:true}
                 else if (macro.source_mapping_guard == "tl_map") {*:st, expl3_tl_map_seen:true}
+                else if (macro.source_mapping_guard == "replicate") {*:st, expl3_replicate_seen:true}
                 else if (macro.source_mapping_guard == "int_math") {*:st, expl3_int_math_seen: true} else st;
             let traced = if (st.prefix_scan == true) {*:marked, prefixed_macro_seen: true} else marked;
             expand_macro(traced, macro, budget, t)
@@ -6793,6 +6796,12 @@ pub fn enable_script_expl3(st: State) State^ {
     let roman_letters = [for (form in ["roman", "Roman"], letter in ["i", "v", "x", "l", "c", "d", "m"]) {
         source:"\\__int_to_" ++ form ++ "_" ++ letter ++ ":w{" ++
             (if (form == "Roman") upper(letter)^ else letter) ++ "}", protected_flag:false}];
+    // Decimal replication shares the native digit-by-digit expansion shapes.
+    let replicate_digits = [for (digit in [0,1,2,3,4,5,6,7,8,9], first in [true,false]) {
+        source:"\\__lambda_replicate:n#1{" ++ (if (first) "\\exp_end:" else
+            "\\cs_end:{" ++ repeated("#1", 10)^ ++ "}") ++ repeated("#1", digit)^ ++ "}",
+        install_as:"__prg_replicate_" ++ (if (first) "first_" else "") ++ string(digit) ++ ":n",
+        protected_flag:false}];
     // The four native insertion shapes share value expansion and assignment order.
     let value_puts = [for (scope in ["", "g"], side in ["left", "right"], form in ["V", "v"]) {
         let value = "\\exp_not:" ++ form ++ (if (form == "V") "#2" else "{#2}");
@@ -6821,7 +6830,7 @@ pub fn enable_script_expl3(st: State) State^ {
         source:"\\" ++ loop.name ++ ":nn#1#2{" ++ (if (loop.first) "#2" else "") ++
             "\\bool_if:n" ++ loop.test ++ "{#1}{" ++ (if (loop.first) "" else "#2") ++
             "\\" ++ loop.name ++ ":nn{#1}{#2}}}", protected_flag:false}];
-    let macros = enable_expl_macro_sources(msg_support, [*variants,*pop_base,*pop_conditionals,*pop_variants,*prop_get_conditionals,*prop_get_variants,*prop_exp_helpers,*prop_pop_bases,*prop_remove_bases,*prop_pop_conditionals,*prop_pop_variants,*prop_remove_variants,*integer_ops,*integer_dynamic,*token_dynamic,*roman_letters,*value_puts,*token_removals,*bool_returns,*bool_gates,*bool_selectors,*bool_loops,
+    let macros = enable_expl_macro_sources(msg_support, [*variants,*pop_base,*pop_conditionals,*pop_variants,*prop_get_conditionals,*prop_get_variants,*prop_exp_helpers,*prop_pop_bases,*prop_remove_bases,*prop_pop_conditionals,*prop_pop_variants,*prop_remove_variants,*integer_ops,*integer_dynamic,*token_dynamic,*roman_letters,*replicate_digits,*value_puts,*token_removals,*bool_returns,*bool_gates,*bool_selectors,*bool_loops,
         {source:"\\ior_new:N#1{\\cs_new_eq:NN#1\\c__ior_term_ior}",protected_flag:true},
         {source:"\\ior_new:c{\\exp_args:Nc\\ior_new:N}",protected_flag:true},
         {source:"\\ior_open:cn{\\exp_args:Nc\\ior_open:Nn}",protected_flag:true},
@@ -6834,6 +6843,11 @@ pub fn enable_script_expl3(st: State) State^ {
         {source:"\\int_to_Roman:n#1{\\exp_after:wN\\__int_to_Roman_aux:N\\__int_to_roman:w\\int_eval:n{#1}Q}",protected_flag:false,source_mapping_guard:"int_math"},
         {source:"\\__int_to_Roman_aux:N#1{\\use:c{__int_to_Roman_#1:w}\\__int_to_Roman_aux:N}",protected_flag:false},
         {source:"\\__int_to_Roman_Q:w#1{}",protected_flag:false},
+        {source:"\\prg_replicate:nn#1{\\exp:w\\exp_after:wN\\__prg_replicate_first:N\\int_value:w\\int_eval:n{#1}\\cs_end:}",protected_flag:false,source_mapping_guard:"replicate"},
+        {source:"\\__prg_replicate:N#1{\\cs:w __prg_replicate_#1:n\\__prg_replicate:N}",protected_flag:false},
+        {source:"\\__prg_replicate_first:N#1{\\cs:w __prg_replicate_first_#1:n\\__prg_replicate:N}",protected_flag:false},
+        {source:"\\__prg_replicate_ :n#1{\\cs_end:}",protected_flag:false},
+        {source:"\\__lambda_replicate:n#1{\\exp_end:\\msg_expandable_error:nn{prg}{negative-replication}}",install_as:"__prg_replicate_first_-:n",protected_flag:false,source_mapping_guard:"replicate_negative"},
         {source:"\\q_no_value{\\q_no_value}",protected_flag:false},
         {source:"\\exp_args:NNe#1#2#3{\\exp_after:wN#1\\exp_after:wN#2\\tex_expanded:D{{#3}}}",protected_flag:false},
         {source:"\\exp_args:Nce#1#2#3{\\tex_expanded:D{\\exp_not:N#1\\exp_after:wN\\exp_not:N\\cs:w#2\\cs_end:{\\__kernel_exp_not:w\\tex_expanded:D{{#3}}}}}",protected_flag:false},
@@ -7364,7 +7378,7 @@ pub fn resume(st: State, source: string, name: string = "<input>", budget: int =
             mathchardef_emission_seen: false,
             expl3_tl_head_seen: false, expl3_tl_tail_seen: false, expl3_keyval_seen: false, expl3_keys_seen:false,
             expl3_clist_map_seen:false, expl3_bool_expr_seen:false, expl3_tl_replace_seen:false, expl3_str_case_seen:false,
-            expl3_seq_map_seen:false, expl3_tl_map_seen:false,
+            expl3_seq_map_seen:false, expl3_tl_map_seen:false, expl3_replicate_seen:false,
             expl3_exp_args_once_seen: false, expl3_exp_args_value_seen: false, expl3_exp_args_f_seen: false,
             sources: [*st.sources, {id: id, name: name, origin: origin, data: source}]};
         run(resumed, budget)

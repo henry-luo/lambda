@@ -34,12 +34,21 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Expl3 replication, 2026-11-26:** Script preloads native expandable
+  `prg_replicate:nn` and its decimal helpers (D10.2.2v2). TeX Live
+  comparisons cover zero, multi-digit counts, arithmetic, nested replication
+  and unexpanded tokens. Negative-count diagnostics and replication source
+  mapping remain explicitly unsupported. Csvsimple's simple expansion now
+  reconstructs a concrete `|l|l|` table with all three data rows. A diagnostic
+  probe that bypasses only the existing guards still finds generated table
+  header source mapping unsupported; no guard was removed.
+
 - **Expl3 token-list mapping, 2026-11-26:** Script preloads the native
   inline and expandable function maps with their eight-item scanner, break
   points and global nesting counter (D10.2.2v2). TeX Live comparisons cover
   groups, ignored spaces, the scanner boundary, nested maps and breaks.
-  The simple csvsimple probe now completes TeX expansion but the document
-  digester rejects boolean-expression source mapping. Constructor argument
+  A later replication operation and the remaining document source-mapping
+  blocker are recorded in the current checkpoint above. Constructor argument
   handling and token-map source mapping remain unsupported.
 
 - **Expl3 Roman integer conversion, 2026-11-26:** Script preloads the native

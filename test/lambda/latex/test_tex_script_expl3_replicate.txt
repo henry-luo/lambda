@@ -1,0 +1,19 @@
+{
+  issue: null,
+  unsupported: null,
+  text: "[]/[ababab]/[xxxxxxxxxxxx]/[yyyyyyyyyyyyyyyyyyyyy]",
+  diagnostics: []
+}
+{
+  issue: null,
+  unsupported: null,
+  text: "QQQ/[\\foo \\foo ]/zzzzzz",
+  diagnostics: []
+}
+{
+  issue: "tex-unsupported-primitive",
+  unsupported: "expl3 negative replication diagnostic",
+  text: "",
+  diagnostics: []
+}
+true
