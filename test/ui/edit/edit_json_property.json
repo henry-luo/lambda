@@ -4,14 +4,20 @@
   "html": "test/fixtures/edit/property-tree.json",
   "working_copy": "temp/edit-ui/edit_json_property.json",
   "events": [
+    {"type": "assert_text", "target": {"selector": ".document-name"}, "equals": "edit_json_property.json"},
+    {"type": "assert_text", "target": {"selector": ".preview-kind"}, "equals": "Edit"},
     {"type": "assert_count", "target": {"selector": ".property-value"}, "count": 4},
-    {"type": "assert_value", "target": {"selector": "input[aria-label='name']"}, "equals": "\"Tea\""},
-    {"type": "click", "target": {"selector": "input[aria-label='name']"}},
+    {"type": "assert_value", "target": {"selector": "textarea[aria-label='name']"}, "equals": "\"Tea\""},
+    {"type": "click", "target": {"selector": "textarea[aria-label='name']"}},
+    {"type": "assert_style", "target": {"selector": "textarea[aria-label='name']"}, "property": "outline-style", "equals": "none"},
+    {"type": "assert_style", "target": {"selector": "textarea[aria-label='name']"}, "property": "border-top-color", "equals": "rgb(9, 105, 218)"},
     {"type": "key_combo", "key": "a", "mods_str": "super"},
     {"type": "type", "text": "\"Coffee\""},
     {"type": "key_combo", "key": "s", "mods_str": "super"},
     {"type": "assert_file", "path": "temp/edit-ui/edit_json_property.json", "contains": "\"name\": \"Coffee\",\n  \"flags\": [true, false],\n  \"details\": {\"count\": 2}"},
     {"type": "click", "target": {"selector": "input.property-key[aria-label='Property name: count']"}},
+    {"type": "assert_style", "target": {"selector": "input.property-key[aria-label='Property name: count']"}, "property": "outline-style", "equals": "none"},
+    {"type": "assert_style", "target": {"selector": "input.property-key[aria-label='Property name: count']"}, "property": "border-top-color", "equals": "rgb(9, 105, 218)"},
     {"type": "key_combo", "key": "a", "mods_str": "super"},
     {"type": "type", "text": "total"},
     {"type": "key_combo", "key": "s", "mods_str": "super"},
@@ -19,6 +25,6 @@
     {"type": "key_combo", "key": "/", "mods_str": "super"},
     {"type": "assert_text", "target": {"selector": ".src-text"}, "contains": "\"total\": 2"},
     {"type": "key_combo", "key": "/", "mods_str": "super"},
-    {"type": "assert_value", "target": {"selector": "input[aria-label='total']"}, "equals": "2"}
+    {"type": "assert_value", "target": {"selector": "textarea[aria-label='total']"}, "equals": "2"}
   ]
 }

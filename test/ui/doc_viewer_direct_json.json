@@ -1,0 +1,14 @@
+{
+  "name": "Direct JSON view uses the browser property pane",
+  "html": "test/fixtures/edit/property-tree.json",
+  "events": [
+    {"type": "assert_text", "target": {"selector": ".document-name"}, "equals": "property-tree.json"},
+    {"type": "assert_count", "target": {"selector": ".file-panel"}, "count": 0},
+    {"type": "assert_count", "target": {"selector": "#property-preview"}, "count": 1},
+    {"type": "click", "target": {"selector": "#property-filter"}},
+    {"type": "type", "text": "count"},
+    {"type": "assert_text", "target": {"selector": ".property-entry[data-property-name='count'] > .property-row .property-value"}, "equals": "2"},
+    {"type": "click", "target": {"selector": ".tab-source"}},
+    {"type": "assert_text", "target": {"selector": "#source-preview"}, "contains": "\"details\": {\"count\": 2}"}
+  ]
+}

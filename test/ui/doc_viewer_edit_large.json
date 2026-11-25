@@ -1,0 +1,31 @@
+{
+  "name": "viewer opens a large tree with viewport-sized initial expansion",
+  "html": "test/fixtures/edit/property-tree-wide.json",
+  "viewport": {
+    "width": 1050,
+    "height": 500
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tab-edit"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".property-entry"
+      },
+      "min": 12,
+      "max": 16
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#property-toggle-0.1.17"
+      },
+      "count": 0
+    }
+  ]
+}

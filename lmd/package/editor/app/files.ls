@@ -12,15 +12,17 @@ import dom
 import sess: lambda.editor.session
 import controller: lambda.editor.controller
 import focus_policy: lambda.dom.focus_order
+import chrome: lambda.doc.document_chrome
 
 // ---------------------------------------------------------------------------
 // Toolbar and window
 // ---------------------------------------------------------------------------
 
-pub fn file_label(session, dirty) =>
+pub fn file_label(session, dirty, source = false) =>
   <div class: "edit-file",
-    <span class: "edit-name", session.name>
+    chrome.title(session.path, session.name, "document-name edit-name");
     <span class: "edit-dirty", title: if (dirty) "Unsaved changes" else "Saved", if (dirty) "*" else "">
+    chrome.badge(if (source) "Source" else "Edit", if (source) "source" else "editing")
   >
 
 // Publish the dirty state to the window: the title marks it, and an armed

@@ -1,0 +1,238 @@
+{
+  "name": "textarea wrapped line caret navigation and selection",
+  "html": "test/ui/test_form_input.html",
+  "viewport": {
+    "width": 600,
+    "height": 600
+  },
+  "events": [
+    {
+      "type": "set_editing_value",
+      "target": {
+        "selector": "#bio"
+      },
+      "text": "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#bio",
+        "offset_x": 8,
+        "offset_y": 28
+      }
+    },
+    {
+      "type": "assert_form_selection",
+      "target": {
+        "selector": "#bio"
+      },
+      "start": 36,
+      "end": 36
+    },
+    {
+      "type": "key_press",
+      "key": "Down"
+    },
+    {
+      "type": "assert_form_selection",
+      "target": {
+        "selector": "#bio"
+      },
+      "start": 72,
+      "end": 72
+    },
+    {
+      "type": "key_press",
+      "key": "Up"
+    },
+    {
+      "type": "assert_form_selection",
+      "target": {
+        "selector": "#bio"
+      },
+      "start": 36,
+      "end": 36
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#bio",
+        "offset_x": 8,
+        "offset_y": 8
+      },
+      "button": "left"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#bio",
+        "offset_x": 24,
+        "offset_y": 28
+      }
+    },
+    {
+      "type": "assert_selection",
+      "is_collapsed": false,
+      "check_dom": true
+    },
+    {
+      "type": "assert_form_selection",
+      "target": {
+        "selector": "#bio"
+      },
+      "start": 0,
+      "end": 38
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#bio",
+        "offset_x": 12,
+        "offset_y": 29
+      },
+      "min_r": 190,
+      "max_r": 210,
+      "min_g": 218,
+      "max_g": 238,
+      "min_b": 245
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#bio",
+        "offset_x": 24,
+        "offset_y": 28
+      },
+      "button": "left"
+    },
+    {
+      "type": "type",
+      "text": "X"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#bio"
+      },
+      "equals": "XMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    },
+    {
+      "type": "set_editing_value",
+      "target": {
+        "selector": "#bio"
+      },
+      "text": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#bio",
+        "offset_x": 8,
+        "offset_y": 28
+      }
+    },
+    {
+      "type": "assert_form_selection",
+      "target": {
+        "selector": "#bio"
+      },
+      "start": 36,
+      "end": 36
+    },
+    {
+      "type": "type",
+      "text": "X"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#bio"
+      },
+      "equals": "ééééééééééééééééééééééééééééééééééééXéééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+    },
+    {
+      "type": "set_editing_value",
+      "target": {
+        "selector": "#bio"
+      },
+      "text": "abc\ndefghijklmnopqrstuvwxyz"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#bio",
+        "offset_x": 8,
+        "offset_y": 28
+      }
+    },
+    {
+      "type": "assert_form_selection",
+      "target": {
+        "selector": "#bio"
+      },
+      "start": 4,
+      "end": 4
+    },
+    {
+      "type": "set_editing_value",
+      "target": {
+        "selector": "#bio"
+      },
+      "text": "abcdefghijklmnopqrstuvwxyzabcdefgh"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#bio"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "End"
+    },
+    {
+      "type": "ime_compose",
+      "phase": "begin"
+    },
+    {
+      "type": "ime_compose",
+      "phase": "update",
+      "preedit": "ABCDEFGHIJKLMNOPQRST",
+      "caret": 20
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#bio",
+        "offset_x": 160,
+        "offset_y": 27
+      },
+      "max_r": 110,
+      "max_g": 110,
+      "max_b": 110
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#bio",
+        "offset_x": 75,
+        "offset_y": 37
+      },
+      "max_r": 170,
+      "max_g": 170,
+      "max_b": 170
+    },
+    {
+      "type": "ime_compose",
+      "phase": "commit",
+      "commit": "ABCDEFGHIJKLMNOPQRST"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#bio"
+      },
+      "equals": "abcdefghijklmnopqrstuvwxyzabcdefghABCDEFGHIJKLMNOPQRST"
+    }
+  ]
+}

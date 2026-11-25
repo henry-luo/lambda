@@ -14,6 +14,54 @@ are unchanged. Full evidence is under `../../lambda/temp/kianhup-style/`.
 
 ## Fixed issues
 
+<a id="ri-239"></a>
+
+### RI-239 — Textarea caret geometry ignores soft-wrapped lines
+
+**Fixed, 2026-11-25.** Radiant painted textarea values on multiple visual
+lines but used only newline characters for pointer positions, the caret and
+selection geometry. The Lambda host also used newline-only navigation for
+line movement. A click on the second line of a wrapped property value placed
+the caret on the first. The text-control geometry now measures the painted
+visual lines, and the host uses those lines for vertical and line-boundary
+navigation (D9.1.1v4, D9.1.3v2). The UI value assertion also initializes a
+textarea before reading its live value, so dynamically mounted default text
+is checked correctly. Composition caret and underline painting use the same
+visual-line geometry for provisional IME text.
+
+The property wrap replay checks a second-line click, vertical navigation,
+editing and saving. A standalone textarea replay checks selection, Unicode,
+explicit newlines and a composition spanning a wrap. The native geometry
+test checks caret placement, hit testing and composition rectangles. All 83
+selected structured-editor replays pass. The
+textarea interaction selection has 16 passing and nine state-dump failures,
+and the same nine fail with the original Radiant files. No baseline was
+changed.
+
+<a id="ri-238"></a>
+
+### RI-238 — Default focus outline misses dialogs and sits away from text fields
+
+**Fixed, 2026-11-25.** An open dialog without `tabindex` acquired
+`:focus-visible` through keyboard-mode focus and computed
+`outline-style: none`. Radiant's default stylesheet restricted the outline to a tag and
+attribute list. The rule now matches `:focus-visible` directly at the
+normal user-agent origin (D9.1.1v4, D9.1.3v2). An author can still
+replace or suppress the outline. [HTML rendering recommendation](https://html.spec.whatwg.org/multipage/rendering.html#phrasing-content-3) · [CSS cascade order](https://www.w3.org/TR/css-cascade-5/#cascade-sort)
+
+The stylesheet also gave text fields a 2 px outline with a 2 px gap.
+Chromium 154 on macOS reports a 1 px outline with zero offset and color
+`#005fcc` for plain text inputs and textareas. Radiant now uses these
+dimensions and color for its solid outline on form fields, with the existing
+offset for checkboxes and radio controls. [Chromium stylesheet](https://github.com/chromium/chromium/blob/main/third_party/blink/renderer/core/html/resources/html.css#L1618)
+
+The headless dialog replay fails the outline assertion on the earlier
+host and passes on the rebuilt host. The field replay checks the one-pixel
+width, zero offset, and author overrides.
+The 148 native dynamic layout tests, seven focus and editor UI replays,
+and the Radiant layout lint pass.
+Evidence is under `temp/ua-focus/`.
+
 <a id="ri-237"></a>
 
 ### RI-237 — SVG export omits metadata for graph nodes with empty labels

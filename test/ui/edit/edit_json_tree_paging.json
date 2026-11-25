@@ -1,0 +1,178 @@
+{
+  "name": "Wide JSON trees start shallow and show more editable rows on demand",
+  "command": "edit",
+  "html": "test/fixtures/edit/property-tree-wide.json",
+  "working_copy": "temp/edit-ui/edit_json_tree_paging.json",
+  "viewport": {
+    "width": 1050,
+    "height": 500
+  },
+  "events": [
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".property-entry"
+      },
+      "min": 12,
+      "max": 16
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "[id='property-toggle-0.0']"
+      },
+      "attribute": "aria-expanded",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "[id='property-toggle-0.0.0']"
+      },
+      "attribute": "aria-expanded",
+      "equals": "false"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "textarea[aria-label='version']"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "[id='property-toggle-0.1.17']"
+      },
+      "count": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[id='property-toggle-0.0.0']"
+      }
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "textarea[aria-label='mode']"
+      },
+      "equals": "\"test\""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".property-more"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "scroll",
+      "x": 500,
+      "y": 300,
+      "dx": 0,
+      "dy": -10
+    },
+    {
+      "type": "scroll",
+      "x": 500,
+      "y": 300,
+      "dx": 0,
+      "dy": -10
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": ".property-content"
+      },
+      "view_scroll_y": 500,
+      "tolerance": 499
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 1000,
+      "y": 5,
+      "expected_selector": ".property-toolbar"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 1000,
+      "y": 495,
+      "expected_selector": ".property-status"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "[id='property-toggle-0.1.17']"
+      },
+      "attribute": "aria-expanded",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[id='property-toggle-0.1.17']"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "textarea[aria-label='version']"
+      },
+      "equals": "18"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "textarea[aria-label='version']"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "text": "99",
+      "clear": true
+    },
+    {
+      "type": "key_combo",
+      "key": "s",
+      "mods_str": "super"
+    },
+    {
+      "type": "assert_file",
+      "path": "temp/edit-ui/edit_json_tree_paging.json",
+      "contains": "\"package-18\": {\"version\": 99}"
+    },
+    {
+      "type": "assert_file",
+      "path": "temp/edit-ui/edit_json_tree_paging.json",
+      "contains": "\"package-26\": {\"version\": 26}"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[id='property-toggle-0.1']"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "[id='property-toggle-0.1.17']"
+      },
+      "count": 0
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "textarea[aria-label='version']"
+      },
+      "equals": "99"
+    }
+  ]
+}

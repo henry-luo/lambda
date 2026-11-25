@@ -7,7 +7,7 @@
   "events": [
     {"type": "assert_count", "target": {"selector": ".property-value"}, "count": 3},
     {"type": "assert_text", "target": {"selector": ".property-tree"}, "contains": "server /"},
-    {"type": "click", "target": {"selector": "input[aria-label='port']"}},
+    {"type": "click", "target": {"selector": "textarea[aria-label='port']"}},
     {"type": "key_combo", "key": "a", "mods_str": "super"},
     {"type": "type", "text": "99"},
     {"type": "key_combo", "key": "s", "mods_str": "super"},

@@ -1,0 +1,134 @@
+{
+  "name": "Direct JSON view uses the browser property pane",
+  "html": "test/fixtures/edit/property-tree.json",
+  "events": [
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".document-name"
+      },
+      "equals": "view_to_edit.json"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".file-panel"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#property-preview"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#property-filter"
+      }
+    },
+    {
+      "type": "type",
+      "text": "count"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".property-entry[data-property-name='count'] > .property-row .property-value"
+      },
+      "equals": "2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tab-source"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#source-preview"
+      },
+      "contains": "\"details\": {\"count\": 2}"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tab-edit"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-format-property"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "textarea[aria-label='name']"
+      },
+      "equals": "\"Tea\""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "textarea[aria-label='name']"
+      }
+    },
+    {
+      "type": "key_combo",
+      "key": "a",
+      "mods_str": "super"
+    },
+    {
+      "type": "type",
+      "text": "\"Edited\""
+    },
+    {
+      "type": "key_combo",
+      "key": "s",
+      "mods_str": "super"
+    },
+    {
+      "type": "assert_file",
+      "path": "temp/edit-ui/view_to_edit.json",
+      "contains": "\"name\": \"Edited\""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".property-source"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".src-text"
+      },
+      "contains": "Edited"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".src-text"
+      }
+    },
+    {
+      "type": "key_combo",
+      "key": "/",
+      "mods_str": "super"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "textarea[aria-label='name']"
+      },
+      "equals": "\"Edited\""
+    }
+  ],
+  "working_copy": "temp/edit-ui/view_to_edit.json"
+}

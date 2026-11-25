@@ -1,0 +1,6 @@
+{
+  "message": "This is a long property value that must wrap within the column. This is a long property value that must wrap within the column. This is a long property value that must wrap within the column. This is a long property value that must wrap within the column. This is a long property value that must wrap within the column. This is a long property value that must wrap within the column. ",
+  "nested": {
+    "number": 7
+  }
+}

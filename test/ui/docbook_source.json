@@ -3,6 +3,7 @@
   "html": "test/input/docbook/showcase.xml",
   "viewport": {"width": 1100, "height": 900},
   "events": [
+    {"type": "switch_frame", "selector": "#xml-preview"},
     {"type": "assert_text", "target": {"selector": "article.book > header h1"}, "equals": "The Riverside Notebook"},
     {"type": "assert_count", "target": {"selector": ".list-of-titles .toc a"}, "min": 7},
     {"type": "assert_count", "target": {"selector": "section.chapter"}, "count": 2},

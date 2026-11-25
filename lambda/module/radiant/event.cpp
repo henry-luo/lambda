@@ -3918,8 +3918,12 @@ static int form_caret_move_line(const char* value, int value_len, int cur,
 
 static bool form_caret_operation_destination(const char* op, const char* value,
                                              int value_len, int cur, bool multiline,
+                                             UiContext* uicon, DomElement* elem,
                                              uint32_t* out_dest) {
     if (!op || !out_dest) return false;
+    // Textarea line operations use the same visual wrapping as hit testing.
+    if (multiline && editing_geometry_textarea_line_destination(
+            uicon, elem, (uint32_t)cur, op, out_dest)) return true;
     if (strcmp(op, "moveCharacterBackward") == 0) {
         int off = cur > 0 ? cur - 1 : 0;
         while (off > 0 && value && ((unsigned char)value[off] & 0xC0) == 0x80) off--;
@@ -3950,9 +3954,12 @@ static bool form_caret_operation_destination(const char* op, const char* value,
         int direction = strcmp(op, "movePageBackward") == 0 ? -1 : 1;
         int dest = cur;
         for (int step = 0; step < 10; step++) {
-            int next = form_caret_move_line(value, value_len, dest, direction);
+            uint32_t next = (uint32_t)dest;
+            const char* line_op = direction < 0 ? "moveLineBackward" : "moveLineForward";
+            if (!form_caret_operation_destination(line_op, value, value_len, dest, multiline,
+                                                   uicon, elem, &next)) break;
             if (next == dest) break;
-            dest = next;
+            dest = (int)next;
         }
         *out_dest = (uint32_t)dest;
     } else {
@@ -3971,7 +3978,7 @@ static bool form_apply_caret_operation(EventContext* evcon, DomElement* elem,
     bool multiline = elem && elem->form_storage() &&
         form_control_is_textarea(elem->form_storage());
     if (!form_caret_operation_destination(s_caret_op_name, value, value_len,
-                                          cur, multiline, &dest)) {
+                                          cur, multiline, evcon->ui_context, elem, &dest)) {
         return false;
     }
     char extend_op[40];

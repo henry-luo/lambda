@@ -4,30 +4,133 @@
   "html": "test/fixtures/edit/property-tree.json",
   "working_copy": "temp/edit-ui/edit_json_add_modal_keyboard.json",
   "events": [
-    {"type": "click", "target": {"selector": "input[aria-label='name']"}},
-    {"type": "key_combo", "key": "a", "mods_str": "super"},
-    {"type": "type", "text": "\"Draft\""},
-    {"type": "key_press", "key": "Enter"},
-    {"type": "click", "target": {"selector": ".property-add", "index": 0}},
-    {"type": "type", "text": "newkey"},
-    {"type": "key_press", "key": "Tab"},
-    {"type": "type", "text": "5"},
-    {"type": "key_combo", "key": "s", "mods_str": "super"},
-    {"type": "assert_file", "path": "temp/edit-ui/edit_json_add_modal_keyboard.json", "not_contains": "Draft"},
-    {"type": "assert_count", "target": {"selector": ".edit-dialog-add-property"}, "count": 1},
-    {"type": "assert_value", "target": {"selector": "#property-new-value"}, "equals": "5"},
-    {"type": "key_combo", "key": "/", "mods_str": "super"},
-    {"type": "assert_count", "target": {"selector": ".property-tree"}, "count": 1},
-    {"type": "assert_count", "target": {"selector": ".edit-dialog-add-property"}, "count": 1},
-    {"type": "key_press", "key": "Tab"},
-    {"type": "key_press", "key": "Tab"},
-    {"type": "key_press", "key": "Tab"},
-    {"type": "assert_focus", "target": {"selector": "#property-new-key"}},
-    {"type": "key_press", "key": "Tab"},
-    {"type": "key_press", "key": "Enter"},
-    {"type": "assert_count", "target": {"selector": ".edit-dialog"}, "count": 0},
-    {"type": "key_combo", "key": "s", "mods_str": "super"},
-    {"type": "assert_file", "path": "temp/edit-ui/edit_json_add_modal_keyboard.json", "contains": "\"name\": \"Draft\""},
-    {"type": "assert_file", "path": "temp/edit-ui/edit_json_add_modal_keyboard.json", "contains": "\"newkey\":5"}
+    {
+      "type": "click",
+      "target": {
+        "selector": "textarea[aria-label='name']"
+      }
+    },
+    {
+      "type": "key_combo",
+      "key": "a",
+      "mods_str": "super"
+    },
+    {
+      "type": "type",
+      "text": "\"Draft\""
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".property-toolbar_add"
+      }
+    },
+    {
+      "type": "type",
+      "text": "newkey"
+    },
+    {
+      "type": "key_press",
+      "key": "Tab"
+    },
+    {
+      "type": "type",
+      "text": "5"
+    },
+    {
+      "type": "key_combo",
+      "key": "s",
+      "mods_str": "super"
+    },
+    {
+      "type": "assert_file",
+      "path": "temp/edit-ui/edit_json_add_modal_keyboard.json",
+      "not_contains": "Draft"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-dialog-add-property"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#property-new-value"
+      },
+      "equals": "5"
+    },
+    {
+      "type": "key_combo",
+      "key": "/",
+      "mods_str": "super"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".property-tree"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-dialog-add-property"
+      },
+      "count": 1
+    },
+    {
+      "type": "key_press",
+      "key": "Tab"
+    },
+    {
+      "type": "key_press",
+      "key": "Tab"
+    },
+    {
+      "type": "key_press",
+      "key": "Tab"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#property-new-key"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "Tab"
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-dialog"
+      },
+      "count": 0
+    },
+    {
+      "type": "key_combo",
+      "key": "s",
+      "mods_str": "super"
+    },
+    {
+      "type": "assert_file",
+      "path": "temp/edit-ui/edit_json_add_modal_keyboard.json",
+      "contains": "\"name\": \"Draft\""
+    },
+    {
+      "type": "assert_file",
+      "path": "temp/edit-ui/edit_json_add_modal_keyboard.json",
+      "contains": "\"newkey\":5"
+    }
   ]
 }

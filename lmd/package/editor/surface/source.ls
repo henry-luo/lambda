@@ -900,15 +900,15 @@ let source_css = "
      (design §6.2), so nothing below the status line may grow the body */
   body.edit-format-source { margin: 0; height: 100vh; overflow: hidden; display: flex;
                             flex-direction: column;
-                            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+                            font-family: var(--document-font); }
   .edit-format-source .edit-status { flex: none; display: flex; justify-content: space-between; gap: 12px;
-                                     padding: 4px 12px; font-size: 12px; color: #57606a;
-                                     background: #f6f8fa; border-top: 1px solid #d0d7de; }
+                                     padding: 4px 12px; font-size: 12px; color: var(--document-muted);
+                                     background: var(--document-status); border-top: 1px solid var(--document-rule); }
   .src-status-left { white-space: pre; overflow: hidden; }
   .src-status-right { flex: none; white-space: pre; }
   .src-main { flex: 1; min-height: 0; display: flex; overflow: hidden;
               font-family: 'SF Mono', Menlo, Monaco, Consolas, monospace; font-size: 13px;
-              background: #ffffff; color: #1f2328; }
+              background: var(--document-source); color: var(--document-ink); }
   .src-gutter { flex: none; padding: 4px 10px 0 12px; text-align: right; color: #8c959f;
                 background: #f6f8fa; border-right: 1px solid #d8dee4; user-select: none;
                 cursor: default; }
@@ -1044,7 +1044,7 @@ edit <source_app> state session: ~.session, b: ~.buf, status: ~.status, sel: car
                          after_save: null, selection_drag: null, selection_frame: 0 {
   let dirty = sess.is_dirty(session, b);
   <body class: "edit-app edit-format-source",
-    tools.toolbar(files.file_label(session, dirty), history_probe(hist), dirty, null, [],
+    tools.toolbar(files.file_label(session, dirty, true), history_probe(hist), dirty, null, [],
                   if (session.rich_format != null) tools.rich_view_group else []);
     <div class: "src-main",
       gutter(b, vw);
@@ -1511,12 +1511,17 @@ on source_frame(evt) {
   rev = project(vw, b, hs, sel, rev)
   'handled'
 }
-// Measure the surface as soon as it is laid out, and again whenever the
-// window resizes: the rendered rows and the wrap width follow it.
-on load(evt) {
-  vw = mounted(b, vw, evt.target, rev)
-  frame = request_exact(evt.target, hs, b, vw, frame)
+// A source surface can mount after the document's load event, from the viewer.
+on render(evt) {
+  if ((evt.event_phase != 2 or vw.handle != null)^) { return 'pass' }
+  let next = mounted(b, vw, evt.target, rev)
+  if ((next.handle != null)^) {
+    vw = next
+    frame = request_exact(evt.target, hs, b, vw, frame)
+  }
+  return 'pass'
 }
+// The rendered rows and wrap width follow the window size.
 on resize(evt) {
   if ((vw.handle == null)^) { return }
   let next = measured(vw, dom.root_node(evt.target))

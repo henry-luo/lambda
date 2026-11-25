@@ -6,7 +6,7 @@
   "events": [
     {"type": "assert_count", "target": {"selector": ".src-text"}, "count": 0},
     {"type": "assert_value", "target": {"selector": "input.property-key[data-key-literal='json']"}, "equals": "\"line\\nbreak\""},
-    {"type": "click", "target": {"selector": "input.property-value"}},
+    {"type": "click", "target": {"selector": "textarea.property-value"}},
     {"type": "key_combo", "key": "a", "mods_str": "super"},
     {"type": "type", "text": "2"},
     {"type": "key_combo", "key": "s", "mods_str": "super"},

@@ -1,0 +1,55 @@
+{
+  "viewport": {
+    "width": 1000,
+    "height": 700
+  },
+  "name": "edit a Markdown document from its preview",
+  "html": "test/ui/edit/sample.md",
+  "working_copy": "temp/edit-ui/view-edit-markdown.md",
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tab-edit"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-format-markdown"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "text": "short paragraph"
+      }
+    },
+    {
+      "type": "type",
+      "text": "KEPT"
+    },
+    {
+      "type": "window_close"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-dialog-close"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-save"
+      }
+    },
+    {
+      "type": "assert_file",
+      "path": "temp/edit-ui/view-edit-markdown.md",
+      "contains": "KEPT"
+    }
+  ]
+}

@@ -928,6 +928,7 @@ struct DocWindowLaunchOptions {
     const char* graph_view_key;
     bool source_surface;
     bool browse_archive;
+    bool standalone;
     bool paged;
     RenderPagedOptions paged_options;
     const char* font_dirs[16];
@@ -992,6 +993,8 @@ static bool parse_doc_window_launch_options(int argc, char** argv, bool is_view,
             out->source_surface = true;
         } else if (is_view && strcmp(argv[i], "--archive") == 0) {
             out->browse_archive = true;
+        } else if (is_view && strcmp(argv[i], "--standalone") == 0) {
+            out->standalone = true;
         } else if (is_view && strcmp(argv[i], "--view-key") == 0) {
             if (i + 1 < argc) {
                 out->graph_view_key = argv[++i];
@@ -4405,14 +4408,15 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("  .jpg/.jpeg JPEG Image\n");
             printf("  .gif       Graphics Interchange Format\n");
             fputs("  .psd       Layered Photoshop image (supported RGB/grayscale8 profile)\n", stdout);
-            printf("  .json      JSON (source view)\n");
-            printf("  .yaml/.yml YAML (source view)\n");
-            printf("  .toml      TOML (source view)\n");
+            printf("  .json      JSON property tree\n");
+            printf("  .yaml/.yml YAML property tree\n");
+            printf("  .toml      TOML property tree\n");
             printf("  .txt       Plain text\n");
-            printf("  .csv       Comma-separated values (source view)\n");
+            printf("  .csv/.tsv  Delimited tables\n");
             printf("  .zip/.jar  ZIP-backed archives (file tree)\n"); // PRINTF_OK: user-facing CLI help.
             printf("\nOptions:\n");
             fputs("  --archive                 Browse the underlying ZIP parts, including DOCX\n", stdout);
+            fputs("  --standalone              Open with the native document loader\n", stdout);
             printf("  --event-file <file.json>   Load simulated events from JSON file for testing\n");
             printf("  --event-result <file.json> Write a machine-readable event result\n");
             fputs("  --paged                   Preview paginated documents or fixed PDF pages\n"
@@ -4445,7 +4449,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("  %s view paper.tex                # View LaTeX document\n", argv[0]);
             printf("  %s view diagram.pgf              # View TikZ/PGF fragment\n", argv[0]);
             printf("  %s view config.xml               # View XML document\n", argv[0]);
-            printf("  %s view data.json                # View JSON source\n", argv[0]);
+            printf("  %s view data.json                # Inspect JSON properties\n", argv[0]);
             printf("  %s view flowchart.mmd            # View Mermaid diagram\n", argv[0]);
             printf("  %s view architecture.d2          # View D2 diagram\n", argv[0]);
             printf("  %s view documents/report.pdf    # View PDF with path\n", argv[0]);
@@ -4572,6 +4576,9 @@ static int lambda_main_impl(int argc, char *argv[]) {
 
         // Detect file type by extension
         const char* ext = effective_ext ? effective_ext : file_path_ext(filename);
+        const bool authored_window = input_path_is_xhtml(filename) ||
+            (ext && (str_ieq_cstr(ext, ".html") || str_ieq_cstr(ext, ".htm") ||
+                str_ieq_cstr(ext, ".ls") || str_ieq_cstr(ext, ".slides")));
         int exit_code;
 
         // Check if this is a graph file that needs conversion
@@ -4616,12 +4623,21 @@ static int lambda_main_impl(int argc, char *argv[]) {
 
             lambda_view_log_completion(exit_code);
             return lambda_main_finish(exit_code);
-        } else if (is_docx_file || is_pptx_file || is_ebook_file || is_graph_file || eps_source_expected(filename, nullptr, 0) || (ext && (strcmp(ext, ".pdf") == 0 ||
-                    strcmp(ext, ".html") == 0 || strcmp(ext, ".htm") == 0 || input_path_is_xhtml(filename) ||
+        } else if (!is_http_url && !launch.standalone && !launch.autoplay && !launch.microphone &&
+                !authored_window) {
+            // Local documents share the browser pane, while authored pages keep
+            // their top-level window and scripting context (D9.3.4).
+            static const LambdaDocumentTransformConfig file_transform = {
+                "document", "lambda.doc.doc_viewer", "open_file",
+                LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH, false
+            };
+            exit_code = view_lambda_document_transform_with_events(filename, &file_transform,
+                nullptr, 0, event_file, headless, font_dirs, font_dir_count, event_log, state_dump, launch.fullscreen, launch.microphone);
+        } else if (authored_window || is_docx_file || is_pptx_file || is_ebook_file || is_graph_file ||
+                    eps_source_expected(filename, nullptr, 0) || (ext && (strcmp(ext, ".pdf") == 0 ||
                     strcmp(ext, ".md") == 0 || strcmp(ext, ".markdown") == 0 ||
                     strcmp(ext, ".tex") == 0 || strcmp(ext, ".latex") == 0 ||
                     strcmp(ext, ".pgf") == 0 ||
-                    strcmp(ext, ".ls") == 0 || strcmp(ext, ".slides") == 0 ||
                     str_ieq_cstr(ext, ".diff") || str_ieq_cstr(ext, ".patch") ||
                     strcmp(ext, ".xml") == 0 || strcmp(ext, ".rst") == 0 ||
                     strcmp(ext, ".wiki") == 0 || strcmp(ext, ".svg") == 0 ||

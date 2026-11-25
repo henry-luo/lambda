@@ -190,7 +190,7 @@ pub fn surface(editor, css_class, style = null) =>
 // page styles are not applied while editing).
 pub let css = "
   .edit-surface { outline: none; min-height: 100%; padding: 28px 36px 48px;
-                  font-size: 16px; line-height: 1.6; color: #1f2328; }
+                  font-size: 16px; line-height: 1.6; color: var(--document-prose); }
   .edit-surface h1 { font-size: 2em; margin: 0.4em 0 0.5em; padding-bottom: 0.2em;
                      border-bottom: 1px solid #d8dee4; }
   .edit-surface h2 { font-size: 1.5em; margin: 1em 0 0.5em; padding-bottom: 0.2em;
@@ -208,12 +208,12 @@ pub let css = "
   .edit-surface li.edit-task-done::before { content: '[x] '; }
   .edit-surface blockquote { border-left: 4px solid #d0d7de; margin: 0.6em 0;
                              padding: 0.1em 1em; color: #57606a; }
-  .edit-surface code { background: #eff1f3; padding: 1px 5px; border-radius: 4px;
-                       font-family: 'SF Mono', Menlo, monospace; font-size: 0.9em; }
-  .edit-surface pre { background: #f6f8fa; padding: 10px 12px; border-radius: 6px;
-                      font-family: 'SF Mono', Menlo, monospace; font-size: 0.9em;
+  .edit-surface code { background: var(--document-code); padding: 1px 5px; border-radius: 4px;
+                       font-family: var(--document-mono); font-size: 0.9em; }
+  .edit-surface pre { background: var(--document-code-block); padding: 10px 12px; border-radius: 6px;
+                      font-family: var(--document-mono); font-size: 0.9em;
                       line-height: 1.45; white-space: pre-wrap; margin: 0.8em 0; }
-  .edit-surface a.edit-link { color: #0969da; text-decoration: underline; cursor: text; }
+  .edit-surface a.edit-link { color: var(--document-key); text-decoration: underline; cursor: text; }
   .edit-surface table { border-collapse: collapse; margin: 0.8em 0; }
   .edit-surface th, .edit-surface td { border: 1px solid #d0d7de; padding: 6px 12px; }
   .edit-surface th { background: #f6f8fa; font-weight: 600; }

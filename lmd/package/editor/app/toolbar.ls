@@ -21,7 +21,7 @@ pub let file_group = [
 // The view switch (Radiant_Design_Source_Editor OQ7): each surface offers
 // the other view of the same file.
 pub let source_view_group = [{cmd: "view_source", label: "Source", title: "Show the source (Cmd/Ctrl+/)", app: true}]
-pub let rich_view_group = [{cmd: "view_rich", label: "Rich", title: "Show the rich view (Cmd/Ctrl+/)", app: true}]
+pub let rich_view_group = [{cmd: "view_rich", label: "Edit", title: "Show the editing surface (Cmd/Ctrl+/)", app: true}]
 
 fn block_button(tag, label, title) =>
   {cmd: string(tag), label: label, title: title, input_type: "formatBlock", payload: {tag: tag}, block: tag}
@@ -249,18 +249,20 @@ on click(evt) {
 }
 
 pub let css = "
-  .edit-toolbar { position: sticky; top: 0; z-index: 10; flex: none; background: #ffffff;
-                  border-bottom: 1px solid #dce2ea; box-shadow: 0 2px 6px rgba(20, 30, 50, 0.04); }
+  .edit-toolbar { position: sticky; top: 0; z-index: 10; flex: none; background: var(--document-chrome);
+                  border-bottom: 1px solid var(--document-rule); }
   .edit-document-bar { display: flex; align-items: center; justify-content: space-between;
-                        gap: 16px; padding: 10px 20px; border-bottom: 1px solid #edf0f4; }
+                        gap: 16px; padding: 10px 20px; border-bottom: 1px solid var(--document-rule);
+                        background: var(--document-chrome); }
   .edit-format-source .edit-document-bar { padding: 6px 20px; border-bottom: none; }
   .edit-document-actions { display: flex; align-items: center; flex: none; gap: 12px; }
-  .edit-file { display: flex; align-items: center; gap: 6px; min-width: 0;
-               font-weight: 600; color: #253047; font-size: 13px; }
-  .edit-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .edit-file { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .edit-file .document-name { font-size: 16px; }
+  .edit-format-source .edit-file .document-name { font-size: 14px; }
+  .edit-format-source .edit-file .document-path { line-height: 14px; }
   .edit-dirty { flex: none; width: 8px; color: #b17a24; }
   .edit-format-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
-                      padding: 7px 20px; background: #fafbfc; }
+                      padding: 7px 20px; background: var(--document-chrome); }
   .edit-compact { position: relative; }
   .edit-compact-trigger { cursor: pointer; padding: 7px 9px; border-radius: 6px; font-size: 13px; }
   .edit-compact-panel { position: absolute; top: 34px; left: 0; z-index: 12; padding: 8px;

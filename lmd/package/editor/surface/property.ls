@@ -3,28 +3,62 @@ import dom
 import sess: lambda.editor.session
 import files: lambda.editor.app.files
 import src: lambda.editor.surface.source
+import chrome: lambda.doc.document_chrome
+
+let PROPERTY_ROW_HEIGHT = 30
+let PROPERTY_TREE_PADDING = 16
+// The first template render precedes viewport measurement.
+let DEFAULT_TREE_ROWS = 20
 
 pub let css = "
-  body.edit-format-property { margin: 0; font: 14px -apple-system, sans-serif; color: #24292f; }
-  .property-toolbar { display: flex; gap: 12px; padding: 10px 16px; background: #f6f8fa; border-bottom: 1px solid #d0d7de; }
-  .property-tree { padding: 16px; max-width: 1000px; }
-  .property-children { padding-left: 22px; border-left: 1px solid #d0d7de; }
-  .property-row { display: flex; align-items: center; min-height: 30px; gap: 8px; }
-  .property-toggle { border: 0; background: transparent; min-width: 22px; cursor: pointer; }
-  .property-name { min-width: 140px; color: #8250df; overflow-wrap: anywhere; }
-  .property-key { width: 140px; border: 1px solid transparent; padding: 4px; color: #8250df; }
-  .property-key:focus { border-color: #0969da; }
+  .property-tree { padding: " ++ string(PROPERTY_TREE_PADDING) ++ "px;
+                   font: 13px/1.4 var(--document-mono); }
+  .property-children { padding-left: 18px; border-left: 1px solid var(--document-rule); }
+  .property-row { display: flex; align-items: flex-start; min-height: " ++ string(PROPERTY_ROW_HEIGHT) ++ "px;
+                  gap: 8px; border-bottom: 1px solid #f0f2f5; }
+  .property-entry:nth-child(even) > .property-row { background: var(--document-stripe); }
+  .property-row:hover { background: var(--document-hover); }
+  .property-row[data-selected='true'] { background: #e8f1ff; }
+  .property-menu { position: fixed; z-index: 30; background: white; border: 1px solid #d0d7de;
+                   border-radius: 6px; padding: 4px; box-shadow: 0 4px 16px rgba(0,0,0,.18); }
+  .property-menu button { display: block; width: 160px; padding: 7px 10px; border: 0;
+                          background: white; text-align: left; cursor: pointer; }
+  .property-menu button:hover { background: var(--document-hover); }
+  .property-toggle { border: 0; background: transparent; min-width: 22px;
+                     color: var(--document-muted); cursor: pointer; }
+  .property-row button:not(.property-toggle) { flex: none; min-width: 22px; height: 22px;
+                     border: 1px solid var(--document-rule); border-radius: 4px; background: white;
+                     color: var(--document-muted); cursor: pointer; }
+  .property-row button:not(.property-toggle):hover { color: var(--document-key); }
+  .property-more { margin: 4px 0; cursor: pointer; }
+  .property-name, .property-key { min-width: 0; box-sizing: border-box;
+                                  color: var(--document-key); }
+  .property-resize { flex: none; width: 6px; align-self: stretch; cursor: col-resize; }
+  .property-resize:hover { background: #d2e5fb; }
+  .property-name { overflow-wrap: anywhere; padding: 4px; }
+  .property-key { border: 1px solid transparent; padding: 4px; background: transparent; font: inherit; }
   .property-section { color: #6e7781; font-size: 12px; }
-  .property-value { flex: 1; min-width: 80px; border: 1px solid transparent; padding: 4px; font: 13px monospace; }
+  .property-value { flex: 1; min-width: 80px; border: 1px solid transparent; padding: 4px;
+                    color: var(--document-value); background: transparent; font: 13px var(--document-mono); }
   textarea.property-value { resize: vertical; white-space: pre-wrap; }
+  .property-value-wrap { flex: 1; min-width: 80px; display: grid; }
+  .property-value-mirror { box-sizing: border-box; padding: 4px; border: 1px solid transparent;
+                           font: 13px/1.4 var(--document-mono); white-space: pre-wrap;
+                           overflow-wrap: anywhere; visibility: hidden; grid-area: 1 / 1; }
+  .property-value-wrap textarea.property-value { grid-area: 1 / 1; width: 100%; height: 100%;
+    box-sizing: border-box; overflow: hidden; resize: none; line-height: 1.4; }
   textarea.property-multiline { min-height: 4em; }
-  .property-value:focus { border-color: #0969da; }
-  .property-kind { color: #6e7781; }
-  .property-status { padding: 6px 16px; color: #57606a; background: #f6f8fa; }
+  /* The property border supplies the focus indicator in place of the UA outline. */
+  .property-key:focus, .property-value:focus { border-color: #0969da; outline: none; }
+  .property-kind { color: var(--document-muted); font-style: italic; }
+  /* Keep document chrome outside the property surface's scrollport. */
+  body.edit-format-property { height: 100vh; min-height: 0; overflow: hidden; }
+  .property-content { flex: 1; min-height: 0; overflow: auto; }
+  .property-status.edit-status { position: static; flex: none; }
   .property-grid-wrap { padding: 16px; overflow: auto; }
   .property-grid { border-collapse: collapse; }
   .property-grid th, .property-grid td { border: 1px solid #d0d7de; padding: 4px; vertical-align: top; }
-  .property-grid th { background: #f6f8fa; font-weight: 500; }
+  .property-grid th { background: var(--document-stripe); color: var(--document-key); font-weight: 500; }
   .property-grid .property-value { width: 160px; box-sizing: border-box; }
   .property-grid-cell { display: flex; align-items: start; }
 "
@@ -32,9 +66,17 @@ pub let css = "
 fn draft_value(draft, first, key, original) =>
   if (draft != null and draft.first == first and draft.key == key) draft.text else original
 
-fn value_view(name, node, format, draft, id = null) any^ {
+fn value_view(name, node, format, draft, id = null, wrap = false) any^ {
   let original = if (node.value_literal == true) node.display_text else node.text
-  if (node.value_literal != true and (format.multiline_values == true or node.multiline == true or node.multiline_capable == true))
+  let multiline = node.value_literal != true and (format.multiline_values == true or node.multiline == true or node.multiline_capable == true)
+  let value = draft_value(draft, node.first, false, original)
+  if (wrap) <div class:"property-value-wrap",
+    <div class:"property-value-mirror", ['aria-hidden']:"true", value ++ " ">
+    <textarea id:id, class:"property-value" ++ (if (node.multiline == true) " property-multiline" else ""), rows:1, ['data-first']:string(node.first), ['data-end']:string(node.last),
+      ['data-original']:original, ['data-value-literal']:if (node.value_literal == true) "json" else null,
+      ['data-single-line']:if (multiline) null else "true", ['aria-label']:name, value>
+  >
+  else if (multiline)
     <textarea id: id, class: "property-value" ++ (if (node.multiline == true) " property-multiline" else ""),
       rows: if (node.multiline == true) 3 else 1, ['data-first']: string(node.first), ['data-end']: string(node.last),
       ['data-original']: original, ['aria-label']: name, draft_value(draft, node.first, false, original)>
@@ -44,32 +86,67 @@ fn value_view(name, node, format, draft, id = null) any^ {
       title: if (node.value_literal == true) "Edit this value as a quoted JSON string" else null, ['aria-label']: name>
 }
 
-fn node_view(name, node, root, key_first, key_end, section, format, draft, path, closed, key_literal = false) any^ =>
+fn child_path(path, index) => path ++ "." ++ string(index)
+
+fn initial_pages(tree, rows) map^ {
+  var pending = [{node: tree, path: "0"}], pages = {}, cursor = 0, remaining = rows - 1
+  // Visit shallow groups first. A wide group can consume the remaining budget
+  // without mounting its other children or visiting their descendants.
+  while (remaining > 0 and cursor < len(pending)) {
+    let group = pending[cursor]
+    let children = group.node.children
+    let count = min(remaining, len(children))
+    if (count > 0) {
+      pages = {*:pages, [group.path]:count}
+      remaining = remaining - count
+      if (remaining > 0) {
+        pending = [*pending, *[for (i, child in children where (len(child.node.children) > 0)^)
+          {node:child.node, path:child_path(group.path, i)}]]
+      }
+    }
+    cursor = cursor + 1
+  }
+  pages
+}
+
+fn node_view(name, node, root, key_first, key_end, section, format, draft, path, tree, key_literal = false) any^ {
+  let branch = tree.branches[path]
+  let initial = tree.pages[path]
+  let count = len(node.children)
+  let expanded = count > 0 and (if (branch == null) initial != null else branch.open)
+  let limit = if (branch != null) branch.limit else initial or tree.rows;
   <div class: "property-entry",
-    <div class: "property-row",
-      if (node.kind != 'scalar' and len(node.children) > 0)
-        apply(<property_toggle path: path, expanded: not (contains(closed, path) ^ { false })>)
+    <div class: "property-row", ['data-first']: string(node.first), ['data-kind']: string(node.kind),
+      ['data-add']: if (node.kind != 'scalar' and format.can_add != false and node.can_add != false) "true" else "false",
+      ['data-add-element']: if (node.can_add_element == true and format.can_add_element == true) "true" else "false",
+      ['data-delete']: if (not root and node.group_header != true and format.can_delete != false and node.can_delete != false) "true" else "false",
+      ['data-delete-element']: if (node.can_delete_element == true and format.can_delete_element == true) "true" else "false",
+      if (count > 0)
+        apply(<property_toggle path: path, expanded: expanded, limit: limit>)
       else null
       if (section != null and section != "") <span class: "property-section", section ++ " /"> else null
-      if (key_first != null and format.can_rename != false and node.can_rename != false) <input class: "property-key", type: "text", value: draft_value(draft, key_first, true, name),
+      if (key_first != null and format.can_rename != false and node.can_rename != false) <input class: "property-key", style:"flex:0 0 " ++ string(tree.width) ++ "%", type: "text", value: draft_value(draft, key_first, true, name),
         ['data-first']: string(key_first), ['data-end']: string(key_end), ['data-original']: name,
         ['data-key-literal']: if (key_literal) "json" else null,
         title: if (key_literal) "Edit this name as a quoted JSON string" else null, ['aria-label']: "Property name: " ++ name>
-      else <span class: "property-name", name>
+      else <span class: "property-name", style:"flex:0 0 " ++ string(tree.width) ++ "%", name>;
+      <span class:"property-resize", title:"Resize property columns", role:"separator", ['aria-label']:"Resize property columns">
       if (node.group_header == true) <span class: "property-kind", if (node.view_only == true) "Open source to edit" else "{ }">
       else if (node.kind == 'scalar')
-        value_view(name, node, format, draft)
-      else <span class: "property-kind", if (node.kind == 'object') "{ }" else "[ ]">
-      if (node.kind != 'scalar' and format.can_add != false and node.can_add != false) apply(<property_button action: "add", label: "+", title: if (format.can_add_element == true) "Add attribute" else "Add item", first: node.first, kind: node.kind>) else null
-      if (node.can_add_element == true and format.can_add_element == true) apply(<property_button action: "add_element", label: "+ child", title: "Add child element", first: node.first>) else null
-      if (not root and node.group_header != true and format.can_delete != false and node.can_delete != false) apply(<property_button action: "delete", label: "−", title: "Remove property", first: node.first>) else null
-      if (node.can_delete_element == true and format.can_delete_element == true) apply(<property_button action: "delete_element", label: "− element", title: "Remove element", first: node.first>) else null
+        value_view(name, node, format, draft, "property-value-" ++ path, true)
+      else <span class: "property-kind", chrome.collection_summary(node.kind, count)>
     >
-    if (node.kind != 'scalar' and not (contains(closed, path) ^ { false }))
-      <div class: "property-children", *[for (i, child in node.children)
-        node_view(child.name, child.node, false, if (node.kind == 'object') child.first else null, child.key_end, child.group, format, draft, path ++ "." ++ string(i), closed, child.key_literal == true)]>
+    if (expanded)
+      <div class: "property-children",
+        for (i, child in take(node.children, limit))
+          node_view(child.name, child.node, false, if (node.kind == 'object') child.first else null,
+            child.key_end, child.group, format, draft, child_path(path, i), tree, child.key_literal == true)
+        if (count > limit)
+          apply(<property_button action: "more", path: path, limit: limit,
+            label: "Show more (" ++ string(count - limit) ++ " remaining)">)>
     else null
   >
+}
 
 // Rows are data, including the first row; numeric headings do not assume a header.
 fn grid_view(tree, format, draft) any^ {
@@ -101,10 +178,11 @@ fn grid_view(tree, format, draft) any^ {
 // The stable id lets the host restore this control after the tree is rebuilt.
 view <property_toggle> { <button id: "property-toggle-" ++ ~.path, class: "property-toggle", ['aria-expanded']: if (~.expanded) "true" else "false",
   ['aria-label']: if (~.expanded) "Collapse" else "Expand", if (~.expanded) "▾" else "▸"> }
-on click(evt) { emit("property_command", {action: "toggle", path: ~.path}) }
+on click(evt) { emit("property_command", {action: "toggle", path: ~.path, open: not ~.expanded, limit: ~.limit}) }
 
-view <property_button> { <button class: "property-" ++ ~.action, title: ~.title, ['aria-label']: if (~.title != null) ~.title else ~.label, ~.label> }
-on click(evt) { emit("property_command", {action: ~.action, node: evt.target, first: ~.first, kind: ~.kind}) }
+view <property_button> { <button class: "property-" ++ ~.action ++ (if (~.toolbar) " edit-btn" else ""),
+  title: ~.title, ['aria-label']: if (~.title != null) ~.title else ~.label, ~.label> }
+on click(evt) { emit("property_command", {action: ~.action, node: evt.target, first: ~.first, kind: ~.kind, path: ~.path, limit: ~.limit}) }
 
 pub fn app(session, doc, status) =>
   apply(<property_app session: session, doc: doc, status: status>, {mode: "edit"})
@@ -157,23 +235,87 @@ fn history_step(doc, undo, redo, forward) =>
   else if (not forward and len(undo) > 0) {doc: undo[len(undo) - 1], undo: take(undo, len(undo) - 1), redo: [*redo, doc]}
   else {doc: doc, undo: undo, redo: redo}
 
-edit <property_app> state session: ~.session, doc: ~.doc, status: ~.status,
-                          dialog: null, after_save: null, undo: [], redo: [], draft: null, closed: [] {
+edit <property_app> () any^ state session: ~.session, doc: ~.doc, status: ~.status,
+                          dialog: null, after_save: null, undo: [], redo: [], draft: null,
+                          tree_rows: DEFAULT_TREE_ROWS, tree_measured: false, branches: {}, menu: null, column_width: 38.0, resize: null {
   let dirty = sess.is_dirty(session, doc)
   let content = if (session.format.id in ['csv', 'tsv']) grid_view(doc.tree, session.format, draft)
-    else <div class: "property-tree", node_view("root", doc.tree, true, null, null, null, session.format, draft, "0", closed)>;
+    else {
+      let tree = {rows:tree_rows, pages:initial_pages(doc.tree, tree_rows)^, branches:branches, width:column_width};
+      <div class: "property-tree", node_view("root", doc.tree, true, null, null, null, session.format, draft, "0", tree)>
+    };
   <body class: "edit-app edit-format-property", tabindex: "0",
-    <div class: "property-toolbar", files.file_label(session, dirty)
-      apply(<property_button action: "save", label: "Save">)
-      apply(<property_button action: "save_as", label: "Save As">)
-      apply(<property_button action: "undo", label: "Undo">)
-      apply(<property_button action: "redo", label: "Redo">)
-      apply(<property_button action: "source", label: "Source">)
+    <div class: "property-toolbar edit-toolbar edit-document-bar", files.file_label(session, dirty);
+      <div class: "edit-document-actions",
+        if (not (session.format.id in ['csv', 'tsv'])) apply(<property_button action:"toolbar_add", label:"+", title:"Add to selected node", toolbar:true>) else null
+        for (action, label in {save:"Save", save_as:"Save As", undo:"Undo", redo:"Redo", source:"Source"})
+          apply(<property_button action:string(action), label:label, toolbar:true>)>
     >
     <div class: "property-content", content>
-    <div class: "property-status", status>
+    <div class: "property-status edit-status", role:"status", status>
+    if (menu != null) <div class:"property-menu", role:"menu", style:"left:" ++ string(menu.x) ++ "px;top:" ++ string(menu.y) ++ "px",
+      if (menu.add) apply(<property_button action:"add", label:if (menu.element) "Add attribute" else "Add item", first:menu.first, kind:menu.kind>) else null
+      if (menu.element) apply(<property_button action:"add_element", label:"Add child element", first:menu.first>) else null
+      if (menu.delete) apply(<property_button action:"delete", label:"Delete node", first:menu.first>) else null
+      if (menu.delete_element) apply(<property_button action:"delete_element", label:"Delete node", first:menu.first>) else null
+    > else null
     dialog_view(dialog, session)
   >
+}
+// Keep selection on the mounted row so clicking an input does not rebuild it.
+on click(evt) {
+  let target = if (dom.node_type(evt.target) == 1) evt.target else dom.parent_node(evt.target)
+  let row = if (target == null) null else dom.closest(target, ".property-row")
+  if (row != null) {
+    let old = dom.query_selector(dom.root_node(row), ".property-row[data-selected='true']")
+    if (old != null) { dom.remove_attribute(old, "data-selected") }
+    dom.set_attribute(row, "data-selected", "true")
+  }
+  if (menu != null and (target == null or dom.closest(target, ".property-menu,.property-toolbar_add") == null)) { menu = null }
+  return 'pass'
+}
+on contextmenu(evt) {
+  let target = if (dom.node_type(evt.target) == 1) evt.target else dom.parent_node(evt.target)
+  let row = if (target == null) null else dom.closest(target, ".property-row")
+  if (row == null) { return 'pass' }
+  let can_delete = dom.get_attribute(row, "data-delete") == "true"
+  let can_delete_element = dom.get_attribute(row, "data-delete-element") == "true"
+  if (not can_delete and not can_delete_element) { return 'pass' }
+  menu = {x:evt.clientX, y:evt.clientY, first:int(dom.get_attribute(row, "data-first")),
+          delete:can_delete, delete_element:can_delete_element}
+  return 'prevent-default'
+}
+on mousedown(evt) {
+  if (evt.button != 0 or not dom.matches(evt.target, ".property-resize")) { return 'pass' }
+  if (draft != null) { status = "Correct the invalid value before continuing."; return 'prevent-default' }
+  let row = dom.closest(evt.target, ".property-row")
+  let box = dom.bounding_box(row)
+  if (box != null and box.width > 0) { resize = {x:evt.x, width:column_width, row_width:box.width} }
+  return 'prevent-default'
+}
+on mousemove(evt) {
+  if (resize != null) { column_width = max(10.0, min(80.0, resize.width + (evt.x - resize.x) * 100.0 / resize.row_width)) }
+  return 'pass'
+}
+on mouseup(evt) {
+  if (resize != null) {
+    column_width = max(10.0, min(80.0, resize.width + (evt.x - resize.x) * 100.0 / resize.row_width))
+    resize = null
+  }
+  return 'pass'
+}
+// A viewer can mount the editor after the document's load event has fired.
+on render(evt) {
+  if (evt.event_phase != 2 or tree_measured) { return 'pass' }
+  let surface = dom.query_selector(evt.target, ".property-tree")
+  if (surface == null) { return 'pass' }
+  let viewport = dom.viewport_size(surface)
+  let bounds = dom.bounding_box(surface)
+  if ((viewport != null and bounds != null and viewport.height > 0)^) {
+    tree_rows = max(2, int((viewport.height - bounds.y - PROPERTY_TREE_PADDING * 2) / PROPERTY_ROW_HEIGHT))
+    tree_measured = true
+  }
+  return 'pass'
 }
 on change(evt) {
   if (evt.event_phase != 2 or not dom.matches(evt.target, ".property-value,.property-key")) { return 'pass' }
@@ -197,13 +339,45 @@ on input(evt) {
       if (field != null) { dom.focus_set(field, false) }
       return
     }
+    let wrapper = dom.closest(evt.target, ".property-value-wrap")
+    if (wrapper != null) {
+      let mirror = dom.query_selector(wrapper, ".property-value-mirror")
+      if (mirror != null) { dom.set_text_content(mirror, (string(dom.get_state(evt.target, "value"))^) ++ " ") }
+    }
     dom.set_close_guard(evt.target, true)
   }
 }
 on property_command(req) {
   if ((draft != null)^) { status = "Correct the invalid value before continuing."; return }
+  if (req.action == "toolbar_add") {
+    let root = dom.root_node(req.node)
+    let selected = dom.query_selector(root, ".property-row[data-selected='true']")
+    // A scalar belongs to its enclosing collection, which accepts new siblings.
+    let entry = if (selected == null) null else dom.closest(selected, ".property-entry")
+    let parent = if (entry == null) null else dom.closest(dom.parent_node(entry), ".property-entry")
+    let row = if (selected == null) dom.query_selector(root, ".property-row")
+              else if (dom.get_attribute(selected, "data-kind") == "scalar" and parent != null)
+                dom.query_selector(parent, ".property-row")
+              else selected
+    if (row == null) { return }
+    let can_add = dom.get_attribute(row, "data-add") == "true"
+    let can_add_element = dom.get_attribute(row, "data-add-element") == "true"
+    let first = int(dom.get_attribute(row, "data-first"))
+    let kind = symbol(dom.get_attribute(row, "data-kind"))
+    if (can_add and can_add_element) {
+      let box = dom.bounding_box(req.node)
+      menu = {x:box.x, y:box.y + box.height, first:first, kind:kind, add:true, element:true}
+    } else if (can_add) { dialog = {kind:'add_property', first:first, container:kind} }
+    else if (can_add_element) { dialog = {kind:'add_element', first:first} }
+    else { status = "Select a container to add an item." }
+    return
+  }
+  if (menu != null) { menu = null }
   if (req.action == "toggle") {
-    closed = if (contains(closed, req.path)) [for (path in closed where path != req.path) path] else [*closed, req.path]
+    branches = {*:branches, [req.path]:{open:req.open, limit:req.limit}}
+  }
+  else if (req.action == "more") {
+    branches = {*:branches, [req.path]:{open:true, limit:req.limit + tree_rows}}
   }
   else if (req.action == "save") {
     let saved = files.save_now(session, doc, req.node)
@@ -228,7 +402,7 @@ on property_command(req) {
       undo = [*undo, doc]
       redo = []
       doc = result.doc
-      closed = []
+      branches = {}
       files.sync_window(req.node, session, doc)^
       dom.focus_set(dom.query_selector(dom.root_node(req.node), "body"), false)
     }
@@ -236,7 +410,7 @@ on property_command(req) {
   else if (req.action == "undo" or req.action == "redo") {
     let next = history_step(doc, undo, redo, req.action == "redo")
     doc = next.doc
-    closed = []
+    branches = {}
     undo = next.undo
     redo = next.redo
     files.sync_window(req.node, session, doc)^
@@ -253,7 +427,7 @@ on edit_dialog(req) {
     undo = [*undo, doc]
     redo = []
     doc = result.doc
-    closed = []
+    branches = {}
     dialog = null
     status = ""
     files.sync_window(req.node, session, doc)^
@@ -270,10 +444,11 @@ on edit_dialog(req) {
   status = result.status
   dialog = result.dialog
   after_save = result.after_save
-  if (result.reloaded != null) { doc = result.reloaded; undo = []; redo = []; closed = [] }
+  if (result.reloaded != null) { doc = result.reloaded; undo = []; redo = []; branches = {} }
   if (dialog == null) { files.focus_surface(req.node)^ }
 }
 on keydown(evt) {
+  if (evt.key == "Escape" and menu != null) { menu = null; return 'prevent-default' }
   if ((dialog != null)^) {
     return files.dialog_keydown(dialog, evt)^
   }
@@ -322,7 +497,8 @@ on keydown(evt) {
     return 'prevent-default'
   }
   if ((dialog == null and evt.key == "Enter" and not primary and
-       dom.matches(evt.target, "input.property-value,input.property-key"))^) {
+       (dom.matches(evt.target, "input.property-value,input.property-key") or
+        dom.get_attribute(evt.target, "data-single-line") == "true"))^) {
     if ((draft != null and not draft_matches(draft, evt.target))^) {
       status = "Correct the invalid value before continuing."
       return 'prevent-default'
@@ -363,7 +539,7 @@ on keydown(evt) {
     if ((not pending and draft == null)^) {
       let next = history_step(doc, undo, redo, evt.shiftKey == true)
       doc = next.doc
-      closed = []
+      branches = {}
       undo = next.undo
       redo = next.redo
       files.sync_window(evt.target, session, doc)^

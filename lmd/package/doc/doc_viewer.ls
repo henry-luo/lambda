@@ -26,6 +26,10 @@ import slide_html: lambda.slide.html
 import ebook: .ebook
 import ebook_reader: .ebook.reader
 import xml: .xml
+import chrome: .document_chrome
+import paths: lambda.io.path
+import editor: lambda.editor.app
+import editor_session: lambda.editor.session
 
 let PROJECT_ROOT = "."
 // Transformed browsers retain the source directory as their URL, so bundle the icon font.
@@ -54,10 +58,6 @@ fn directory_entries(source) any^ {
 fn child_path(parent_path, child_name) => join([parent_path, child_name], "/")
 fn absolute_file_path(path) any^ => if (starts_with(path, "/") or path[1] == ":") path
   else sys.proc.self.cwd ++ "/" ++ path
-
-// Keep the root list identity stable so document selection does not recreate
-// the mounted directory-row components.
-let PROJECT_ENTRIES = directory_entries(PROJECT_ROOT) ^ { [] }
 
 fn path_is_open(open_paths, path) => contains(open_paths, path) ^ { false }
 fn tree_hit_class(path) any^ => "tree-hit-" ++ replace(replace(path, "/", "_"), ".", "_")
@@ -163,7 +163,7 @@ fn document_format(extension) any^ {
   else if (ext == "man" or contains(["1", "2", "3", "4", "5", "6", "7", "8", "9", "1m", "3p"], ext)) { "man" }
   else if (ext == "textile") { "textile" }
   else if (ext == "rtf") { "rtf" }
-  else if (contains(["htm", "html"], ext)) { "html" }
+  else if (contains(["htm", "html", "xht", "xhtml"], ext)) { "html" }
   else { null }
 }
 
@@ -179,16 +179,28 @@ fn is_office_document(extension) => is_docx_document(extension) or is_pptx_docum
 fn is_epub_document(extension) => lower(extension) == "epub"
 fn is_eml_document(extension) => lower(extension) == "eml"
 fn is_pgf_document(extension) => lower(extension) == "pgf"
-fn is_image_document(extension) => contains(["png", "jpg", "jpeg", "gif", "svg"], lower(extension)) ^ { false }
-fn is_raster_document(extension) => is_image_document(extension) and lower(extension) != "svg"
+// Match the raster formats decoded by the shared image library and SVG.
+fn is_image_document(extension) => contains(
+  ["png", "jpg", "jpeg", "gif", "webp", "avif", "bmp", "tif", "tiff", "ico", "svg"],
+  lower(extension)) ^ { false }
+fn is_raster_document(extension) => lower(extension) == "psd" or
+  (is_image_document(extension) and lower(extension) != "svg")
 fn is_table_document(extension) => contains(["csv", "tsv"], lower(extension)) ^ { false }
 fn graph_flavor(extension) {
   let ext = lower(extension)
   if (ext == "mmd") { "mermaid" }
-  else if (ext == "dot") { "dot" }
+  else if (ext == "dot" or ext == "gv") { "dot" }
   else if (ext == "d2") { "d2" }
+  else if (ext == "dsl" or ext == "structurizr") { "structurizr" }
   else { null }
 }
+
+// These formats already have their own document renderer. Keep its styles
+// and controls in a frame, as for an authored HTML page.
+fn framed_format(file) =>
+  type(file["source"]) != element and
+    (contains(["eps", "epsi", "psd", "diff", "patch", "slides", "fo", "xslfo", "rpd"],
+              lower(file["extension"])) ^ { false })
 
 fn property_format(extension) any^ {
   let ext = lower(extension)
@@ -275,7 +287,7 @@ fn file_icon(extension) any^ {
   else if (is_pgf_document(ext)) { SETI_SVG }
   else if (contains(["mmd", "dot", "gv", "d2", "dsl", "structurizr"], ext)) { SETI_PIPELINE }
   else if (ext == "svg") { SETI_SVG }
-  else if (contains(["png", "jpg", "jpeg", "gif", "bmp", "tif", "tiff", "webp", "ico"], ext)) { SETI_IMAGE }
+  else if (is_image_document(ext)) { SETI_IMAGE }
   else if (ext == "css") { SETI_CSS }
   else if (ext == "jsx") { SETI_REACT }
   else if (contains(["vcf", "vcard", "eml"], ext)) { SETI_INFO }
@@ -311,6 +323,8 @@ fn selected_image_source(file) any^ {
     let extension = lower(file["extension"])
     let mime = if (extension == "svg") "image/svg+xml"
       else if (contains(["jpg", "jpeg"], extension)) "image/jpeg"
+      else if (contains(["tif", "tiff"], extension)) "image/tiff"
+      else if (extension == "ico") "image/x-icon"
       else "image/" ++ extension
     media.data_uri(input(file["source"], 'binary')^, mime)^
   }
@@ -508,8 +522,8 @@ fn property_summary(value, format) any^ {
     if (label != null) { label }
     else { string(len(value["entries"])) ++ " entries" }
   }
-  else if (type(value) == map) { "Object · " ++ string(len(value)) ++ " properties" }
-  else if (type(value) == array) { "Array · " ++ string(len(value)) ++ " items" }
+  else if (type(value) == map) { chrome.collection_summary('object', len(value)) }
+  else if (type(value) == array) { chrome.collection_summary('array', len(value)) }
   else { property_value_text(value) }
 }
 
@@ -904,7 +918,7 @@ on click(evt) {
 // Pane-local controls are state on a pane model the app rebuilds only for a
 // new file or a CSV change, so a property toggle, tab switch or property
 // filter edit re-renders this pane alone instead of the whole project tree.
-view <document_pane> () any^ state preview_mode: "view", property_filter: "", property_open_paths: ~.initial_open_paths, property_closed_paths: [], property_more_paths: [] {
+view <document_pane> () any^ state preview_mode: "view", property_filter: "", property_open_paths: ~.initial_open_paths, property_closed_paths: [], property_more_paths: [], edit_error: null {
   if (~.file == null) {
     <main class:"document-panel"
     , <div id:"empty-preview", class:"empty-preview"
@@ -914,15 +928,10 @@ view <document_pane> () any^ state preview_mode: "view", property_filter: "", pr
         <p class:"empty-preview-note", "CSV and TSV open as resizable tables. JSON, YAML, TOML, INI, ICS, and VCF open as property trees. XML opens as a node tree or with its declared stylesheet. Email shows its headers and body. EPUB books, Word DOCX, PowerPoint PPTX, Markdown, HTML, RTF, LaTeX, PDF, diagrams, and images open as rendered documents; other files open as source.">
       >
     >
-  } else if (is_renderable_document(~.file["extension"])) {
+  } else if (is_renderable_document(~.file["extension"]) or framed_format(~.file)) {
     <main class:"document-panel"
-    , <div class:"document-header"
-      , <div class:"document-title"
-        , <div class:"document-path", ~.file["file_path"]>
-          <h1 class:"document-name", ~.file["name"]>
-        >
-        <span class:"preview-kind rendered", if (preview_mode == "view") "View" else "Source">
-      >
+    , chrome.header(~.file["file_path"], ~.file["name"], if (preview_mode == "view") "View" else "Source",
+      if (preview_mode == "view") "rendered" else "source");
       <div class:"document-content"
       , if (preview_mode == "view") {
         if (property_format(~.file["extension"]) == "xml" and
@@ -967,6 +976,8 @@ view <document_pane> () any^ state preview_mode: "view", property_filter: "", pr
             <iframe id:"html-preview", class:"document-preview",
               src:absolute_file_path(~.file["file_path"])>
           }
+        } else if (framed_format(~.file)) {
+          <iframe class:"document-preview", src:absolute_file_path(~.file["file_path"]), title:~.file["name"]>
         } else {
           let preview = selected_preview(~.file);
           <section id:"rendered-preview", class:"rendered-preview",
@@ -989,21 +1000,19 @@ view <document_pane> () any^ state preview_mode: "view", property_filter: "", pr
         if (not is_raster_document(~.file["extension"])) {
           <button class:(if (preview_mode == "source") "document-tab tab-source active" else "document-tab tab-source"), "Source">
         }
+        if (type(~.file.source) != element) <button class:"document-tab tab-edit", "Edit"> else null
       >
+      if (edit_error != null) <div class:"preview-error", role:"alert", edit_error> else null
     >
   } else {
     let source = selected_source(~.file);
     <main class:"document-panel"
-    , <div class:"document-header"
-      , <div class:"document-title"
-        , <div class:"document-path", ~.file["file_path"]>
-          <h1 class:"document-name", ~.file["name"]>
-        >
-        <span class:"preview-kind source", "Source">
-      >
+    , chrome.header(~.file["file_path"], ~.file["name"], "Source", "source");
       <section class:"source-tab-panel"
       , <pre id:"source-preview", class:"source-preview", source>
       >
+      <nav class:"document-tabs", if (type(~.file.source) != element) <button class:"document-tab tab-edit", "Edit"> else null>
+      if (edit_error != null) <div class:"preview-error", role:"alert", edit_error> else null
     >
   }
 }
@@ -1011,6 +1020,12 @@ on click(evt) {
   let target_class = evt["target_class"]
   if (contains(target_class, "tab-view")) { preview_mode = "view" }
   else if (contains(target_class, "tab-source")) { preview_mode = "source" }
+  else if (contains(target_class, "tab-edit")) {
+    let opened = editor.open_state(~.file.file_path, null) ^ { {error: ^.message} }
+    if (opened.error != null) { edit_error = "Cannot edit: " ++ opened.error; return }
+    dom.set_window_title(evt.target, editor_session.window_title(opened.session, false)^)
+    emit("viewer_edit", opened)
+  }
   else if (target_class == "property-filter-clear") {
     property_filter = ""
     property_more_paths = []
@@ -1148,92 +1163,74 @@ on file_select(entry) {
   emit("document_select", entry)
 }
 
-// The stable model keeps the tree's state when document controls update.
-let PROJECT_TREE_MODEL = <project_tree root_path:PROJECT_ROOT, root_name:"project root", entries:PROJECT_ENTRIES>
-
 fn document_pane_model(file, property_data, open_paths, eml_data, office_data, csv_data, csv_widths, csv_visible_rows) =>
   <document_pane file:file, property_data:property_data, initial_open_paths:open_paths,
     eml_data:eml_data, office_data:office_data, csv_data:csv_data, csv_widths:csv_widths, csv_visible_rows:csv_visible_rows>
 
-edit <doc_editor_app> state selected_file: null, property_data: null, initial_open_paths: [], eml_data: null, office_data: null, csv_data: null, csv_widths: [], csv_visible_rows: CSV_PAGE_SIZE, csv_resize: null, pane: <document_pane file:null, initial_open_paths:[]> {
-  <div class:"doc-editor"
-  , apply(~.tree_model, {mode: "edit"})
-  apply(pane)
-  >
-}
-on document_select(entry) {
+// Capture the format's model once for both direct opens and tree selections.
+pn load_pane(entry) element^ {
   let format = property_format(entry["extension"])
-  // Retain the parsed tree while the user edits the filter or expands nodes.
   let parsed = if (format == null) null else input(entry["source"], format) ^ { null }
-  // Procedure handlers assign the captured publication in their success arm.
-  var publication = null
-  if (is_epub_document(entry["extension"])^) {
-    { let __error_outcome_1 = selected_epub(entry) ^ { ^ }; if (__error_outcome_1 is error) {
-      publication = {error:__error_outcome_1.message}
-    } else match __error_outcome_1 { case any {
-      publication = ~
-    } } }
-  }
-  let file = {file_path: entry["file_path"], source:entry["source"], name: entry["name"],
-    extension: entry["extension"], text_width_px: entry["text_width_px"],
+  let publication = if (is_epub_document(entry["extension"]))
+    selected_epub(entry) ^ { {error:^.message} } else null
+  let file = {file_path:entry["file_path"], source:entry["source"], name:entry["name"],
+    extension:entry["extension"], text_width_px:entry["text_width_px"],
     ebook:publication,
-    xml_rendered: (if (format == "xml" and type(entry.source) != element)
+    xml_rendered:(if (format == "xml" and type(entry.source) != element)
       xml_has_stylesheet(parsed) or xml_is_docbook(parsed) else false)}
   let properties = if (format == "properties") properties_tree(parsed) else parsed
   let open_paths = property_initial_open_paths(properties, format)
   let eml = if (is_eml_document(entry["extension"])) input(entry["source"], 'eml') ^ { null } else null
-  // retain Office conversion in the pane model across tab changes and tree redraws.
-  let converted_office = if (is_office_document(entry["extension"]))
+  let office = if (is_office_document(entry["extension"]))
     selected_office(entry) ^ { {error:^.message} } else null
   let table = if (is_table_document(entry["extension"]))
     input(entry["source"], lower(entry["extension"])) ^ { null } else null
   let widths = [for (column in csv_columns(table)^) CSV_DEFAULT_WIDTH]
-  selected_file = file
-  property_data = properties
-  initial_open_paths = open_paths
-  eml_data = eml
-  office_data = converted_office
-  csv_data = table
-  csv_widths = widths
-  csv_visible_rows = CSV_PAGE_SIZE
-  csv_resize = null
-  // a new pane model starts the pane-local controls afresh for this file
-  pane = document_pane_model(file, properties, open_paths, eml, converted_office, table, widths, CSV_PAGE_SIZE)
+  return document_pane_model(file, properties, open_paths, eml, office, table, widths, CSV_PAGE_SIZE)
 }
-// CSV state stays here: a column release can land over the file panel, which
-// only this app sees. Its pane is rebuilt with the table; CSV previews have no
-// other pane-local state worth keeping (they render only in the View tab).
+
+fn table_pane(pane:element, widths, rows) element^ =>
+  document_pane_model(pane.file, pane.property_data, pane.initial_open_paths,
+    pane.eml_data, pane.office_data, pane.csv_data, widths, rows)
+
+edit <doc_editor_app> state csv_resize: null, pane: ~.initial_pane, editing: null {
+  if (editing != null) <div class:"viewer-edit-host", <style editor.stylesheet> editor.surface(editing)>
+  else <div class:"doc-editor",
+    if (~.tree_model != null) apply(~.tree_model, {mode:"edit"});
+    apply(pane)
+  >
+}
+on viewer_edit(document) { editing = document }
+on document_select(entry) {
+  csv_resize = null
+  pane = load_pane(entry)^
+}
+// A release can land over the file panel after shrinking a wide column.
 on csv_resize_start(gesture) { csv_resize = gesture }
 on csv_more_rows(_) {
-  let rows = csv_visible_rows + CSV_PAGE_SIZE
-  csv_visible_rows = rows
-  pane = document_pane_model(selected_file, property_data, initial_open_paths, eml_data, office_data, csv_data, csv_widths, rows)
+  pane = table_pane(pane, pane.csv_widths, pane.csv_visible_rows + CSV_PAGE_SIZE)^
 }
 on csv_resize_move(x) {
   if (csv_resize != null) {
-    let widths = csv_resized_widths(csv_widths, csv_resize, x)
-    csv_widths = widths
-    pane = document_pane_model(selected_file, property_data, initial_open_paths, eml_data, office_data, csv_data, widths, csv_visible_rows)
+    pane = table_pane(pane, csv_resized_widths(pane.csv_widths, csv_resize, x), pane.csv_visible_rows)^
   }
 }
-// A release can land over the file panel after shrinking a wide column.
 on mouseup(evt) {
   if (csv_resize == null) { return }
-  let widths = csv_resized_widths(csv_widths, csv_resize, evt.x)
-  csv_widths = widths
+  pane = table_pane(pane, csv_resized_widths(pane.csv_widths, csv_resize, evt.x), pane.csv_visible_rows)^
   csv_resize = null
-  pane = document_pane_model(selected_file, property_data, initial_open_paths, eml_data, office_data, csv_data, widths, csv_visible_rows)
 }
 
 // --------------------------------------------------------------------------
 // Page shell
 // --------------------------------------------------------------------------
 
-fn viewer_document(tree_model) {
+fn viewer_document(tree_model, initial_pane = <document_pane file:null, initial_open_paths:[]>) {
 <html lang:"en",
   <head
     <meta charset:"UTF-8">
-    <title "Lambda Document Viewer">
+    <title if (initial_pane.file != null) initial_pane.file.name else "Lambda Document Viewer">
+    <style chrome.css>
     latex.font_stylesheet();
     <style pdf_html.DEFAULT_CSS>
     <style latex_css.STYLESHEET>
@@ -1242,9 +1239,9 @@ fn viewer_document(tree_model) {
     <style (ebook_reader.stylesheet ++ ".epub-preview .ebook-reader{height:calc(100vh - 180px);min-height:400px}")>
     <style ("@font-face { font-family: 'Seti Icons'; src: url('" ++ ICON_FONT ++ "') format('woff'); }")>
     <style "
-      * { box-sizing: border-box; }
+      .doc-editor, .doc-editor * { box-sizing: border-box; }
       body { margin: 0; height: 100vh; overflow: hidden; background: #eef1f5; color: #20242c;
-             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+             font-family: var(--document-font); }
       .doc-editor { display: flex; height: 100vh; overflow: hidden; }
 
       .file-panel { width: 300px; min-width: 240px; max-width: 40vw; display: flex;
@@ -1298,28 +1295,25 @@ fn viewer_document(tree_model) {
       .document-content > .rendered-preview, .document-content > .source-tab-panel,
       .document-content > .document-preview { position: absolute; top: 0; right: 0; bottom: 0; left: 0; }
       .document-header { min-height: 77px; display: flex; align-items: center; justify-content: space-between;
-                         gap: 18px; padding: 15px 28px; border-bottom: 1px solid #e2e6ec; background: #fbfcfe; }
-      .document-path { margin-bottom: 3px; color: #7b8798; font-size: 12px; font-family: 'SF Mono', Menlo, monospace; }
-      .document-name { margin: 0; color: #212936; font-size: 18px; font-weight: 650; }
-      .preview-kind { flex: 0 0 auto; padding: 4px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; }
-      .preview-kind.rendered { background: #e3f4eb; color: #1b7447; }
-      .preview-kind.source { background: #e8edf5; color: #536275; }
+                         gap: 18px; padding: 15px 28px; border-bottom: 1px solid var(--document-rule);
+                         background: var(--document-chrome); }
+      .document-header .document-path { margin-bottom: 3px; }
 
       .empty-preview { max-width: 520px; margin: auto; padding: 48px 36px; text-align: center; color: #596779; }
       .empty-preview-icon { color: #89a9df; font-size: 42px; }
       .empty-preview h1 { margin: 14px 0 7px; color: #2b3545; font-size: 24px; }
       .empty-preview p { margin: 5px 0; line-height: 1.5; }
       .empty-preview-note { margin-top: 18px !important; color: #8491a1; font-size: 13px; }
-      .source-tab-panel { min-height: 0; flex: 1; overflow: auto; background: #fcfcfd; }
+      .source-tab-panel { min-height: 0; flex: 1; overflow: auto; background: var(--document-source); }
       .source-preview { min-height: 100%; margin: 0; padding: 26px 30px;
-                        color: #293545; font: 13px/1.55 'SF Mono', Menlo, Consolas, monospace; white-space: pre; }
+                        color: #293545; font: 13px/1.55 var(--document-mono); white-space: pre; }
       .rendered-preview { min-height: 0; flex: 1; overflow: auto; padding: 30px clamp(24px, 6vw, 80px) 60px; }
       .rtf-preview { background: #eef1f5; }
       .rtf-preview .document-body { box-sizing: border-box; min-height: 100%; padding: 42px 52px;
                                     background: #fff; box-shadow: 0 2px 14px #d9dee7; }
       .rtf-preview .document-body p { margin: 0 0 .85em; white-space: pre-wrap; }
       .property-preview { padding: 0 0 40px; background: #fff; color: #263448;
-                          font: 13px/1.4 'SF Mono', Menlo, Consolas, monospace; }
+                          font: 13px/1.4 var(--document-mono); }
       .property-filter-bar { position: sticky; top: 0; z-index: 1; height: 44px; display: flex;
                              align-items: center; gap: 7px; padding: 0 16px; border-bottom: 1px solid #dce2eb;
                              background: #fbfcfe; }
@@ -1332,16 +1326,16 @@ fn viewer_document(tree_model) {
       .property-row { display: flex; min-height: 30px; align-items: baseline; gap: 8px;
                       padding: 5px 18px 5px 0; border-bottom: 1px solid #f0f2f5; }
       .property-expandable { cursor: pointer; }
-      .property-entry:nth-child(even) > .property-row { background: #f7f9fb; }
-      .property-row:hover { background: #edf4ff !important; }
+      .property-entry:nth-child(even) > .property-row { background: var(--document-stripe); }
+      .property-row:hover { background: var(--document-hover) !important; }
       .property-toggle, .property-spacer { flex: 0 0 16px; width: 16px; height: 18px;
                                            padding: 0; border: 0; background: none; color: #7b8798;
                                            font: 13px/18px sans-serif; text-align: center; }
       .property-toggle { cursor: pointer; }
       .property-toggle:hover { color: #185da8; }
-      .property-name { flex: 0 0 38%; min-width: 0; overflow-wrap: anywhere; color: #1268c0; }
+      .property-name { flex: 0 0 38%; min-width: 0; overflow-wrap: anywhere; color: var(--document-key); }
       .property-value { min-width: 0; flex: 1; overflow-wrap: anywhere; white-space: pre-wrap;
-                        color: #ab2778; }
+                        color: var(--document-value); }
       .property-summary { color: #6b788b; font-style: italic; }
       .property-message { padding: 18px 22px; color: #6b788b; }
       .property-root-value { padding-left: 32px; }
@@ -1387,12 +1381,12 @@ fn viewer_document(tree_model) {
       /* an iframe is replaced: inset:0 alone keeps its 150px intrinsic height (CSS 2.1 §10.6.5) */
       .document-preview { min-width: 0; min-height: 0; flex: 1; width: 100%; height: 100%; border: 0; display: block; background: #fff; }
       .document-tabs { flex: 0 0 auto; display: flex; gap: 2px; justify-content: flex-end;
-                       padding: 7px 18px; border-top: 1px solid #e2e6ec; background: #fbfcfe; }
+                       padding: 7px 18px; border-top: 1px solid var(--document-rule); background: var(--document-chrome); }
       .document-tab { padding: 5px 11px; border: 0; border-radius: 5px; background: transparent;
-                      color: #68778a; cursor: pointer; font-size: 12px; font-weight: 650; }
+                      color: var(--document-muted); cursor: pointer; font-size: 12px; font-weight: 650; }
       .document-tab:hover { background-color: #e8edf5; color: #31425a; }
       .document-tab.active { background: #dce9fd; color: #1c5da6; }
-      .document-body, .latex-output { max-width: 900px; margin: 0 auto; color: #232a35; font-size: 16px; line-height: 1.65; }
+      .document-body, .latex-output { max-width: 900px; margin: 0 auto; color: var(--document-prose); font-size: 16px; line-height: 1.65; }
       .document-body h1, .document-body h2, .document-body h3, .document-body h4,
       .latex-output h1, .latex-output h2, .latex-output h3, .latex-output h4 { color: #192130; line-height: 1.25; }
       .document-body h1, .latex-output h1 { margin: .2em 0 .65em; font-size: 2em; }
@@ -1417,10 +1411,10 @@ fn viewer_document(tree_model) {
       .document-body dl { margin: 1em 0; }
       .document-body dt { margin-top: .6em; font-weight: 650; }
       .document-body dd { margin-left: 1.4em; }
-      .document-body code, .latex-output code { padding: 2px 5px; border-radius: 4px; background: #eef1f5;
-                     font: .9em 'SF Mono', Menlo, monospace; }
+      .document-body code, .latex-output code { padding: 2px 5px; border-radius: 4px; background: var(--document-code);
+                     font: .9em var(--document-mono); }
       .document-body pre, .latex-output pre { overflow: auto; padding: 13px 15px; border-radius: 6px;
-                     background: #f1f3f6; color: #243042; white-space: pre-wrap; }
+                     background: var(--document-code-block); color: #243042; white-space: pre-wrap; }
       .document-body pre code, .latex-output pre code { padding: 0; background: transparent; color: inherit; }
       .document-body a, .latex-output a { color: #1769c2; }
       .document-body table, .latex-output table { width: 100%; border-collapse: collapse; margin: 1em 0; }
@@ -1437,7 +1431,7 @@ fn viewer_document(tree_model) {
     ">
   >
   <body
-    apply(<doc_editor_app tree_model:tree_model>, {mode: "edit"})
+    apply(<doc_editor_app tree_model:tree_model, initial_pane:initial_pane>, {mode:"edit"})
   >
 >
 }
@@ -1450,4 +1444,14 @@ pub pn open_browser(source, options) {
   viewer_document(<project_tree root_path:source, root_name:root_name, entries:entries>)
 }
 
-viewer_document(PROJECT_TREE_MODEL)
+pub pn open_file(source: string, options) element^ {
+  let name = paths.basename(replace(source, "\\", "/"))^
+  let dot = last_index_of(name, ".")
+  let extension = if (dot == null) "" else slice(name, dot + 1)
+  let pane = load_pane({file_path:source, source:source, name:name, extension:extension})^
+  return viewer_document(null, pane)
+}
+
+// Keep the root identity stable across document selections.
+viewer_document(<project_tree root_path:PROJECT_ROOT, root_name:"project root",
+  entries:(directory_entries(PROJECT_ROOT) ^ { [] })>)

@@ -1,0 +1,34 @@
+{
+  "info": {
+    "generator": {"mode": "test"},
+    "description": "Wide tree fixture"
+  },
+  "packages": {
+    "package-01": {"version": 1},
+    "package-02": {"version": 2},
+    "package-03": {"version": 3},
+    "package-04": {"version": 4},
+    "package-05": {"version": 5},
+    "package-06": {"version": 6},
+    "package-07": {"version": 7},
+    "package-08": {"version": 8},
+    "package-09": {"version": 9},
+    "package-10": {"version": 10},
+    "package-11": {"version": 11},
+    "package-12": {"version": 12},
+    "package-13": {"version": 13},
+    "package-14": {"version": 14},
+    "package-15": {"version": 15},
+    "package-16": {"version": 16},
+    "package-17": {"version": 17},
+    "package-18": {"version": 18},
+    "package-19": {"version": 19},
+    "package-20": {"version": 20},
+    "package-21": {"version": 21},
+    "package-22": {"version": 22},
+    "package-23": {"version": 23},
+    "package-24": {"version": 24},
+    "package-25": {"version": 25},
+    "package-26": {"version": 26}
+  }
+}

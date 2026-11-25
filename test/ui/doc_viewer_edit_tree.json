@@ -1,0 +1,50 @@
+{
+  "name": "open a project file in the editor",
+  "html": "test/fixtures/edit",
+  "viewport": {
+    "width": 1100,
+    "height": 700
+  },
+  "events": [
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-filter"
+      },
+      "text": "property-tree.json"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry .tree-label"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".tab-edit"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tab-edit"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-format-property"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "textarea[aria-label='name']"
+      },
+      "equals": "\"Tea\""
+    }
+  ]
+}

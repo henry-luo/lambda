@@ -6,7 +6,7 @@
   "viewport": {"width": 1000, "height": 700},
   "events": [
     {"type": "assert_count", "target": {"selector": ".property-value"}, "count": 2},
-    {"type": "click", "target": {"selector": "input[aria-label='app.name']"}},
+    {"type": "click", "target": {"selector": "textarea[aria-label='app.name']"}},
     {"type": "key_combo", "key": "a", "mods_str": "super"},
     {"type": "type", "text": "Tea"},
     {"type": "key_combo", "key": "s", "mods_str": "super"},

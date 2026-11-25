@@ -4,7 +4,7 @@
   "html": "test/fixtures/edit/sample.ini",
   "working_copy": "temp/edit-ui/edit_ini_create_multiline.ini",
   "events": [
-    {"type": "click", "target": {"selector": "input[aria-label='port']"}},
+    {"type": "click", "target": {"selector": "textarea[aria-label='port']"}},
     {"type": "key_combo", "key": "a", "mods_str": "super"},
     {"type": "type", "text": "\"alpha\""},
     {"type": "key_press", "key": "Enter"},

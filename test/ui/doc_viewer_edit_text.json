@@ -1,0 +1,62 @@
+{
+  "viewport": {
+    "width": 1000,
+    "height": 700
+  },
+  "name": "open a source-only file in the editor",
+  "html": "test/ui/edit/sample.txt",
+  "working_copy": "temp/edit-ui/view-edit-text.txt",
+  "events": [
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".tab-edit"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tab-edit"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-format-source"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".src-text"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".src-text .edit-doc > div:first-child"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "End"
+    },
+    {
+      "type": "type",
+      "text": " edited"
+    },
+    {
+      "type": "key_combo",
+      "key": "s",
+      "mods_str": "super"
+    },
+    {
+      "type": "assert_file",
+      "path": "temp/edit-ui/view-edit-text.txt",
+      "contains": "Source editor sample edited"
+    }
+  ]
+}

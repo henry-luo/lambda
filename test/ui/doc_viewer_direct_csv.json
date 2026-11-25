@@ -1,0 +1,16 @@
+{
+  "name": "Direct CSV view keeps the browser table controls",
+  "html": "test/fixtures/edit/sample.csv",
+  "events": [
+    {"type": "assert_text", "target": {"selector": ".document-name"}, "equals": "sample.csv"},
+    {"type": "assert_count", "target": {"selector": "#csv-preview tbody tr"}, "count": 2},
+    {"type": "assert_text", "target": {"selector": "#csv-preview tbody tr:first-child td:nth-child(2)"}, "equals": "Kuala Lumpur, MY"},
+    {"type": "assert_rect", "target": {"selector": ".csv-table thead th", "index": 0}, "width": 150, "tolerance": 5},
+    {"type": "mouse_drag", "target": {"selector": ".csv-table thead th:first-child .csv-resize", "offset_x": 5, "offset_y": 12}, "dx": 70, "dy": 0, "button": 0},
+    {"type": "assert_rect", "target": {"selector": ".csv-table thead th", "index": 0}, "width": 220, "tolerance": 5},
+    {"type": "click", "target": {"selector": ".tab-source"}},
+    {"type": "assert_text", "target": {"selector": "#source-preview"}, "contains": "Alice,\"Kuala Lumpur, MY\""},
+    {"type": "click", "target": {"selector": ".tab-view"}},
+    {"type": "assert_rect", "target": {"selector": ".csv-table thead th", "index": 0}, "width": 220, "tolerance": 5}
+  ]
+}

@@ -5,7 +5,7 @@
   "working_copy": "temp/edit-ui/edit_json_save_as_keyboard.json",
   "events": [
     {"type": "write_file", "path": "temp/edit-ui/edit_json_save_as_keyboard_copy.json", "content": "old copy\n"},
-    {"type": "click", "target": {"selector": "input[aria-label='name']"}},
+    {"type": "click", "target": {"selector": "textarea[aria-label='name']"}},
     {"type": "key_combo", "key": "a", "mods_str": "super"},
     {"type": "type", "text": "\"COPYKEY\""},
     {"type": "key_combo", "key": "s", "mods_str": "super+shift"},

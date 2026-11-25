@@ -5,20 +5,20 @@
   "working_copy": "temp/edit-ui/edit_ini_control_values.ini",
   "events": [
     {"type": "assert_count", "target": {"selector": ".property-value[data-value-literal='json']"}, "count": 2},
-    {"type": "assert_value", "target": {"selector": "input[aria-label='first']"}, "equals": "\"\\fvalue\""},
-    {"type": "assert_value", "target": {"selector": "input[aria-label='second']"}, "equals": "\"\\u000b\\\"quoted\\\"\""},
-    {"type": "click", "target": {"selector": "input[aria-label='first']"}},
+    {"type": "assert_value", "target": {"selector": "textarea[aria-label='first']"}, "equals": "\"\\fvalue\""},
+    {"type": "assert_value", "target": {"selector": "textarea[aria-label='second']"}, "equals": "\"\\u000b\\\"quoted\\\"\""},
+    {"type": "click", "target": {"selector": "textarea[aria-label='first']"}},
     {"type": "key_combo", "key": "s", "mods_str": "super"},
     {"type": "assert_file", "path": "temp/edit-ui/edit_ini_control_values.ini", "equals": "[main]\nfirst=\fvalue\nsecond=\u000b\"quoted\"\nthird=ordinary\n"},
     {"type": "key_combo", "key": "a", "mods_str": "super"},
     {"type": "type", "text": "\"\\fchanged\""},
     {"type": "key_combo", "key": "s", "mods_str": "super"},
     {"type": "assert_file", "path": "temp/edit-ui/edit_ini_control_values.ini", "equals": "[main]\nfirst=\fchanged\nsecond=\u000b\"quoted\"\nthird=ordinary\n"},
-    {"type": "click", "target": {"selector": "input[aria-label='second']"}},
+    {"type": "click", "target": {"selector": "textarea[aria-label='second']"}},
     {"type": "key_combo", "key": "a", "mods_str": "super"},
     {"type": "type", "text": "\"normal\""},
     {"type": "key_combo", "key": "s", "mods_str": "super"},
-    {"type": "assert_value", "target": {"selector": "input[aria-label='second']"}, "equals": "normal"},
+    {"type": "assert_value", "target": {"selector": "textarea[aria-label='second']"}, "equals": "normal"},
     {"type": "assert_file", "path": "temp/edit-ui/edit_ini_control_values.ini", "equals": "[main]\nfirst=\fchanged\nsecond=normal\nthird=ordinary\n"}
   ]
 }

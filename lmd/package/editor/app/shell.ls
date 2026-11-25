@@ -29,12 +29,13 @@ let shell_css = "
      inside their containing block, so a body fixed to the viewport's height
      would carry both away once the page scrolls past its first screen */
   body { margin: 0; min-height: 100%;
-         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-         background: #ffffff; color: #1f2328; }
+         font-family: var(--document-font);
+         background: #ffffff; color: var(--document-ink); }
   .edit-app { display: flex; flex-direction: column; min-height: 100%; }
   .edit-main { flex: 1; max-width: 980px; width: 100%; margin: 0 auto; }
   .edit-status { position: sticky; bottom: 0; padding: 4px 12px; font-size: 12px;
-                 color: #57606a; background: #f6f8fa; border-top: 1px solid #d0d7de; }
+                 color: var(--document-muted); background: var(--document-status);
+                 border-top: 1px solid var(--document-rule); }
   .edit-table-menu { position: fixed; z-index: 30; background: white; border: 1px solid #d0d7de;
                      border-radius: 6px; padding: 4px; box-shadow: 0 4px 16px rgba(0,0,0,.18); }
   .edit-table-menu .edit-group { display: flex; flex-direction: column; align-items: stretch; }

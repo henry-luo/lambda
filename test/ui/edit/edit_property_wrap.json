@@ -1,0 +1,132 @@
+{
+  "name": "wrapped property values and resizable columns",
+  "command": "edit",
+  "html": "test/fixtures/edit/property-wrap.json",
+  "working_copy": "temp/edit-ui/edit_property_wrap.json",
+  "viewport": {
+    "width": 700,
+    "height": 500
+  },
+  "events": [
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "textarea[aria-label='message']"
+      },
+      "height": 173.8,
+      "tolerance": 4
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "input[aria-label='Property name: message']"
+      },
+      "width": 246.6,
+      "tolerance": 4
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "textarea[aria-label='message']",
+        "offset_x": 5,
+        "offset_y": 30
+      }
+    },
+    {
+      "type": "assert_form_selection",
+      "target": {
+        "selector": "textarea[aria-label='message']"
+      },
+      "start": 47,
+      "end": 47
+    },
+    {
+      "type": "key_press",
+      "key": "Down"
+    },
+    {
+      "type": "assert_form_selection",
+      "target": {
+        "selector": "textarea[aria-label='message']"
+      },
+      "start": 94,
+      "end": 94
+    },
+    {
+      "type": "key_press",
+      "key": "Up"
+    },
+    {
+      "type": "assert_form_selection",
+      "target": {
+        "selector": "textarea[aria-label='message']"
+      },
+      "start": 47,
+      "end": 47
+    },
+    {
+      "type": "type",
+      "text": "Z"
+    },
+    {
+      "type": "key_combo",
+      "key": "s",
+      "mods_str": "super"
+    },
+    {
+      "type": "assert_file",
+      "path": "temp/edit-ui/edit_property_wrap.json",
+      "contains": "\"This is a long property value that must wrap wZithin the column. This is a long property value that must wrap within the column. This is a long property value that must wrap within the column. This is a long property value that must wrap within the column. This is a long property value that must wrap within the column. This is a long property value that must wrap within the column. \""
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "super"
+    },
+    {
+      "type": "mouse_drag",
+      "target": {
+        "selector": ".property-resize",
+        "index": 1,
+        "offset_x": 3,
+        "offset_y": 10
+      },
+      "dx": 100,
+      "dy": 0,
+      "button": 0
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "input[aria-label='Property name: message']"
+      },
+      "width": 346.6,
+      "tolerance": 4
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "textarea[aria-label='message']"
+      }
+    },
+    {
+      "type": "key_combo",
+      "key": "a",
+      "mods_str": "super"
+    },
+    {
+      "type": "type",
+      "text": "\"updated value\""
+    },
+    {
+      "type": "key_combo",
+      "key": "s",
+      "mods_str": "super"
+    },
+    {
+      "type": "assert_file",
+      "path": "temp/edit-ui/edit_property_wrap.json",
+      "contains": "\"message\": \"updated value\""
+    }
+  ]
+}

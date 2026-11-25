@@ -5,7 +5,7 @@
   "working_copy": "temp/edit-ui/edit_properties_switch.properties",
   "viewport": {"width": 1000, "height": 700},
   "events": [
-    {"type": "click", "target": {"selector": "input[aria-label='app.name']"}},
+    {"type": "click", "target": {"selector": "textarea[aria-label='app.name']"}},
     {"type": "key_combo", "key": "a", "mods_str": "super"},
     {"type": "type", "text": "Tea"},
     {"type": "key_combo", "key": "/", "mods_str": "super"},

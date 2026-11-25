@@ -5,7 +5,7 @@
   "working_copy": "temp/edit-ui/edit_calendar_property.ics",
   "events": [
     {"type": "assert_count", "target": {"selector": ".property-value"}, "count": 2},
-    {"type": "click", "target": {"selector": "input[aria-label='SUMMARY']"}},
+    {"type": "click", "target": {"selector": "textarea[aria-label='SUMMARY']"}},
     {"type": "key_combo", "key": "a", "mods_str": "super"},
     {"type": "type", "text": "Changed meeting"},
     {"type": "key_combo", "key": "s", "mods_str": "super"},

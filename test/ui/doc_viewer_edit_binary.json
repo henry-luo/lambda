@@ -1,0 +1,30 @@
+{
+  "viewport": {
+    "width": 1000,
+    "height": 700
+  },
+  "name": "show an editor error for an unsupported binary file",
+  "html": "test/layout/data/res/sample1.png",
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tab-edit"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".preview-error"
+      },
+      "contains": "Cannot edit:"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#image-preview"
+      },
+      "count": 1
+    }
+  ]
+}

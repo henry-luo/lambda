@@ -1,5 +1,71 @@
 # Editing viewer document formats
 
+## Viewer to editor — 2026-11-25
+
+The viewer's Edit control opens a local file in the same editor session used
+by `lambda edit`, including its save, source-switch and close handling
+(D9.3.4, D10.2.5). The editor occupies the window after the switch. Archive
+members remain preview-only because editing them requires archive-specific
+write support. An editor open failure is shown in the viewer.
+
+Property and source surfaces measure their viewport on their first render so
+they can mount after the viewer document has loaded. Direct file, project
+tree, JSON, Markdown, source-only, invalid binary and large-tree replays cover
+the transition. The long-source visual check was moved above the new footer.
+
+## Property wrapping and column sizing — 2026-11-25
+
+Structured property values wrap in an editable multiline control whose height
+follows its content. Dragging a separator adjusts the shared name/value split.
+The existing single-line commit semantics remain on formats that require them
+(D9.3.4, D10.2.5). Radiant's wrapped caret and selection geometry are tracked
+under RI-239. The focused structured-editor selection passes 83 replays.
+
+## Shared document presentation — 2026-11-25
+
+Direct local document views reuse the project browser's preview model,
+format selection, controls, and styles. A direct open starts with the
+selected pane at full window width. Browser selections retain the file
+tree. Both load the selected document in the shipped package under D9.3.4
+and keep its reactive state under S12.1.3v6.
+
+Authored HTML, XHTML, Lambda applications, slide presentations, and model
+viewers keep their full-window loaders. Remote URLs and specialized view
+options keep their host routes. `view --standalone` selects the native
+loader for a direct document. XML with its own presentation, EPS, PSD,
+diffs, and page documents use their renderer inside the shared pane.
+
+Property, source, and rich-text editors use the same title, mode badge,
+and palette as the viewer. Editing controls and format admission remain
+with the editor under D10.2.5 and D10.2.6v2. JSON and delimited table
+replays verify filtering, resizing, and View/Source switching at the
+direct entry point.
+
+All 23 direct format checks and 24 native view tests passed. The browser
+and editor replay selection passed 252 of 255 cases. The original packages
+reproduce the TOML fixture failure and both source-editor crashes.
+Verification and screenshots are in `temp/document-presentation/`.
+
+## Property tree startup — 2026-11-25
+
+The property editor mounted controls for every field before drawing the first
+frame. It now allocates the initial row budget from the viewport below the
+toolbar. It visits branches in breadth-first order and offers **Show more**
+where a group's children exceed the budget. The editor retains the complete
+source-backed model for navigation, edits, and saves (D10.2.5, D9.3.4).
+
+On `node_modules/.package-lock.json` (209 KiB, 430 packages), the median of
+three headless release runs through the first render went from 5.55 s to
+0.43 s. The host initialized 41 controls, down from 7,882. Both variants
+used the same release host and package path. Phase timings are in
+`temp/edit-startup/final-{before,after}-*.tsv`.
+
+The wide JSON replay verifies the initial row budget, paging, and saving an
+edit on a later page. It passes all 12 assertions under the interpreter and
+JIT. The checkout's editor suite passes 222 of 224 replays. The two source
+editor failures, drag selection and horizontal scroll, also reproduce with
+the original property surface in the same host.
+
 ## Editing admission ruling — 2026-11-16
 
 D10.2.5 now requires graphical editing for successfully parsed documents in

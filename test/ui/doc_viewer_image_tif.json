@@ -1,0 +1,45 @@
+{
+  "name": "Direct uppercase TIF alias renders decoded pixels",
+  "html": "test/input/image/sample.tiff",
+  "working_copy": "temp/edit-ui/viewer-image.TIF",
+  "viewport": {
+    "width": 800,
+    "height": 600
+  },
+  "events": [
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#image-preview img"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".tab-source"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#image-preview img"
+      },
+      "width": 256,
+      "height": 192,
+      "tolerance": 1
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#image-preview img",
+        "offset_x": 100,
+        "offset_y": 50
+      },
+      "max_r": 110,
+      "max_g": 125,
+      "max_b": 160
+    }
+  ]
+}

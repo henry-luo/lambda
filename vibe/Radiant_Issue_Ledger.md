@@ -20,6 +20,30 @@ observations still require re-verification. Add new Radiant issues here.
 
 ## Open issues
 
+<a id="ri-240"></a>
+
+### RI-240 — Textarea caret needs affinity at a soft-wrap boundary
+
+**Status:** Open, observed 2026-11-25. **Owner:** Radiant text-control
+selection and painting (D9.1.3v2). This limits wrapped textarea navigation.
+
+In `test/ui/test_form_input.html`, enter enough text to wrap across three
+lines, click the start of the second line, and press End. The selection offset
+reaches the end of that visual line, but the caret paints at the start of the
+third line. The shared byte offset identifies both visual positions, and the
+selection state currently has no affinity to distinguish them. A fix needs
+to preserve visual affinity through pointer and keyboard selection, redraw,
+and text-control state transitions. Reproduction and capture are in
+`temp/textarea-end-boundary.json` and `temp/textarea-end-boundary.png`.
+
+<a id="ri-239"></a>
+
+- [RI-239 — Textarea caret geometry ignores soft-wrapped lines](<Radiant_Issue_Ledger (fixed).md#ri-239>).
+
+<a id="ri-238"></a>
+
+- [RI-238 — Default focus outline misses dialogs and sits away from text fields](<Radiant_Issue_Ledger (fixed).md#ri-238>).
+
 <a id="ri-236"></a>
 
 ### RI-236 — Automatic SVG export clips diagrams to the initial viewport

@@ -29,6 +29,7 @@ import sess: lambda.editor.session
 import files: lambda.editor.app.files
 import tools: lambda.editor.app.toolbar
 import lambda.editor.model
+import chrome: lambda.doc.document_chrome
 
 // Every editable format, in lookup order. The source surface opens the text
 // formats no rich surface claims, and any file under `--source`
@@ -43,7 +44,7 @@ pub fn format_for_path(path) {
   if (len(found) == 0) null else found[0]
 }
 
-pub pn open_document(path, options) element^ {
+pub pn open_state(path, options) map^ {
   let named = format_for_path(path)
   // The source surface accepts unlisted text formats after the same byte checks.
   let requested = if (options != null and options.source == true or named == null) src.descriptor else named
@@ -66,10 +67,12 @@ pub pn open_document(path, options) element^ {
   let status = if (reason != null) "Opened source: " ++ reason
                else if (nul_source) "Opened " ++ session.name ++ " in source view."
                else "Opened " ++ session.name ++ "."
-  page(if (format.surface == 'source') {mode: 'source', session: session, doc: loaded.doc, status: status}
+  if (format.surface == 'source') {mode: 'source', session: session, doc: loaded.doc, status: status}
        else if (format.surface == 'property') {mode: 'property', session: session, doc: loaded.doc, status: status}
-       else {mode: 'rich', session: session, doc: edit_open(loaded.doc, sess.edit_schema(format, loaded.envelope)^, null), status: status})
+       else {mode: 'rich', session: session, doc: edit_open(loaded.doc, sess.edit_schema(format, loaded.envelope)^, null), status: status}
 }
+
+pub pn open_document(path, options) element^ { return page(open_state(path, options)^) }
 
 // The application root: the rich (or drawing) surface or the source surface
 // over one file (Radiant_Design_Source_Editor OQ7, CED20). Each surface keeps
@@ -86,13 +89,16 @@ on edit_switch(next) {
   shown = next
 }
 
+pub fn surface(shown) => apply(<edit_doc shown: shown>, {mode: "edit"})
+pub let stylesheet = chrome.css ++ files.css ++ tools.css ++ shell.surface_css ++ src.surface_css ++ property.css
+
 fn page(shown) =>
   <html lang: "en",
     <head
       <meta charset: "UTF-8">
       <title sess.window_title(shown.session, false)>
       // Math projections carry their measured glyph outlines in SVG.
-      <style files.css ++ tools.css ++ shell.surface_css ++ src.surface_css ++ property.css>
+      <style stylesheet>
     >
-    apply(<edit_doc shown: shown>, {mode: "edit"})
+    surface(shown)
   >

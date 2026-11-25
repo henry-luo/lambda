@@ -1,0 +1,245 @@
+{
+  "name": "project browser previews supported raster formats",
+  "html": "test/input/image",
+  "viewport": {
+    "width": 1100,
+    "height": 900
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='/sample.ico'] .tree-label"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".document-name"
+      },
+      "equals": "sample.ico"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#image-preview img"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".tab-source"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#image-preview img"
+      },
+      "width": 256,
+      "height": 192,
+      "tolerance": 1
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#image-preview img",
+        "offset_x": 100,
+        "offset_y": 50
+      },
+      "max_r": 110,
+      "max_g": 125,
+      "max_b": 160
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='/sample.bmp'] .tree-label"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".document-name"
+      },
+      "equals": "sample.bmp"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#image-preview img"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".tab-source"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#image-preview img"
+      },
+      "width": 256,
+      "height": 192,
+      "tolerance": 1
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#image-preview img",
+        "offset_x": 100,
+        "offset_y": 50
+      },
+      "max_r": 110,
+      "max_g": 125,
+      "max_b": 160
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='/sample.tiff'] .tree-label"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".document-name"
+      },
+      "equals": "sample.tiff"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#image-preview img"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".tab-source"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#image-preview img"
+      },
+      "width": 256,
+      "height": 192,
+      "tolerance": 1
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#image-preview img",
+        "offset_x": 100,
+        "offset_y": 50
+      },
+      "max_r": 110,
+      "max_g": 125,
+      "max_b": 160
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='/sample.avif'] .tree-label"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".document-name"
+      },
+      "equals": "sample.avif"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#image-preview img"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".tab-source"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#image-preview img"
+      },
+      "width": 256,
+      "height": 192,
+      "tolerance": 1
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#image-preview img",
+        "offset_x": 100,
+        "offset_y": 50
+      },
+      "max_r": 110,
+      "max_g": 125,
+      "max_b": 160
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='/sample.webp'] .tree-label"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".document-name"
+      },
+      "equals": "sample.webp"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#image-preview img"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".tab-source"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#image-preview img"
+      },
+      "width": 256,
+      "height": 192,
+      "tolerance": 1
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#image-preview img",
+        "offset_x": 100,
+        "offset_y": 50
+      },
+      "max_r": 110,
+      "max_g": 125,
+      "max_b": 160
+    }
+  ]
+}

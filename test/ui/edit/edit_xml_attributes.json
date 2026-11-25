@@ -9,16 +9,28 @@
   },
   "events": [
     {
-      "type": "assert_count",
+      "type": "click",
       "target": {
-        "selector": ".property-add"
-      },
-      "count": 2
+        "selector": "input[aria-label='Property name: catalog']"
+      }
     },
     {
       "type": "click",
       "target": {
-        "selector": ".property-add"
+        "selector": ".property-toolbar_add"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".property-menu .property-add"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".property-menu .property-add"
       }
     },
     {
@@ -57,7 +69,14 @@
     {
       "type": "click",
       "target": {
-        "selector": ".property-delete"
+        "selector": "input[aria-label='Property name: @title']"
+      },
+      "button": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".property-menu .property-delete"
       }
     },
     {

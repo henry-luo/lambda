@@ -5,7 +5,7 @@
   "working_copy": "temp/edit-ui/edit_calendar_stream.ics",
   "events": [
     {"type": "assert_count", "target": {"selector": ".property-value"}, "count": 4},
-    {"type": "click", "target": {"selector": "input[aria-label='LOCATION']"}},
+    {"type": "click", "target": {"selector": "textarea[aria-label='LOCATION']"}},
     {"type": "key_combo", "key": "a", "mods_str": "super"},
     {"type": "type", "text": "Changed"},
     {"type": "key_combo", "key": "s", "mods_str": "super"},

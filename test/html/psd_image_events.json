@@ -1,5 +1,6 @@
 {
   "events": [
+    {"type": "switch_frame", "selector": "iframe.document-preview"},
     {"type": "assert_attribute", "target": {"selector": "body"}, "attribute": "data-rdt-document", "equals": "image"},
     {"type": "assert_count", "target": {"selector": "img.rdt-image-document"}, "count": 1},
     {"type": "assert_attribute", "target": {"selector": "img"}, "attribute": "src", "contains": "data:image/png;base64,"},

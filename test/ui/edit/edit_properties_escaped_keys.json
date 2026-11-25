@@ -4,9 +4,9 @@
   "html": "test/fixtures/edit/escaped-keys.properties",
   "working_copy": "temp/edit-ui/edit_properties_escaped_keys.properties",
   "events": [
-    {"type": "assert_count", "target": {"selector": "input[aria-label='a=b']"}, "count": 1},
-    {"type": "assert_count", "target": {"selector": "input[aria-label='key space']"}, "count": 1},
-    {"type": "click", "target": {"selector": "input[aria-label='a=b']"}},
+    {"type": "assert_count", "target": {"selector": "textarea[aria-label='a=b']"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": "textarea[aria-label='key space']"}, "count": 1},
+    {"type": "click", "target": {"selector": "textarea[aria-label='a=b']"}},
     {"type": "key_combo", "key": "a", "mods_str": "super"},
     {"type": "type", "text": "new"},
     {"type": "key_combo", "key": "s", "mods_str": "super"},
@@ -16,6 +16,6 @@
     {"type": "type", "text": "renamed key=1"},
     {"type": "key_combo", "key": "s", "mods_str": "super"},
     {"type": "assert_file", "path": "temp/edit-ui/edit_properties_escaped_keys.properties", "contains": "a\\=b=new\nrenamed\\ key\\=1 : two\nliteral\\\\name=three\n"},
-    {"type": "assert_count", "target": {"selector": "input[aria-label='renamed key=1']"}, "count": 1}
+    {"type": "assert_count", "target": {"selector": "textarea[aria-label='renamed key=1']"}, "count": 1}
   ]
 }
