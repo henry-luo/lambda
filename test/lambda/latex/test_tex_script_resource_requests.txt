@@ -1,0 +1,15 @@
+{
+  requests: [{
+      scope: "local",
+      name: "child"
+    }, {
+      scope: "local",
+      name: "child.tex"
+    }, {
+      scope: "bundled",
+      name: "sample.sty"
+    }],
+  issues: ["tex-resource-needed", "tex-resource-needed", "tex-resource-needed"],
+  text: "World  ",
+  issue: null
+}

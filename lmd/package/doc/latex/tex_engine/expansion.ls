@@ -45,7 +45,8 @@ fn result(input: map, definitions: map, groups: array, output: map[], count: int
         expression_arithmetic_error: false,
         parameters: {endlinechar: input.reader.endline, escapechar: 92, mag: 1000, tolerance: 10000,
             newlinechar: if (options.latex == true) -1 else 0}, after_assignment: null, token_text_scan: false,
-        resources: options.resources, resources_seen: {}, resource_ids: {}, resource_count: 0, resource_bytes: 0,
+        resources: options.resources, resource_requests: options.resource_requests == true,
+        resources_seen: {}, resource_ids: {}, resource_count: 0, resource_bytes: 0,
         sources: [{id: input.reader.file_id, name: if (options.source_name == null) "<input>" else options.source_name,
             origin: if (input.reader.origin == "bundled") "bundled" else "local", data: input.reader.source}],
         fonts: [{name: "nullfont", size: 0, param_base: 0, param_count: 7, params: {}, hyphen_char: 45, skew_char: -1,
@@ -53,7 +54,8 @@ fn result(input: map, definitions: map, groups: array, output: map[], count: int
         font_memory: 7, current_font: 0, diagnostics: [], diagnostic_records: [],
         messages: [], terminal_line: "", expansions: count, issue: issue}
 fn fail(st: State, code: string) State => {*:st, issue: code}
-fn unsupported(st: State, name: string) State => {*:st, issue: "tex-unsupported-primitive", unsupported: name}
+fn unsupported(st: State, name: string) State => if (st.issue != null) st
+    else {*:st, issue: "tex-unsupported-primitive", unsupported: name}
 fn charcat(t, cat) => t != null and t.kind == "char" and t.cat == cat
 fn is_control(t) => t != null and (t.kind == "control" or t.kind == "active")
 fn key(t) => if (t.kind == "active") "active:" ++ t.value else "control:" ++ t.value
@@ -2177,6 +2179,10 @@ fn pdf_string_primitive(st: State, name, budget) State^ {
 fn next_source_id(st) any^ => max(len(st.sources) + abs(st.input.reader.file_id) + 1,
     max([0, *[for (source in st.sources) source.id]]) + 1)
 
+// A host may capture one missing resource and restart from the original source.
+fn request_resource(st, scope, name) State =>
+    {*:st, issue:"tex-resource-needed", resource_request:{scope:scope, name:name}}
+
 // The caller supplies captured, authorized bytes; this module does not open paths.
 fn captured_resource(st, name, requested_scope = null) any^ {
     let cleaned = replace(name, "\"", "")^;
@@ -2190,7 +2196,9 @@ fn captured_resource(st, name, requested_scope = null) any^ {
         {state: st, available: true, found: false, data: null}
     else {
         let entry = st.resources[scope][cleaned];
-        if (entry == null) {state: st, available: true, found: false, data: null}
+        if (entry == null and st.resource_requests)
+            {state: request_resource(st, scope, cleaned), available: false, found: false, data: null}
+        else if (entry == null or entry.missing == true) {state: st, available: true, found: false, data: null}
         else if (not (entry.data is string or entry.data is binary))
             {state: fail(st, "tex-resource-invalid"), available: true, found: false, data: null}
         else {
@@ -4918,7 +4926,12 @@ fn probe_resource(st, name, scope) any^ {
         {state: fail(st, "tex-resource-invalid"), available: true, found: false}
     else if (st.resources[scope] == null) {state: st, available: false, found: false}
     else if (name == "" or starts_with(name, "/") or contains(name, "..")) {state: st, available: true, found: false}
-    else {state: st, available: true, found: st.resources[scope][name] != null}
+    else {
+        let entry = st.resources[scope][name];
+        if (entry == null and st.resource_requests)
+            {state:request_resource(st, scope, name), available:false, found:false}
+        else {state:st, available:true, found:entry != null and entry.missing != true}
+    }
 }
 
 fn package_loaded(st, name, is_class) any^ =>

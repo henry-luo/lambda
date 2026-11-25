@@ -33,6 +33,21 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Resource requests, 2026-11-25:** The Script expander can now report a
+  missing local or bundled resource by scope and name when the host opts in;
+  the facade can accept captured bytes or a confirmed missing file and restart
+  expansion. Default snapshot behavior and explicit unsupported outcomes are
+  unchanged. Extension fallback and bundled package probes have focused tests.
+  Runtime acquisition is not wired yet. The existing native path resolution
+  and containment helpers have been moved to the shared input boundary and the
+  main build passes and the native TeX unit suite passes 12 cases with two
+  skipped. The request regression passes both tiers under forced GC. Next use
+  the caller's `SecurityIOClient`
+  to capture scoped resources with the existing
+  limits, pass the document base, then rerun the included-file and security
+  suites. Do not treat access denial or an incomplete snapshot as absence
+  (D10.2.2v2, D9.1.2v2, D11.1.2, S1.8).
+
 - **Retirement ordered before parity, 2026-11-25:** The user explicitly
   directed retirement first and repair of failing Script tests afterwards.
   Runtime `parse` for explicit `tex`, `latex` and `latex-ts` and `input` with
