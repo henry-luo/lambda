@@ -1,0 +1,4 @@
+[<latex_document
+    <document source_offset: 26,
+      <paragraph
+        "OK">>>, "parse: Script latex engine: latex-digest-unsupported: generated text source mapping", "parse: Script latex engine: latex-digest-unsupported: generated text source mapping"]

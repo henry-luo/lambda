@@ -1,0 +1,14 @@
+[<latex_document
+    <document source_offset: 0,
+      <paragraph
+        <fbox source_offset: 16, argument_groups: [{
+              kind: "required",
+              raw: "\\verb|\\mbox{|x\\verb|}|",
+              start: 21,
+              end: 45
+            }],
+          <verb source_offset: 22, raw_source: "\\verb|\\mbox{|",
+            "\\mbox{">
+          "x"
+          <verb source_offset: 36, raw_source: "\\verb|}|",
+            "}">>>>>, "parse: Script latex engine: latex-digest-unsupported: verbatim group source mapping", "parse: Script latex engine: latex-digest-unsupported: verbatim group source mapping"]

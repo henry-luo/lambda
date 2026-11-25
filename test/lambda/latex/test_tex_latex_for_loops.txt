@@ -1,0 +1,29 @@
+[{
+    text: "[a][b,c][d]",
+    diagnostics: []
+  }, {
+    text: "[a][][b][]",
+    diagnostics: []
+  }, {
+    text: "\\def\\items{u,v}[u][v][w]",
+    diagnostics: []
+  }, {
+    text: "END",
+    diagnostics: []
+  }, {
+    text: "[a][bc][d]",
+    diagnostics: []
+  }, {
+    text: "[oneA][oneB][twoA][twoB]",
+    diagnostics: []
+  }]
+[{
+    text: "=a\\do{Y}END",
+    diagnostics: ["tex-missing-cs", "latex-for-syntax"]
+  }, {
+    text: "a\\do{Y}END",
+    diagnostics: ["latex-for-syntax"]
+  }, {
+    text: "",
+    diagnostics: ["tex-runaway-argument"]
+  }]

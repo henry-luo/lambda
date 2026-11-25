@@ -111,6 +111,18 @@ fn inline_group_safe(bytes, nested) any^ {
     }
 }
 
+// A complete group can balance delimiters across multiple verbatim commands.
+fn inline_group_verbatim_safe(tokens) any^ {
+    if (len(tokens) == 0 or not any([for (token in tokens) token.raw_verb == true])) false
+    else {
+        let first = tokens[0];
+        let final = tokens[len(tokens) - 1];
+        if (first.output_text == null or first.output_start == null or final.output_end == null or
+            final.output_text != first.output_text or final.output_end < first.output_start) false
+        else inline_group_safe(slice(binary(first.output_text)^, first.output_start, final.output_end)^, true)
+    }
+}
+
 fn inline_code_node(name, offset, starred, options, language, raw, body) =>
     <[name] source_offset:offset, *:if(starred){starred:true}else{},
         *:if(options==null){}else{options_raw:options}, *:if(language==null){}else{language:language},
@@ -2908,9 +2920,12 @@ fn setlength_node(tokens, sources, index) any^ {
 // Group parsing excludes delimiters; restore source whitespace skipped at its edges.
 fn inline_group(group, sources) any^ {
     // Adjacent source controls must be visible together when restoring their gaps.
-    let tokens = [for (token in group.tokens)
+    let prepared = [for (token in group.tokens)
         if (token.chardef_emission == true and chardef_source(token,sources)^ != null)
             {*:token, *:token.chardef_origin, chardef_emission:false, read_offset:null, read_file:null} else token];
+    let group_safe = inline_group_verbatim_safe(prepared)^;
+    let tokens = if (group_safe) [for (token in prepared)
+        if (token.raw_verb == true) {*:token, group_scan_safe:true} else token] else prepared;
     let first = if (len(tokens) == 0) null else tokens[0];
     let final_token = if (len(tokens) == 0) null else tokens[len(tokens) - 1];
     let original_final = if (len(group.tokens) == 0) null else group.tokens[len(group.tokens) - 1];
@@ -3208,7 +3223,7 @@ fn inline(tokens, sources, index = 0, text = "", items = [], stop_blocks = true,
             else inline(tokens, sources, definition.index, "", [*append_text(items, text), *definition.nodes], stop_blocks, table_mode)
         }
         else if (token.raw_verb == true) {
-            let verb = verb_element(token,index,not stop_blocks)^;
+            let verb = verb_element(token,index,not stop_blocks and token.group_scan_safe != true)^;
             if (verb.issue != null) verb
             else inline(tokens,sources,index + 1,"",[*append_text(items,text),verb.node],stop_blocks,table_mode)
         }
@@ -3872,7 +3887,7 @@ pub fn digest(expanded: map) Digested^ {
         {ast: null, issue: "latex-digest-unsupported", unsupported: "expl3 value argument source mapping"}
     else if (expanded.expl3_int_math_seen == true)
         {ast: null, issue: "latex-digest-unsupported", unsupported: "expl3 integer source mapping"}
-    else if (expanded.generated_text_mapping_seen == true)
+    else if (any([for (token in expanded.output) token.generated_text_mapping == true]))
         {ast: null, issue: "latex-digest-unsupported", unsupported: "generated text source mapping"}
     else if (expanded.inspection_seen == true)
         {ast: null, issue: "latex-digest-unsupported", unsupported: "inspection source mapping"}

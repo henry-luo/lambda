@@ -1977,8 +1977,10 @@ fn string_primitive(st: State, name, budget) State^ {
                     (if (t.value == "") escape(current) ++ "csname" ++ escape(current) ++ "endcsname"
                         else escape(current) ++ t.value) else t.value;
                 let escaped = any([for (c in ["\\", "{", "}", "$", "&", "#", "^", "_", "%", "~"]) contains(text, c)]);
-                {*:current, input: stream.push(read.stream, text_tokens(text)),
-                    generated_text_mapping_seen: current.generated_text_mapping_seen == true or escaped}
+                // Only emitted generated text can affect the document's source mapping.
+                let generated = [for (token in text_tokens(text)^)
+                    {*:token, *:if (escaped) {generated_text_mapping:true} else {}}];
+                {*:current, input: stream.push(read.stream, generated)}
             }
         }
     }
@@ -5348,6 +5350,79 @@ fn latex_ifnextchar(st: State, star) State^ {
     }
 }
 
+// Commas delimit only top-level items; an enclosing group is removed per item.
+fn latex_for_items(tokens, index = 0, depth = 0, item = [], items = []) any^ {
+    if (index >= len(tokens)) if (len(tokens) == 0) [] else [*items, stream.strip_outer(item)^]
+    else {
+        let token = tokens[index];
+        if (depth == 0 and other(token, ","))
+            latex_for_items(tokens, index + 1, 0, [], [*items, stream.strip_outer(item)^])
+        else latex_for_items(tokens, index + 1,
+            depth + if (charcat(token, 1)) 1 else if (charcat(token, 2)) -1 else 0,
+            [*item, token], items)
+    }
+}
+
+fn latex_tfor_group_end(tokens, index, depth) any^ {
+    if (index >= len(tokens)) index
+    else {
+        let token = tokens[index];
+        let next = depth + if (charcat(token, 1)) 1 else if (charcat(token, 2)) -1 else 0;
+        if (next == 0) index + 1 else latex_tfor_group_end(tokens, index + 1, next)
+    }
+}
+
+fn latex_tfor_items(tokens, index = 0, items = []) any^ {
+    if (index >= len(tokens)) items
+    else if (charcat(tokens[index], 10)) latex_tfor_items(tokens, index + 1, items)
+    else {
+        let end = if (charcat(tokens[index], 1)) latex_tfor_group_end(tokens, index, 0)^ else index + 1;
+        let item = stream.strip_outer(slice(tokens, index, end))^;
+        latex_tfor_items(tokens, end, [*items, item])
+    }
+}
+
+// Assign each loop value through the normal definition path before its body.
+fn latex_for_steps(variable, items, body, index = 0, output = []) any^ {
+    if (index >= len(items)) output
+    else latex_for_steps(variable, items, body, index + 1, [*output, control_token("def"),
+        variable, brace_token(true), *stored_tokens(items[index]), brace_token(false), *stored_tokens(body)])
+}
+
+fn latex_for(st: State, tokens_loop) State^ {
+    let target = nonspace(st.input)^;
+    let missing = target.token != null and not is_control(target.token);
+    let noted = if (missing) record_diagnostic({*:st, input:target.stream}, "tex-missing-cs",
+        "Missing control sequence inserted")^ else st;
+    // A non-control target is put back before the syntax scanner reads ':'.
+    let input = if (missing) stream.push(target.stream, [target.token]) else target.stream;
+    let variable = if (is_control(target.token)) target.token else control_token(chr(2) ++ "inaccessible");
+    let colon = stream.next(input)^;
+    let equals = stream.next(colon.stream)^;
+    let current = {*:noted, input:equals.stream};
+    if (not other(colon.token, ":") or not other(equals.token, "="))
+        record_diagnostic(current, "latex-for-syntax", "\\@for expects \\var:=list\\do{body}")
+    else {
+        let scanned = stream.delimited(current.input, [control_token("do")], true)^;
+        let body = stream.argument(scanned.stream, true)^;
+        let list_state = if (scanned.error != null) recover_macro_argument({*:current,input:scanned.stream},
+            scanned.error, scanned.cause, control_token("relax"), false)^ else current;
+        let ready = if (body.error != null) recover_macro_argument({*:list_state,input:body.stream},
+            body.error, body.cause, control_token("relax"), false)^ else {*:list_state,input:body.stream};
+        if (ready.issue != null) ready
+        else {
+            let first = if (len(scanned.tokens) > 0 and is_control(scanned.tokens[0])) meaning(ready, scanned.tokens[0]) else null;
+            // Native expands one leading parameterless macro for comma loops only.
+            let values = if (not tokens_loop and first != null and first.kind == "macro" and
+                    first.count == 0 and first.document_specs == null)
+                [*first.body, *slice(scanned.tokens, 1, len(scanned.tokens))] else scanned.tokens;
+            let items = if (tokens_loop) latex_tfor_items(values)^ else latex_for_items(values)^;
+            let steps = latex_for_steps(stored_tokens([variable])[0], items, body.tokens)^;
+            {*:ready, input:stream.push(ready.input, steps)}
+        }
+    }
+}
+
 fn latex_needs_format(st: State) State^ {
     let arg = stream.argument(st.input, true)^;
     let version_arg = latex_optional(arg.stream)^;
@@ -5803,6 +5878,7 @@ fn step(st: State, budget) State^ {
     else if (st.latex and contains(["(", ")", "[", "]"], cmd)) latex_math_switch(current, t, cmd)
     else if (st.latex and contains(["@ifnextchar", "kernel@ifnextchar", "@ifstar"], cmd))
         latex_ifnextchar(current, cmd == "@ifstar")
+    else if (st.latex and contains(["@for", "@tfor"], cmd)) latex_for(current, cmd == "@tfor")
     else if (st.latex and cmd == "NeedsTeXFormat") latex_needs_format(current)
     else if (st.latex and contains(["documentclass", "LoadClass", "LoadClassWithOptions"], cmd))
         latex_documentclass(current, t, budget, cmd)
@@ -6522,7 +6598,7 @@ pub fn resume(st: State, source: string, name: string = "<input>", budget: int =
         let next_input = {*:stream.from_reader(next_reader), everyeof: st.input.everyeof};
         let resumed = {*:st, input: next_input, finished: false, output: [], messages: [], terminal_line: "", expansions: 0,
             main_file: id, echo_incomplete: false, prefixed_macro_seen: false, prefix_scan: false,
-            generated_text_mapping_seen: false, mathchardef_emission_seen: false,
+            mathchardef_emission_seen: false,
             expl3_tl_head_seen: false, expl3_tl_tail_seen: false,
             expl3_exp_args_once_seen: false, expl3_exp_args_value_seen: false, expl3_exp_args_f_seen: false,
             sources: [*st.sources, {id: id, name: name, origin: origin, data: source}]};

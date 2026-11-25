@@ -34,6 +34,20 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Package loops and source mapping, 2026-11-26:** Script now executes the
+  retired engine's `\@for` and `\@tfor` token loops, including grouped and
+  empty items, one leading macro expansion, nested loops and malformed-syntax
+  recovery. Nine exact text/diagnostic cases were captured independently from
+  an isolated retired engine built under `temp/latex-retirement/`. Generated
+  escaped text now blocks document digestion only when its tokens reach output;
+  balanced verbatim spans can be checked across their enclosing source group
+  while unmatched spans retain the guard (S1.8, D10.2.2v2). The previously
+  failing showcase now matches its complete golden. The loop, generated-text
+  and balanced/unbalanced verbatim regressions pass interpreter and JIT with
+  forced GC and poisoning. A follow-up of eleven tests passed four and still
+  found seven mismatches or failures; the 31-document corpus timeout remains
+  open. See `temp/latex-retirement/gtest-after-loops.log`.
+
 - **Document environment headers, 2026-11-25:** The 70-case LaTeX document
   sweep initially passed 59 cases; ten mismatched and the 31-document corpus
   exceeded its existing 60-second limit. Script digestion now preserves the
