@@ -591,6 +591,7 @@ fn expand_one(st: State, t, budget) State^ {
                     {*:st, expl3_exp_args_value_seen:true, expl3_exp_args_once_seen:true}
                 else if (macro.source_mapping_guard == "bool_expr") {*:st, expl3_bool_expr_seen:true}
                 else if (macro.source_mapping_guard == "str_case") {*:st, expl3_str_case_seen:true}
+                else if (macro.source_mapping_guard == "seq_map") {*:st, expl3_seq_map_seen:true}
                 else if (macro.source_mapping_guard == "int_math") {*:st, expl3_int_math_seen: true} else st;
             let traced = if (st.prefix_scan == true) {*:marked, prefixed_macro_seen: true} else marked;
             expand_macro(traced, macro, budget, t)
@@ -6667,6 +6668,7 @@ pub fn enable_script_expl3(st: State) State^ {
         {name: "int_value:w", kind: "primitive", value: "number"},
         {name: "__int_sep:", kind: "primitive", value: "right"},
         {name: "__int_eval:w", kind: "primitive", value: "numexpr"},
+        {name: "int_eval:w", kind: "primitive", value: "numexpr"},
         {name: "__int_eval_end:", kind: "primitive", value: "relax"},
         {name: "reverse_if:N", kind: "primitive", value: "unless"},
         {name: "l_tmpa_bool", kind: "chardef", value: 0},
@@ -6823,6 +6825,14 @@ pub fn enable_script_expl3(st: State) State^ {
         {source:"\\prg_break:#1\\prg_break_point:{}",protected_flag:false},
         {source:"\\seq_map_break:{\\prg_map_break:Nn\\seq_map_break:{}}",protected_flag:false},
         {source:"\\seq_map_break:n{\\prg_map_break:Nn\\seq_map_break:}",protected_flag:false},
+        {source:"\\__seq_push_item_def:n{\\__seq_push_item_def:\\cs_gset:Npn\\__seq_item:n##1}",protected_flag:true},
+        {source:"\\__seq_push_item_def:{\\int_gincr:N\\g__kernel_prg_map_int\\cs_gset_eq:cN{__seq_map_\\int_use:N\\g__kernel_prg_map_int :w}\\__seq_item:n}",protected_flag:true},
+        {source:"\\__seq_pop_item_def:{\\cs_gset_eq:Nc\\__seq_item:n{__seq_map_\\int_use:N\\g__kernel_prg_map_int :w}\\int_gdecr:N\\g__kernel_prg_map_int}",protected_flag:true},
+        {source:"\\seq_map_inline:Nn#1#2{\\__seq_push_item_def:n{#2}#1\\prg_break_point:Nn\\seq_map_break:{\\__seq_pop_item_def:}}",protected_flag:true,source_mapping_guard:"seq_map",argument_unqualified:true},
+        {source:"\\seq_map_indexed_inline:Nn#1#2{\\int_gincr:N\\g__kernel_prg_map_int\\cs_gset_protected:cpn{__seq_map_\\int_use:N\\g__kernel_prg_map_int :w}##1##2{#2}\\exp_args:NNc\\__seq_map_indexed:NN#1{__seq_map_\\int_use:N\\g__kernel_prg_map_int :w}\\prg_break_point:Nn\\seq_map_break:{\\int_gdecr:N\\g__kernel_prg_map_int}}",protected_flag:true,source_mapping_guard:"seq_map",argument_unqualified:true},
+        {source:"\\seq_map_indexed_function:NN#1#2{\\__seq_map_indexed:NN#1#2\\prg_break_point:Nn\\seq_map_break:{}}",protected_flag:false,source_mapping_guard:"seq_map"},
+        {source:"\\__seq_map_indexed:NN#1#2{\\exp_after:wN\\__seq_map_indexed:Nw\\exp_after:wN#2\\int_value:w1\\exp_after:wN\\use_i:nn\\exp_after:wN;#1\\prg_break:\\__seq_item:n{}\\prg_break_point:}",protected_flag:false},
+        {source:"\\__seq_map_indexed:Nw#1#2;#3\\__seq_item:n#4{#3#1{#2}{#4}\\exp_after:wN\\__seq_map_indexed:Nw\\exp_after:wN#1\\int_value:w\\int_eval:w1+#2;}",protected_flag:false},
         {source:"\\clist_map_break:{\\prg_map_break:Nn\\clist_map_break:{}}",protected_flag:false},
         {source:"\\clist_map_break:n{\\prg_map_break:Nn\\clist_map_break:}",protected_flag:false},
         {source:"\\seq_map_function:NN#1#2{\\exp_after:wN\\use_i_ii:nnn\\exp_after:wN\\__seq_map_function:Nw\\exp_after:wN#2#1\\prg_break:\\__seq_item:n{}\\__seq_item:n{}\\__seq_item:n{}\\__seq_item:n{}\\prg_break_point:\\prg_break_point:Nn\\seq_map_break:{}}",protected_flag:false},
@@ -6838,6 +6848,7 @@ pub fn enable_script_expl3(st: State) State^ {
         {source:"\\c__msg_text_prefix_tl{msg~text~>~}",protected_flag:false},
         {source:"\\c__msg_more_text_prefix_tl{msg~extra~text~>~}",protected_flag:false},
         {source:"\\cs_gset:cpn{\\exp_args:Nc\\cs_gset:Npn}",protected_flag:true,long_ok:false},
+        {source:"\\cs_gset_protected:cpn{\\exp_args:Nc\\cs_gset_protected:Npn}",protected_flag:true,long_ok:false,source_mapping_guard:"dynamic_assignment",argument_unqualified:true},
         {source:"\\cs_set:cpn{\\exp_args:Nc\\cs_set:Npn}",protected_flag:true,long_ok:false},
         {source:"\\msg_if_exist:nnT#1#2{\\cs_if_exist:cTF{\\c__msg_text_prefix_tl#1/#2}{\\prg_return_true:}{\\prg_return_false:}\\exp_end:\\use:n\\use_none:n}",protected_flag:false},
         {source:"\\msg_if_exist:nnTF#1#2{\\cs_if_exist:cTF{\\c__msg_text_prefix_tl#1/#2}{\\prg_return_true:}{\\prg_return_false:}\\exp_end:}",protected_flag:false},
@@ -6917,6 +6928,8 @@ pub fn enable_script_expl3(st: State) State^ {
         {source: "\\bool_new:N#1{\\cs_new_eq:NN#1\\c_false_bool}", protected_flag: true},
         {source: "\\bool_new:c{\\exp_args:Nc\\bool_new:N}", protected_flag: true},
         {source: "\\cs_gset_eq:NN{\\tex_global:D\\cs_set_eq:NN}", protected_flag: true},
+        {source: "\\cs_gset_eq:cN{\\exp_args:Nc\\cs_gset_eq:NN}", protected_flag:true,source_mapping_guard:"dynamic_assignment",argument_unqualified:true},
+        {source: "\\cs_gset_eq:Nc{\\exp_args:NNc\\cs_gset_eq:NN}", protected_flag:true,source_mapping_guard:"dynamic_assignment",argument_unqualified:true},
         {source: "\\bool_set_true:N#1{\\cs_set_eq:NN#1\\c_true_bool}", protected_flag: true},
         {source: "\\bool_set_false:N#1{\\cs_set_eq:NN#1\\c_false_bool}", protected_flag: true},
         {source: "\\bool_gset_true:N#1{\\cs_gset_eq:NN#1\\c_true_bool}", protected_flag: true},
@@ -7324,6 +7337,7 @@ pub fn resume(st: State, source: string, name: string = "<input>", budget: int =
             mathchardef_emission_seen: false,
             expl3_tl_head_seen: false, expl3_tl_tail_seen: false, expl3_keyval_seen: false, expl3_keys_seen:false,
             expl3_clist_map_seen:false, expl3_bool_expr_seen:false, expl3_tl_replace_seen:false, expl3_str_case_seen:false,
+            expl3_seq_map_seen:false,
             expl3_exp_args_once_seen: false, expl3_exp_args_value_seen: false, expl3_exp_args_f_seen: false,
             sources: [*st.sources, {id: id, name: name, origin: origin, data: source}]};
         run(resumed, budget)

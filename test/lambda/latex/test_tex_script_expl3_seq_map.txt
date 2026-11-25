@@ -1,0 +1,31 @@
+{
+  issue: null,
+  unsupported: null,
+  text: "[[a][b,c][d]]",
+  diagnostics: []
+}
+{
+  issue: null,
+  unsupported: null,
+  text: "[[1:a][2:b,c][3:d]]",
+  diagnostics: []
+}
+{
+  issue: null,
+  unsupported: null,
+  text: "[[a/1/a][a/2/b,c][a/3/d][b,c/1/a][b,c/2/b,c][b,c/3/d][d/1/a][d/2/b,c][d/3/d]]",
+  diagnostics: []
+}
+{
+  issue: null,
+  unsupported: null,
+  text: "[[a][b,c]END]/0",
+  diagnostics: []
+}
+{
+  issue: null,
+  unsupported: null,
+  text: "[1:a][2:b,c][3:d]",
+  diagnostics: []
+}
+true

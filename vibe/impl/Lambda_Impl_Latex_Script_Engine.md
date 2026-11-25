@@ -34,13 +34,20 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Expl3 sequence mapping, 2026-11-26:** Script preloads the native inline,
+  indexed-inline and expandable indexed-function sequence maps, including
+  their scoped item definitions and break cleanup (D10.2.2v2). TeX Live
+  comparisons cover nested maps, indices, grouped items, early breaks and
+  counter restoration. Constructor argument handling and sequence-map source
+  mapping remain unsupported. Csvsimple now reaches `tl_set:cn`.
+
 - **Expl3 string cases, 2026-11-26:** Script preloads the native expandable
   `str_case:nn` conditional family and its delimiter-scanned helpers
   (D10.2.2v2). TeX Live comparisons cover first-match behavior, all branch
   forms and unexpanded control-sequence keys. This fixes csvsimple's grouped
   split delimiter: the missing case macro had remained in its separator token
-  list. Csvsimple now reaches `seq_map_indexed_inline:Nn`; string-case source
-  mapping remains explicitly unsupported.
+  list. Csvsimple's later blocker is recorded in the sequence-map checkpoint
+  above; string-case source mapping remains explicitly unsupported.
 
 - **Expl3 token removal, 2026-11-26:** Script preloads the four native local
   and global, once and all removal wrappers over the shared token-replacement
