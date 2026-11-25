@@ -1,0 +1,46 @@
+{
+  issue: null,
+  unsupported: null,
+  text: "[first][second][fallback]"
+}
+{
+  issue: null,
+  unsupported: null,
+  text: "[demo/nested/b|b|value]"
+}
+{
+  issue: null,
+  unsupported: null,
+  text: "[local-value][again][again(one)(two)]"
+}
+{
+  issue: null,
+  unsupported: null,
+  text: "[AB]"
+}
+{
+  issue: null,
+  unsupported: null,
+  text: "[z][demo/outer|outer|z]"
+}
+{
+  issue: null,
+  unsupported: null,
+  text: "[G]"
+}
+{
+  issue: null,
+  unsupported: null,
+  text: "[]"
+}
+{
+  issue: "tex-unsupported-primitive",
+  unsupported: "expl3 key property unsupported:n",
+  text: ""
+}
+{
+  issue: "tex-unsupported-primitive",
+  unsupported: "expl3 unknown key diagnostic",
+  text: ""
+}
+true

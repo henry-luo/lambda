@@ -4063,6 +4063,8 @@ pub fn digest(expanded: map) Digested^ {
         {ast: null, issue: "latex-digest-unsupported", unsupported: "expl3 integer source mapping"}
     else if (expanded.expl3_keyval_seen == true)
         {ast: null, issue: "latex-digest-unsupported", unsupported: "expl3 key-value source mapping"}
+    else if (expanded.expl3_keys_seen == true)
+        {ast: null, issue: "latex-digest-unsupported", unsupported: "expl3 key execution source mapping"}
     else if (any([for (token in expanded.output) token.generated_text_mapping == true]))
         {ast: null, issue: "latex-digest-unsupported", unsupported: "generated text source mapping"}
     else if (expanded.inspection_seen == true)

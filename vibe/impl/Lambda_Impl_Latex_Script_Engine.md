@@ -34,6 +34,16 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Expl3 key definitions and execution, 2026-11-26:** Script now handles
+  scoped `.code:n`, `.default:n`, `.initial:n`, `.tl_set:N`, `.tl_gset:N`
+  and `.meta:n` properties through `keys_define:nn` and `keys_set:nn`
+  (D10.2.2v2). TeX Live comparisons cover initial ordering, defaults, nested
+  calls and key context, local redefinition, global token-list assignment and
+  variable creation. The document digester still rejects key source mapping;
+  other properties, diagnostic recovery, complex name tokens and assignment
+  prefixes remain explicitly unsupported. Csvsimple now reaches the
+  unimplemented `.choices:nn` property.
+
 - **Adapter and constructor regression migration, 2026-11-26:** Both
   previously failing fixtures now pass without changing their expected
   assertions (D10.2.2v2). The no-adapter cases compare exact output captured
@@ -47,8 +57,8 @@ The existing native engine design and historical Phase IV work are in
   separators, nested groups, omitted values and empty values (D10.2.2v2).
   Four expandable results match TeX Live; malformed key diagnostics and
   document source mapping remain explicitly unsupported. This supplies the
-  common parser needed by the still-unported `keys_define:nn` and
-  `keys_set:nn`; csvsimple therefore remains blocked at key definition.
+  common parser used by the bounded key-definition and execution support
+  recorded above.
 
 - **Expl3 input-stream lifecycle, 2026-11-26:** Script now opens, reads,
   checks EOF and closes expl3 input streams through the existing captured
@@ -58,8 +68,8 @@ The existing native engine design and historical Phase IV work are in
   reads. An authorized file and denied symlink pass the security runtime check
   in interpreter and JIT. Missing-file diagnostics and negative `globaldefs`
   pool scoping remain explicitly unsupported; the document digester still
-  rejects input-stream source mapping. Csvsimple remains blocked earlier at
-  `keys_define:nn`.
+  rejects input-stream source mapping. Csvsimple's later blocker is recorded
+  in the current key-definition checkpoint above.
 
 - **Expl3 stream declarations and integer registers, 2026-11-26:** Script now
   creates closed input-stream variables with TeX's terminal-stream meaning and

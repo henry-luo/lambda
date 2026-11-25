@@ -3098,6 +3098,143 @@ fn expl3_keyval_parse(st: State, budget) State^ {
     }
 }
 
+let KEYS_SCRATCH = ["l_keys_path_str", "l_keys_path_tl", "l_keys_key_str", "l_keys_key_tl",
+    "l_keys_value_tl", "l__keys_module_str", "l__keys_inherit_str"]
+fn expl3_keys_next_token() => {kind:"expl3-keys-next", value:"", cat:null, start:-1, end:-1}
+
+// The l3keys path syntax discards spaces adjacent to module separators.
+fn expl3_key_path(text) any^ => join([for (part in split(text, "/")^) trim(part)^], "/")
+
+fn expl3_keys_scratch(st: State, values, index = 0) State^ {
+    if (index >= len(values)) st
+    else expl3_keys_scratch(assign_meaning(st, "control:" ++ values[index].name,
+        values[index].value, false)^, values, index + 1)
+}
+
+fn expl3_keys_context(st: State, path, value) State^ {
+    let parts = split(path, "/")^;
+    let leaf = parts[len(parts) - 1];
+    let parent = join(slice(parts, 0, len(parts) - 1)^, "/")^;
+    let full = expl3.token_list(text_tokens(path)^);
+    let key = expl3.token_list(text_tokens(leaf)^);
+    expl3_keys_scratch(st, [
+        {name:"l_keys_path_str", value:full}, {name:"l_keys_path_tl", value:full},
+        {name:"l_keys_key_str", value:key}, {name:"l_keys_key_tl", value:key},
+        {name:"l_keys_value_tl", value:expl3.token_list(value)},
+        {name:"l__keys_module_str", value:expl3.token_list(text_tokens(parent)^)},
+        {name:"l__keys_inherit_str", value:expl3.token_list([])}])
+}
+
+fn expl3_keys_begin(st: State, name) State^ {
+    let module = stream.argument(st.input, true)^;
+    let items = stream.argument(module.stream, true)^;
+    let current = {*:st, input:items.stream, expl3_keys_seen:true};
+    if (module.error != null) fail(current, module.error)
+    else if (items.error != null) fail(current, items.error)
+    else if (parameter_value(current, "globaldefs") != 0 or current.after_assignment != null)
+        unsupported(current, "expl3 key assignment prefixes")
+    else if (any([for (token in module.tokens) token.kind != "char" or token.cat == 1 or token.cat == 2]))
+        unsupported(current, "expl3 key module tokens")
+    else {
+        let entries = expl3.keyval_entries(items.tokens)^;
+        if (any([for (entry in entries) entry.invalid])) unsupported(current, "expl3 keyval syntax diagnostic")
+        else {
+            let saved = [for (variable in KEYS_SCRATCH)
+                {name:variable, value:current.definitions["control:" ++ variable]}];
+            let frames = if (current.expl3_key_frames is array) current.expl3_key_frames else [];
+            let frame = {module:expl3_key_path(token_text(current, module.tokens)^)^,
+                entries:entries, index:0, defining:name == "keys_define:nn", saved:saved};
+            {*:current, expl3_key_frames:[*frames, frame],
+                input:stream.push(current.input, [expl3_keys_next_token()])}
+        }
+    }
+}
+
+fn expl3_key_code(st: State, path, tokens) State^ {
+    let parsed = body_params(tokens, 1)^;
+    if (parsed.issue != null) fail(st, parsed.issue)
+    else assign_meaning(st, "control:key code > " ++ path,
+        latex_macro(1, false, true, false, [], parsed.tokens)^, false)
+}
+
+fn expl3_key_define(st: State, module, path, property, value) State^ {
+    if (value == null) unsupported(st, "expl3 key property value diagnostic")
+    else if (property == "code:n") expl3_key_code(st, path, value)
+    else if (property == "default:n")
+        assign_meaning(st, "control:key default > " ++ path,
+            if (len(value) == 0) {kind:"undefined"} else expl3.token_list(value), false)
+    else if (property == "tl_set:N" or property == "tl_gset:N") {
+        if (len(value) != 1 or not is_control(value[0])) unsupported(st, "expl3 key token-list target")
+        else {
+            let target = value[0];
+            // l3keys creates an absent target globally before defining the local key.
+            let ready = if (latex_definable(meaning(st, target)^))
+                assign_meaning(st, key(target), expl3.token_list([]), true)^ else st;
+            let setter = control_token(if (property == "tl_set:N") "tl_set:Nn" else "tl_gset:Nn");
+            let body = [setter, target, brace_token(true), parameter_token(0), brace_token(false)];
+            assign_meaning(ready, "control:key code > " ++ path,
+                latex_macro(1, false, true, false, [], body)^, false)
+        }
+    }
+    else if (property == "meta:n") expl3_key_code(st, path,
+        [control_token("keys_set:nn"), brace_token(true), *text_tokens(module)^, brace_token(false),
+            brace_token(true), *value, brace_token(false)])
+    else if (property == "initial:n") {
+        let code = st.definitions["control:key code > " ++ path];
+        if (code == null or code.kind == "undefined") st
+        else {
+            let contextual = expl3_keys_context(st, path, value)^;
+            {*:contextual, input:stream.push(contextual.input,
+                [control_token("key code > " ++ path), brace_token(true), *value, brace_token(false)])}
+        }
+    }
+    else unsupported(st, "expl3 key property " ++ property)
+}
+
+fn expl3_keys_next(st: State) State^ {
+    let frames = st.expl3_key_frames;
+    if (not (frames is array) or len(frames) == 0) fail(st, "expl3-key-frame")
+    else if (parameter_value(st, "globaldefs") != 0 or st.after_assignment != null)
+        unsupported(st, "expl3 key assignment prefixes")
+    else {
+        let tail = len(frames) - 1;
+        let frame = frames[tail];
+        if (frame.index >= len(frame.entries))
+            expl3_keys_scratch({*:st, expl3_key_frames:slice(frames, 0, tail)^}, frame.saved)
+        else {
+            let entry = frame.entries[frame.index];
+            let advanced = {*:st, expl3_key_frames:[*slice(frames, 0, tail)^, {*:frame, index:frame.index + 1}],
+                input:stream.push(st.input, [expl3_keys_next_token()])};
+            if (any([for (token in entry.key) token.kind != "char" or token.cat == 1 or token.cat == 2]))
+                unsupported(advanced, "expl3 key name tokens")
+            else {
+                let key_text = token_text(st, entry.key)^;
+                let pieces = if (frame.defining) split(key_text, ".")^ else [];
+                let named = if (frame.defining and len(pieces) > 1)
+                    join(slice(pieces, 0, len(pieces) - 1)^, ".")^ else key_text;
+                let key = expl3_key_path(named)^;
+                let path = if (frame.module == "") key else frame.module ++ "/" ++ key;
+                if (frame.defining and len(pieces) < 2) unsupported(advanced, "expl3 key property diagnostic")
+                else if (key == "") unsupported(advanced, "expl3 key name diagnostic")
+                else if (frame.defining)
+                    expl3_key_define(advanced, frame.module, path, trim(pieces[len(pieces) - 1])^, entry.value)
+                else {
+                    let code = advanced.definitions["control:key code > " ++ path];
+                    let fallback = advanced.definitions["control:key default > " ++ path];
+                    let value = if (entry.value != null) entry.value
+                        else if (fallback != null and fallback.kind == "macro") fallback.body else [];
+                    if (code == null or code.kind == "undefined") unsupported(advanced, "expl3 unknown key diagnostic")
+                    else {
+                        let contextual = expl3_keys_context(advanced, path, value)^;
+                        {*:contextual, input:stream.push(contextual.input,
+                            [control_token("key code > " ++ path), brace_token(true), *value, brace_token(false)])}
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn expl3_tl_assign(st: State, name, budget) State^ {
     let target = nonspace(st.input)^;
     let current = {*:st, input: target.stream};
@@ -6065,6 +6202,7 @@ fn step(st: State, budget) State^ {
     if (t == null) if (len(st.conditions) > 0) finish_conditionals(current,len(st.conditions) - 1) else {*:current, finished: true}
     else if ((charcat(t, 10) or (is_control(t) and t.value == "par")) and direct_package_token(st, t)) current
     else if (t.kind == "expl3-sort-end") {*:current, expl_sort_done: true}
+    else if (t.kind == "expl3-keys-next") expl3_keys_next(current)
     else if (t.kind == "counter-value-end") current
     else if (t.kind == "env-close") end_group(current, null, true, true)
     else if (t.kind == "package-load") start_package(current, t, budget)
@@ -6157,6 +6295,8 @@ fn step(st: State, budget) State^ {
         after_assignment(current, expl3_cs_define(current, cmd, budget))
     else if (st.script_expl3 and expl3.cs_variant(cmd))
         after_assignment(current, expl3_cs_generate_variant(current))
+    else if (st.script_expl3 and expl3.keys_action(cmd))
+        expl3_keys_begin(current, cmd)
     else if (st.script_expl3 and expl3.ior_action(cmd))
         after_assignment(current, expl3_ior_action(current, cmd, budget))
     else if (st.script_expl3 and expl3.token_assignment(cmd))
@@ -6353,7 +6493,8 @@ pub fn enable_script_expl3(st: State) State^ {
     // expl3 predefines four empty scratch sequences alongside its token lists.
     let sequences = enable_expl_scratch(global_tl, ["l_tmpa_seq", "l_tmpb_seq", "g_tmpa_seq", "g_tmpb_seq"], expl3_seq_value([])^)^;
     let scratch = enable_expl_scratch(sequences, ["l_tmpa_tl", "l_tmpb_tl", "g_tmpa_tl", "g_tmpb_tl",
-        "l__seq_internal_a_tl", "l__seq_internal_b_tl", "l__exp_internal_tl"], expl3.token_list([]))^;
+        "l__seq_internal_a_tl", "l__seq_internal_b_tl", "l__exp_internal_tl",
+        *KEYS_SCRATCH], expl3.token_list([]))^;
     let support = enable_expl_values(scratch, [
         {name: "tex_let:D", kind: "primitive", value: "let", source_mapping_guard: "tl_eq"},
         {name: "tex_global:D", kind: "primitive", value: "global"},
@@ -6943,7 +7084,7 @@ pub fn resume(st: State, source: string, name: string = "<input>", budget: int =
         let resumed = {*:st, input: next_input, finished: false, output: [], messages: [], terminal_line: "", expansions: 0,
             main_file: id, echo_incomplete: false, prefixed_macro_seen: false, prefix_scan: false,
             mathchardef_emission_seen: false,
-            expl3_tl_head_seen: false, expl3_tl_tail_seen: false, expl3_keyval_seen: false,
+            expl3_tl_head_seen: false, expl3_tl_tail_seen: false, expl3_keyval_seen: false, expl3_keys_seen:false,
             expl3_exp_args_once_seen: false, expl3_exp_args_value_seen: false, expl3_exp_args_f_seen: false,
             sources: [*st.sources, {id: id, name: name, origin: origin, data: source}]};
         run(resumed, budget)
