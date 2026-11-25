@@ -21,9 +21,6 @@
 #include "lib/hashmap_typed.hpp"
 #include "lib/thread_pool.h"
 #include "lambda/io/mark_builder.hpp"
-#ifndef LAMBDA_NO_LATEX
-#include "lambda/input/input-tex.hpp"
-#endif
 #include "lambda/core/lambda-decimal.hpp"
 #include "lambda-error.h"
 #include "lambda-stack.h"
@@ -387,12 +384,6 @@ extern "C" void lambda_compiler_timing_get(LambdaCompilerTiming* out) {
 // directory of the same name on macOS/Linux.
 void lambda_home_init(void) {
     host_paths_init_from_env();
-#ifndef LAMBDA_NO_LATEX
-    // bundled TeX resources follow the document package namespace (D9.3.4, D10.2.2).
-    char* tex_dir = host_path_join(HOST_PATH_HOME, "package/doc/latex/tex");
-    tex::set_resource_dir(tex_dir);
-    if (tex_dir) mem_free(tex_dir);
-#endif
 }
 
 

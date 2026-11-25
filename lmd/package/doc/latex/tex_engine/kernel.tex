@@ -127,6 +127,20 @@
 \let\@latex@info\@gobble
 \let\MessageBreak\space
 \let\protect\relax \let\@typeset@protect\relax
+% text commands select their encoding-specific definition or the default fallback
+\def\encodingdefault{OT1}\let\cf@encoding\encodingdefault
+\def\@inmathwarn#1{\ifmmode\@latex@warning{Command \protect#1 invalid in math mode}\fi}
+\def\TextSymbolUnavailable#1{\@latex@error{Command \protect#1 unavailable in encoding \cf@encoding}\@eha}
+\def\@current@cmd#1{\ifx\protect\@typeset@protect\@inmathwarn#1\else
+  \noexpand#1\expandafter\@gobble\fi}
+\def\@changed@cmd#1#2{\ifx\protect\@typeset@protect
+  \@inmathwarn#1\expandafter\ifx\csname\cf@encoding\string#1\endcsname\relax
+    \expandafter\ifx\csname ?\string#1\endcsname\relax
+      \expandafter\def\csname ?\string#1\endcsname{\TextSymbolUnavailable#1}\fi
+    \global\expandafter\let\csname\cf@encoding\string#1\expandafter\endcsname
+      \csname ?\string#1\endcsname\fi
+  \csname\cf@encoding\string#1\expandafter\endcsname
+  \else\noexpand#1\fi}
 \def\@unexpandable@protect{\noexpand\protect\noexpand}
 \def\protected@edef{\let\@@protect\protect\let\protect\@unexpandable@protect
   \afterassignment\restore@protect\edef}

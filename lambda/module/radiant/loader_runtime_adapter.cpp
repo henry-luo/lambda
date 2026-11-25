@@ -386,11 +386,12 @@ static bool loader_render_embedded(UiContext* host, Input* input,
             continue;
         }
         RuntimeExecutionScope execution_scope(render_context);
-        RootFrame roots(4);
+        RootFrame roots(5);
         Rooted<Item> options(roots, ItemNull);
         Rooted<Item> option_name(roots, (Item){.item = s2it(heap_strcpy("display", 7))});
         Rooted<Item> argument(roots, ItemNull);
         Rooted<Item> rendered(roots, ItemNull);
+        Rooted<Item> math_format(roots, (Item){.item = s2it(heap_strcpy("math", 4))});
         for (int64_t i = 0; i < nodes->length; i++) {
             Element* node = nodes->items[i].element;
             bool display = false;
@@ -398,7 +399,15 @@ static bool loader_render_embedded(UiContext* host, Input* input,
             if (kind == 0) {
                 ConstItem ast = node->get_attr("ast");
                 argument.set(*(Item*)&ast);
+                if (get_type_id(argument.get()) == LMD_TYPE_NULL && node->length) {
+                    // The markup reader retains TeX bytes; only the runtime owns its parser.
+                    argument.set(fn_parse2(node->items[0], math_format.get()));
+                }
                 if (get_type_id(argument.get()) == LMD_TYPE_NULL) continue;
+                if (item_is_error(argument.get())) {
+                    log_error("[Lambda Markdown] Embedded math parsing failed; retaining source");
+                    continue;
+                }
                 String* type = node->get_attr("type").string();
                 display = type && strcmp(type->chars, "block") == 0;
                 options.set(vmap_new());

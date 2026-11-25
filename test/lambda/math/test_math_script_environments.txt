@@ -1,0 +1,27 @@
+[<math
+    <environment name: "matrix", body: <env_body
+        "a"
+        'col_sep'
+        "b"
+        'row_sep'
+        "c"
+        'col_sep'
+        "d">>>, <math
+    <environment name: "pmatrix*", alignment: "r", body: <env_body
+        "a"
+        'col_sep'
+        "b">>>, <math
+    <environment name: "alignedat", pairs: "2", body: <env_body
+        "a"
+        'col_sep'
+        <relation value: "=">
+        "b">>>, <math
+    <environment name: "array", columns: "lr", body: <env_body
+        "a"
+        'col_sep'
+        "b">>>, <math
+    <ignored_begin name: "unknown">
+    "x"
+    <malformed_end>
+    <group
+      ["u", "n", "k", "n", "o", "w", "n"]>>]

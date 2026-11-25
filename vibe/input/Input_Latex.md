@@ -5,9 +5,11 @@
 On 2026-11-25 the user directed retirement before fixing remaining Script test
 failures. D10.2.2v2 assigns TeX and LaTeX parsing to the Lambda Script engine
 in the runtime; native clients migrate to the runtime document parser, and Input
-does not import the runtime (D9.1.3v2). The migration remains incomplete:
-standalone Input dispatch, embedded math, resource acquisition, and the native
-engine build and tests still require migration.
+does not import the runtime (D9.1.3v2). Runtime and CLI document input, TeX
+math and embedded Markdown math now use Script. Standalone Input reports that
+a runtime host is required, while native AsciiMath remains available. The C
+TeX engine and native LaTeX document digester are removed; Script parity,
+lazy native clients and full test qualification remain incomplete.
 
 Runtime `input()` and `parse()` now use Input's existing format detection
 to hand detected TeX or LaTeX source back to the runtime for Script parsing.
@@ -16,7 +18,7 @@ call or import the runtime (S1.8, D9.1.3v2, D10.2.2v2). Explicit archive member
 parses use the same handoff without external resource grants (S12.4.1v2,
 D11.1.2). HTTP URL and representable HTTP Path inputs also use the deferred
 handoff after [LI-120](<../Lib_Input_Issue_Ledger (fixed).md#li-120>);
-standalone and lazy member-content entry points still need migration
+the native CLI now uses that handoff; lazy member-content clients still need migration
 (S2.4.2v6, S2.4.3v4).
 
 The Lambda-owned [script TeX engine implementation plan](../impl/Lambda_Impl_Latex_Script_Engine.md) tracks package-specific progress and issues. General Lambda language and runtime issues remain in the Lambda issue ledger.

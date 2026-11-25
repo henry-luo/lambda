@@ -16,6 +16,27 @@
 > Semantic and design rulings remain cited by S# / D#; where no formal ruling
 > covers a point, the original vibe ledger ID is retained.
 
+<a id="lr09-36"></a>
+## LR09-36 — Generic string concatenation changed an existing operand
+
+**Fixed 2026-11-25.** A generic `fn_join` converted operands to strings and
+called the ownership-consuming append helper before clearing the result's
+buffer flag. If the first operand was a previously published buffer, the
+append mutated it. A Script-parsed math command named `sum` became `sum∑`
+after rendering on JIT, while the interpreter retained `sum`; the changed
+name also broke large-operator layout. The operands must retain their values
+under **S10.6.1v3** and **S9.1.2**.
+
+Generic concatenation now uses the shared copy-join with ownership disabled;
+the separately proven MIR owner path remains available. A native unit test
+checks an existing buffer and the resulting concatenation, and
+`test/lambda/math/test_math_script_string_ownership.ls` passes in both tiers.
+The JIT regression previously returned `[false, false, false, true]`; after
+the fix it returns four true values. The AMS environment golden that exposed the
+corruption also passes. Evidence: `temp/latex-retirement/ownership-before-jit.out`,
+`temp/latex-retirement/ownership-after-jit.out` and
+`temp/latex-retirement/string-native-test.log`.
+
 <a id="interpreter-task-drain-stalls-a-returned-shell-pipeline"></a>
 ## Interpreter task drain stalls a returned shell pipeline
 

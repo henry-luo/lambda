@@ -717,7 +717,9 @@ fn math_generic_arguments(tokens, index, items = []) any^ {
     }
     else if (tokens[at].kind == "char" and tokens[at].value == "[") {
         let arg = read_generic_delimited(tokens, at, "[", "]", "latex-digest-unclosed-optional")^;
-        if (arg.issue != null) arg
+        // An unmatched bracket remains punctuation after the command.
+        if (arg.issue == "latex-digest-unclosed-optional") {issue:null, index:at, items:items}
+        else if (arg.issue != null) arg
         else {
             let content = math_atoms(arg.tokens)^;
             if (content.issue != null) content
@@ -741,6 +743,61 @@ fn math_escaped_run(tokens, index, previous, text) any^ {
     }
 }
 
+// Both document and standalone math recognize these environment names.
+fn common_math_environment(name) => contains(["array", "alignat", "alignat*", "aligned",
+    "gather", "gather*", "split", "IEEEeqnarray", "cases", "cases*", "matrix", "matrix*",
+    "pmatrix", "pmatrix*", "bmatrix", "bmatrix*", "vmatrix", "vmatrix*", "Vmatrix", "Vmatrix*",
+    "smallmatrix"], name)
+fn standalone_math_environment(name) => common_math_environment(name) or contains([
+    "Bmatrix", "Bmatrix*", "rcases", "dcases", "alignedat", "align", "align*", "gathered",
+    "equation", "equation*", "subarray", "CD", "psmallmatrix", "psmallmatrix*",
+    "bsmallmatrix", "bsmallmatrix*", "Bsmallmatrix", "Bsmallmatrix*", "vsmallmatrix", "vsmallmatrix*",
+    "Vsmallmatrix", "Vsmallmatrix*", "drcases", "dcases*", "rcases*", "drcases*",
+    "multlined", "lgathered", "rgathered"], name)
+
+// Environment bodies reuse math_atoms so nested groups and scripts keep their AST shapes.
+fn math_environment(tokens, index) any^ {
+    let at = math_nonspace(tokens, index + 1)^;
+    if (at >= len(tokens) or not opening(tokens[at])) {issue:null, index:at, value:null}
+    else {
+        let name_group = read_group(tokens, at)^;
+        if (name_group.issue != null or not plain_group(name_group)) unsupported(at, "math environment name")
+        else {
+            let env = group_text(name_group);
+            if (not standalone_math_environment(env))
+                {issue:null, index:name_group.end, value:<ignored_begin name:env>}
+            else {
+                let header_at = math_nonspace(tokens, name_group.end)^;
+                let pairs = contains(["alignedat", "alignat", "alignat*"], env);
+                let columns = contains(["array", "subarray"], env);
+                let aligned = (ends_with(env, "*") or false) and (contains(env, "matrix") or false);
+                let arg = if ((pairs or columns) and header_at < len(tokens) and opening(tokens[header_at]))
+                    read_group(tokens, header_at)^ else null;
+                let opt = if (aligned and arg == null) read_optional(tokens, header_at)^ else null;
+                if ((arg != null and arg.issue != null) or (opt != null and opt.issue != null))
+                    unsupported(header_at, "math environment header")
+                else {
+                    let begin = if (arg != null) arg.end else if (opt != null and opt.present) opt.end else header_at;
+                    let finish = math_environment_end(tokens, begin, env, 0, false)^;
+                    if (finish.issue != null) finish
+                    else {
+                        let body = math_atoms(slice(tokens, begin, finish.index))^;
+                        if (body.issue != null) body
+                        else {
+                            let attrs = if (arg != null and pairs) {pairs:group_text(arg)}
+                                else if (arg != null and columns) {columns:group_text(arg)}
+                                else if (opt != null and opt.present) {alignment:group_text(opt)}
+                                else {};
+                            {issue:null, index:finish.end,
+                                value:<environment name:env, *:attrs, body:<env_body *math_content(body.items)^>>}
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn math_command(tokens, index) any^ {
     let name = tokens[index].value;
     if (contains(["{", "}", "[", "]", "(", ")", "$", "%", "#", "&", "_"], name)) {
@@ -753,6 +810,12 @@ fn math_command(tokens, index) any^ {
     }
     else if (name == "\\" or name == "cr")
         {issue: null, index: index + 1, value: 'row_sep'}
+    else if (contains([",", ":", ";", "!", "quad", "qquad"], name))
+        {issue: null, index: index + 1, value: <space_command value:"\\" ++ name>}
+    else if (name == "limits" or name == "nolimits")
+        {issue: null, index: index + 1, value: symbol(name)}
+    else if (name == "begin") math_environment(tokens, index)
+    else if (name == "end") {issue:null, index:index + 1, value:<malformed_end>}
     // stackrel uses the same native AST command as overset.
     else if (contains(["overset", "underset", "stackrel"], name)) {
         let args = math_arguments(tokens, index + 1, 2)^;
@@ -912,10 +975,25 @@ fn math_script_arg(tokens, index) any^ {
     else unsupported(at, "math script argument")
 }
 
-fn math_scripts(tokens, index, base, sub = null, sup = null) any^ {
+// Consecutive primes form one superscript group before a following ^ argument.
+fn math_primes(tokens, index, items = []) any^ {
+    if (index >= len(tokens) or tokens[index].kind != "char" or tokens[index].value != "'" or
+        (len(items) > 0 and not math_adjacent(tokens[index - 1], tokens[index])))
+        {index:index, items:items}
+    else math_primes(tokens, index + 1, [*items, <symbol_command name:"prime">])
+}
+
+fn math_scripts(tokens, index, base, sub = null, sup = null, modifier = null) any^ {
     let at = math_nonspace(tokens, index)^;
     let token = if (at < len(tokens)) tokens[at] else null;
-    if (token != null and token.kind == "char" and (token.cat == 7 or token.cat == 8)) {
+    if (token != null and token.kind == "control" and contains(["limits", "nolimits"], token.value))
+        math_scripts(tokens, at + 1, base, sub, sup, token.value)
+    else if (token != null and token.kind == "char" and token.value == "'") {
+        let primes = math_primes(tokens, at)^;
+        let upper = <group *(if (sup == null) primes.items else [sup, *primes.items])>;
+        math_scripts(tokens, primes.index, base, sub, upper, modifier)
+    }
+    else if (token != null and token.kind == "char" and (token.cat == 7 or token.cat == 8)) {
         let superscript = token.cat == 7;
         let arg = math_script_arg(tokens, at + 1)^;
         if (arg.issue != null) arg
@@ -923,13 +1001,14 @@ fn math_scripts(tokens, index, base, sub = null, sup = null) any^ {
             // native accumulates superscripts and replaces an earlier subscript.
             let upper = if (superscript and sup != null) <group *[sup, arg.value]> else arg.value;
             math_scripts(tokens, arg.index, base, if (superscript) sub else arg.value,
-                if (superscript) upper else sup)
+                if (superscript) upper else sup, modifier)
         }
     }
     else {
-        let value = if (sub != null and sup != null) <subsup base: base, sub: sub, sup: sup>
-            else if (sub != null) <subsup base: base, sub: sub>
-            else if (sup != null) <subsup base: base, sup: sup> else base;
+        let extra = if (modifier == null) {} else {modifier:modifier};
+        let value = if (sub != null and sup != null) <subsup base: base, sub: sub, sup: sup, *:extra>
+            else if (sub != null) <subsup base: base, sub: sub, *:extra>
+            else if (sup != null) <subsup base: base, sup: sup, *:extra> else base;
         {issue: null, index: at, value: value}
     }
 }
@@ -991,8 +1070,8 @@ fn math_atoms(tokens, index = 0, items = []) any^ {
                 if (scripted.issue != null) scripted else math_atoms(tokens, scripted.index, [*items, scripted.value])
             }
         }
-        else if (token.kind == "char" and contains(["&", "(", ")", "[", "]", ",", ":", "|", ";",
-                "+", "-", "*", "/", "<", ">", "=", "^", "_"], token.value)) {
+        // Remaining ASCII characters have the native punctuation shape.
+        else if (token.kind == "char" and len(token.value) == 1 and ord(token.value) < 128) {
             let atom = math_punctuation(tokens,index)^;
             if (atom.issue != null) atom else {
                 let scripted = math_scripts(tokens,atom.index,atom.value)^;
@@ -2760,14 +2839,11 @@ fn environment_offset(token) any^ => if (token.read_offset == null) token.start
     else token.read_offset
 
 // Native digestion assigns special headers, math or raw bodies to these environments.
-fn special_environment(name) any^ => tex_reader.raw_environment_name(name)^ or contains([
-    "array", "longtable", "tabularx", "xltabular", "subfigure", "subtable",
+fn special_environment(name) any^ => tex_reader.raw_environment_name(name)^ or common_math_environment(name) or contains([
+    "longtable", "tabularx", "xltabular", "subfigure", "subtable",
     "multicols", "multicols*", "tcolorbox", "tabbing",
-    "eqnarray", "eqnarray*", "alignat", "alignat*",
-    "aligned", "aligned*", "gather", "gather*", "multline", "multline*", "split", "split*",
-    "IEEEeqnarray", "IEEEeqnarray*", "cases", "cases*", "array*", "matrix", "matrix*",
-    "pmatrix", "pmatrix*", "bmatrix", "bmatrix*", "vmatrix", "vmatrix*", "Vmatrix", "Vmatrix*",
-    "smallmatrix", "smallmatrix*"], name)
+    "eqnarray", "eqnarray*", "aligned*", "multline", "multline*", "split*",
+    "IEEEeqnarray*", "array*", "smallmatrix*"], name)
 
 fn heading(name, attrs) => <[name] *:attrs>
 
@@ -2940,20 +3016,20 @@ fn list_header(tokens, sources, arg) any^ {
 }
 
 // math environment delimiters can nest without closing the outer environment.
-fn math_environment_end(tokens, index, name, depth = 0) any^ {
+fn math_environment_end(tokens, index, name, depth = 0, strict = true) any^ {
     if (index >= len(tokens)) unsupported(index, "unclosed math environment")
     else if (control(tokens[index], "begin") or control(tokens[index], "end")) {
         let group = read_group(tokens, index + 1)^;
         if (group.issue != null or not plain_group(group)) unsupported(index, "math environment delimiter")
-        else if (tokens[index].direct != true or group.direct != true or tokens[index].file != group.file or
-            tokens[index].end != group.start_offset)
+        else if (strict and (tokens[index].direct != true or group.direct != true or tokens[index].file != group.file or
+            tokens[index].end != group.start_offset))
             unsupported(index, "math environment delimiter source mapping")
-        else if (control(tokens[index], "begin")) math_environment_end(tokens, group.end, name, depth + 1)
-        else if (depth > 0) math_environment_end(tokens, group.end, name, depth - 1)
+        else if (control(tokens[index], "begin")) math_environment_end(tokens, group.end, name, depth + 1, strict)
+        else if (depth > 0) math_environment_end(tokens, group.end, name, depth - 1, strict)
         else if (group_text(group) == name) {issue: null, index: index, end: group.end}
         else unsupported(index, "math environment end")
     }
-    else math_environment_end(tokens, index + 1, name, depth)
+    else math_environment_end(tokens, index + 1, name, depth, strict)
 }
 fn ascii_space(value) => contains([9, 10, 11, 12, 13, 32], value)
 fn math_trim_begin(bytes, at = 0) any^ =>
@@ -3147,6 +3223,23 @@ fn trailing_event_nodes(events, index = 0, text = "", started = false, nodes = [
     }
 }
 fn trailing_nodes(text) any^ => trailing_event_nodes(paragraph_events(text)^)
+
+// Reconstruct emitted positions before parsing standalone math: macro output
+// can join tokens from different source spans into one native math atom.
+pub fn math(expanded: map) Digested^ {
+    let built = rebuild.reconstruct(expanded, true)^;
+    if (built.issue != null) {ast:null, issue:built.issue}
+    else {
+        let tokens = mark_output_tokens(expanded.output, built, expanded.constructor_argument_mode)^;
+        let atoms = math_atoms(tokens)^;
+        if (atoms.issue != null) {ast:null, issue:atoms.issue, unsupported:atoms.unsupported}
+        else {
+            let content = math_content(atoms.items)^;
+            let diagnostic = if (len(expanded.diagnostic_records) > 0) expanded.diagnostic_records[0].message else null;
+            {ast:if (diagnostic == null) <math *content> else <math error:diagnostic, *content>, issue:null}
+        }
+    }
+}
 
 pub fn digest(expanded: map) Digested^ {
     if (expanded.issue != null) {ast: null, issue: expanded.issue, unsupported: expanded.unsupported}

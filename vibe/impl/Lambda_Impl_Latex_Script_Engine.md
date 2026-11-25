@@ -1,7 +1,7 @@
 # Lambda Script TeX and LaTeX engine implementation plan
 
-**Status:** In progress; the Script engine serves explicit TeX and LaTeX
-runtime input, while native parsing remains in other entry points. The records
+**Status:** In progress; production TeX and LaTeX input routes through Script,
+and the native TeX engine source and direct tests have been retired. The records
 below include historical observations and test results as of their dates; they
 do not imply full TeX compatibility.
 
@@ -34,7 +34,35 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
-- **Next work:** The baseline from the HTTP Path checkpoint did not finish:
+- **Production retirement and remaining parity, 2026-11-25:** The Input archive
+  excludes the C TeX engine and the executable contains no native TeX engine
+  symbols. Runtime and native CLI document inputs use the Script facade;
+  standalone Input reports that it needs a runtime host. Standalone TeX math
+  and Radiant's embedded Markdown math now use Script; native AsciiMath remains
+  available (D10.2.2v2, D9.1.3v2, S1.8). The C TeX engine source and its
+  direct test executable have been removed. Six native document tests were transferred to
+  `test_latex_retired_native_documents.ls`, which passes all eight checks.
+  Encoding dispatch, macro, environment and expl3 regressions were also
+  transferred; the expl3 cases pass after implementing undefined-control case
+  conversion, token expandability and unexpanded string equality. Existing
+  comparisons that call `parse` now compare Script with itself, so they cannot
+  establish native parity. Preserve independent expected results when migrating
+  them. `test_math_extended_constructs` still reports two equation-reference
+  failures because digestion rejects `\\tag`. The rich-text suite also exposes
+  unsupported `\\text`, `\\textsf`, `\\verb` and `\\raisebox`; its first
+  propagated error alone does not enumerate every missing construct. The migrated custom-format test
+  `test_tex_retired_engine_format.ls` currently returns `[true, false]`: the
+  automatic restart works but Script does not load the supplied `expl3.ltx`.
+  Full corpus parity and native-client qualification remain open.
+  The resource broker grants shipped metadata and reads without enumeration;
+  the resource root now uses metadata, while every resource read still requires
+  authorization (D11.1.2). The eight scoped local-package, include, captured
+  member and revoked-authority cases pass across both tiers; all five HTTP
+  handoff cases and all five standalone Input math/scanner cases also pass.
+  The earlier Lambda baseline did not complete because
+  an aborting test child hung in `pthread_kill`; it is not a passing baseline.
+
+- **Earlier HTTP Path checkpoint:** The baseline did not finish:
   `ValueRepresentationTest.UnsupportedDirectTransitionFailsClosed` timed out
   at 180 seconds and also hung in an isolated rerun. Both aborting children
   remained in macOS uninterruptible exit state, leaving the runner's pipe open;
@@ -45,10 +73,10 @@ The existing native engine design and historical Phase IV work are in
   `test_output/test_lambda_errors_gtest.log`. The Script handoff now reserves
   all eight root slots, including its captured kernel; the local Path include
   regression passes in both tiers with forced GC and freed-memory poisoning
-  (D5.2.1). Standalone math still uses Input's native
+  (D5.2.1). At that checkpoint standalone math still used Input's native
   direct parser; `digest.ls` already owns the corresponding Script math atom
-  parser. Expose and qualify that parser for a runtime math entry point before
-  migrating embedded markup math and removing the native engines (D10.2.2v2,
+  parser. The subsequent work exposed that parser for a runtime math entry point
+  and migrated embedded markup math (D10.2.2v2,
   D9.1.3v2). A scratch probe using the shared reader and atom parser matched
   the native AST for nine of eleven simple formulas, including scripts,
   fractions, radicals, Unicode, and delimiters. It reported unsupported for

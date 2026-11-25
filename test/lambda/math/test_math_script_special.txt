@@ -1,0 +1,21 @@
+[<math
+    "a"
+    <space_command value: "\\,">
+    "b"
+    <space_command value: "\\:">
+    "c"
+    <space_command value: "\\;">
+    "d"
+    <space_command value: "\\!">
+    "e">, <math
+    <subsup base: <mathop body: <group
+          "x">>, sup: "2", modifier: "limits">>, <math
+    <mathop body: <group
+        "x">>>, <math
+    <subsup base: "f", sup: <group
+        <group
+          <symbol_command name: "prime">
+          <symbol_command name: "prime">
+          <symbol_command name: "prime">>
+        "2">>>, <math
+    'limits'>]

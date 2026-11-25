@@ -5,6 +5,7 @@ from functools import partial
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 import os
+import json
 import subprocess
 import sys
 import threading
@@ -94,6 +95,40 @@ class TexHttpHandoffTest(unittest.TestCase):
             '{matches:(input(bad_host,"latex") ^ { null }) == null and '
             '(input(bad_key,"latex") ^ { null }) == null}\n')
         self.assertEqual(QuietHandler.requests, [])
+
+    def test_native_cli_uses_script_for_local_and_remote_documents(self):
+        fixture = ROOT / "test/lambda/latex/fixtures/script_public_latex_include.tex"
+        remote = "http://127.0.0.1:%d/script_http_basic.tex" % self.server.server_address[1]
+        env = dict(os.environ, LAMBDA_HOME=str(ROOT / "lmd"),
+            LAMBDA_TEMP_DIR=str(self.work), LAMBDA_CACHE_DIR=str(self.work / "cache"))
+        for name, source in (("local", str(fixture)), ("remote", remote)):
+            for declared in (False, True):
+                with self.subTest(source=name, explicit=declared):
+                    case = name + ("-explicit" if declared else "-auto")
+                    output = self.work / ("cli-" + case + ".json")
+                    command = [str(ROOT / "lambda.exe"), "convert", source]
+                    if declared:
+                        command += ["-f", "latex"]
+                    command += ["-t", "json", "-o", str(output)]
+                    result = subprocess.run(command, cwd=ROOT,
+                        env=env, capture_output=True, timeout=120)
+                    self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace")[-2000:])
+                    self.run_script("cli-compare-" + case,
+                        'let document=input(%s,"latex")^;\n' % json.dumps(source) +
+                        'let expected=parse(format(document,"json")^,"json")^;\n'
+                        'let actual=input(%s,"json")^;\n' % json.dumps(str(output)) +
+                        '{matches:actual==expected}\n')
+
+    def test_native_cli_reports_script_parser_failure(self):
+        fixture = ROOT / "test/lambda/latex/fixtures/script_auto_unsupported.tex"
+        output = self.work / "unsupported.json"
+        env = dict(os.environ, LAMBDA_HOME=str(ROOT / "lmd"),
+            LAMBDA_TEMP_DIR=str(self.work), LAMBDA_CACHE_DIR=str(self.work / "cache"))
+        result = subprocess.run([str(ROOT / "lambda.exe"), "convert", str(fixture),
+            "-f", "latex", "-t", "json", "-o", str(output)], cwd=ROOT,
+            env=env, capture_output=True, timeout=120)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(output.exists())
 
 
 if __name__ == "__main__":

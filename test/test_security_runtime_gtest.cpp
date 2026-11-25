@@ -10,7 +10,6 @@
 #include "../lambda/runtime/lambda-error.h"
 #include "../lambda/runtime/lambda-root-frame.hpp"
 #include "lambda/input/input.hpp"
-#include "lambda/input/input-tex.hpp"
 #include "lambda/io/fs_node.hpp"
 #include "lambda/core/mark_reader.hpp"
 #include "../lambda/host/safety/file_broker.h"
@@ -632,17 +631,16 @@ TEST_P(SecurityRuntimeTest, CapturedMemberParsingCannotRetainExternalResourceAut
     const char* source = "\\RequirePackage{safety-private}\\privatevalue\\input{secret}\\end";
     seed("safety-private.sty", "\\def\\privatevalue{EXTERNAL}");
     seed("secret.tex", "FORBIDDEN");
-    struct ResourceDirectoryScope {
-        explicit ResourceDirectoryScope(const char* path) { tex::set_resource_dir(path); }
-        ~ResourceDirectoryScope() { lambda_home_init(); }
-    } resources(directory);
+    ASSERT_NE(admit_shipped_packages(), 0U);
+    seed("control.ls", "let opts={type:'tex', base:\"@ROOT@\", resources:{bundled:"
+        "{'safety-private.sty':{data:\"\\\\def\\\\privatevalue{EXTERNAL}\"}}}}\n"
+        "let text=parse(\"\\\\RequirePackage{safety-private}\\\\privatevalue\\\\input{secret}\\\\end\", opts)^.text\n"
+        "contains(text, \"EXTERNAL\")^ and contains(text, \"FORBIDDEN\")^\n");
+    Input* control = load_file("control.ls"); ASSERT_NE(control, nullptr);
+    ASSERT_EQ(get_type_id(control->root), LMD_TYPE_BOOL); ASSERT_TRUE(control->root.bool_val);
     Input* owner = InputManager::create_input(nullptr); ASSERT_NE(owner, nullptr);
     MarkBuilder builder(owner);
     String* type = builder.createString("tex");
-    Input* control = input_from_source_n(source, strlen(source), url_parse("doc.tex"), type, nullptr);
-    ASSERT_NE(control, nullptr);
-    String* text = MapReader::fromItem(control->root).get("text").asString();
-    ASSERT_NE(text, nullptr); ASSERT_NE(strstr(text->chars, "EXTERNAL"), nullptr);
 
     ZipOutputEntry entry = {"doc.tex", (const uint8_t*)source, strlen(source), 0100644, 0, false};
     ArrayList* entries = arraylist_new(1); arraylist_append(entries, &entry);
@@ -663,11 +661,11 @@ TEST_P(SecurityRuntimeTest, CapturedMemberParsingCannotRetainExternalResourceAut
         Item report = fs_node_input(node, type, nullptr);
         EXPECT_EQ(get_type_id(report), LMD_TYPE_ERROR);
     }
-    ASSERT_NE(admit_shipped_packages(), 0U);
     seed("member.ls", "let archive=input(\"@ROOT@/member.zip\")^\n"
         "let member=content(archive)^[0]\n"
         "let first=input(member, 'tex')^\n"
-        "let second=parse(member, {type:'tex', base:\"@ROOT@\"})^\n"
+        "let second=parse(member, {type:'tex', base:\"@ROOT@\", resources:{bundled:"
+        "{'safety-private.sty':{data:\"\\\\def\\\\privatevalue{EXTERNAL}\"}}}})^\n"
         "first == second and not contains(first.text, \"EXTERNAL\")^ and "
         "not contains(first.text, \"FORBIDDEN\")^\n");
     Input* result = load_file("member.ls"); ASSERT_NE(result, nullptr);
@@ -699,6 +697,17 @@ TEST_P(SecurityRuntimeTest, TexLocalIncludesUseTheSameDataGrant) {
     EXPECT_GE(atomic_load32(&capture.denied_reads), 1);
 }
 
+TEST_P(SecurityRuntimeTest, TexLocalPackagesUseTheSameDataGrant) {
+    ASSERT_NE(admit_shipped_packages(), 0U);
+    seed("local-only.sty", "\\def\\localvalue{EXTERNAL}");
+    seed("entry.ls", "contains(parse(\"\\\\RequirePackage{local-only}\\\\localvalue\\\\end\", "
+        "{type:'tex', base:\"@ROOT@\"})^.text, \"EXTERNAL\")^\n");
+    Input* result = load_file(); ASSERT_NE(result, nullptr);
+    ASSERT_EQ(get_type_id(result->root), LMD_TYPE_BOOL) <<
+        (runtime_get_eval_context(&runtime)->last_error ? runtime_get_eval_context(&runtime)->last_error->message : "no runtime diagnostic");
+    EXPECT_TRUE(result->root.bool_val);
+}
+
 TEST_P(SecurityRuntimeTest, StructurizrIncludesRetainTheirNarrowerDocumentRoot) {
     // Script parser dependencies use the same read-only shipped grant as other packages (D11.2.1).
     lambda_home_init();
@@ -723,24 +732,15 @@ TEST_P(SecurityRuntimeTest, StructurizrIncludesRetainTheirNarrowerDocumentRoot) 
     EXPECT_GT(atomic_load32(&capture.source_reads), 1);
 }
 
-TEST_P(SecurityRuntimeTest, AmbientExplThreeFormatIsNotAnAuthorityCache) {
-    lambda_home_init();
-    const char* source = "\\ExplSyntaxOn\\int_eval:n{2+3}\\ExplSyntaxOff";
-    tex::EngineOptions options = {};
-    options.expl3 = true;
-    tex::Engine* trusted = tex::engine_create(&options); ASSERT_NE(trusted, nullptr);
-    tex::Result result = {};
-    ASSERT_TRUE(tex::engine_run(trusted, source, strlen(source), &result));
-    EXPECT_EQ(result.diagnostic_count, 0U);
-    EXPECT_NE(strstr(result.text, "5"), nullptr);
-    tex::engine_destroy(trusted);
-    options.io = eval_context_security_io(runtime_get_eval_context(&runtime));
-    tex::Engine* scoped = tex::engine_create(&options); ASSERT_NE(scoped, nullptr);
+TEST_P(SecurityRuntimeTest, TexKernelCannotBypassRevokedReadAuthority) {
+    ASSERT_NE(admit_shipped_packages(), 0U);
+    seed("entry.ls", "contains(parse(\"\\\\ExplSyntaxOn\\\\int_eval:n{2+3}\\\\ExplSyntaxOff\", 'tex')^.text, \"5\")^\n");
+    Input* trusted = load_file(); ASSERT_NE(trusted, nullptr);
+    ASSERT_EQ(get_type_id(trusted->root), LMD_TYPE_BOOL); ASSERT_TRUE(trusted->root.bool_val);
+    // Reusing the initialized Script package must not reuse an earlier data grant.
+    ASSERT_TRUE(security_file_broker_restrict(broker, SECURITY_LOAD_SOURCE));
+    expect_failed(load_file());
     EXPECT_GE(atomic_load32(&capture.denied_reads), 1);
-    tex::engine_run(scoped, source, strlen(source), &result);
-    EXPECT_GT(result.diagnostic_count, 0U);
-    EXPECT_EQ(strstr(result.text, "5"), nullptr);
-    tex::engine_destroy(scoped);
 }
 
 TEST_P(SecurityRuntimeTest, PathMetadataAndExistsHaveIndependentAuthority) {

@@ -16,8 +16,8 @@ fn expand_once(source, configured, budget) any^ {
     else profile.expand(source, configured, budget)
 }
 
-fn expand(source, options, budget) any^ {
-    let configured = {*:expansion.options_map(options), echo_definitions:true, auto_expl3:true};
+fn expand(source, options, budget, echo_definitions = true) any^ {
+    let configured = {*:expansion.options_map(options), echo_definitions:echo_definitions, auto_expl3:true};
     let first = expand_once(source, configured, budget)^;
     if (first.issue == "tex-expl3-restart")
         expand_once(source, {*:configured, script_expl3:true}, budget)
@@ -69,5 +69,20 @@ pub fn latex(source: string, options = null, budget: int = 20000000) any^ {
     else {
         let parsed = digest.digest(expanded)^;
         {root:parsed.ast, issue:parsed.issue, unsupported:parsed.unsupported}
+    }
+}
+
+// Standalone math uses the same expanded token stream and atom digester as documents.
+pub fn math(source: string, options = null, budget: int = 20000000) any^ {
+    if (len(source) == 0) {root:null, issue:null, unsupported:null}
+    else {
+        let configured = {*:expansion.options_map(options), math_mode:true};
+        let expanded = expand(source, configured, budget, false)^;
+        if (expanded.issue != null) failure(expanded.issue, expanded.unsupported, expanded.resource_request)
+        else if (not complete_diagnostics(expanded)^) failure("tex-diagnostic-unsupported")
+        else {
+            let parsed = digest.math(expanded)^;
+            {root:parsed.ast, issue:parsed.issue, unsupported:parsed.unsupported}
+        }
     }
 }

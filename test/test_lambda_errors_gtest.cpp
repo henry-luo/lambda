@@ -81,6 +81,23 @@ TEST(LambdaAstMetadata, MixedResultInferencePreservesThePublicBoxedAbi) {
     pool_destroy(pool);
 }
 
+TEST_F(EvalContextTest, GenericJoinDoesNotMutateAnExistingStringBuffer) {
+    RootFrame roots(4);
+    Rooted<String*> first(roots, heap_strcpy("s", 1));
+    Rooted<String*> second(roots, heap_strcpy("um", 2));
+    Rooted<String*> original(roots, fn_strcat(first.get(), second.get()));
+    ASSERT_NE(original.get(), nullptr);
+    ASSERT_TRUE(original.get()->is_buffer);
+    Rooted<Item> joined(roots, fn_join({.item = s2it(original.get())}, {.item = s2it(first.get())}));
+    ASSERT_EQ(get_type_id(joined.get()), LMD_TYPE_STRING);
+    EXPECT_EQ(original.get()->len, 3u);
+    EXPECT_EQ(memcmp(original.get()->chars, "sum", 3), 0);
+    String* result = joined.get().get_safe_string();
+    ASSERT_NE(result, nullptr);
+    EXPECT_EQ(result->len, 4u);
+    EXPECT_EQ(memcmp(result->chars, "sums", 4), 0);
+}
+
 TEST_F(EvalContextTest, TypeMembershipSkipsReportsAndPreservesValidatorMode) {
     Item value = {.item = i2it(7)};
     TypeBinary choice = {};

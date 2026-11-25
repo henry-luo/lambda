@@ -1,0 +1,1 @@
+[for(s in ["\\begin{matrix}a&b\\\\c&d\\end{matrix}", "\\begin{pmatrix*}[r]a&b\\end{pmatrix*}", "\\begin{alignedat}{2}a&=b\\end{alignedat}", "\\begin{array}{lr}a&b\\end{array}", "\\begin{unknown}x\\end{unknown}"]) parse(s,"math")^]

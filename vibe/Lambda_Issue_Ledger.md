@@ -17,6 +17,10 @@
 > Semantic and design rulings are cited by `S#` / `D#` per CLAUDE.md rule 17;
 > where no formal ruling covers a point, the vibe ledger ID is given.
 
+## LR09-36 — Generic string concatenation changed an existing operand
+
+Fixed and archived. See [the root cause and verification](<Lambda_Issue_Ledger (fixed).md#lr09-36>).
+
 ## Interpreter task drain stalls a returned shell pipeline
 
 Fixed and archived. See the

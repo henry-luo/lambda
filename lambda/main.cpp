@@ -1758,30 +1758,27 @@ int exec_convert(int argc, char* argv[]) {
     // Step 1: Parse the input file using Lambda's input system
     printf("Reading input file: %s\n", input_file);
 
-    // Create absolute URL for the input file
-    char* cwd_path = file_getcwd();
-    if (!cwd_path) {
-        printf("Error: Failed to get current directory\n");
-        mem_pool_destroy(temp_pool);
-        return 1;
-    }
-
-    // Create file URL (percent-encoded, cross-platform) from an absolute path
-    char abs_path[PATH_MAX + 8];
-    if (input_file[0] == '/') {
-        snprintf(abs_path, sizeof(abs_path), "%s", input_file);
+    String* url_string = nullptr;
+    if (is_http_url) {
+        // HTTP sources have already been identified above and must retain their scheme.
+        url_string = create_string(temp_pool, input_file);
     } else {
-        snprintf(abs_path, sizeof(abs_path), "%s/%s", cwd_path, input_file);
+        char* cwd_path = file_getcwd();
+        if (!cwd_path) {
+            printf("Error: Failed to get current directory\n");
+            mem_pool_destroy(temp_pool);
+            return 1;
+        }
+        char abs_path[PATH_MAX + 8];
+        if (input_file[0] == '/') snprintf(abs_path, sizeof(abs_path), "%s", input_file);
+        else snprintf(abs_path, sizeof(abs_path), "%s/%s", cwd_path, input_file);
+        mem_free(cwd_path);
+        char* furl = url_from_local_path(abs_path);
+        if (furl) {
+            url_string = create_string(temp_pool, furl);
+            mem_free(furl);
+        }
     }
-    mem_free(cwd_path);
-
-    char file_url[PATH_MAX + 8];
-    char* furl = url_from_local_path(abs_path);
-    snprintf(file_url, sizeof(file_url), "%s", furl ? furl : "");
-    if (furl) mem_free(furl);
-
-    // Create URL string
-    String* url_string = create_string(temp_pool, file_url);
     if (!url_string) {
         printf("Error: Failed to create URL string\n");
         mem_pool_destroy(temp_pool);

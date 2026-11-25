@@ -216,6 +216,8 @@ static Item input_parse_error_item(const char* function_name, Input* input,
     }
 }
 
+static Item parse_tex_script(Item source, Item options, const char* format, const char* base, bool captured_member = false);
+
 static bool read_script_input(void* owner, Input* input, const char* type,
         const char* flavor, const char* source, size_t length, Item* output) {
     bool fragment = !strcmp(type, "structurizr-fragment");
@@ -303,7 +305,47 @@ Input* lambda_input_from_url(String* url, String* type, String* flavor, Url* cwd
     const InputScriptParser parser = lambda_input_script_parser(&runtime);
     InputParseOptions options = {};
     options.script_parser = &parser;
-    Input* result = input_from_url_with_options(url, type, flavor, cwd, &options);
+    const char* deferred = nullptr;
+    Input* result = input_from_url_with_options_deferred(url, type, flavor, cwd, &options, &deferred);
+    if (result && deferred && !result->parse_failed) {
+        EvalContext* eval = runtime_get_eval_context(&runtime);
+        // Native callers need the same runtime-owned parser as input() and parse().
+        Input* initialized = run_lambda_package_module(&runtime, "lambda.doc.latex.tex_engine.facade");
+        bool ready = initialized && !item_is_error(initialized->root) && eval_context_matches(eval);
+        if (initialized) pool_destroy(initialized->pool);
+        if (!ready) {
+            result->parse_failed = true;
+            result->parse_error_message = pool_strdup(result->pool, "Could not initialize the Script TeX parser");
+        } else {
+            RuntimeExecutionScope execution_scope(eval);
+            RootFrame roots(2);
+            Rooted<Item> source(roots, ItemNull);
+            Rooted<Item> parsed(roots, ItemNull);
+            Item raw = result->root;
+            String* copy = get_type_id(raw) == LMD_TYPE_STRING ? heap_strcpy(raw.get_chars(), raw.get_len()) : nullptr;
+            if (copy) {
+                source.set((Item){.item = s2it(copy)});
+                Url* resolved = (Url*)result->url;
+                char* local = resolved && resolved->scheme == URL_SCHEME_FILE
+                    ? url_to_local_path(resolved) : nullptr;
+                const char* base = local ? local : resolved && resolved->href
+                    ? resolved->href->chars : url->chars;
+                parsed.set(parse_tex_script(source.get(), ItemNull, deferred, base));
+                mem_free(local);
+                if (!item_is_error(parsed.get())) {
+                    MarkBuilder builder(result);
+                    result->root = builder.deep_copy(parsed.get());
+                }
+            }
+            if (!copy || item_is_error(parsed.get()) || item_is_error(result->root)) {
+                result->parse_failed = true;
+                LambdaError* failure = item_is_error(parsed.get()) ? it2err(parsed.get()) : nullptr;
+                result->parse_error_message = pool_strdup(result->pool, failure && failure->message
+                    ? failure->message : "Script TeX parser failed");
+                result->root = ItemError;
+            }
+        }
+    }
     runtime_cleanup(&runtime);
     return result;
 }
@@ -652,11 +694,10 @@ static String* fn_concat_string_items(Item left, Item right) {
     Rooted<String*> left_str(roots, fn_string(left));
     Rooted<String*> right_str(roots, (String*)NULL);
     right_str.set(fn_string(right));
-    String* result = fn_strcat(left_str.get(), right_str.get());
-    // Generic fn_join has no MIR ownership proof. Its result may immediately
-    // escape through a container, call, or alias, so it is immutable on return.
-    if (result && result != &STR_ERROR) result->is_buffer = 0;
-    return result;
+    // Generic fn_join has no ownership proof; even an owned buffer may have
+    // escaped through an earlier container or function result.
+    String* parts[] = {left_str.get(), right_str.get()};
+    return string_buffer_join<2>(parts, 2, false);
 }
 
 bool lambda_value_rep_proves_contract(Item value, Type* contract);
@@ -5927,8 +5968,6 @@ static bool input_schema_prepare_name_parent(Type* schema_type, NamePool* name_p
     return ok;
 }
 
-static Item parse_tex_script(Item source, Item options, const char* format, const char* base, bool captured_member = false);
-
 #ifndef LAMBDA_IME_RESOURCE_IO
 static Item parse_captured_input(Item node, String* type, String* flavor, Item options,
         const InputScriptParser* parser) {
@@ -7257,7 +7296,7 @@ static bool tex_capture_file(const SecurityIOClient* io, const char* base, const
     if (bundled) {
         char* location = host_path_join(HOST_PATH_HOME, "package/doc/latex/tex");
         int32_t kind = -1; SecurityIOResult status = {};
-        root = location ? input_tex_resolve_path(io, location, &kind, &status) : nullptr;
+        root = location ? input_tex_resolve_path(io, location, &kind, &status, true) : nullptr;
         mem_free(location);
         if (root && kind != SECURITY_OBJECT_DIRECTORY) { mem_free(root); root = nullptr; }
     }
@@ -7319,6 +7358,8 @@ static Item parse_tex_script(Item source, Item options, const char* format, cons
         if (!converted) return ItemError;
         text.set((Item){.item = s2it(converted)});
     }
+    // The math input contract represents an empty source as null.
+    if (!strcmp(format, "math") && !text.get().get_len()) return ItemNull;
     // TeX input cannot accept a literal NUL, including in file-loaded text.
     if (memchr(text.get().get_chars(), 0, text.get().get_len()))
         return runtime_error_itemf(ERR_PARSE_ERROR, "parse: Input format does not accept a literal NUL byte");
@@ -7350,15 +7391,20 @@ static Item parse_tex_script(Item source, Item options, const char* format, cons
     uint64_t captured = 0; int local_files = 0; int requests = 0;
     for (;;) {
         Item args[] = {text.get(), settings.get()};
-        result.set(interp_call_package_export(runtime, package, !strcmp(format, "tex") ? "tex" : "latex", args, 2));
+        const char* entry = !strcmp(format, "tex") ? "tex" : !strcmp(format, "math") ? "math" : "latex";
+        result.set(interp_call_package_export(runtime, package, entry, args, 2));
         if (get_type_id(result.get()) != LMD_TYPE_MAP)
             return runtime_error_itemf(ERR_PARSE_ERROR, "parse: Script %s engine failed", format);
         MapReader reply(result.get().map);
         Item issue = reply.get("issue").item();
         if (get_type_id(issue) == LMD_TYPE_NULL) return reply.get("root").item();
-        if (!is_text_type_id(get_type_id(issue)) || strcmp(issue.get_chars(), "tex-resource-needed"))
-            return runtime_error_itemf(ERR_PARSE_ERROR, "parse: Script %s engine: %s", format,
-                is_text_type_id(get_type_id(issue)) ? issue.get_chars() : "unsupported input");
+        if (!is_text_type_id(get_type_id(issue)) || strcmp(issue.get_chars(), "tex-resource-needed")) {
+            Item detail = reply.get("unsupported").item();
+            return runtime_error_itemf(ERR_PARSE_ERROR, "parse: Script %s engine: %s%s%s", format,
+                is_text_type_id(get_type_id(issue)) ? issue.get_chars() : "unsupported input",
+                is_text_type_id(get_type_id(detail)) ? ": " : "",
+                is_text_type_id(get_type_id(detail)) ? detail.get_chars() : "");
+        }
         MapReader request = reply.get("request").asMap();
         scope.set(request.get("scope").item()); name.set(request.get("name").item());
         if (!is_text_type_id(get_type_id(scope.get())) || !is_text_type_id(get_type_id(name.get())))
@@ -7547,6 +7593,9 @@ Item fn_parse2(Item str_item, Item type) {
     if (type_str && (!strcmp(type_str->chars, "tex") || !strcmp(type_str->chars, "latex") ||
             !strcmp(type_str->chars, "latex-ts"))) {
         return parse_tex_script(parse_source_root.get(), parse_options_root.get(), type_str->chars, parse_options.tex_base);
+    }
+    if (type_str && input_math_is_tex(type_str->chars, flavor_str ? flavor_str->chars : nullptr)) {
+        return parse_tex_script(parse_source_root.get(), parse_options_root.get(), "math", parse_options.tex_base);
     }
     // plain text has no parser state or Input-owned objects to retain.
     if (type_str && strcmp(type_str->chars, "text") == 0) {
