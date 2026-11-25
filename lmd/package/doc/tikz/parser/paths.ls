@@ -16,6 +16,7 @@ fn failed(current, message: string) map^ => {*:current, cursor:lex.fail(current.
 fn at_vertex(current, vertex) map^ {
     let cursor = plots.add_points(current.cursor, 1)^;
     {*:current, cursor:cursor, pos:vertex.next, point:vertex, cartesian:vertex.cartesian,
+        subpath:if (current.subpath == null or vertex.value.move == true) vertex else current.subpath,
         reference:if (vertex.advance) {x:vertex.x,y:vertex.y} else current.reference,
         children:scan.add(current.children, vertex.value)}
 }
@@ -74,26 +75,37 @@ fn curve(s, current, pos: int, stop: int) map^ {
 }
 
 fn shaped_segment(s, current, keyword: string, after: int, stop: int) map^ {
+    let vertex = coords.vertex(s, after, stop, current.reference)^
     let rectangle = keyword == "rectangle"
-    let vertex = if (rectangle) {
-        let numeric = if (current.cartesian) coords.path_literal(s, after, stop, current.reference)^ else null;
-        if (numeric == null) null else {*:numeric, cartesian:true,
-            value:coords.point(numeric.x, numeric.y, numeric.x_explicit, numeric.y_explicit)^}
-    } else coords.vertex(s, after, stop, current.reference)^
-    if (vertex == null) {
-        let message = if (rectangle) "rectangle requires a second coordinate" else "grid requires a second coordinate"
-        let failed_vertex = if (rectangle) current else failed(current, "expected finite Cartesian coordinate or named node")^
-        return failed(failed_vertex, message)^
+    if (rectangle and (not current.cartesian or vertex == null or not vertex.cartesian)) {
+        return failed(current, "rectangle requires a second coordinate")^
     }
-    let appended = at_vertex(current, vertex)^
-    let result = {*:appended, attrs:{*:appended.attrs, shape:keyword}}
+    if (vertex == null) {
+        return failed(failed(current, "expected finite Cartesian coordinate or named node")^,
+            "grid requires a second coordinate")^
+    }
     let pos = lex.skip(s, vertex.next, stop)^
-    if (pos == stop) { return {*:result, pos:stop} }
-    if (not rectangle) { return failed(result, "grid must end after its second coordinate")^ }
-    let label = inline(s, result, pos, stop)^
-    if (label.pos == pos) { return label }
-    if (lex.skip(s, label.pos, stop)^ != stop) { return failed(label, "rectangle accepts only a following node")^ }
-    return {*:label, pos:stop}
+    let single = current.children.count == 1
+    let label = if (rectangle and single and lex.word(s, pos, stop, "node")^ != null)
+        inline(s, current, pos, stop)^ else null
+    if (not rectangle or (single and (pos == stop or (label != null and lex.skip(s, label.pos, stop)^ == stop)))) {
+        let appended = at_vertex(current, vertex)^
+        let compact = {*:appended, attrs:{*:appended.attrs, shape:keyword}}
+        if (not rectangle and pos != stop) { return failed(compact, "grid must end after its second coordinate")^ }
+        return if (label == null) compact else inline(s, compact, pos, stop)^
+    }
+    // Close the rectangle's own subpath, then resume from the opposite corner.
+    let first = current.point
+    let origin = coords.point(first.x, first.y, first.x_explicit == true, first.y_explicit == true, true)^
+    let points = [origin,
+        coords.point(first.x, vertex.y, first.x_explicit == true, vertex.y_explicit)^,
+        vertex.value,
+        coords.point(vertex.x, first.y, vertex.x_explicit, first.y_explicit == true)^,
+        <point *:map(origin), move:false, close:true>]
+    let result = {*:vertex, value:<point *:map(vertex.value), move:true>}
+    let children = reduce([current.children, *points], scan.add)^
+    let cursor = plots.add_points(current.cursor, 5)^
+    return at_vertex({*:current, children:children, cursor:cursor}, result)^
 }
 
 fn line_segment(s, current, pos: int, stop: int, connector: string) map^ {
@@ -101,6 +113,11 @@ fn line_segment(s, current, pos: int, stop: int, connector: string) map^ {
     let attrs = if (via == null) current.attrs else {*:current.attrs,
         line_mode:if (via == "|-") "vertical-horizontal" else "horizontal-vertical"}
     let first = lex.skip(s, pos + 2, stop)^
+    let cycle = if (via == null) lex.word(s, first, stop, "cycle")^ else null
+    if (cycle != null) {
+        let origin = current.subpath
+        return at_vertex(current, {*:origin, next:cycle, value:<point *:map(origin.value), move:false, close:true>})^
+    }
     let with_label = if (scan.starts(s, first, binary("node")^)^) inline(s, current, first, stop, true)^
         else {*:current, pos:first}
     if (len(with_label.cursor.errors)^ > 0) { return with_label }
@@ -132,7 +149,7 @@ fn step(s, current, pos: int, stop: int) map^ {
 
 fn geometry(s, cursor, begin: int, stop: int) map^ {
     let origin = {x:0.0,y:0.0}
-    let initial = {cursor:cursor, pos:begin, point:origin, reference:origin, cartesian:false,
+    let initial = {cursor:cursor, pos:begin, point:origin, reference:origin, cartesian:false, subpath:null,
         children:null, ellipses:null, attrs:{}}
     let uses_origin = lex.word(s, begin, stop, "circle")^ != null or lex.word(s, begin, stop, "ellipse")^ != null
     let vertex = if (uses_origin) {x:0.0, y:0.0, cartesian:true, advance:true, next:begin,

@@ -78,7 +78,7 @@ fn canonical_content(value, label, preserve_other_children, authored_children = 
     else if (preserve_other_children) noncanonical_children(value)
     else [];
   let lowered = if (len(authored) > 0) authored
-    else if (label != null and len(label) > 0)
+    else if (label != null and label[0] != null)
       graph_content.lower(label[0], string(label.format))
     else [];
   if (label == null and len(lowered) == 0) { null }
@@ -169,15 +169,17 @@ fn is_dot_source_graph(graph) any^ =>
 fn node_declaration_groups(graph) {
   let entries = [for (entry in model.node_entries(graph)
     where entry.value.id != null) {
-      id: string(entry.value.id), value: entry.value
+      id: string(entry.value.id), value: entry.value, group: entry.group
     }];
   let grouped = [for (entry in entries group by entry.id into declarations) {
-    id: id,
-    values: [for (declaration in declarations
-      where declaration.value != null) declaration.value]
+    let values = [for (declaration in declarations where declaration.value != null) declaration.value];
+    let grouped_values = if (graph.flavor == "mermaid" and graph["diagram-type"] == "flowchart") [
+      for (declaration in declarations where declaration.group != null) declaration.value
+    ] else [];
+    {id: id, values: values, placement: grouped_values[0] or values[0]}
   }];
   map([for (declarations in grouped,
-    pair in [declarations.id, declarations.values]) pair])
+    pair in [declarations.id, declarations]) pair])
 }
 
 fn merge_node_attrs_at(values, i, attrs) {
@@ -195,16 +197,16 @@ fn source_declaration_matches(a, b) =>
     a["source-line"] == b["source-line"] and
     a["source-column"] == b["source-column"]
 
-fn is_first_node_declaration(groups, node) any^ {
-  let values = if (node.id != null) groups[string(node.id)] else null;
-  if (values != null and len(values) > 0) { source_declaration_matches(node, values[0]) }
+fn is_node_placement(groups, node) any^ {
+  let group = if (node.id != null) groups[string(node.id)] else null;
+  if (group != null) { source_declaration_matches(node, group.placement) }
   // missing ids must survive merging so canonical validation can diagnose them.
   else if (node.id == null) { true }
   else { false }
 }
 
 fn merged_source_node(groups, node) {
-  let values = if (node.id != null) groups[string(node.id)] else [node];
+  let values = if (node.id != null) groups[string(node.id)].values else [node];
   let final_declaration = values[len(values) - 1];
   let attrs = merge_node_attrs_at(values, 0, {});
   <node *:attrs,
@@ -220,7 +222,7 @@ fn merged_source_children(groups, container) => [
   for (child in model.child_items(container), merged in
     ((if (not (child is element)) [child]
     else if (model.tag(child) == "node")
-      (if (is_first_node_declaration(groups, child)) [merged_source_node(groups, child)] else [])
+      (if (is_node_placement(groups, child)) [merged_source_node(groups, child)] else [])
     else if (model.tag(child) == "subgraph") [merged_source_subgraph(groups, child)]
     else [child]) ^ { [] })) merged
 ]

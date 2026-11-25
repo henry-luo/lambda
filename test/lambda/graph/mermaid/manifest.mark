@@ -39,7 +39,7 @@
   >
   <case id: 'nested-subgraph', source: 'nested_subgraph.mmd',
       origin: 'lambda', status: 'baseline', policy: 'ir', features: 'subgraphs,nesting';
-    <expect direction: 'TB', nodes: 3, edges: 2, subgraphs: 1>
+    <expect direction: 'TB', nodes: 3, source-nodes: 4, edges: 2, subgraphs: 1>
     <subgraph id: 'backend', label: 'Backend', direction: 'LR'>
     <node id: 'db', label: 'Database', shape: 'cylinder'>
   >

@@ -12,11 +12,12 @@ pub fn layout(parent, children, ctx) {
   let result = graph_layout.from_velmts(parent, children, ctx);
   let edge_color = if (parent.attrs != null and parent.attrs["data-edge-color"] != null)
     string(parent.attrs["data-edge-color"]) else "#59636e";
+  let flavor = if (parent.attrs == null) null else parent.attrs["data-graph-flavor"];
   {
     width: result.width,
     height: result.height,
     placements: result.placements,
-    paint_layers: paint.layers(result, {edge_color: edge_color})
+    paint_layers: paint.layers(result, {edge_color: edge_color, flavor: flavor})
   }
 }
 

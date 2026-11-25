@@ -149,12 +149,19 @@ fn periphery_shadows(count, i, palette, values) {
     "inset 0 0 0 " ++ string(i * 4) ++ "px " ++ palette.node_border])
 }
 
-fn periphery_css(node, shape, palette) any^ {
+fn periphery_count(node, shape) int^ {
   let authored = source_attr(node, "peripheries", null);
-  let count = if (authored != null) int(authored)
-    else if (shape == "doublecircle") 2 else 1;
+  if (authored != null) int(authored)^ else if (shape == "doublecircle") 2 else 1
+}
+
+fn vector_peripheries(shape) =>
+  shape in ["circle", "doublecircle", "ellipse", "f-circ"]
+
+fn periphery_css(node, shape, palette) any^ {
+  let count = periphery_count(node, shape)^;
   if (count == 0) "border-color:transparent;"
   else if (count == 1) ""
+  else if (vector_peripheries(shape)) "position:relative;"
   else "box-shadow:" ++ periphery_shadows(count, 1, palette, []) ++ ";"
 }
 
@@ -169,35 +176,29 @@ fn uses_fill(value) any^ {
   }
 }
 
-fn resolved_node_style(node, style_declarations) any^ {
-  let fill = if (uses_fill(node)) graph_style.safe_color(source_attr(node, "fill", null))
-    else null;
-  let stroke = graph_style.safe_color(source_attr(node, "stroke", null));
-  let stroke_width = graph_style.unsigned_number_text(
-    source_attr(node, "stroke-width", null), false);
-  let direct =
-    (if (fill != null) "fill:" ++ fill ++ ";" else "") ++
-    (if (stroke != null) "stroke:" ++ stroke ++ ";" else "") ++
-    (if (stroke_width != null) "stroke-width:" ++ stroke_width ++ ";" else "");
-  // Graphviz style is a keyword list, not CSS declarations.
-  let source = if (source_attr(node, "graphviz-shape", null) != null) ""
-    else if (node.style != null) string(node.style) else "";
-  graph_style.parse(direct ++ source ++ ";" ++ style_declarations)
-}
-
-fn resolved_edge_style(edge, style_declarations) any^ {
-  let stroke = graph_style.safe_color(source_attr(edge, "stroke", null));
-  let stroke_width = graph_style.unsigned_number_text(
-    source_attr(edge, "stroke-width", null), false);
-  let opacity = graph_style.unsigned_number_text(source_attr(edge, "opacity", null), true);
-  let dash = source_attr(edge, "stroke-dasharray", null);
-  let direct =
+fn direct_paint(value, fill = null) any^ {
+  let stroke = graph_style.safe_color(source_attr(value, "stroke", null));
+  let stroke_width = graph_style.unsigned_number_text(source_attr(value, "stroke-width", null), false);
+  let opacity = graph_style.unsigned_number_text(source_attr(value, "opacity", null), true);
+  let dash = source_attr(value, "stroke-dasharray", null);
+  (if (fill != null) "fill:" ++ fill ++ ";" else "") ++
     (if (stroke != null) "stroke:" ++ stroke ++ ";" else "") ++
     (if (stroke_width != null) "stroke-width:" ++ stroke_width ++ ";" else "") ++
     (if (opacity != null) "opacity:" ++ opacity ++ ";" else "") ++
-    (if (dash != null) "stroke-dasharray:" ++ string(dash) ++ ";" else "");
-  graph_style.parse(direct ++ style_declarations)
+    (if (dash != null) "stroke-dasharray:" ++ string(dash) ++ ";" else "")
 }
+
+fn resolved_node_style(node, style_declarations) any^ {
+  let fill = if (uses_fill(node)) graph_style.safe_color(source_attr(node, "fill", null))
+    else null;
+  // Graphviz style is a keyword list, not CSS declarations.
+  let source = if (source_attr(node, "graphviz-shape", null) != null) ""
+    else if (node.style != null) string(node.style) else "";
+  graph_style.parse(direct_paint(node, fill) ++ source ++ ";" ++ style_declarations)
+}
+
+fn resolved_edge_style(edge, style_declarations) any^ =>
+  graph_style.parse(direct_paint(edge) ++ style_declarations)
 
 fn gradient_background(value, fallback) any^ {
   let raw = source_attr(value, "fill", null);
@@ -265,6 +266,19 @@ fn node_rim(node, parsed) {
         "px;max-height:100%;border:inherit;border-radius:50%;">
     ]
   }
+}
+
+fn node_children(node, parsed, palette, content = []) any^ {
+  let shape = source_attr(node, "shape", "box");
+  let count = periphery_count(node, shape)^;
+  let color = parsed.stroke or palette.node_border;
+  [*node_rim(node, parsed), *content,
+    // Paint circular outlines as borders so SVG retains the text as vector content.
+    if ((count > 1 and vector_peripheries(shape))^)
+      for (index in 1 to (count - 1))
+        <'node-periphery' 'aria-hidden':"true",
+          style:"position:absolute;display:block;pointer-events:none;box-sizing:border-box;" ++
+            "inset:" ++ string(index * 4 - 1) ++ "px;border:1px solid " ++ color ++ ";border-radius:50%;">]
 }
 
 fn node_style(node, parsed, palette) any^ {
@@ -389,13 +403,12 @@ fn html_node(node, index, group, assigned_classes, style_declarations, interacti
         else node_style(node, parsed_style, palette)
 , if (fixed_shape) {
       <'node-shape' style: fixed_shape_style(node, parsed_style, palette),
-        for (rim in ((node_rim(node, parsed_style)) ^ { [] })) rim
+        for (child in ((node_children(node, parsed_style, palette)) ^ { [] })) child
       >
       fixed_shape_content(content, node)
     }
     else {
-      for (rim in ((node_rim(node, parsed_style)) ^ { [] })) rim
-      for (child in content) child
+      for (child in ((node_children(node, parsed_style, palette, content)) ^ { [] })) child
     }
   >
 }

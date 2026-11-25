@@ -93,7 +93,7 @@ pub fn initialization(s, start: int) map^ {
      warning:if (closed) null else {offset:pos, message:"Unterminated Mermaid initialization directive"}}
 }
 
-pub fn identifier(s, initial: int) map^ {
+pub fn identifier(s, initial: int, decimal_segments: bool = false) map^ {
     let start = scan.inline_space(s, initial)^
     if (scan.byte(s, start)^ == 96) {
         let stop = raw_until(s, start + 1, [-1, 10, 96])^
@@ -103,7 +103,9 @@ pub fn identifier(s, initial: int) map^ {
     var pos = start
     while (true) {
         let b = scan.byte(s, pos)^
+        // Flowchart IDs such as P2.5 retain numeric segments without taking the .class suffix.
         if (word_byte(b) or b >= 128 or
+                (decimal_segments and pos > start and b == 46 and scan.digit(scan.byte(s, pos + 1)^)) or
                 (pos > start and b == 45 and not (scan.byte(s, pos + 1)^ in [45, 46, 61, 62]))) {
             pos = pos + 1
         } else { break }

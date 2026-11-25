@@ -1,0 +1,6 @@
+\begin{tikzpicture}
+  \draw[help lines] (0,0) grid (3,2);
+  \draw                 (0,0) -- (1,1) -- (1,0);
+  \draw[rotate=40,blue] (0,0) -- (1,1) -- (1,0);
+  \draw[rotate=-20,red] (0,0) -- (1,1) -- (1,0);
+\end{tikzpicture}

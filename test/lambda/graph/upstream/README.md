@@ -1,6 +1,6 @@
 # Upstream graph render corpus
 
-`make test-graph-upstream` builds Lambda and checks 43 SVG renders from 41 source
+`make test-graph-upstream` builds Lambda and checks 111 SVG renders from 102 source
 fixtures. With an existing build, run
 `python3 test/lambda/graph/upstream/compare.py`. The test starts the ordinary
 `lambda render` command and writes SVGs and a semantic diff under
@@ -9,22 +9,26 @@ fixtures. With an existing build, run
 The [fixture manifest](sources.json) records the upstream commits, source paths,
 PGF manual line ranges, license notices, and SHA-256 hashes. Complete source
 files are copied verbatim. The TikZ files contain the corresponding unmodified
-`tikzpicture` excerpts. Fixture candidates were checked for duplicates against
-`test/input`, `test/lambda`, and `test/render` using content with whitespace
-removed.
+`tikzpicture` excerpts. The expansion added 61 sources and 68 renders.
+It checked all new sources against one another and 1,032 existing source
+files under `test`, `lambda-input/test`, `radiant/test` and `lambda-test`,
+using content with whitespace removed. For TeX files the scan also indexed
+individual `tikzpicture` bodies.
 
 ## Observations
 
 | Format | Source files | SVGs | Checked output |
 |---|---:|---:|---|
-| D2 | 8 | 8 | Node names and labels, directed and undirected connections, parallel edges, edge labels, and horizontal order |
-| DOT | 9 | 9 | Node and edge identities, named ports, edge labels, cluster labels, and authored cluster stroke and dashes |
-| Mermaid | 10 | 10 | Node identities, flowchart and class edges, markers, labels, subgraph endpoints, selected class fills, and state transition count |
-| Structurizr | 7 | 9 | View selection by key, projected node names, relationships, and static or dynamic relationship labels |
-| TikZ | 7 | 7 | Line lengths and curved subpaths, dash lengths and phase, stroke colors, and even-odd fills |
+| D2 | 16 | 16 | Node and edge identities and labels, direction and rank order, parallel edges, selected stroke and opacity, and thick-edge arrow dimensions |
+| DOT | 30 | 30 | Node and edge identities, ports, visible node labels, edge labels and annotations, and cluster labels and paint |
+| Mermaid | 29 | 29 | Node identities and selected labels, flowchart and class edges, markers, edge labels, cluster endpoints and border attachment, selected class fills, and state transition count |
+| Structurizr | 15 | 24 | View selection by key, projected node names, relationships, static and parallel dynamic labels, and selected deployment boundaries |
+| TikZ | 12 | 12 | Line lengths and curved subpaths, rectangle and polygon closure, dash lengths and phase, stroke colors, and even-odd fills |
 
 The graph check uses the semantic structure of each rendered SVG and considers
-engine-specific geometry only where the fixture has a specific invariant. For
+engine-specific geometry only where the fixture has a specific invariant.
+The manifest specifies where to compare authored paint, rank order or
+rendered node labels. For
 TikZ it converts PDF points to CSS pixels, tolerates 0.15 px of measurement
 error, and allows a one-unit rounding difference per RGB channel. The
 comparison viewport is 2600 × 2300 CSS px to fit the entire test diagram. The

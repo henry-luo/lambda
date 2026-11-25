@@ -35,7 +35,7 @@ def words(value):
 
 
 def text(element):
-    return words(' '.join(element.itertext()))
+    return words(' '.join(element.itertext())) if element is not None else ''
 
 
 def attr(el, key):
@@ -49,16 +49,63 @@ def arrow(source, target, start, end):
 
 
 def d2_id(value):
-    return json.loads(value) if value.startswith('"') else value
+    # The SVG id is a D2 key path. A quoted segment can itself contain a dot.
+    parts = re.findall(r'"(?:\\.|[^"\\])*"|[^."]+', value)
+    return '.'.join(json.loads(part) if part.startswith('"') else part for part in parts)
 
 
 def topology(nodes, edges, labels=()):
     return {'nodes': sorted(nodes), 'edges': sorted(edges), 'edge_labels': sorted(filter(None, labels))}
 
 
-def upstream_d2(root, case):
+def style_value(el, prop, default=''):
+    declarations = dict(item.split(':', 1) for item in el.get('style', '').split(';') if ':' in item)
+    return declarations.get(prop, el.get(prop, default)).strip()
+
+
+def arrow_dimensions(root, edge, upstream):
+    if upstream:
+        marker_id = edge.get('marker-end', '').removeprefix('url(#').removesuffix(')')
+        marker = root.find(f".//*[@id='{marker_id}']")
+        if marker is None:
+            raise ValueError('missing reference arrowhead')
+        return float(marker.get('markerWidth')), float(marker.get('markerHeight'))
+    # Lambda flattens the filled arrowhead to a path plus its paint transform.
+    arrowhead = next((path for path in edge.iterfind('.//{*}path')
+                      if path.get('fill') not in (None, 'none') and path.get('transform')), None)
+    if arrowhead is None:
+        raise ValueError('missing rendered arrowhead')
+    coords = list(map(float, re.findall(NUMBER, arrowhead.get('d'))))
+    matrix = list(map(float, re.findall(NUMBER, arrowhead.get('transform'))))
+    x, y = coords[::2], coords[1::2]
+    return (round((max(x) - min(x)) * math.hypot(*matrix[:2]), 2),
+            round((max(y) - min(y)) * math.hypot(*matrix[2:4]), 2))
+
+
+def paint_observations(root, checks, nodes, edges, upstream):
+    report = []
+    for check in checks.get('paint', []):
+        is_node = 'node' in check
+        key = check['node'] if is_node else tuple(check['edge'])
+        owner, shape = (nodes if is_node else edges)[key]
+        result = {}
+        for field in check['fields']:
+            if field == 'arrow-size':
+                result[field] = list(arrow_dimensions(root, shape, upstream))
+                continue
+            target = owner if field == 'opacity' else shape
+            fallback = '1' if field == 'opacity' else ''
+            value = style_value(target, field, fallback) if upstream else (attr(target, field) or fallback)
+            result[field] = float(value) if field in ('opacity', 'stroke-width') else value.lower()
+        report.append(result)
+    return report
+
+
+def upstream_d2(root, case, checks):
     nodes = {}
     edges = []
+    node_paint = {}
+    edge_paint = {}
     labels = []
     for group in root.iterfind('.//{*}g'):
         token = group.get('class', '')
@@ -68,24 +115,33 @@ def upstream_d2(root, case):
             name = html.unescape(base64.b64decode(token, validate=True).decode())
         except (ValueError, UnicodeError):
             continue
-        if any(child.get('class') == 'shape' for child in group):
+        shape = next((child for child in group if child.get('class') == 'shape'), None)
+        if shape is not None:
+            key = d2_id(name)
             label = group.find('{*}text')
-            nodes[d2_id(name)] = label
+            nodes[key] = label
+            mark = next((el for el in shape.iter() if el.get('stroke')), shape)
+            node_paint[key] = (group, mark)
         else:
             connection = next((el for el in css_class(group, 'connection') if el.get('d')), None)
             names = re.fullmatch(r'\((.*?) (?:->|<-|--|<->) (.*?)\)\[\d+\]', name)
             if connection is not None and names:
-                edges.append(arrow(*map(d2_id, names.groups()), bool(connection.get('marker-start')),
-                                   bool(connection.get('marker-end'))))
+                edge = arrow(*map(d2_id, names.groups()), bool(connection.get('marker-start')),
+                             bool(connection.get('marker-end')))
+                edges.append(edge)
+                edge_paint[tuple(edge[:2])] = (group, connection)
                 labels += [text(label) for label in group.findall('{*}text')]
     report = topology(nodes, edges, labels)
-    report['node_labels'] = {key: text(value) for key, value in nodes.items()}
-    if case.stem == 'direction-right':
-        report['horizontal_order'] = sorted(nodes, key=lambda key: float(nodes[key].get('x')))
+    report['node_labels'] = {key: text(value) for key, value in nodes.items()
+                             if float(style_value(node_paint[key][0], 'opacity', '1')) != 0}
+    if axis := checks.get('order') or ('x' if case.stem == 'direction-right' else None):
+        report['node_order'] = sorted(nodes, key=lambda key: float(nodes[key].get(axis)))
+    if 'paint' in checks:
+        report['paint'] = paint_observations(root, checks, node_paint, edge_paint, True)
     return report
 
 
-def upstream_dot(root, case):
+def upstream_dot(root, case, checks):
     names = {node.findtext('{*}title'): node for node in css_class(root, 'node')}
     structurizr = case.parent.name == 'structurizr'
     mapped = {key: text(node.find('.//{*}text')) if structurizr else key
@@ -101,8 +157,13 @@ def upstream_dot(root, case):
         edges.append(sorted(pair) if op == '--' else pair)
         labels += [text(label) for label in edge.iterfind('.//{*}text')]
     result = topology(mapped.values(), edges, labels)
-    if not structurizr:
-        clusters = css_class(root, 'cluster')
+    if checks.get('node_labels'):
+        result['node_labels'] = {key: words(' '.join(text(el) for el in node.iterfind('.//{*}text')))
+                                 for key, node in names.items()}
+    clusters = css_class(root, 'cluster')
+    if structurizr and checks.get('cluster_labels'):
+        result['clusters'] = sorted(text(c.find('{*}text')) for c in clusters)
+    elif not structurizr:
         result['clusters'] = sorted([c.findtext('{*}title'), *[text(x) for x in c.findall('{*}text')]]
                                     for c in clusters)
         if case.stem == 'clust':
@@ -112,55 +173,86 @@ def upstream_dot(root, case):
     return result
 
 
-def upstream_mermaid(root, case):
+def undirected_dot(case):
+    header = re.sub(rb'//[^\n]*|/\*.*?\*/|(?m:^\s*\#[^\n]*)', b'', case.read_bytes(), flags=re.S)
+    return re.match(rb'\s*(?:strict\s+)?graph\b', header, re.I) is not None
+
+
+def upstream_mermaid(root, case, checks):
     nodes = css_class(root, 'node')
-    kind = case.stem
-    family = 'state' if kind == 'state-diagram' else 'classId' if kind.startswith('class-diagram') else 'flowchart'
+    kind = root.get('aria-roledescription', '')
+    family = 'state' if kind.startswith('state') else 'classId' if kind.startswith('class') else 'flowchart'
+    prefix = root.get('id') + '-'
 
     def key(node):
-        name = node.get('id').removeprefix(f'diagram-{family}-').rsplit('-', 1)[0]
+        name = node.get('id').removeprefix(prefix)
+        if name.startswith(family + '-'):
+            name = name.removeprefix(family + '-').rsplit('-', 1)[0]
         return {'root_start': '__state_start', 'root_end': '__state_end'}.get(name, name) if family == 'state' else name
 
-    if kind == 'state-diagram':
+    if family == 'state':
         return {'nodes': sorted(map(key, nodes)), 'edge_count': len(css_class(root, 'transition'))}
+    clusters = css_class(root, 'cluster')
+    node_ids = set(map(key, nodes))
+    endpoints = node_ids | {cluster.get('id').removeprefix(prefix) for cluster in clusters}
     connectors = css_class(root, 'relation' if family == 'classId' else 'flowchart-link')
     edges = []
     for path in connectors:
-        source, target = path.get('data-id').split('_')[1:3]
+        edge_id = path.get('data-id')
+        # Both endpoint IDs may contain underscores. Resolve the separator
+        # against the rendered node and cluster IDs before comparing the edge.
+        pair = edge_id.split('_', 1)[1].rsplit('_', 1)[0]
+        matches = [(pair[:i], pair[i + 1:]) for i, ch in enumerate(pair)
+                   if ch == '_' and pair[:i] in endpoints and pair[i + 1:] in endpoints]
+        if len(matches) != 1:
+            raise ValueError(f'ambiguous Mermaid edge id {edge_id}')
+        source, target = matches[0]
         edges.append([source, target, bool(path.get('marker-start')), bool(path.get('marker-end'))])
-    result = topology(map(key, nodes), edges, [text(el) for el in css_class(root, 'edgeLabel')
+    result = topology(node_ids, edges, [text(el) for el in css_class(root, 'edgeLabel')
                                               if el.tag.endswith('}g')])
-    result['clusters'] = sorted(text(css_class(c, 'cluster-label')[0]) for c in css_class(root, 'cluster'))
+    result['clusters'] = sorted(text(css_class(c, 'cluster-label')[0]) for c in clusters)
+    if checks.get('node_labels'):
+        result['node_labels'] = {key(node): text(node.find(".//*[@class='label']")) for node in nodes}
     if case.stem == 'shapes-and-styling':
         result['distinguished_fills'] = sorted(key(node) for node in nodes
                                               if '#f96' in ET.tostring(node, encoding='unicode'))
     return result
 
 
-def lambda_graph(root, case):
+def lambda_graph(root, case, checks):
     family = case.parent.name
     nodes = role(root, 'node')
     rendered_edges = role(root, 'edge')
     clusters = role(root, 'cluster')
     labels = [words(attr(label, 'label')) for label in role(root, 'edge-label')]
+    if family == 'dot':
+        # Graphviz keeps invisible objects in the layout and omits their paint.
+        nodes = [node for node in nodes if attr(node, 'opacity') != '0']
+        rendered_edges = [edge for edge in rendered_edges if attr(edge, 'opacity') != '0']
+        labels.extend(words(attr(label, 'label')) for label in role(root, 'annotation')
+                      if attr(label, 'owner-kind') == 'edge')
     if case.stem == 'state-diagram':
         return {'nodes': sorted(attr(node, 'node-id') for node in nodes),
                 'edge_count': len(rendered_edges)}
     name = {attr(node, 'node-id'): attr(node, 'label') for node in nodes}
+    undirected = family == 'dot' and undirected_dot(case)
     edges = []
+    edge_paint = {}
     for edge in rendered_edges:
         source = attr(edge, 'tail-cluster') or attr(edge, 'from')
         target = attr(edge, 'head-cluster') or attr(edge, 'to')
         start, end = (attr(edge, 'marker-' + side) not in ('', 'none') for side in ('start', 'end'))
         if family == 'd2':
-            edges.append(arrow(source, target, start, end))
+            row = arrow(source, target, start, end)
+            edges.append(row)
+            edge_paint[tuple(row[:2])] = (edge, edge)
         elif family == 'dot':
             ends = []
             for node, side in ((source, 'from'), (target, 'to')):
                 port = attr(edge, side + '-port')
                 compass = attr(edge, side + '-compass')
                 ends.append([node, ':'.join(filter(None, (port, compass)))] if port or compass else [node])
-            edges.append(sorted(ends) if case.stem == 'Heawood' else ends)
+            edges.append(sorted(ends) if undirected else ends)
         elif family == 'structurizr':
             edges.append([[name[source]], [name[target]]])
         else:
@@ -171,13 +263,22 @@ def lambda_graph(root, case):
     if family == 'dot':
         result['clusters'] = sorted([cid, cluster_names[cid]] if cid in cluster_names else [cid]
                                     for cluster in clusters for cid in [attr(cluster, 'cluster-id')])
-    if family == 'mermaid':
+    if family == 'mermaid' or (family == 'structurizr' and checks.get('cluster_labels')):
         result['clusters'] = sorted(cluster_names.values())
+    if checks.get('node_labels'):
+        # The exporter writes a title for each glyph run. Inspect rendered text
+        # so an accidentally painted placeholder fails even with correct metadata.
+        result['node_labels'] = {attr(node, 'node-id'):
+                                 words(' '.join(text(el) for el in node.iterfind('.//{*}title')))
+                                 for node in nodes}
     if family == 'd2':
-        result['node_labels'] = {key: words(label) for key, label in name.items()}
-        if case.stem == 'direction-right':
-            result['horizontal_order'] = [attr(n, 'node-id') for n in
-                                          sorted(nodes, key=lambda n: float(attr(n, 'x')))]
+        result['node_labels'] = {attr(n, 'node-id'): words(attr(n, 'label'))
+                                 for n in nodes if attr(n, 'opacity') != '0'}
+        if axis := checks.get('order') or ('x' if case.stem == 'direction-right' else None):
+            result['node_order'] = [attr(n, 'node-id') for n in sorted(nodes, key=lambda n: float(attr(n, axis)))]
+        if 'paint' in checks:
+            node_paint = {attr(n, 'node-id'): (n, n) for n in nodes}
+            result['paint'] = paint_observations(root, checks, node_paint, edge_paint, False)
     if case.stem == 'clust':
         result['cluster_paint'] = {attr(cluster, 'cluster-id'):
             [attr(cluster, 'stroke'), any(p.get('stroke-dasharray') for p in cluster.iter())]
@@ -190,19 +291,24 @@ def lambda_graph(root, case):
 
 def lines_and_curves(path):
     current = None
+    subpath = None
     lengths = []
     curves = 0
     curving = False
-    commands = re.findall(r'([MLCZ])([^MLCZ]*)', path)
+    commands = re.findall(r'([MLCAZ])([^MLCAZ]*)', path)
     for command, values in commands:
         coords = list(map(float, re.findall(NUMBER, values)))
         if command == 'M':
             curving = False
+            subpath = coords[-2:]
         elif command == 'L' and current is not None:
             lengths.append(math.dist(current, coords[-2:]))
-        elif command == 'C' and not curving:
+        elif command in 'CA' and not curving:
             curving = True
             curves += 1
+        elif command == 'Z' and current is not None and subpath is not None:
+            lengths.append(math.dist(current, subpath))
+            current = subpath
         if coords:
             current = coords[-2:]
     return lengths, curves
@@ -260,17 +366,18 @@ def check_graph_geometry(root):
                 raise ValueError(f'{side} of {attr(edge, "edge-id")} does not meet {cluster_id} border')
 
 
-def observations(svg, case, upstream=False):
+def observations(svg, case, upstream=False, checks=None):
     root = ET.parse(svg).getroot()
+    checks = checks or {}
     family = case.parent.name
     if family == 'tikz':
         return tikz_geometry(root, upstream)
     if upstream:
         adapter = {'d2': upstream_d2, 'dot': upstream_dot, 'mermaid': upstream_mermaid,
                    'structurizr': upstream_dot}[family]
-        return adapter(root, case)
+        return adapter(root, case, checks)
     check_graph_geometry(root)
-    return lambda_graph(root, case)
+    return lambda_graph(root, case, checks)
 
 
 def agrees(key, actual, expected):
@@ -302,21 +409,23 @@ def main():
             raise ValueError(f'upstream fixture digest changed: {source.relative_to(SUITE)}')
         for view in fixture.get('views', [None]):
             name = source.stem + ('--' + view if view else '') + '.svg'
-            cases.append((str(source.parent.relative_to(SUITE) / name), source, view))
+            cases.append((str(source.parent.relative_to(SUITE) / name), source, view, fixture.get('checks', {})))
 
     if options.capture_reference:
-        goldens = {key: observations(OUTPUT / 'reference' / key, src, True) for key, src, _ in cases}
+        goldens = {key: observations(OUTPUT / 'reference' / key, src, True, checks)
+                   for key, src, _, checks in cases}
         GOLDEN.write_text('{\n' + ',\n'.join(
             '  ' + json.dumps(key) + ': ' + json.dumps(value, sort_keys=True, ensure_ascii=False)
             for key, value in goldens.items()) + '\n}\n')
     expected = json.loads(GOLDEN.read_text())
-    if expected.keys() != {key for key, _, _ in cases}:
+    if expected.keys() != {key for key, *_ in cases}:
         raise ValueError('reference keys differ from sources.json')
 
     def compare(case):
-        key, source, view = case
+        key, source, view, checks = case
         svg = OUTPUT / 'lambda' / key
         svg.parent.mkdir(parents=True, exist_ok=True)
+        svg.unlink(missing_ok=True)
         # A viewport large enough for the test diagrams keeps the comparison
         # independent of continuous-export viewport clipping.
         args = [options.lambda_exe.resolve(), 'render', source, '--no-log', '-o', svg,
@@ -332,11 +441,11 @@ def main():
         if process.returncode != 0:
             return key, {'render': [process.returncode, process.stdout, process.stderr]}
         try:
-            actual = observations(svg, source)
+            actual = observations(svg, source, checks=checks)
+            differences = {name: {'lambda': actual[name], 'upstream': value}
+                           for name, value in expected[key].items() if not agrees(name, actual[name], value)}
         except (ET.ParseError, OSError, ValueError, KeyError) as error:
             return key, {'svg': str(error)}
-        differences = {name: {'lambda': actual[name], 'upstream': value}
-                       for name, value in expected[key].items() if not agrees(name, actual[name], value)}
         return key, differences
 
     with ThreadPoolExecutor(max_workers=4) as pool:

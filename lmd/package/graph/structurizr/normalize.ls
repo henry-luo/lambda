@@ -307,6 +307,18 @@ fn resolve_ref(elements, value) {
   }
 }
 
+fn resolve_environment(elements, value) {
+  if (value == null) null
+  else {
+    let ref = resolve_ref(elements, value);
+    let environments = [for (entry in elements
+      where ((entry.kind == "deployment-environment") ^ { false })) entry];
+    let known = any([for (entry in environments) entry.id == ref]);
+    let named = [for (entry in environments where ((entry.name == value) ^ { false })) entry.id];
+    if (not known and len(named) == 1) named[0] else ref
+  }
+}
+
 fn resolved_element(entry, elements) {
   let model_id = resolve_ref(elements, entry.model_ref);
   let model = first([for (candidate in elements where ((candidate.id == model_id) ^ { false })) candidate]);
@@ -372,43 +384,51 @@ fn interaction_by_ref(value, relationships, key, sequence, parallel_group) {
   }
 }
 
-fn interaction_values_at(values, index, elements, relationships, key, st,
-    forced_order = null, parallel_group = null) any^ {
-  if (index >= len(values)) st
-  else {
-    let value = values[index];
-    let tag = graph_model.tag(value);
-    let next = if (tag == "relationship") {
-      let item = interaction(value, elements, relationships, key,
-        if (forced_order != null) forced_order else st.next_order, parallel_group);
-      {items: [*st.items, item], next_order:
-        if (forced_order != null) st.next_order else st.next_order + 1}
+fn interaction_values(values, elements, relationships, key, initial_order,
+    initial_items, parallel_group = null) any^ {
+  var items = initial_items
+  var order = initial_order
+  var advanced = false
+  var direct = false
+  var siblings = null
+  var index = 0
+  while ((index < len(values))^) {
+    let value = values[index]
+    index = index + 1
+    let tag = graph_model.tag(value)
+    if ((tag == "parallel")^) {
+      let group = parallel_group or siblings or (key ++ ":parallel@" ++ source_identity(value))
+      let branch = interaction_values(children(value), elements, relationships, key,
+        order, items, group)^
+      items = branch.items
+      // A branch starts at its parent's counter. An enclosing block with
+      // only branches consumes one step after the parallel sequence.
+      if ((branch.direct)^) { siblings = group }
+      else {
+        order = branch.next_order + (if (branch.advanced) 0 else 1)
+        advanced = advanced or not branch.advanced
+        siblings = null
+      }
+    } else {
+      let item = if (tag == "relationship")
+        interaction(value, elements, relationships, key, order, parallel_group)
+      else if (tag == "statement")
+        interaction_by_ref(value, relationships, key, order, parallel_group)
+      else null
+      if ((item != null)^) {
+        items = [*items, item]
+        order = order + 1
+        direct = true
+        advanced = true
+        siblings = null
+      }
     }
-    else if (tag == "statement") {
-      let item = interaction_by_ref(value, relationships, key,
-        if (forced_order != null) forced_order else st.next_order, parallel_group);
-      if (item == null) st
-      else {items: [*st.items, item], next_order:
-        if (forced_order != null) st.next_order else st.next_order + 1}
-    }
-    else if (tag == "parallel") {
-      let group_id = if (parallel_group != null) parallel_group
-        else key ++ ":parallel@" ++ source_identity(value);
-      let block_order = if (forced_order != null) forced_order else st.next_order;
-      let nested = interaction_values_at(children(value), 0, elements, relationships,
-        key, st, block_order, group_id);
-      {items: nested.items, next_order:
-        if (forced_order != null) st.next_order else st.next_order + 1}
-    }
-    else st;
-    interaction_values_at(values, index + 1, elements, relationships, key,
-      next, forced_order, parallel_group)
   }
+  {items: items, next_order: order, advanced: advanced, direct: direct}
 }
 
 fn dynamic_interactions(value, elements, relationships, key) any^ =>
-  interaction_values_at(children(value), 0, elements, relationships, key,
-    {items: [], next_order: 1}).items
+  interaction_values(children(value), elements, relationships, key, 1, []).items
 
 fn authored_view_key(value) any^ =>
   if (value.kind == "systemLandscape" or value.kind == "custom") arg(value, 0)
@@ -576,7 +596,7 @@ fn c4_view(value, elements) =>
   <'c4-view' key: value.key, kind: value.kind,
     *:if (value.legacy_key == null) {} else {'legacy-key':value.legacy_key},
     scope: resolve_ref(elements, value.scope),
-    environment: resolve_ref(elements, value.environment),
+    environment: resolve_environment(elements, value.environment),
     'base-key': value.base_key, 'filter-mode': value.filter_mode,
     direction: value.direction, 'rank-sep': value.rank_sep, 'node-sep': value.node_sep,
     'source-start': value.source["source-start"], 'source-end': value.source["source-end"],

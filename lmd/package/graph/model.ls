@@ -31,7 +31,11 @@ pub fn content_element(value) => first_direct_child(value, "content")
 
 pub fn label_source(value, fallback = null) any^ {
   let label = label_element(value);
-  if (label != null and len(label) > 0) label[0]
+  // Empty label elements still have format attributes (S8.3.1v3).
+  if (label != null) {
+    let child = label[0];
+    if (child == null) "" else child
+  }
   else if (value.label != null) value.label
   else fallback
 }

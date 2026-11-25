@@ -116,6 +116,51 @@ dimensions, continuous export clips some large graphs
 exposed remaining D2 gaps in nested containers and arrowhead maps and TikZ
 gaps in bounding-box commands and bracketed ellipse radii.
 
+## Second upstream corpus expansion
+
+The follow-up adds 61 source files and 68 CLI render cases to the pinned
+corpus. The full suite has 102 sources and 111 cases. A whitespace-normalized
+content scan checked every addition against the other additions and 1,032
+existing fixtures, including matched TikZ environments embedded in TeX.
+The reference tools and revisions are the same as in the first expansion.
+[Corpus manifest and replay instructions](../../test/lambda/graph/upstream/README.md)
+
+| Format | New sources | New renders | Corrections verified against upstream |
+|---|---:|---:|---|
+| D2 | 8 | 8 | Quoted identifiers and labels, attached style blocks, authored stroke and opacity, thick-edge arrow dimensions, and upward rank order |
+| DOT | 21 | 21 | Invisible objects retain their layout role, empty labels omit glyphs and retain SVG identity, circular peripheries use vector borders, and head and tail labels enter the comparison |
+| Mermaid | 19 | 19 | Dotted numeric IDs, preservation of node labels and first subgraph membership, and cluster attachment on feedback edges |
+| Structurizr | 8 | 15 | Case-insensitive DSL keywords, selection of deployment environments by name, and matching ordinals for sibling and nested parallel sequences |
+| TikZ | 5 | 5 | Independent closed rectangles inside one path, continuation from the opposite corner, and closure of relative-coordinate polygons |
+
+The checks compare semantic and selected geometric observations from the
+actual SVG export under D9.5.6v2. DOT and selected Mermaid cases read
+rendered node glyph titles. D2 paint observations check authored stroke
+and opacity. TikZ lengths include SVG close-path segments and use the
+same physical-unit tolerance. The empty DOT label fix uses the element
+child axis under S8.3.1v3 and preserves SVG node metadata under
+[RI-237](<../Radiant_Issue_Ledger (fixed).md#ri-237>).
+
+All 111 cases pass under automatic, interpreter and JIT execution
+(D8.3.1v3). The saved observations reproduce byte for byte from the
+independent SVGs. The thick-arrow check rejects the prior 64 × 64 px
+arrow and measures the reference's 28 × 36 px arrow after the fix. The
+focused suites passed 76 Lambda Script cases, 72 hosted graph cases and
+two retained Radiant cases. The shipped scanner and parser sources total
+3,998 lines against the 4,000-line gate. The full Lambda baseline passed
+6,110 of 6,131 cases. Its 21 failing test names match the interpreter-tuning
+baseline exactly. Logs and exploratory comparisons are in
+`temp/graph-upstream-more/`.
+
+Exploratory renders also exposed examples outside the accepted set.
+Remaining gaps include D2 nested key containers, arrowhead maps and
+grid layouts, non-UTF-8 DOT source, Mermaid subgraphs declared only by
+reference to other subgraphs, Structurizr deployment node-to-node
+relationship lifting and `-/>` exclusions, and TikZ library-specific
+path operators and styles. Large exploratory graphs still require a
+viewport that encompasses the measured geometry under
+[RI-236](../Radiant_Issue_Ledger.md#ri-236).
+
 ## Release loading benchmark
 
 On macOS 26.3 arm64, both release hosts used automatic tier selection (D8.3.1v3) and the same 92 fixtures totaling 36,620 bytes. The native executable was relinked from the pre-port release objects and archives. Serialized source Mark matched byte for byte on all 92 fixtures before timing.

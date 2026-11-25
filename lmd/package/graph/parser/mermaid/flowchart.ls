@@ -69,7 +69,7 @@ fn properties(s, initial, start: int, edge: bool) map^ {
 
 fn node_ref(s, initial, start: int) map^ {
     let first = scan.inline_space(s, start)^
-    let id = mm.identifier(s, first)^
+    let id = mm.identifier(s, first, true)^
     if (id.value == null) { return {parsed_state:scan.set_cursor(initial, id.next), id:null} }
     let pos = scan.inline_space(s, id.next)^
     let shape = mm.node_shape(s, pos)^
@@ -83,11 +83,13 @@ fn node_ref(s, initial, start: int) map^ {
     let kind = node_kinds[values.shape] or values.shape
     let suffix = mm.class_suffix(s, {*:attrs.parsed_state, children:null}, id.value, attrs.parsed_state.pos)^
     let st = {*:suffix, children:attrs.parsed_state.children}
-    let existing = st.ids[id.value] == true or st.root_ids[id.value] == true
     var output = st
-    if (authored or not existing) {
-        let value = <node id:id.value, label:label.value, shape:kind,
-            *:if (authored) {'label-format':label.format} else {}, *:scan.span(s, first, suffix.pos)^>
+    if (authored or st.ids[id.value] != true) {
+        // A bare reference in a subgraph declares membership without
+        // resetting a previously authored label or shape.
+        let attrs = if (not authored and st.root_ids[id.value] == true) {} else {label:label.value, shape:kind}
+        let value = <node id:id.value, *:attrs, *:if (authored) {'label-format':label.format} else {},
+            *:scan.span(s, first, suffix.pos)^>
         let entry = mm.append(st, value)
         output = {*:entry, ids:{*:entry.ids, [id.value]:true}}
     }
@@ -272,7 +274,7 @@ fn children(s, st) array^ {
 fn subgraph(s, initial, start: int, after: int, depth: int) map^ {
     let pos = mm.skip(s, after)^
     let quoted = scan.byte(s, pos)^ == 34
-    let id = if (quoted) mm.unescaped(s, pos + 1, 34, 10)^ else mm.identifier(s, pos)^
+    let id = if (quoted) mm.unescaped(s, pos + 1, 34, 10)^ else mm.identifier(s, pos, true)^
     let generated_name = "subgraph_" ++ string(id.next)
     let name = id.value or generated_name
     let bracket = scan.inline_space(s, id.next, false)^

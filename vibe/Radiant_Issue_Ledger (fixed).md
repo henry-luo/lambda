@@ -14,6 +14,19 @@ are unchanged. Full evidence is under `../../lambda/temp/kianhup-style/`.
 
 ## Fixed issues
 
+<a id="ri-237"></a>
+
+### RI-237 — SVG export omits metadata for graph nodes with empty labels
+
+**Fixed, 2026-11-25.** The DOT corpus fixture `switch.gv` paints visible
+unlabeled circles. The SVG walker emitted metadata only when a block
+had children. The empty circles therefore lost their graph node IDs in
+SVG. The SVG backend now receives an empty semantic group for a
+childless graph node during content paint. Its bounds and paint still
+come from the existing layout and render path (D9.1.3v2, D9.5.6v2).
+The upstream comparison verifies visible node identities and the absence
+of label glyphs. [Upstream graph corpus](../test/lambda/graph/upstream/README.md)
+
 <a id="ri-235"></a>
 
 ### RI-235 — Late positioning stretches intrinsic popovers

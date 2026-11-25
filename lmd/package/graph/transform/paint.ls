@@ -129,23 +129,30 @@ fn marker_ref_x(tokens) any^ {
   len(tokens) * 8 - (if (nearest == "normal") 1 else 4)
 }
 
-fn edge_marker(id, marker_type, color, opacity, size) {
+fn edge_marker(id, marker_type, color, opacity, size, stroke_width, flavor) {
   let tokens = marker_tokens(marker_type);
   let width = max([1, len(tokens)]) * 8;
-  <marker id: id, markerWidth: width * size, markerHeight: 8 * size,
+  // D2's default triangle grows from a fixed base. SVG strokeWidth units
+  // scale the entire marker and can make thick arrows cover the label.
+  let d2_arrow = flavor == "d2" and marker_type == "normal";
+  <marker id: id,
+      markerWidth: if (d2_arrow) (4.0 + 3.0 * stroke_width) * size else width * size,
+      markerHeight: if (d2_arrow) (4.0 + 4.0 * stroke_width) * size else 8 * size,
       viewBox: "0 0 " ++ string(width) ++ " 8",
-      refX: marker_ref_x(tokens), refY: 4,
-      orient: "auto-start-reverse", markerUnits: "strokeWidth",
+      refX: if (d2_arrow) 8 else marker_ref_x(tokens), refY: 4,
+      orient: "auto-start-reverse",
+      markerUnits: if (d2_arrow) "userSpaceOnUse" else "strokeWidth",
+      preserveAspectRatio: if (d2_arrow) "none" else null,
       opacity: opacity, 'data-marker-type': marker_type,
     marker_content(id, marker_type, color)
   >
 }
 
-fn edge_defs(edge, color, opacity) {
+fn edge_defs(edge, color, opacity, stroke_width, flavor) {
   let size = max([0.1, float(if (edge.arrow_size != null) edge.arrow_size else 1.0)]);
   [<defs
-    edge_marker(marker_id(edge, "start"), edge.marker_start, color, opacity, size)
-    edge_marker(marker_id(edge, "end"), edge.marker_end, color, opacity, size)
+    edge_marker(marker_id(edge, "start"), edge.marker_start, color, opacity, size, stroke_width, flavor)
+    edge_marker(marker_id(edge, "end"), edge.marker_end, color, opacity, size, stroke_width, flavor)
   >]
 }
 
@@ -178,7 +185,7 @@ fn edge_svg(edge, width, height, opts) {
   let stroke_width = if (edge.stroke_width != null) edge.stroke_width
     else if (opts != null and opts.edge_width != null) opts.edge_width else 1.5;
   let opacity = if (edge.opacity != null) edge.opacity else null;
-  let defs = edge_defs(edge, color, opacity);
+  let defs = edge_defs(edge, color, opacity, stroke_width, if (opts == null) null else opts.flavor);
   <svg xmlns: "http://www.w3.org/2000/svg", width: width, height: height,
       viewBox: "0 0 " ++ string(width) ++ " " ++ string(height),
       style: "overflow:visible;pointer-events:none;",

@@ -1082,6 +1082,19 @@ fn cluster_boundary(cluster, source_x, source_y, target_x, target_y) {
   clip_polygon(source_x, source_y, target_x, target_y, vertices)
 }
 
+fn clip_lane_to_cluster(points, cluster, fallback) any^ {
+  if (cluster == null or len(points) < 2) { return points }
+  let bounds = routing_rect(cluster.x, cluster.y, cluster.width, cluster.height, 0.0);
+  // A feedback lane may spend several segments inside the cluster before exiting.
+  let outside = [for (i, point in points where ((i > 0 and not point_inside_rect(point, bounds)^) ^ { false })) i];
+  let at = outside[0] or 1;
+  let a = points[at - 1];
+  let b = points[at];
+  let boundary = if (len(outside) > 0) cluster_boundary(cluster, a.x, a.y, b.x, b.y)
+    else fallback;
+  simplify_route([boundary, for (i, point in points where i >= at) point])
+}
+
 fn chain_outside_endpoint(chain, endpoint_id) {
   let matches = [for (i, cluster in chain where cluster.id == endpoint_id) i];
   if (len(matches) == 0) chain
@@ -1324,9 +1337,13 @@ fn route_edge(edge, nodes, clusters, edges, opts) any^ {
         // to stay distinct from their forward partner.
         if (from_node.rank - to_node.rank > 1 and
             not route_hits_obstacle([start, finish], obstacles)) [start, finish]
-        else lane_route_points(from_node, to_node, back_lane_offset,
-          vertical_rank_axis, edge.from_port, edge.to_port,
-          edge.from_compass, edge.to_compass, true)
+        else {
+          let lane_route = lane_route_points(from_node, to_node, back_lane_offset,
+            vertical_rank_axis, edge.from_port, edge.to_port, edge.from_compass, edge.to_compass, true);
+          let clipped_tail = clip_lane_to_cluster(lane_route, explicit_tail, start);
+          if (explicit_head == null) clipped_tail else
+            reverse_items(clip_lane_to_cluster(reverse_items(clipped_tail), explicit_head, finish))
+        }
       else if (has_compound)
         if (route_mode == "orthogonal")
           orthogonal_waypoints(compound_points, vertical_rank_axis)

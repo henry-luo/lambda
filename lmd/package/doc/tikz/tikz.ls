@@ -238,7 +238,7 @@ fn path_point(point, coordinates, dx, dy, basis_x, basis_y,
             let literal = physical_point(point, dx, dy, basis_x, basis_y, program_data)^;
             [literal.x, literal.y]
         };
-    {x: position[0], y: position[1], move: point.move == true}
+    {x: position[0], y: position[1], move: point.move == true, close: point.close == true}
 }
 
 fn path_data_points(path, coordinates, dx = 0.0, dy = 0.0,
@@ -386,10 +386,11 @@ fn arc_chain_points(source, basis_x, basis_y) any^ =>
     arc_chain_steps(source, 0, null, null, 0.0, 0.0,
         basis_x, basis_y, [])^
 
-fn arc_chain_svg(mapped, flags) any^ {
+fn segmented_path_svg(mapped, moves, closes) any^ {
     latex_util.str_join([for (at in 0 to (len(mapped) - 1))
         // SVG starts with a moveto even if the first TikZ point has no move flag.
-        if (at == 0 or flags[at]) svg.M(mapped[at][0], mapped[at][1])
+        if (at == 0 or moves[at]) svg.M(mapped[at][0], mapped[at][1])
+        else if (closes[at]) "Z"
         else svg.L(mapped[at][0], mapped[at][1])], " ")
 }
 
@@ -556,6 +557,7 @@ fn draw_path(record, coordinates, min_x, max_y, left, top,
          top + (max_y - float(point.y)) * px_per_cm]];
     let mapped = decorated_points(path, mapped_raw)^
     let move_flags = [for (point in points) point.move == true]
+    let close_flags = [for (point in points) point.close == true]
     let ellipses = path_ellipses(record, coordinates)^
     let stroke_width = opts.stroke_width(path,
         if (help_lines) opts.dimension_px("0.2pt")^ else record.stroke_width)^
@@ -633,8 +635,8 @@ fn draw_path(record, coordinates, min_x, max_y, left, top,
                 arrows.shortened(mapped[final_index - 1], point, end_tip.line_end)
             else point];
         // Emit one path so winding and dash behavior operate on the original subpaths.
-        let lines = if (path.shape == "arc-chain" or len([for (flag in move_flags where flag) flag]) > 0)
-            arc_chain_svg(drawn, move_flags) else svg.line_path(drawn)
+        let lines = if (path.shape == "arc-chain" or true in move_flags or true in close_flags)
+            segmented_path_svg(drawn, move_flags, close_flags) else svg.line_path(drawn)
         let data = if (len(ellipses) == 0) lines else join([lines,
             for (ellipse in ellipses) ellipse_subpath(
                 left + (ellipse.x - min_x) * px_per_cm, top + (max_y - ellipse.y) * px_per_cm,

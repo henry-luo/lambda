@@ -85,7 +85,7 @@ pub fn finish(items) array^ {
 
 pub fn problem(offset: int, message: string) => {offset: offset, message: message}
 
-pub fn quoted(s: Source, start: int, escape) map^ {
+pub fn quoted(s: Source, start: int, escape, delimiter: int = 34) map^ {
     var pieces = null
     var first = start + 1
     var pos = first
@@ -93,7 +93,7 @@ pub fn quoted(s: Source, start: int, escape) map^ {
     let limit = s.length
     while (pos < limit) {
         let current = bytes[pos]
-        if (current == 34) {
+        if (current == delimiter) {
             let tail = text(s, first, pos)^
             let value = if (pieces == null) tail else join([*finish(pieces)^, tail], "")
             return {value: value, next: pos + 1, issue: null}

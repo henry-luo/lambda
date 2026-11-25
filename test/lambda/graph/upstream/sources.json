@@ -294,6 +294,482 @@
         84,
         87
       ]
+    },
+    {
+      "file": "d2/direction-up.d2",
+      "source": "static/d2/direction-up.d2",
+      "sha256": "28cc913095ffdaf526fcb17d3b2c4cf978357d1e46b794c1741b19544ee7ad92",
+      "project": "d2-docs",
+      "checks": {
+        "order": "y"
+      }
+    },
+    {
+      "file": "d2/hello-world.d2",
+      "source": "static/d2/hello-world.d2",
+      "sha256": "be0e07b77de7b0e733a5392683e074e335c7ec2100b8c044738412f39b841695",
+      "project": "d2-docs"
+    },
+    {
+      "file": "d2/language.d2",
+      "source": "static/d2/language.d2",
+      "sha256": "050c2fb85554e70824644db34d7f31a229e5ffccf13edae4737cc8423f507941",
+      "project": "d2-docs"
+    },
+    {
+      "file": "d2/strings-1.d2",
+      "source": "static/d2/strings-1.d2",
+      "sha256": "bd3f84f462d946264214a22c8b37255773d6de841b3e9844c1103468dd70de98",
+      "project": "d2-docs"
+    },
+    {
+      "file": "d2/strings-2.d2",
+      "source": "static/d2/strings-2.d2",
+      "sha256": "f57e7e312d83ab699ffe72887332ca49b9aaa05c3dfced55fda774208924ab09",
+      "project": "d2-docs"
+    },
+    {
+      "file": "d2/styles-stroke.d2",
+      "source": "static/d2/styles-stroke.d2",
+      "sha256": "2f97cf008b1daa535f6e5cdd48b612084683f8f2f762069e75aec269773a962b",
+      "project": "d2-docs",
+      "checks": {
+        "paint": [
+          {
+            "node": "x",
+            "fields": [
+              "stroke"
+            ]
+          },
+          {
+            "edge": [
+              "x",
+              "y"
+            ],
+            "fields": [
+              "stroke"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "file": "d2/styles-stroke-width.d2",
+      "source": "static/d2/styles-stroke-width.d2",
+      "sha256": "36b63f40578814152e6d4a0b8a94e68360b1d6265cf4a2a61736445814d60070",
+      "project": "d2-docs",
+      "checks": {
+        "paint": [
+          {
+            "node": "x",
+            "fields": [
+              "stroke-width"
+            ]
+          },
+          {
+            "edge": [
+              "x",
+              "y"
+            ],
+            "fields": [
+              "stroke-width",
+              "arrow-size"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "file": "d2/styles-opacity.d2",
+      "source": "static/d2/styles-opacity.d2",
+      "sha256": "d1e3551fa412d1e94ceb9dba61d0a8eaff1ef3ecae360066b92fb63b67131499",
+      "project": "d2-docs",
+      "checks": {
+        "paint": [
+          {
+            "node": "x",
+            "fields": [
+              "opacity"
+            ]
+          },
+          {
+            "edge": [
+              "x",
+              "y"
+            ],
+            "fields": [
+              "opacity"
+            ]
+          },
+          {
+            "node": "y",
+            "fields": [
+              "opacity"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "file": "dot/clust2.gv",
+      "source": "graphs/directed/clust2.gv",
+      "sha256": "90092757bc5966671f3349be36b9133b29732cbe739775422cf66eb6536a9af0",
+      "checks": {
+        "node_labels": true
+      }
+    },
+    {
+      "file": "dot/clust3.gv",
+      "source": "graphs/directed/clust3.gv",
+      "sha256": "65321beb01e069143d729a158aa2546b700d25248b9ed9b4264fe6d305c49779",
+      "checks": {
+        "node_labels": true
+      }
+    },
+    {
+      "file": "dot/clust4.gv",
+      "source": "graphs/directed/clust4.gv",
+      "sha256": "dd4f7d38966260e6a05acd03a5e1811fdd9c2863828ea616f19c24224db30c5a",
+      "checks": {
+        "node_labels": true
+      }
+    },
+    {
+      "file": "dot/clust5.gv",
+      "source": "graphs/directed/clust5.gv",
+      "sha256": "5950749bc4d1fbcc180191adcd475d3e4b6acff1e551ebebb7bb9fb4f0ce4738",
+      "checks": {
+        "node_labels": true
+      }
+    },
+    {
+      "file": "dot/fsm.gv",
+      "source": "graphs/directed/fsm.gv",
+      "sha256": "88f0a27f933db544495310fe7fe18ae0e686e9996f9955df5c38c1a32dbbbe43",
+      "checks": {
+        "node_labels": true
+      }
+    },
+    {
+      "file": "dot/japanese.gv",
+      "source": "graphs/directed/japanese.gv",
+      "sha256": "2b71038ca2937ca7cc9f55064c83cc9af9d9b1f22e8fb67832743bd16263764d",
+      "checks": {
+        "node_labels": true
+      }
+    },
+    {
+      "file": "dot/russian.gv",
+      "source": "graphs/directed/russian.gv",
+      "sha256": "72b51763a249ee73252dfefca3abf77b975d9358781bcace40b0daec868a5f3e",
+      "checks": {
+        "node_labels": true
+      }
+    },
+    {
+      "file": "dot/states.gv",
+      "source": "graphs/directed/states.gv",
+      "sha256": "c81a2e58ec30a7d98bcca1167c710318dc9e0dcaa059730a8a6bc97bccc40542",
+      "checks": {
+        "node_labels": true
+      }
+    },
+    {
+      "file": "dot/Petersen.gv",
+      "source": "graphs/undirected/Petersen.gv",
+      "sha256": "aa6bc461fc55e79a012bbeb212553119f8a4a7f5a6c445783ce9200c9043f214",
+      "checks": {
+        "node_labels": true
+      }
+    },
+    {
+      "file": "dot/switch.gv",
+      "source": "graphs/directed/switch.gv",
+      "sha256": "a2cb260c13ae822ae0e0824c592cd81cd730203b723cc8b960e5a4355c90865e",
+      "checks": {
+        "node_labels": true
+      }
+    },
+    {
+      "file": "dot/abstract.gv",
+      "source": "graphs/directed/abstract.gv",
+      "sha256": "d1b3b4f5ab27c15025d4ca91f041b5e04a18f52b04da78a0450cea83b7b90027"
+    },
+    {
+      "file": "dot/ctext.gv",
+      "source": "graphs/directed/ctext.gv",
+      "sha256": "83aa5508a19002d66e414d6e47791f96cc2b7d0e79408417be539b76b4a41abf"
+    },
+    {
+      "file": "dot/grammar.gv",
+      "source": "graphs/directed/grammar.gv",
+      "sha256": "b052afcbdde1823b112b7910bbdc46a0ff799d415e000ef08223146b951cdb65"
+    },
+    {
+      "file": "dot/honda-tokoro.gv",
+      "source": "graphs/directed/honda-tokoro.gv",
+      "sha256": "d64090d432751986e72aa8a2bf3dcb48fe17931ac91ade3a1b335fb29ca3e7f3"
+    },
+    {
+      "file": "dot/jcctree.gv",
+      "source": "graphs/directed/jcctree.gv",
+      "sha256": "de3905eb3d75019ca113566b90487d0f9545eca152f4b492b4c097c659793312"
+    },
+    {
+      "file": "dot/records.gv",
+      "source": "graphs/directed/records.gv",
+      "sha256": "6c07da2a7321f46a136144d53a19c3d2ab2f127237335fc044ff362c65435861"
+    },
+    {
+      "file": "dot/shells.gv",
+      "source": "graphs/directed/shells.gv",
+      "sha256": "a9f70bd7db220ea974af49b02a513ccdf8c03630dcfa920a109e6da57bcbc426"
+    },
+    {
+      "file": "dot/structs.gv",
+      "source": "graphs/directed/structs.gv",
+      "sha256": "26202c6e6503eae2d9503a83029e862da34f40b8ecb657de5dc7dd855c49d576"
+    },
+    {
+      "file": "dot/tree.gv",
+      "source": "graphs/directed/tree.gv",
+      "sha256": "e2bfbcabc74746af4021ccdaaaca0ef1c90ce8390e0b4d7aaafb77756c0a2cbd"
+    },
+    {
+      "file": "dot/world.gv",
+      "source": "graphs/directed/world.gv",
+      "sha256": "20d53d78ca4723c9e8cf8099e71702b5f0f4b283d6845417b41875c35c11c772"
+    },
+    {
+      "file": "dot/process.gv",
+      "source": "graphs/undirected/process.gv",
+      "sha256": "6aeded9884ca551bcfbc19c5e49811736b23015af296b30c2d9973d929063a0f"
+    },
+    {
+      "file": "mermaid/Company-simp.mmd",
+      "source": "cypress/platform/dev-diagrams/layout-tests/Company-simp.mmd",
+      "sha256": "a90f6e785ac423264ebadcabda4467549dff8d31333c1d6293945711da432107"
+    },
+    {
+      "file": "mermaid/class-diagram.mmd",
+      "source": "cypress/platform/dev-diagrams/layout-tests/class-diagram.mmd",
+      "sha256": "ec93b0c07ce70ce8bfeebc953d0fb21f58f99dbc512a327f9598e9b5a2ef3575"
+    },
+    {
+      "file": "mermaid/class-diagram-3.mmd",
+      "source": "cypress/platform/dev-diagrams/layout-tests/class-diagram-3.mmd",
+      "sha256": "70096909cb801e308effd3da29dcf43377d88fdc086f2c7f9de6de59998ebc8d"
+    },
+    {
+      "file": "mermaid/decoupled-subgraph.mmd",
+      "source": "cypress/platform/dev-diagrams/layout-tests/decoupled-subgraph.mmd",
+      "sha256": "19bc5536f54ad3b7ef74bd10762254ce5e90f776f87b639e11df41765596940f"
+    },
+    {
+      "file": "mermaid/deploy-pipeline.mmd",
+      "source": "cypress/platform/dev-diagrams/layout-tests/deploy-pipeline.mmd",
+      "sha256": "95343fb1ab1b25056bdd663b0550d6f5ccaadab75f1e7b2837cfa8e3c2fd442d"
+    },
+    {
+      "file": "mermaid/domus1.mmd",
+      "source": "cypress/platform/dev-diagrams/layout-tests/domus1.mmd",
+      "sha256": "c647db6f0fa83b54e5284d2d1fa650534142de5d5ce9fed58c8ba3039560e129"
+    },
+    {
+      "file": "mermaid/edge-to-node-in-subgraph.mmd",
+      "source": "cypress/platform/dev-diagrams/layout-tests/edge-to-node-in-subgraph.mmd",
+      "sha256": "f0fa7ed8e5581859ec5d793f77db77e07305a98b5e1856ecabc78da01d0617b4"
+    },
+    {
+      "file": "mermaid/edge-to-subgraph.mmd",
+      "source": "cypress/platform/dev-diagrams/layout-tests/edge-to-subgraph.mmd",
+      "sha256": "aa94a13398db5fe569e8dd7a72c058263041b70c0a9401b8ec6ac4306c1e07b9"
+    },
+    {
+      "file": "mermaid/identical-edges-in-subgraph.mmd",
+      "source": "cypress/platform/dev-diagrams/layout-tests/identical-edges-in-subgraph.mmd",
+      "sha256": "31184fe4f1e051a3ff1971eefac477b5a3373e774f66632053042f86fec684fa"
+    },
+    {
+      "file": "mermaid/life-choices.mmd",
+      "source": "cypress/platform/dev-diagrams/layout-tests/life-choices.mmd",
+      "sha256": "9b1e423fb517a0155c912c9cdbc3c312623ee5f4ab64bc5c84fa862cee5fde37",
+      "checks": {
+        "node_labels": true
+      }
+    },
+    {
+      "file": "mermaid/multiple-edges.mmd",
+      "source": "cypress/platform/dev-diagrams/layout-tests/multiple-edges.mmd",
+      "sha256": "4b44b206207276d47ccc7238931953922b759ea1acc28b3483f9758892a943b3"
+    },
+    {
+      "file": "mermaid/nested-incoming.mmd",
+      "source": "cypress/platform/dev-diagrams/layout-tests/nested-incoming.mmd",
+      "sha256": "9d1ff0c7d654f74db7ab473f87ff518e264c1dc57da7a405b6cb92a057214cf8"
+    },
+    {
+      "file": "mermaid/nested-sb-edges-in-out.mmd",
+      "source": "cypress/platform/dev-diagrams/layout-tests/nested-sb-edges-in-out.mmd",
+      "sha256": "76720e70afdb15f73ff764c33e13866778a3f9a1bf5bf347743816e11f5d2dc5",
+      "checks": {
+        "node_labels": true
+      }
+    },
+    {
+      "file": "mermaid/nested-sg-outgoing-5.mmd",
+      "source": "cypress/platform/dev-diagrams/layout-tests/nested-sg-outgoing-5.mmd",
+      "sha256": "b33481eff63c4099a32140121c5f91b2fe65fd9d38242d24686c87ffe8d424e7"
+    },
+    {
+      "file": "mermaid/nested-subgraphs-3.mmd",
+      "source": "cypress/platform/dev-diagrams/layout-tests/nested-subgraphs-3.mmd",
+      "sha256": "8fbfaf4bd70c9d7e0c0aace099172d990f92ea45069430bdee947103c5a8e9e1"
+    },
+    {
+      "file": "mermaid/self-loop-2.mmd",
+      "source": "cypress/platform/dev-diagrams/layout-tests/self-loop-2.mmd",
+      "sha256": "39eac89b1f59244a8c4ca6359c003ae2fcf6449ee5bc4dde27c0da85fcf2e285",
+      "checks": {
+        "node_labels": true
+      }
+    },
+    {
+      "file": "mermaid/subgraph-labels-2.mmd",
+      "source": "cypress/platform/dev-diagrams/layout-tests/subgraph-labels-2.mmd",
+      "sha256": "5a9f44329d519e8bb3658d9ca2b179b228c20411b3b20213eb85e124a3d81043"
+    },
+    {
+      "file": "mermaid/subgraph-variation.mmd",
+      "source": "cypress/platform/dev-diagrams/layout-tests/subgraph-variation.mmd",
+      "sha256": "cabc90e760875f353b4b090455af788e34ad0aea5ce816dc94fd1dfd236b0106",
+      "checks": {
+        "node_labels": true
+      }
+    },
+    {
+      "file": "mermaid/subgraph-variation-2.mmd",
+      "source": "cypress/platform/dev-diagrams/layout-tests/subgraph-variation-2.mmd",
+      "sha256": "2c034f215d6044c3ad93fae1d5b730532c6d1ba57a0eab9e005e78bce615f4d0"
+    },
+    {
+      "file": "structurizr/custom-view-animation.dsl",
+      "source": "structurizr-dsl/src/test/resources/dsl/custom-view-animation.dsl",
+      "sha256": "ca642936207ce96af5319348d250fae92e7103a3156b409c920d66f9335f06e9",
+      "views": [
+        "Custom-001",
+        "Custom-002"
+      ]
+    },
+    {
+      "file": "structurizr/dynamic-view-with-explicit-relationships.dsl",
+      "source": "structurizr-dsl/src/test/resources/dsl/dynamic-view-with-explicit-relationships.dsl",
+      "sha256": "f146b544fee20b948b47ad56f7044dd71803c490353ea09d356f3a195ad65b20",
+      "views": [
+        "Dynamic-001",
+        "SystemLandscape-001"
+      ]
+    },
+    {
+      "file": "structurizr/getting-started-short.dsl",
+      "source": "structurizr-dsl/src/test/resources/dsl/getting-started-short.dsl",
+      "sha256": "d67f55c31b2ece7557982c5affc7c497f32528f99e4adda9ea337a76d2160755",
+      "views": [
+        "SystemContext-001"
+      ]
+    },
+    {
+      "file": "structurizr/parallel1.dsl",
+      "source": "structurizr-dsl/src/test/resources/dsl/parallel1.dsl",
+      "sha256": "f122ef861d439f3c8751398e6675c6d503c6b4e0e8b01363f096cfb53e95002d",
+      "views": [
+        "Dynamic-001"
+      ]
+    },
+    {
+      "file": "structurizr/parallel2.dsl",
+      "source": "structurizr-dsl/src/test/resources/dsl/parallel2.dsl",
+      "sha256": "ffa563e2c018f71d7f026d3f5015d11bcd75b887ca6739ffbcbd751f32fd2fd1",
+      "views": [
+        "Dynamic-001"
+      ]
+    },
+    {
+      "file": "structurizr/parallel3.dsl",
+      "source": "structurizr-dsl/src/test/resources/dsl/parallel3.dsl",
+      "sha256": "e530fd368044ed1731f7b4471be01315b09881006009211f5b867709b979d681",
+      "views": [
+        "Dynamic-001"
+      ]
+    },
+    {
+      "file": "structurizr/static-view-animation.dsl",
+      "source": "structurizr-dsl/src/test/resources/dsl/static-view-animation.dsl",
+      "sha256": "19f815078a116cbca41e027604ee1f1bde0a03470f3e9c2cf53aa6f357261cd0",
+      "views": [
+        "SystemLandscape-001",
+        "SystemLandscape-002"
+      ]
+    },
+    {
+      "file": "structurizr/deployment-view-animation.dsl",
+      "source": "structurizr-dsl/src/test/resources/dsl/deployment-view-animation.dsl",
+      "sha256": "547c532880d41257d3f095d171299b8fe29eecec660ef954e77a6dc3dd8a2405",
+      "checks": {
+        "cluster_labels": true
+      },
+      "views": [
+        "Deployment-001",
+        "Deployment-002",
+        "Deployment-003",
+        "Deployment-004",
+        "Deployment-005"
+      ]
+    },
+    {
+      "file": "tikz/pgf-coordinates-925.pgf",
+      "source": "doc/generic/pgf/pgfmanual-en-tikz-coordinates.tex",
+      "sha256": "19acd7e96c66e5122564d4b5151740f6767bd36ff56d41dccb926ef8a3e5060e",
+      "lines": [
+        925,
+        929
+      ]
+    },
+    {
+      "file": "tikz/pgf-coordinates-938.pgf",
+      "source": "doc/generic/pgf/pgfmanual-en-tikz-coordinates.tex",
+      "sha256": "00f0b9858a64e894e0db11e03912926d6b4d677787877fb9850acc359b98ef87",
+      "lines": [
+        938,
+        942
+      ]
+    },
+    {
+      "file": "tikz/pgf-paths-369.pgf",
+      "source": "doc/generic/pgf/pgfmanual-en-tikz-paths.tex",
+      "sha256": "a0f4380e2d74f36dca2b2d4a3e5d2b470803f3d4480a7af9685c8567df86350a",
+      "lines": [
+        369,
+        372
+      ]
+    },
+    {
+      "file": "tikz/pgf-scopes-497.pgf",
+      "source": "doc/generic/pgf/pgfmanual-en-tikz-scopes.tex",
+      "sha256": "b3198c596f336da416f10ce8ba3ca718f7ff4bd5e7ef37c0290f8e411d2069a2",
+      "lines": [
+        497,
+        500
+      ]
+    },
+    {
+      "file": "tikz/pgf-transformations-338.pgf",
+      "source": "doc/generic/pgf/pgfmanual-en-tikz-transformations.tex",
+      "sha256": "91692879d754ad29bae5cf94caddb43108e29cc327db3cab348a1af6da72f8d6",
+      "lines": [
+        338,
+        343
+      ]
     }
   ]
 }

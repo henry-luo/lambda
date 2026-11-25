@@ -109,6 +109,9 @@ let view_keywords = ["systemLandscape", "systemContext", "container", "component
     "dynamic", "deployment", "custom", "image"]
 let required_blocks = ["workspace", "model", "views", "styles", "archetypes"]
 let regular_tags = ["include", "exclude", "properties", "perspectives", "animation"]
+let keyword_spelling = map([for (word in
+    [*declaration_keywords, *view_keywords, *required_blocks, *regular_tags, "autoLayout"],
+    pair in [lower(word), word]) pair])
 
 fn tag_for(parent, keyword, relationship) string^ {
     if (parent == "archetypes") "archetype"
@@ -163,9 +166,11 @@ fn classify(s, tokens, parent) map^ {
         (tok.value == "->" or tok.kind == "relationship-archetype"))^)) i]
     let arrow_idx = arrows[0]
     let relationship = arrow_idx != null
-    let keyword = if (relationship) "relationship" else tokens[first].value
+    // DSL keywords are case-insensitive. Identifiers and argument values keep their spelling.
+    let raw = tokens[first].value
+    let keyword = if (relationship) "relationship" else keyword_spelling[lower(raw)] or raw
     let tag = tag_for(parent, keyword, relationship)^
-    let base = if (relationship) tokens[arrow_idx].value else tokens[first].value
+    let base = if (relationship) tokens[arrow_idx].value else keyword
     let specific = if (tag == "workspace") {flavor:"structurizr", 'ir-stage':"source"}
         else if (tag == "view") {kind:keyword}
         else if (tag == "style-rule") {'target-kind':keyword}

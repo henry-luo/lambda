@@ -17,6 +17,8 @@ fn connector(s, pos: int) map?^ {
 }
 
 fn identifier(s, start: int) map^ {
+    let opening = scan.byte(s, start)^
+    if (opening in [34,39]) { return scan.quoted(s, start, scan.standard_escape, opening)^ }
     var pos = start
     var stop = start
     while (true) {
@@ -29,7 +31,7 @@ fn identifier(s, start: int) map^ {
             pos = pos + 1
         } else { break }
     }
-    return {value: scan.text(s, start, stop)^, next: stop}
+    return {value: scan.text(s, start, stop)^, next: stop, issue:null}
 }
 
 fn property_separator(id) {
@@ -43,7 +45,8 @@ fn property_separator(id) {
 
 fn label(s, start: int) map^ {
     let first = trivia(s, start, false)^
-    if (scan.byte(s, first)^ == 34) { return scan.quoted(s, first, scan.standard_escape)^ }
+    let opening = scan.byte(s, first)^
+    if (opening in [34,39]) { return scan.quoted(s, first, scan.standard_escape, opening)^ }
     var pos = first
     while (pos < s.length and not (scan.byte(s, pos)^ in [10, 13, 123, 125, 35, 59])) {
         pos = pos + 1
@@ -76,15 +79,10 @@ fn style(s, start: int, initial: map) map^ {
         } else if (b == -1) { break }
         else {
             let key = identifier(s, pos)^
-            if (key.value == "") {
-                issues = [scan.problem(pos, "Expected property name in style block")]
-                break
-            }
             pos = trivia(s, key.next)^
-            if (scan.byte(s, pos)^ != 58) {
-                issues = [scan.problem(pos, "Expected ':' after property name")]
-                break
-            }
+            let issue = key.issue or (if (key.value == "") scan.problem(pos, "Expected property name in style block")
+                else if (scan.byte(s, pos)^ != 58) scan.problem(pos, "Expected ':' after property name") else null)
+            if (issue != null) { issues = [issue]; break }
             pos = trivia(s, pos + 1)^
             if (scan.byte(s, pos)^ == 123) {
                 depth = depth + 1;
@@ -92,7 +90,9 @@ fn style(s, start: int, initial: map) map^ {
                 continue
             }
             let parsed = label(s, pos)^
-            props = attribute(props, key.value, parsed.value)
+            let name = if (starts_with(key.value, "style.")) slice(key.value, 6, len(key.value)) or key.value
+                else key.value
+            props = attribute(props, name, parsed.value)
             if (parsed.issue != null) { issues = [parsed.issue] }
             pos = trivia(s, parsed.next)^
         }
@@ -107,15 +107,20 @@ fn style(s, start: int, initial: map) map^ {
 fn node(s, id, first: int, stop: int, props: map = {}) element^ =>
     <node id:id, *:scan.span(s, first, stop)^, *:props>
 
+fn properties(s, pos: int, key: string, has_value: bool) map^ {
+    let value = if (has_value) label(s, pos)^ else {value:null, next:pos, issue:null}
+    let attrs = attribute({}, key, value.value)
+    let block = trivia(s, value.next, false)^
+    let body = if (scan.byte(s, block)^ == 123) style(s, block, attrs)^
+        else {props:attrs, next:value.next, issues:[]};
+    {*:body, issues:if (value.issue == null) body.issues else [value.issue, *body.issues]}
+}
+
 fn node_value(s, id, sep, first: int, colon: int) map^ {
     let pos = trivia(s, colon + 1)^
     let node_id = if (sep == null) id else slice(id, 0, sep.node_end) or ""
-    let parsed = if (scan.byte(s, pos)^ == 123) style(s, pos, {})^ else {
-        let value = label(s, pos)^
-        let key = if (sep == null) "label" else slice(id, sep.property, len(id))
-        {props: attribute({}, key, value.value), next: value.next,
-         issues: if (value.issue == null) [] else [value.issue]}
-    };
+    let key = if (sep == null) "label" else slice(id, sep.property, len(id)) or "label"
+    let parsed = properties(s, pos, key, true)^;
     {nodes: [node(s, node_id, first, pos, parsed.props)^], next: parsed.next, issues: parsed.issues}
 }
 
@@ -127,6 +132,7 @@ fn edge_chain(s, id, first: int, initial) map^ {
     while (link != null) {
         let target_at = trivia(s, link.next, false)^
         let target = identifier(s, target_at)^
+        if (target.issue != null) { return {nodes: [], next: target.next, issues: [target.issue]} }
         if (target.value == "") {
             return {nodes: [], next: target_at,
                 issues: [scan.problem(target_at, "Expected target node after '" ++ link.value ++ "'")]}
@@ -136,39 +142,41 @@ fn edge_chain(s, id, first: int, initial) map^ {
         pos = trivia(s, target.next, false)^
         link = connector(s, pos)^
     }
-    let value = if (scan.byte(s, pos)^ == 58) label(s, pos + 1)^ else {value: null, next: pos, issue: null}
-    let attrs = attribute({}, "label", value.value);
+    let colon = scan.byte(s, pos)^ == 58
+    let body = properties(s, if (colon) pos + 1 else pos, "label", colon)^;
     // A label after the last endpoint applies to every connection in the chain.
-    {nodes: [node(s, id, first, value.next)^,
+    {nodes: [node(s, id, first, body.next)^,
         for (segment in scan.finish(segments)^) (
-            node(s, segment.to, segment.at, value.next)^,
+            node(s, segment.to, segment.at, body.next)^,
             <edge from:if (segment.operator == "<-") segment.to else segment.from,
                 to:if (segment.operator == "<-") segment.from else segment.to,
-                *:attrs, *:scan.span(s, first, value.next)^,
+                *:body.props, *:scan.span(s, first, body.next)^,
                 *:if (segment.operator in ["--", "<->"]) {
                     'arrow-tail':if (segment.operator == "<->") "normal" else "none",
                     'arrow-head':if (segment.operator == "<->") "normal" else "none"
                 } else {}>
         )],
-     next: value.next, issues: if (value.issue == null) [] else [value.issue]}
+     next: body.next, issues: body.issues}
 }
 
 let directions = {up:"BT", down:"TB", left:"RL", right:"LR"}
 
 fn statement(s, first: int) map^ {
     let id = identifier(s, first)^
+    if (id.issue != null) { return {nodes: [], next: id.next, issues: [id.issue]} }
     if (id.value == "") {
         return {nodes: [], next: first, issues: [scan.problem(first, "Expected identifier")]}
     }
     let pos = trivia(s, id.next, false)^
     let b = scan.byte(s, pos)^
-    if (b == 58 and id.value == "direction") {
+    let quoted = scan.byte(s, first)^ in [34,39]
+    if (b == 58 and id.value == "direction" and not quoted) {
         let value = label(s, pos + 1)^
         let direction = if (value.value == null) null else directions[lower(value.value)]
         return {nodes: [], next: value.next, direction:direction,
             issues: if (direction != null) [] else [scan.problem(pos + 1, "Expected D2 direction up, down, left, or right")]}
     }
-    if (b == 58) { return node_value(s, id.value, property_separator(id.value), first, pos)^ }
+    if (b == 58) { return node_value(s, id.value, if (quoted) null else property_separator(id.value), first, pos)^ }
     let op = connector(s, pos)^
     if (op != null) { return edge_chain(s, id.value, first, op)^ }
     return {nodes: [node(s, id.value, first, pos)^], next: pos, issues: []}

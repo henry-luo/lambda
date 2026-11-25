@@ -1,0 +1,4 @@
+\begin{tikzpicture}
+  \draw             (0,0) grid +(2,2);
+  \draw[help lines] (2,0) grid +(2,2);
+\end{tikzpicture}
