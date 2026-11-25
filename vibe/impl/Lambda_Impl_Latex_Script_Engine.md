@@ -34,6 +34,14 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Expl3 key-value parsing, 2026-11-26:** Script implements the expandable
+  `keyval_parse:NNn` and `keyval_parse:nnn` token parsers, including active
+  separators, nested groups, omitted values and empty values (D10.2.2v2).
+  Four expandable results match TeX Live; malformed key diagnostics and
+  document source mapping remain explicitly unsupported. This supplies the
+  common parser needed by the still-unported `keys_define:nn` and
+  `keys_set:nn`; csvsimple therefore remains blocked at key definition.
+
 - **Expl3 input-stream lifecycle, 2026-11-26:** Script now opens, reads,
   checks EOF and closes expl3 input streams through the existing captured
   resource broker, reusing TeX stream slots (S1.8, D10.2.2v2, D11.1.2).

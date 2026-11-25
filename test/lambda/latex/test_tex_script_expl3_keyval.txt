@@ -1,0 +1,31 @@
+{
+  issue: null,
+  unsupported: null,
+  text: "V[a]=[1]V[b]=[one,two]N[c]V[empty]=[]V[a,b]=[v]N[q]V[{g}]=[{v}]"
+}
+{
+  issue: null,
+  unsupported: null,
+  text: "V[a=b]=[c=d]V[raw]=[\\unexpandedword ]N[tail]"
+}
+{
+  issue: null,
+  unsupported: null,
+  text: "V[first]=[x,{y,z}]V[second]=[v=w]"
+}
+{
+  issue: null,
+  unsupported: null,
+  text: "V[a]=[1]V[b]=[c,d]N[e]"
+}
+{
+  issue: "tex-unsupported-primitive",
+  unsupported: "expl3 keyval syntax diagnostic",
+  text: ""
+}
+{
+  issue: "tex-unsupported-primitive",
+  unsupported: "expl3 keyval syntax diagnostic",
+  text: ""
+}
+true

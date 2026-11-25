@@ -9,6 +9,7 @@ let CS_GLOBAL = ["cs_gset:Npn", "cs_gset_protected:Npn"]
 let CS_VARIANT = ["cs_generate_variant:Nn"]
 let IOR_ACTION = ["ior_open:Nn", "ior_close:N", "ior_get:NN", "ior_str_get:NN"]
 let IOR_EOF = ["ior_if_eof:NTF", "ior_if_eof:NT", "ior_if_eof:NF", "ior_if_eof_p:N"]
+let KEYVAL_PARSE = ["keyval_parse:NNn", "keyval_parse:nnn"]
 let TL_NEW = ["tl_new:N", "tl_const:Nn"]
 let TL_SET = ["tl_set:Nn", "tl_set:Nx", "tl_gset:Nn", "tl_gset:Nx", "tl_clear:N", "tl_gclear:N"]
 let TL_PUT = ["tl_put_left:Nn", "tl_put_right:Nn", "tl_gput_left:Nn", "tl_gput_right:Nn",
@@ -48,8 +49,9 @@ pub fn exists(name) bool => contains(SEQ_EMPTY, name) or contains(INT_TEST, name
     contains(CS_GLOBAL, name) or contains(CS_VARIANT, name) or contains(IOR_ACTION, name) or contains(IOR_EOF, name) or contains(TL_NEW, name) or contains(TL_SET, name) or contains(TL_PUT, name) or contains(TL_REPLACE, name) or contains(TL_EMPTY, name) or contains(TL_BLANK, name) or contains(TL_EQUAL, name) or contains(TL_STRING, name) or contains(TL_COUNT, name) or
     contains(SEQ_NEW, name) or contains(SEQ_SET, name) or contains(SEQ_EXPAND, name) or
     contains(SEQ_SORT, name) or contains(SORT_RETURN, name) or contains(STR_COMPARE, name) or contains(TOKEN_EXPANDABLE, name) or contains(TEXT_CASE, name) or
-    contains(["ExplSyntaxOn", "ExplSyntaxOff", "ProvidesExplPackage", "ProvidesExplClass", "ProvidesExplFile", "tl_use:N", "int_eval:n", "fp_eval:n", "cs_new_eq:NN"], name)
-pub fn expandable(name) bool => contains(IOR_EOF, name) or contains(SEQ_EMPTY, name) or contains(INT_TEST, name) or contains(INT_COMPARE_EXPR, name) or contains(INT_COMPARE, name) or contains(INT_MATH, name) or contains(["tl_use:N", "int_eval:n", "fp_eval:n"], name) or contains(SEQ_EXPAND, name) or contains(STR_COMPARE, name) or contains(TOKEN_EXPANDABLE, name) or contains(TEXT_CASE, name) or contains(TL_EMPTY, name) or contains(TL_BLANK, name) or contains(TL_EQUAL, name) or contains(TL_STRING, name) or contains(TL_COUNT, name)
+    contains(KEYVAL_PARSE, name) or contains(["ExplSyntaxOn", "ExplSyntaxOff", "ProvidesExplPackage", "ProvidesExplClass", "ProvidesExplFile", "tl_use:N", "int_eval:n", "fp_eval:n", "cs_new_eq:NN"], name)
+pub fn expandable(name) bool => contains(KEYVAL_PARSE, name) or contains(IOR_EOF, name) or contains(SEQ_EMPTY, name) or contains(INT_TEST, name) or contains(INT_COMPARE_EXPR, name) or contains(INT_COMPARE, name) or contains(INT_MATH, name) or contains(["tl_use:N", "int_eval:n", "fp_eval:n"], name) or contains(SEQ_EXPAND, name) or contains(STR_COMPARE, name) or contains(TOKEN_EXPANDABLE, name) or contains(TEXT_CASE, name) or contains(TL_EMPTY, name) or contains(TL_BLANK, name) or contains(TL_EQUAL, name) or contains(TL_STRING, name) or contains(TL_COUNT, name)
+pub fn keyval_parse(name) bool => contains(KEYVAL_PARSE, name)
 pub fn cs_definition(name) bool => contains(CS_NEW, name) or contains(CS_LOCAL, name) or contains(CS_GLOBAL, name)
 pub fn cs_variant(name) bool => contains(CS_VARIANT, name)
 pub fn ior_action(name) bool => contains(IOR_ACTION, name)
@@ -114,7 +116,7 @@ fn split_item(tokens: map[], trim_spaces: bool, empty: bool, strip_groups: bool)
     else slice(tokens, first, limit)
 }
 
-fn split_tokens(tokens: map[], delimiter: map[], trim_spaces: bool, empty: bool, strip_groups: bool, once: bool,
+fn split_tokens(tokens: map[], delimiter: map[], trim_spaces: bool, empty: bool, strip_groups: bool, once: bool, active: bool = false,
         index: int = 0, depth: int = 0, current: map[] = [], items: array = []) array^ {
     if (index >= len(tokens)) {
         let item = split_item(current, trim_spaces, empty, strip_groups)^;
@@ -123,16 +125,17 @@ fn split_tokens(tokens: map[], delimiter: map[], trim_spaces: bool, empty: bool,
     else {
         let token = tokens[index];
         let matched = depth == 0 and (not once or len(items) == 0) and index + len(delimiter) <= len(tokens) and
-            stream.same_tokens(slice(tokens, index, index + len(delimiter)), delimiter)^;
+            (stream.same_tokens(slice(tokens, index, index + len(delimiter)), delimiter)^ or
+                (active and len(delimiter) == 1 and token.kind == "active" and token.value == delimiter[0].value));
         if (matched) {
             let item = split_item(current, trim_spaces, empty, strip_groups)^;
-            split_tokens(tokens, delimiter, trim_spaces, empty, strip_groups, once, index + len(delimiter), depth, [],
+            split_tokens(tokens, delimiter, trim_spaces, empty, strip_groups, once, active, index + len(delimiter), depth, [],
                 if (item == null) items else [*items, item])
         }
         else {
             let next = depth + if (token.kind == "char" and token.cat == 1) 1
                 else if (token.kind == "char" and token.cat == 2) -1 else 0;
-            split_tokens(tokens, delimiter, trim_spaces, empty, strip_groups, once, index + 1, next, [*current, token], items)
+            split_tokens(tokens, delimiter, trim_spaces, empty, strip_groups, once, active, index + 1, next, [*current, token], items)
         }
     }
 }
@@ -156,6 +159,18 @@ pub fn from_split(tokens: map[], delimiter: map[], trim_spaces: bool) array^ =>
     else split_tokens(tokens, delimiter, trim_spaces, true, true, false)
 pub fn replace_tokens(tokens: map[], search: map[], replacement: map[], once: bool) array^ =>
     stream.join_tokens(split_tokens(tokens, search, false, true, false, once)^, replacement)
+
+// Key-value separators can be active, and braces protect nested separators.
+pub fn keyval_entries(tokens: map[]) array^ {
+    let comma = [{kind:"char", value:",", cat:12}];
+    let equal = [{kind:"char", value:"=", cat:12}];
+    let items = split_tokens(tokens, comma, true, false, false, false, true)^;
+    [for (item in items) {
+        let parts = split_tokens(item, equal, true, true, true, false, true)^;
+        {key:parts[0], value:if (len(parts) == 2) parts[1] else null,
+            invalid:len(parts) > 2 or len(parts[0]) == 0}
+    }]
+}
 
 // Build the same expandable argument adapter used by expl3's generated variants.
 fn variant_argument(mode, position) any^ {

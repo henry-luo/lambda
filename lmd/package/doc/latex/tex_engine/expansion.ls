@@ -624,6 +624,7 @@ fn expand_one(st: State, t, budget) State^ {
     else if (st.latex and contains(["arabic", "roman", "Roman", "alph", "Alph", "fnsymbol", "value"], primitive(st, t)))
         latex_counter_format(st, t, primitive(st, t), budget)
     else if (st.script_expl3 and primitive(st, t) == "tl_use:N") expl3_tl_use(st, budget)
+    else if (st.script_expl3 and expl3.keyval_parse(primitive(st, t))) expl3_keyval_parse(st, budget)
     else if (st.script_expl3 and expl3.ior_eof(primitive(st, t))) expl3_ior_eof(st, primitive(st, t))
     else if (st.script_expl3 and expl3.token_empty(primitive(st, t))) expl3_tl_empty(st, primitive(st, t), budget)
     else if (st.script_expl3 and expl3.token_equal(primitive(st, t))) expl3_tl_equal(st, primitive(st, t), budget)
@@ -3063,6 +3064,36 @@ fn expl3_cs_generate_variant(st: State) State^ {
             let protected_flag = base.protected_flag == true or
                 (base.kind == "primitive" and expl3.exists(base.name) and not expl3.expandable(base.name));
             expl3_install_variants(advanced, target.token.value, expl3.from_clist(variants.tokens)^, protected_flag)
+        }
+    }
+}
+
+fn expl3_keyval_calls(entries, absent, present, index = 0, output = []) any^ {
+    if (index >= len(entries)) output
+    else {
+        let entry = entries[index];
+        let value = if (entry.value == null) [] else [brace_token(true), *entry.value, brace_token(false)];
+        let callback = if (entry.value == null) absent else present;
+        expl3_keyval_calls(entries, absent, present, index + 1,
+            [*output, *callback, brace_token(true), *entry.key, brace_token(false), *value])
+    }
+}
+
+// Parse without expanding either callbacks or input; the resulting calls expand normally.
+fn expl3_keyval_parse(st: State, budget) State^ {
+    if (st.expansions >= budget) fail(st, "tex-budget")
+    else {
+        let absent = stream.argument(st.input, true)^;
+        let present = stream.argument(absent.stream, true)^;
+        let data = stream.argument(present.stream, true)^;
+        let current = {*:st, input:data.stream, expansions:st.expansions + 1, expl3_keyval_seen:true};
+        if (absent.error != null) fail(current, absent.error)
+        else if (present.error != null) fail(current, present.error)
+        else if (data.error != null) fail(current, data.error)
+        else {
+            let entries = expl3.keyval_entries(data.tokens)^;
+            if (any([for (entry in entries) entry.invalid])) unsupported(current, "expl3 keyval syntax diagnostic")
+            else {*:current, input:stream.push(current.input, expl3_keyval_calls(entries, absent.tokens, present.tokens)^)}
         }
     }
 }
@@ -6912,7 +6943,7 @@ pub fn resume(st: State, source: string, name: string = "<input>", budget: int =
         let resumed = {*:st, input: next_input, finished: false, output: [], messages: [], terminal_line: "", expansions: 0,
             main_file: id, echo_incomplete: false, prefixed_macro_seen: false, prefix_scan: false,
             mathchardef_emission_seen: false,
-            expl3_tl_head_seen: false, expl3_tl_tail_seen: false,
+            expl3_tl_head_seen: false, expl3_tl_tail_seen: false, expl3_keyval_seen: false,
             expl3_exp_args_once_seen: false, expl3_exp_args_value_seen: false, expl3_exp_args_f_seen: false,
             sources: [*st.sources, {id: id, name: name, origin: origin, data: source}]};
         run(resumed, budget)
