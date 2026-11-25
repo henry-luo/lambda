@@ -34,6 +34,16 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Format-date checks, 2026-11-26:** The kernel implements
+  `\IfFormatAtLeastTF` through LaTeX's version comparison macros and the
+  active `\fmtversion`, replacing the retired engine's unconditional true
+  branch. Past, equal, future, slash-form and changed-version cases agree with
+  the installed TeX Live reference; the exact Script golden and neighboring
+  loop, definition and kernel-reuse tests pass interpreter and JIT with forced
+  GC and poisoning (S1.8, D10.2.2v2). This deliberately corrects the old C
+  approximation for future dates. The bundled-package fixture now reaches
+  the unported `\filename@parse`; it is not yet passing.
+
 - **Package argument definitions, 2026-11-26:** Script now implements
   `\@yargdef` using the existing control-target, numeric scanner, argument
   converter and scoped-definition machinery. Six independent retired-engine

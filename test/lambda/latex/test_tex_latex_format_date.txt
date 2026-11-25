@@ -1,0 +1,4 @@
+{
+  text: "old-yes/equal-yes/future-no/\\def\\fmtversion{2019-01-01}changed-no ",
+  diagnostics: []
+}

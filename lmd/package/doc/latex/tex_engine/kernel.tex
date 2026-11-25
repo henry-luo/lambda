@@ -169,8 +169,15 @@
 \long\def\@whilesw#1\fi#2{#1\expandafter\@firstofone\else\expandafter\@gobble\fi
   {#2\@whilesw#1\fi{#2}}}
 \def\@addtofilelist#1{\xdef\@filelist{\@filelist,#1}}
-\long\def\@ifl@t@r#1#2#3#4{#3}
 \def\fmtname{LaTeX2e}\def\fmtversion{2024-11-01}
+% Compare the active format version rather than assuming every date is older.
+\def\IfFormatAtLeastTF{\@ifl@t@r\fmtversion}
+\def\@ifl@t@r#1#2{\ifnum\expandafter\@parse@version@#1//00\@nil<%
+  \expandafter\@parse@version@#2//00\@nil
+  \expandafter\@secondoftwo\else\expandafter\@firstoftwo\fi}
+\def\@parse@version@#1{\@parse@version0#1}
+\def\@parse@version#1/#2/#3#4#5\@nil{\@parse@version@dash#1-#2-#3#4\@nil}
+\def\@parse@version@dash#1-#2-#3#4#5\@nil{\if\relax#2\relax\else#1\fi#2#3#4 }
 \def\BooleanTrue{true}\def\BooleanFalse{false}
 \def\baselinestretch{1}
 \newdimen\textwidth \textwidth=345pt \newdimen\textheight \textheight=550pt
