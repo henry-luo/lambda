@@ -629,8 +629,9 @@ TEST_P(SecurityRuntimeTest, InlineParsingCarriesResourceAuthority) {
 }
 
 TEST_P(SecurityRuntimeTest, CapturedMemberParsingCannotRetainExternalResourceAuthority) {
-    const char* source = "\\RequirePackage{safety-private}\\privatevalue\\end";
+    const char* source = "\\RequirePackage{safety-private}\\privatevalue\\input{secret}\\end";
     seed("safety-private.sty", "\\def\\privatevalue{EXTERNAL}");
+    seed("secret.tex", "FORBIDDEN");
     struct ResourceDirectoryScope {
         explicit ResourceDirectoryScope(const char* path) { tex::set_resource_dir(path); }
         ~ResourceDirectoryScope() { lambda_home_init(); }
@@ -647,6 +648,9 @@ TEST_P(SecurityRuntimeTest, CapturedMemberParsingCannotRetainExternalResourceAut
     ArrayList* entries = arraylist_new(1); arraylist_append(entries, &entry);
     StrBuf* bytes = strbuf_new(); ZipError error = {};
     ASSERT_TRUE(zip_write_entries(entries, nullptr, bytes, &error));
+    char* archive_path = file_path_join(directory, "member.zip"); ASSERT_NE(archive_path, nullptr);
+    ASSERT_EQ(write_binary_file(archive_path, bytes->str, bytes->length), 0);
+    mem_free(archive_path);
     Input* archive = input_from_source_n(bytes->str, bytes->length, nullptr, nullptr, nullptr);
     strbuf_free(bytes); arraylist_free(entries);
     ASSERT_NE(archive, nullptr);
@@ -654,13 +658,20 @@ TEST_P(SecurityRuntimeTest, CapturedMemberParsingCannotRetainExternalResourceAut
     ASSERT_EQ(get_type_id(children), LMD_TYPE_VARRAY);
     ASSERT_EQ(varray_count(children.varray), 1);
     Item node = varray_get(children.varray, 0);
-    // The control proves this very member name has an ambient bundled
-    // resource. Both initial lazy parsing and cache reuse must remain closed.
+    // Standalone Input cannot execute the Script parser or retain external grants.
     for (int repeat = 0; repeat < 2; repeat++) {
         Item report = fs_node_input(node, type, nullptr);
-        text = MapReader::fromItem(report).get("text").asString();
-        ASSERT_NE(text, nullptr); EXPECT_EQ(strstr(text->chars, "EXTERNAL"), nullptr);
+        EXPECT_EQ(get_type_id(report), LMD_TYPE_ERROR);
     }
+    ASSERT_NE(admit_shipped_packages(), 0U);
+    seed("member.ls", "let archive=input(\"@ROOT@/member.zip\")^\n"
+        "let member=content(archive)^[0]\n"
+        "let first=input(member, 'tex')^\n"
+        "let second=parse(member, {type:'tex', base:\"@ROOT@\"})^\n"
+        "first == second and not contains(first.text, \"EXTERNAL\")^ and "
+        "not contains(first.text, \"FORBIDDEN\")^\n");
+    Input* result = load_file("member.ls"); ASSERT_NE(result, nullptr);
+    ASSERT_EQ(get_type_id(result->root), LMD_TYPE_BOOL); EXPECT_TRUE(result->root.bool_val);
 }
 
 TEST_P(SecurityRuntimeTest, TexLocalIncludesUseTheSameDataGrant) {

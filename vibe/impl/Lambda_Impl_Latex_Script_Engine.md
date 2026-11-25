@@ -34,6 +34,18 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Captured archive members, 2026-11-25:** Explicit `input(member, 'tex' | 'latex')`
+  and `parse(member, ...)` now hand the captured source to the Script engine.
+  Input caches the captured source, not a runtime-owned result; repeated Script
+  parses currently re-execute, so parsed-result caching remains open. A member carries
+  no external resource grant even if its options name a base or supply resource
+  snapshots (S12.4.1v2, D11.1.2, D10.2.2v2). Standalone lazy TeX reads now
+  report that a runtime host is required instead of using the native engine;
+  migration of the lazy virtual-content interface remains open. Two captured
+  member regressions pass in both tiers under forced GC; the security isolation
+  tests pass in both tiers under forced GC, and five native ZIP cache/member
+  tests pass. The HTTP, standalone document and math paths still need migration.
+
 - **Automatic detection handoff, 2026-11-25:** Local `input()` and `parse()`
   can ask Input to return the acquired TeX/LaTeX source and detected format to
   the runtime. Input keeps its format detection and never imports or calls the
@@ -43,9 +55,9 @@ The existing native engine design and historical Phase IV work are in
   the prior mixed auto/native route now passes, along with a native-backed
   automatic document comparison. The final build and eight focused script
   tests pass; both auto tests pass in both tiers under forced GC, and scoped
-  include and denied-symlink tests pass in both tiers under forced GC. Captured
-  archive members, HTTP acquisition, standalone Input clients, and math still
-  need migration before C retirement.
+  include and denied-symlink tests pass in both tiers under forced GC. At that
+  checkpoint captured archive members, HTTP acquisition, standalone Input
+  clients, and math still needed migration before C retirement.
 
 - **Resource requests, 2026-11-25:** The Script expander requests missing local
   or bundled resources by scope and name; the runtime captures authorized bytes

@@ -5927,7 +5927,25 @@ static bool input_schema_prepare_name_parent(Type* schema_type, NamePool* name_p
     return ok;
 }
 
-static Item parse_tex_script(Item source, Item options, const char* format, const char* base);
+static Item parse_tex_script(Item source, Item options, const char* format, const char* base, bool captured_member = false);
+
+#ifndef LAMBDA_IME_RESOURCE_IO
+static Item parse_captured_input(Item node, String* type, String* flavor, Item options,
+        const InputScriptParser* parser) {
+    const char* deferred = nullptr;
+    Item value = fs_node_input_deferred(node, type, flavor, parser, &deferred);
+    if (!deferred) return value;
+    if (get_type_id(value) != LMD_TYPE_STRING)
+        return runtime_error_itemf(ERR_PARSE_ERROR, "input: captured TeX source is not text");
+    RootFrame roots(1);
+    Rooted<Item> source(roots, ItemNull);
+    // The archive retains this snapshot; the Script evaluator needs a GC-owned copy.
+    String* copy = heap_strcpy(value.get_chars(), value.get_len());
+    if (!copy) return ItemError;
+    source.set((Item){.item = s2it(copy)});
+    return parse_tex_script(source.get(), options, deferred, nullptr, true);
+}
+#endif
 
 static Item input_resource(Item target_item, Item type, bool template_url_only) {
     GUARD_ERROR2(target_item, type);
@@ -6091,8 +6109,8 @@ static Item input_resource(Item target_item, Item type, bool template_url_only) 
     const InputScriptParser parser = lambda_input_script_parser(context->runtime);
 #ifndef LAMBDA_IME_RESOURCE_IO
     if (fs_target) {
-        Item result = fs_node_input(input_target_root.get(), type_str, flavor_str,
-            parser.context ? &parser : nullptr);
+        Item result = parse_captured_input(input_target_root.get(), type_str, flavor_str,
+            input_options_root.get(), parser.context ? &parser : nullptr);
         if (get_type_id(result) == LMD_TYPE_ERROR) {
             if (context) eval_context_set_last_error(context, it2err(result));
             return result;
@@ -7260,7 +7278,7 @@ static bool tex_capture_file(const SecurityIOClient* io, const char* base, const
     mem_free(root); *missing = absent; return absent;
 }
 
-static Item parse_tex_script(Item source, Item options, const char* format, const char* base) {
+static Item parse_tex_script(Item source, Item options, const char* format, const char* base, bool captured_member) {
     // The caller's converted option may not survive allocations during a restart.
     struct BasePath {
         char* value;
@@ -7307,8 +7325,8 @@ static Item parse_tex_script(Item source, Item options, const char* format, cons
         if (!kernel) return ItemError;
         kernel_item.set((Item){.item = s2it(kernel)});
     }
-    Item initial[] = {settings.get(), base_item.get(), kernel_item.get()};
-    settings.set(interp_call_package_export(runtime, package, "host_options", initial, 3));
+    Item initial[] = {settings.get(), base_item.get(), kernel_item.get(), (Item){.item = b2it(captured_member)}};
+    settings.set(interp_call_package_export(runtime, package, "host_options", initial, 4));
     if (get_type_id(settings.get()) != LMD_TYPE_MAP) return ItemError;
     const uint64_t resource_bytes = INPUT_TEX_RESOURCE_BYTE_LIMIT;
     uint64_t captured = 0; int local_files = 0; int requests = 0;
@@ -7491,7 +7509,8 @@ Item fn_parse2(Item str_item, Item type) {
     // captured ZIP members are values: parsing them never reacquires their source (S12.4.1v2).
 #ifndef LAMBDA_IME_RESOURCE_IO
     if (fs_node_is(str_item)) {
-        Item result = fs_node_input(str_item, type_str, flavor_str, parse_options.script_parser);
+        Item result = parse_captured_input(str_item, type_str, flavor_str,
+            parse_options_root.get(), parse_options.script_parser);
         return result;
     }
 #endif

@@ -1,0 +1,10 @@
+{
+  tex_matches: true,
+  text: "\\begin{document}Hello\\end{document}",
+  latex_matches: false,
+  document: "\\begin{document}Hello\\end{document}",
+  latex: <latex_document
+    <document source_offset: 0,
+      <paragraph
+        "Hello">>>
+}
