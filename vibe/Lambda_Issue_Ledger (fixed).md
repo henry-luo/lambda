@@ -16,6 +16,22 @@
 > Semantic and design rulings remain cited by S# / D#; where no formal ruling
 > covers a point, the original vibe ledger ID is retained.
 
+<a id="interpreter-task-drain-stalls-a-returned-shell-pipeline"></a>
+## Interpreter task drain stalls a returned shell pipeline
+
+**Fixed in the working tree, 2026-11-25.** The interpreter drained tasks
+before reading the shell stream returned by `main`. Once the final child
+filled its stdout pipe, the stdin feeder could no longer finish. The
+five-second idle watchdog eventually released the task drain. The
+interpreter now consumes the returned stream before draining other
+tasks on the same execution thread, matching the MIR completion order
+(**S14.3.3–S14.3.6v2**, **D7.5.1**, **D8.3.1v3**).
+
+The 100 MiB mixed chain now takes 0.96 s in auto on the release host,
+down from 5.94 s. All three backend settings produced identical output
+before the three-second deadline that previously expired in auto. The
+shell regression also passed with forced GC. [Benchmark and results](../test/shell/pipe/README.md) · [Implementation checkpoint](impl/Lambda_Impl_Shell_Piping.md#qualification)
+
 <a id="lr12-72"></a>
 ## LR12-72 — DOM and document-preview seams blocked the split build
 

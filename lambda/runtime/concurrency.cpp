@@ -1,6 +1,7 @@
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
 #include "concurrency.h"
+#include "shell_pipeline.hpp"
 #include "activation.h"
 #include "lambda-root-frame.hpp"
 #include "lambda-error.h"
@@ -253,7 +254,7 @@ static LambdaPromiseIsFn promise_is;
 static LambdaPromiseWaitFn promise_wait;
 static LambdaHandleToPromiseFn handle_to_promise;
 static bool scheduler_has_heap(void);
-static LambdaTask* lambda_current_task(void);
+static LambdaTask* lambda_current_task(bool create_root = true);
 static void offload_cancel(LambdaOffload* job);
 static void offload_release(LambdaOffload* job, bool free_on_close);
 
@@ -408,7 +409,7 @@ static Item task_error(LambdaErrorCode code, const char* message) {
     return error ? err2it(error) : ItemError;
 }
 
-static bool task_read_milliseconds(Item item, int64_t* out) {
+extern "C" bool lambda_read_milliseconds(Item item, int64_t* out) {
     TypeId type_id = get_type_id(item);
     // Inline int values store their payload in the Item itself; only INT64
     // carries a pointer that is valid for get_int64().
@@ -1209,8 +1210,8 @@ extern "C" bool lambda_task_cancel_requested(const LambdaTask* task) {
     return task && task->cancel_requested;
 }
 
-extern "C" void lambda_task_set_cleanup_masked(LambdaTask* task, bool masked) {
-    if (!task) return;
+extern "C" bool lambda_task_set_cleanup_masked(LambdaTask* task, bool masked) {
+    if (!task) return false;
     bool was_masked = task->cleanup_masked;
     task->cleanup_masked = masked;
     if (was_masked && !masked && task->cancel_requested &&
@@ -1219,6 +1220,7 @@ extern "C" void lambda_task_set_cleanup_masked(LambdaTask* task, bool masked) {
         // the first park point after cleanup finishes.
         task_resume_with(task, task_error(ERR_CANCELLED, "task cancelled"));
     }
+    return was_masked;
 }
 
 extern "C" LambdaSendStatus lambda_task_send(
@@ -1425,8 +1427,12 @@ static Item task_entry(Activation* self, Item launch) {
     args.capacity = arg_count;
     // A task publishes its result after this entry returns. Its companion
     // word is therefore the stable home for a MIR public wrapper's wide scalar.
-    return lambda_concurrency_fn_call_procedure_into(function, &args,
-        task ? &task->result_scalar : NULL);
+    RootFrame roots(1);
+    Rooted<Item> result(roots, lambda_concurrency_fn_call_procedure_into(
+        function, &args, task ? &task->result_scalar : NULL));
+    // Reap task-owned children before publishing this task's result.
+    shell_task_finish();
+    return result.get();
 }
 
 static Item task_start_function_scoped(Item function, List* args, bool escapes, void* explicit_document) {
@@ -1710,13 +1716,14 @@ extern "C" int lambda_document_tasks_release(void* document) {
     return document_tasks_join(scheduler, document);
 }
 
-static LambdaTask* lambda_current_task(void) {
+static LambdaTask* lambda_current_task(bool create_root) {
     LambdaScheduler* scheduler = context ? context->scheduler : NULL;
     if (!scheduler) return NULL;
     if (scheduler->current) return scheduler->current;
     // Base-stack code is the root task; another activation that is not a
     // task (a generator body) has no task identity of its own.
-    return activation_current() ? NULL : scheduler_root_task(scheduler);
+    if (activation_current()) return NULL;
+    return create_root ? scheduler_root_task(scheduler) : scheduler->root;
 }
 
 extern "C" LambdaTaskScope* lambda_task_scope_enter(void) {
@@ -1850,7 +1857,7 @@ extern "C" Item pn_wait2(Item handle, Item timeout_ms) {
             "wait timeout is not supported for JavaScript Promises", NULL));
     }
     int64_t value = -1;
-    task_read_milliseconds(timeout_ms, &value);
+    lambda_read_milliseconds(timeout_ms, &value);
     if (value < 0) return err2it_or_error(err_create_heap(ERR_INVALID_OPERATION,
         "wait timeout must be a non-negative integer", NULL));
     return wait_handle(handle, (uint64_t)value);
@@ -1883,7 +1890,7 @@ extern "C" Item pn_select(Item handles, Item timeout_ms) {
     }
     int64_t timeout = -1;
     // failed conversion must not turn an invalid deadline into an unlimited wait.
-    if (!task_read_milliseconds(timeout_ms, &timeout) || timeout < 0) {
+    if (!lambda_read_milliseconds(timeout_ms, &timeout) || timeout < 0) {
         mem_free(targets);
         return err2it_or_error(err_create_heap(ERR_INVALID_OPERATION,
             "select timeout must be a non-negative integer", NULL));
@@ -1899,7 +1906,7 @@ extern "C" Item pn_select(Item handles, Item timeout_ms) {
 extern "C" Item pn_sleep(Item duration_ms) {
     LambdaTask* task = lambda_current_task();
     int64_t value = -1;
-    task_read_milliseconds(duration_ms, &value);
+    lambda_read_milliseconds(duration_ms, &value);
     if (!task || value < 0) return err2it_or_error(err_create_heap(ERR_INVALID_OPERATION,
         "sleep requires a running task and non-negative duration", NULL));
     if (task_cancel_pending(task)) return task_cancelled_error();
@@ -2221,6 +2228,10 @@ extern "C" LambdaTask* lambda_task_running(void) {
     return lambda_current_task();
 }
 
+extern "C" LambdaTask* lambda_task_running_if_present(void) {
+    return lambda_current_task(false);
+}
+
 // Only a task parked on this job may be woken: parked anywhere else (its
 // progress callback sleeping, say) it finds `done` or `progress_pending`
 // when it returns to the offload loop.
@@ -2411,7 +2422,7 @@ static Item process_progress(void* data, bool final) {
     return get_type_id(outcome) == LMD_TYPE_ERROR ? outcome : ItemNull;
 }
 
-static char* process_argument(Item value) {
+extern "C" char* lambda_process_argument(Item value) {
     TypeId type = get_type_id(value);
     const char* chars = NULL;
     size_t length = 0;
@@ -2448,15 +2459,15 @@ static LambdaProcess* process_create(Item program, Item arguments, Item options,
     process->arg_count = (int)arguments.array->length + 1;
     process->args = (char**)mem_calloc((size_t)process->arg_count + 1, sizeof(char*), MEM_CAT_EVAL);
     if (!process->args) { process_release(process); return NULL; }
-    process->args[0] = process_argument(program);
+    process->args[0] = lambda_process_argument(program);
     bool valid = process->args[0] && process->args[0][0];
     for (int i = 1; valid && i < process->arg_count; i++) {
-        process->args[i] = process_argument(arguments.array->items[i - 1]);
+        process->args[i] = lambda_process_argument(arguments.array->items[i - 1]);
         valid = process->args[i] != NULL;
     }
     Item cwd = io_fs_option_get(&opts, "cwd");
     if (get_type_id(cwd) != LMD_TYPE_NULL) {
-        if (get_type_id(cwd) == LMD_TYPE_BINARY) process->cwd = process_argument(cwd);
+        if (get_type_id(cwd) == LMD_TYPE_BINARY) process->cwd = lambda_process_argument(cwd);
         else {
             StrBuf* path = lambda_get_local_path_from_item(cwd);
             if (path) { process->cwd = mem_dup_n(path->str, path->length, MEM_CAT_EVAL); strbuf_free(path); }
@@ -2478,7 +2489,7 @@ static LambdaProcess* process_create(Item program, Item arguments, Item options,
                 char* key = mem_dup_n(field->name->str, field->name->length, MEM_CAT_EVAL);
                 bool found = false;
                 Item value = _map_get(shape, env.map->data, key, &found);
-                char* text = get_type_id(value) == LMD_TYPE_NULL ? NULL : process_argument(value);
+                char* text = get_type_id(value) == LMD_TYPE_NULL ? NULL : lambda_process_argument(value);
                 if (!key || !key[0] || strchr(key, '=') ||
                         (get_type_id(value) != LMD_TYPE_NULL && !text)) valid = false;
                 process->env[index++] = {key, text};

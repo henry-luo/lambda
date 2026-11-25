@@ -420,6 +420,7 @@ typedef enum SysFunc {
     SYSPROC_IO_RTC_STATUS,
     SYSPROC_IO_DISCOVERY_ADVERTISE, SYSPROC_IO_DISCOVERY_BROWSE, SYSPROC_IO_DISCOVERY_CLOSE,
     SYSPROC_IO_DISK_WATCH, SYSPROC_IO_DISK_CHANGES, SYSPROC_IO_DISK_UNWATCH,
+    SYSPROC_SHELL_START, SYSPROC_SHELL_STDIN,
 } SysFunc;
 
 #ifdef __cplusplus
@@ -1629,6 +1630,10 @@ extern "C" {
     // io module functions (procedural)
     Item pn_io_copy(Item src, Item dst);
     Item pn_io_read(Item target);
+    Item pn_shell_start(Item input, Item program, Item arguments, Item errors, Item timeout);
+    Item pn_shell_stdin(void);
+    int64_t fn_shell_is_stream(Item value);
+    Item fn_shell_record_stage(Item source, Item callback, Item root, Item caught, int64_t filter);
     Item pn_io_exec2(Item program, Item args);
     Item pn_io_exec3(Item program, Item args, Item options);
     Item pn_io_move(Item src, Item dst);

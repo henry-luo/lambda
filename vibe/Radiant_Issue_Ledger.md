@@ -20,6 +20,10 @@ observations still require re-verification. Add new Radiant issues here.
 
 ## Open issues
 
+<a id="ri-235"></a>
+
+- [RI-235 — Late positioning stretches intrinsic popovers](<Radiant_Issue_Ledger (fixed).md#ri-235>).
+
 <a id="ri-234"></a>
 
 - [RI-234 — Native edge scrolling retains a retired text row](<Radiant_Issue_Ledger (fixed).md#ri-234>).

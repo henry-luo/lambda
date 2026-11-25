@@ -886,6 +886,7 @@ typedef struct AstBinaryNode : AstNode {
 
 struct LambdaAstBinaryNode : AstBinaryNode {
     StrView op_str;
+    struct AstFuncNode* shell_stage; // deferred RHS for live process or value streams
     uint32_t pipe_effect_guard; // for arbitrary whole-value pipe callables
     bool interp_int_arithmetic; // predicted operands; runtime tags still guard the kernel
 };
@@ -1505,6 +1506,7 @@ typedef struct AstFuncNode : AstNode {
     // S11.4.11: a `that` body's function; its one parameter is the candidate,
     // which the body reads as `~` (resolver_predicate_begin)
     bool is_that_predicate;
+    bool is_shell_pipe_stage;
     // T29-1: number of synthesized place-handle slots in this body
     uint16_t place_handle_count;
     // D8.3.2: a synthesized loop continuation, whose parameters are the

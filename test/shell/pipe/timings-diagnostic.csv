@@ -1,0 +1,10 @@
+trial,variant,ms
+1,cat/jit,795.398833
+1,cat/auto,5927.808292
+1,stdout/auto,674.348750
+2,stdout/auto,679.457291
+2,cat/auto,5947.304708
+2,cat/jit,800.787541
+3,cat/auto,5927.792667
+3,cat/jit,841.278041
+3,stdout/auto,687.313167

@@ -1643,6 +1643,10 @@ test-lambda-mvp: build-lambda-baseline
 	@echo "Running Lambda baseline GTests with MVP selected for JIT arms..."
 	@LAMBDA_TEST_MIR_COMPILER=mvp LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js $(LAMBDA_BASELINE_SELECTION) --parallel $(ARGS)
 
+.PHONY: test-shell-piping
+test-shell-piping: build
+	@$(PYTHON) test/shell/pipe/test_shell_piping.py
+
 # Independent RFC 6455 peers, including TLS and malformed input.
 .PHONY: test-websocket
 test-websocket: build
