@@ -583,7 +583,12 @@ static SecurityIOResult security_file_input_kind(void* context, const char* path
             if (decision == SECURITY_ALLOWED) {
                 broker->active = &lease;
                 FileRevision revision;
-                if (!file_anchor_stat(root->anchor, relative, &revision)) result.system_error = errno;
+                if (!file_anchor_stat(root->anchor, relative, &revision)) {
+                    int error = errno;
+                    // An authorized absent name must remain distinct from a denied path.
+                    if (error == ENOENT) result = security_file_result(SECURITY_ALLOWED, error);
+                    else result.system_error = error;
+                }
                 else if ((candidate == SECURITY_OBJECT_FILE && revision.stat.is_file) ||
                         (candidate == SECURITY_OBJECT_DIRECTORY && revision.stat.is_dir)) {
                     *kind = candidate; result = security_file_result(SECURITY_ALLOWED);

@@ -1,0 +1,9 @@
+{
+  matches: true,
+  document: <latex_document
+    <document source_offset: 0,
+      <paragraph
+        "A Hello\n">>
+    <paragraph
+      "\n">>
+}

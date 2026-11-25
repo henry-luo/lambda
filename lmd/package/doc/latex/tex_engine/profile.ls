@@ -28,7 +28,10 @@ pub fn expand_with_kernel(source: string, kernel: string, options: any ! error =
 }
 
 pub fn expand(source: string, options: any ! error = null, budget: int = 20000000) State | Unavailable | error {
-    let kernel = input(sys.lambda.home ++ "/package/doc/latex/tex_engine/kernel.tex", "text") ^ { null };
+    let configured = expansion.options_map(options);
+    // Restricted hosts supply already authorized kernel bytes without exposing system information.
+    let kernel = if (configured.kernel_source is string) configured.kernel_source
+        else input(sys.lambda.home ++ "/package/doc/latex/tex_engine/kernel.tex", "text") ^ { null };
     if (kernel == null) {issue: "tex-kernel-unavailable"}
     else expand_with_kernel(source, kernel, options, budget)
 }

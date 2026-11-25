@@ -1,0 +1,17 @@
+[{
+    text: " ",
+    diagnostics: [{
+        code: "tex-no-base",
+        message: "file `somefile' needs a document location (base)",
+        offset: 15,
+        line: 1
+      }]
+  }, {
+    text: " ",
+    diagnostics: [{
+        code: "tex-no-base",
+        message: "file `../outside' needs a document location (base)",
+        offset: 17,
+        line: 1
+      }]
+  }]

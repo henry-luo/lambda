@@ -1,0 +1,4 @@
+{
+  matches: true,
+  text: "script\\_public\\_jobname"
+}

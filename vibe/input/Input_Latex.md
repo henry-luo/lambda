@@ -58,14 +58,15 @@ establish complete TeX conformance.
 The experimental engine can answer PDF file queries and expand `\input` from
 explicit snapshots of caller-authorized local and bundled resources. It keeps
 those scopes separate, tracks captured source IDs and byte offsets, and handles
-nested input, `\endinput`, and conditional file probes and inclusion. The caller
-must enforce D11.1.2 when acquiring bytes and provide a complete snapshot for
-each selected scope; the engine opens
-no paths. An absent snapshot reports the primitive as unsupported rather than
-treating every file as missing. Names reject absolute paths and `..`, and local
+nested input, `\endinput`, and conditional file probes and inclusion. The engine
+opens no paths. The runtime facade requests missing snapshot entries and captures
+them through the caller's authority (D9.1.2v2, D11.1.2); direct snapshot callers
+still receive an explicit unsupported result when a scope is absent. Names reject
+absolute paths and `..`, and local
 captures count against the native 128-file and 16 MiB limits. Included source
-bytes currently must be valid UTF-8. Bundled search-path selection, synthetic
-source mapping and the production resource adapter remain unimplemented.
+bytes currently must be valid UTF-8. The runtime searches the bundled root and
+its binding directory. Synthetic source mapping and resource qualification for
+the remaining native entry points remain incomplete.
 
 The experimental `tex_engine.profile` loads the ported Lambda LaTeX kernel as
 an approved package resource and carries its definitions and category codes
@@ -78,9 +79,8 @@ nested loads, metadata, end-of-package and document hooks, and restoration of
 package category codes. Declared, passed, inherited and starred package
 options are processed, and expandable package and class option queries work
 inside definitions. Captured local classes can load a base class, pass class
-options and run end-of-class hooks. The caller must supply complete authorized
-snapshots for both package search scopes; this is not yet a production resource
-provider.
+options and run end-of-class hooks. The runtime supplies requested captures for
+explicit TeX and LaTeX calls; this path still requires full corpus qualification.
 
 The script profile supports LaTeX counter declarations, global set/add/step
 operations, child resets, `\value`, and Arabic, Roman, alphabetic and symbol

@@ -5927,7 +5927,7 @@ static bool input_schema_prepare_name_parent(Type* schema_type, NamePool* name_p
     return ok;
 }
 
-static Item parse_tex_script(Item source, Item options, const char* format);
+static Item parse_tex_script(Item source, Item options, const char* format, const char* base);
 
 static Item input_resource(Item target_item, Item type, bool template_url_only) {
     GUARD_ERROR2(target_item, type);
@@ -6096,16 +6096,21 @@ static Item input_resource(Item target_item, Item type, bool template_url_only) 
         Rooted<Item> source(roots, ItemNull);
         Input* text_input = text_type.get() ? input_from_target_with_io(target, text_type.get(), nullptr,
             nullptr, eval_context_security_io(context), nullptr) : nullptr;
-        target_free(target);
-        if (!text_input) return runtime_error_itemf(ERR_IO_ERROR, "input: failed to load TeX source");
-        if (text_input->parse_failed) return input_parse_error_item("input", text_input, type_str);
+        if (!text_input) { target_free(target); return runtime_error_itemf(ERR_IO_ERROR, "input: failed to load TeX source"); }
+        if (text_input->parse_failed) {
+            Item error = input_parse_error_item("input", text_input, type_str);
+            target_free(target); return error;
+        }
         Item raw = text_input->root;
-        if (get_type_id(raw) != LMD_TYPE_STRING)
+        if (get_type_id(raw) != LMD_TYPE_STRING) {
+            target_free(target);
             return runtime_error_itemf(ERR_PARSE_ERROR, "input: TeX source is not text");
+        }
         String* copy = heap_strcpy(raw.get_chars(), raw.get_len());
-        if (!copy) return ItemError;
+        if (!copy) { target_free(target); return ItemError; }
         source.set((Item){.item = s2it(copy)});
-        Item parsed = parse_tex_script(source.get(), input_options_root.get(), type_str->chars);
+        Item parsed = parse_tex_script(source.get(), input_options_root.get(), type_str->chars, target->original);
+        target_free(target);
         if (schema_type && get_type_id(parsed) != LMD_TYPE_ERROR)
             return lambda_type_check(parsed, schema_type, "input schema");
         return parsed;
@@ -7040,7 +7045,7 @@ static Item fn_parse_highlight_spans(bool html, Item src_item, Item window_item,
 
     // Every allocation below may collect: each array is rooted, and slots are
     // reserved before a fresh symbol is pushed so the push cannot allocate.
-    RootFrame roots(7);
+    RootFrame roots(8);
     Rooted<Array*> result(roots, array_plain());
     Rooted<Array*> kinds(roots, array_plain());
     Rooted<Array*> spans(roots, array_plain());
@@ -7215,11 +7220,72 @@ public:
     ScopedValueParse& operator=(const ScopedValueParse&) = delete;
 };
 
-static Item parse_tex_script(Item source, Item options, const char* format) {
-    RootFrame roots(3);
+// Capture only authorized resources within the selected document or package root.
+static bool tex_capture_file(const SecurityIOClient* io, const char* base, const char* scope,
+        const char* name, uint64_t limit, char** bytes, size_t* length, bool* missing, bool* no_base) {
+    *bytes = nullptr; *length = 0; *missing = false; *no_base = false;
+    if (!name || !*name || name[0] == '/' || strstr(name, "..")) return false;
+    bool bundled = !strcmp(scope, "bundled");
+    if (!bundled && strcmp(scope, "local")) return false;
+    char* root = nullptr;
+    if (bundled) {
+        char* location = host_path_join(HOST_PATH_HOME, "package/doc/latex/tex");
+        int32_t kind = -1; SecurityIOResult status = {};
+        root = location ? input_tex_resolve_path(io, location, &kind, &status) : nullptr;
+        mem_free(location);
+        if (root && kind != SECURITY_OBJECT_DIRECTORY) { mem_free(root); root = nullptr; }
+    }
+    else {
+        if (!base || !*base || (strstr(base, "://") && strncmp(base, "file://", 7))) {
+            *missing = true; *no_base = true; return true;
+        }
+        const char* location = !strncmp(base, "file://", 7) ? base + 7 : base;
+        int32_t kind = -1; SecurityIOResult status = {};
+        char* resolved = input_tex_resolve_path(io, location, &kind, &status);
+        if (!resolved) return false;
+        root = kind == SECURITY_OBJECT_DIRECTORY ? resolved : file_path_dirname(resolved);
+        if (root != resolved) mem_free(resolved);
+    }
+    if (!root) return false;
+    bool absent = false;
+    for (int attempt = 0; attempt < (bundled ? 2 : 1); attempt++) {
+        char* dir = attempt ? file_path_join(root, "binding") : mem_strdup(root, MEM_CAT_INPUT_OTHER);
+        char* joined = dir ? file_path_join(dir, name) : nullptr;
+        mem_free(dir);
+        int32_t kind = -1; SecurityIOResult status = {};
+        char* resolved = joined ? input_tex_resolve_path(io, joined, &kind, &status) : nullptr;
+        mem_free(joined);
+        if (!resolved) {
+            absent = status.decision == SECURITY_ALLOWED && (status.system_error == ENOENT || status.system_error == ENOTDIR);
+            if (!absent) { mem_free(root); return false; }
+            continue;
+        }
+        bool inside = input_tex_path_inside(root, resolved);
+        if (!inside || kind != SECURITY_OBJECT_FILE) { mem_free(resolved); mem_free(root); return false; }
+        bool ok = security_io_read_bytes(io, resolved, false, limit, MEM_CAT_INPUT_OTHER, bytes, length, &status);
+        mem_free(resolved); mem_free(root);
+        return ok;
+    }
+    mem_free(root); *missing = absent; return absent;
+}
+
+static Item parse_tex_script(Item source, Item options, const char* format, const char* base) {
+    // The caller's converted option may not survive allocations during a restart.
+    struct BasePath {
+        char* value;
+        explicit BasePath(const char* path) : value(path ? mem_strdup(path, MEM_CAT_INPUT_OTHER) : nullptr) {}
+        ~BasePath() { mem_free(value); }
+    } base_path(base);
+    if (base && !base_path.value) return ItemError;
+    RootFrame roots(7);
     Rooted<Item> text(roots, source);
     Rooted<Item> settings(roots, get_type_id(options) == LMD_TYPE_MAP ? options : ItemNull);
     Rooted<Item> result(roots, ItemNull);
+    Rooted<Item> scope(roots, ItemNull);
+    Rooted<Item> name(roots, ItemNull);
+    Rooted<Item> data(roots, ItemNull);
+    Rooted<Item> base_item(roots, ItemNull);
+    Rooted<Item> kernel_item(roots, ItemNull);
     if (get_type_id(source) == LMD_TYPE_BINARY) {
         Binary* bytes = source.get_safe_binary();
         String* converted = heap_strcpy((const char*)binary_data(bytes), binary_length(bytes));
@@ -7229,18 +7295,72 @@ static Item parse_tex_script(Item source, Item options, const char* format) {
     // TeX input cannot accept a literal NUL, including in file-loaded text.
     if (memchr(text.get().get_chars(), 0, text.get().get_len()))
         return runtime_error_itemf(ERR_PARSE_ERROR, "parse: Input format does not accept a literal NUL byte");
-    // The Script engine receives source as data and reports unsupported work explicitly.
-    Item args[] = {text.get(), settings.get()};
-    result.set(interp_call_package_export(context ? context->runtime : NULL,
-        "lambda.doc.latex.tex_engine.facade", !strcmp(format, "tex") ? "tex" : "latex", args, 2));
-    if (get_type_id(result.get()) != LMD_TYPE_MAP)
-        return runtime_error_itemf(ERR_PARSE_ERROR, "parse: Script %s engine failed", format);
-    MapReader reply(result.get().map);
-    Item issue = reply.get("issue").item();
-    if (get_type_id(issue) != LMD_TYPE_NULL)
-        return runtime_error_itemf(ERR_PARSE_ERROR, "parse: Script %s engine: %s", format,
-            is_text_type_id(get_type_id(issue)) ? issue.get_chars() : "unsupported input");
-    return reply.get("root").item();
+    const char* package = "lambda.doc.latex.tex_engine.facade";
+    Runtime* runtime = context ? context->runtime : nullptr;
+    if (base_path.value) {
+        String* name = heap_strcpy(base_path.value, strlen(base_path.value));
+        if (!name) return ItemError;
+        base_item.set((Item){.item = s2it(name)});
+    }
+    MapReader config = MapReader::fromItem(settings.get());
+    Item ini = config.get("ini").item();
+    if (get_type_id(ini) != LMD_TYPE_BOOL || !it2b(ini)) {
+        char* path = host_path_join(HOST_PATH_HOME, "package/doc/latex/tex_engine/kernel.tex");
+        char* bytes = nullptr; size_t length = 0;
+        bool loaded = path && security_io_read_bytes(context ? eval_context_security_io(context) : nullptr,
+            path, false, INPUT_TEX_RESOURCE_BYTE_LIMIT, MEM_CAT_INPUT_OTHER, &bytes, &length, nullptr);
+        mem_free(path);
+        if (!loaded) return runtime_error_itemf(ERR_IO_ERROR, "parse: TeX kernel unavailable or denied");
+        String* kernel = heap_strcpy(bytes, length);
+        mem_free(bytes);
+        if (!kernel) return ItemError;
+        kernel_item.set((Item){.item = s2it(kernel)});
+    }
+    Item initial[] = {settings.get(), base_item.get(), kernel_item.get()};
+    settings.set(interp_call_package_export(runtime, package, "host_options", initial, 3));
+    if (get_type_id(settings.get()) != LMD_TYPE_MAP) return ItemError;
+    const uint64_t resource_bytes = INPUT_TEX_RESOURCE_BYTE_LIMIT;
+    uint64_t captured = 0; int local_files = 0; int requests = 0;
+    for (;;) {
+        Item args[] = {text.get(), settings.get()};
+        result.set(interp_call_package_export(runtime, package, !strcmp(format, "tex") ? "tex" : "latex", args, 2));
+        if (get_type_id(result.get()) != LMD_TYPE_MAP)
+            return runtime_error_itemf(ERR_PARSE_ERROR, "parse: Script %s engine failed", format);
+        MapReader reply(result.get().map);
+        Item issue = reply.get("issue").item();
+        if (get_type_id(issue) == LMD_TYPE_NULL) return reply.get("root").item();
+        if (!is_text_type_id(get_type_id(issue)) || strcmp(issue.get_chars(), "tex-resource-needed"))
+            return runtime_error_itemf(ERR_PARSE_ERROR, "parse: Script %s engine: %s", format,
+                is_text_type_id(get_type_id(issue)) ? issue.get_chars() : "unsupported input");
+        MapReader request = reply.get("request").asMap();
+        scope.set(request.get("scope").item()); name.set(request.get("name").item());
+        if (!is_text_type_id(get_type_id(scope.get())) || !is_text_type_id(get_type_id(name.get())))
+            return runtime_error_itemf(ERR_PARSE_ERROR, "parse: invalid TeX resource request");
+        if (memchr(scope.get().get_chars(), 0, scope.get().get_len()) ||
+                memchr(name.get().get_chars(), 0, name.get().get_len()))
+            return runtime_error_itemf(ERR_PARSE_ERROR, "parse: TeX resource names cannot contain NUL");
+        // A restart must make progress and remains bounded even for absent files.
+        if (++requests > 20000000) return runtime_error_itemf(ERR_PARSE_ERROR, "parse: TeX resource request budget exceeded");
+        char* bytes = nullptr; size_t length = 0; bool missing = false; bool no_base = false;
+        bool local = !strcmp(scope.get().get_chars(), "local");
+        if (!tex_capture_file(context ? eval_context_security_io(context) : nullptr, base_path.value,
+                scope.get().get_chars(), name.get().get_chars(), local ? resource_bytes - captured : resource_bytes,
+                &bytes, &length, &missing, &no_base))
+            return runtime_error_itemf(ERR_IO_ERROR, "parse: TeX resource unavailable or denied");
+        if (!missing) {
+            if (local && (++local_files > INPUT_TEX_LOCAL_FILE_LIMIT || (captured += length) > resource_bytes)) {
+                mem_free(bytes);
+                return runtime_error_itemf(ERR_PARSE_ERROR, "parse: TeX resource budget exceeded");
+            }
+            if (length) data.set(heap_binary_value_from_bytes(bytes, length));
+            else { String* empty = heap_strcpy("", 0); data.set(empty ? (Item){.item = s2it(empty)} : ItemError); }
+            mem_free(bytes);
+            if (item_is_error(data.get())) return ItemError;
+        } else data.set(ItemNull);
+        Item captured_args[] = {settings.get(), scope.get(), name.get(), data.get(), (Item){.item = b2it(no_base)}};
+        settings.set(interp_call_package_export(runtime, package, "host_capture", captured_args, 5));
+        if (get_type_id(settings.get()) != LMD_TYPE_MAP) return ItemError;
+    }
 }
 
 Item fn_parse2(Item str_item, Item type) {
@@ -7398,7 +7518,7 @@ Item fn_parse2(Item str_item, Item type) {
     }
     if (type_str && (!strcmp(type_str->chars, "tex") || !strcmp(type_str->chars, "latex") ||
             !strcmp(type_str->chars, "latex-ts"))) {
-        return parse_tex_script(parse_source_root.get(), parse_options_root.get(), type_str->chars);
+        return parse_tex_script(parse_source_root.get(), parse_options_root.get(), type_str->chars, parse_options.tex_base);
     }
     // plain text has no parser state or Input-owned objects to retain.
     if (type_str && strcmp(type_str->chars, "text") == 0) {

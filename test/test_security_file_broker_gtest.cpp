@@ -390,6 +390,24 @@ TEST_F(SecurityFileBrokerTest, ReadOnlyClassificationDoesNotRequireOrGrantMetada
     EXPECT_FALSE(security_io_input_kind(&client, "data", &kind, nullptr));
 }
 
+TEST_F(SecurityFileBrokerTest, ClassificationDistinguishesAuthorizedAbsenceFromDenial) {
+    admit_project();
+    int32_t kind = -1;
+    SecurityIOResult status = {};
+    EXPECT_FALSE(security_io_input_kind(&client, "missing", &kind, &status));
+    EXPECT_EQ(status.decision, SECURITY_ALLOWED);
+    EXPECT_EQ(status.system_error, ENOENT);
+    EXPECT_EQ(kind, -1);
+    EXPECT_FALSE(security_io_input_kind(&client, protected_path, &kind, &status));
+    EXPECT_EQ(status.decision, SECURITY_DENIED);
+    char* link = file_path_join(project, "protected-link");
+    ASSERT_NE(link, nullptr);
+    ASSERT_EQ(symlink(protected_path, link), 0);
+    mem_free(link);
+    EXPECT_FALSE(security_io_input_kind(&client, "protected-link/missing", &kind, &status));
+    EXPECT_EQ(status.decision, SECURITY_DENIED);
+}
+
 TEST_F(SecurityFileBrokerTest, EnumerateOnlyGrantReturnsNamesWithoutMetadataOrBytes) {
     seed("data", "value");
     SecurityFileRootSpec spec = {project, SECURITY_SCOPE_SELECTED, SECURITY_ENUMERATE,

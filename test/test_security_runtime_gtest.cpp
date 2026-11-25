@@ -247,6 +247,19 @@ protected:
         mem_free(dependency); return id;
     }
 
+    uint64_t admit_shipped_packages() {
+        lambda_home_init();
+        char* path = host_path_join(HOST_PATH_HOME, "package");
+        char* canonical = path ? file_realpath(path) : nullptr;
+        mem_free(path);
+        if (!canonical) return 0;
+        SecurityFileRootSpec shipped = {canonical, SECURITY_SCOPE_SHIPPED,
+            SECURITY_READ | SECURITY_METADATA | SECURITY_LOAD_SOURCE, 0, 0, true, false, nullptr};
+        uint64_t id = security_file_broker_admit_root(broker, &shipped);
+        mem_free(canonical);
+        return id;
+    }
+
     void expect_failed(Input* input) {
         ASSERT_NE(input, nullptr);
         EXPECT_EQ(get_type_id(input->root), LMD_TYPE_ERROR);
@@ -593,12 +606,16 @@ TEST_P(SecurityRuntimeTest, SourceAuthorityDoesNotPermitInitializerDataReads) {
 }
 
 TEST_P(SecurityRuntimeTest, InlineParsingCarriesResourceAuthority) {
+    // The Script engine needs its shipped source and kernel independently of document grants.
+    ASSERT_NE(admit_shipped_packages(), 0U);
     seed("part.tex", "SAFE");
     seed("outside/part.tex", "FORBIDDEN", true);
     seed("entry.ls", "contains(parse(\"\\\\input{part}\\\\end\", "
         "{type: 'tex', base: \"@ROOT@\"})^.text, \"SAFE\")^\n");
     Input* result = load_file(); ASSERT_NE(result, nullptr);
-    ASSERT_EQ(get_type_id(result->root), LMD_TYPE_BOOL); EXPECT_TRUE(result->root.bool_val);
+    ASSERT_EQ(get_type_id(result->root), LMD_TYPE_BOOL) <<
+        (runtime_get_eval_context(&runtime)->last_error ? runtime_get_eval_context(&runtime)->last_error->message : "no runtime diagnostic");
+    EXPECT_TRUE(result->root.bool_val);
     seed("relative.ls", "contains(parse(\"\\\\input{part}\\\\end\", "
         "{type: 'tex', base: \".\"})^.text, \"SAFE\")^\n");
     result = load_file("relative.ls"); ASSERT_NE(result, nullptr);
@@ -606,7 +623,8 @@ TEST_P(SecurityRuntimeTest, InlineParsingCarriesResourceAuthority) {
     seed("denied.ls", "contains(parse(\"\\\\input{part}\\\\end\", "
         "{type: 'tex', base: \"@ROOT@/../outside\"})^.text, \"FORBIDDEN\")^\n");
     result = load_file("denied.ls"); ASSERT_NE(result, nullptr);
-    ASSERT_EQ(get_type_id(result->root), LMD_TYPE_BOOL); EXPECT_FALSE(result->root.bool_val);
+    // Denial propagates as an error instead of masquerading as an absent file (D11.1.2).
+    expect_failed(result);
     EXPECT_GE(atomic_load32(&capture.denied_reads), 1);
 }
 
@@ -646,6 +664,7 @@ TEST_P(SecurityRuntimeTest, CapturedMemberParsingCannotRetainExternalResourceAut
 }
 
 TEST_P(SecurityRuntimeTest, TexLocalIncludesUseTheSameDataGrant) {
+    ASSERT_NE(admit_shipped_packages(), 0U);
     seed("docs/doc.tex", "\\input{part}\\end"); seed("docs/part.tex", "SAFE");
     seed("entry.ls", "contains(input(\"@ROOT@/docs/doc.tex\", 'tex')^.text, \"SAFE\")^\n");
     Input* result = load_file(); ASSERT_NE(result, nullptr);
@@ -658,7 +677,7 @@ TEST_P(SecurityRuntimeTest, TexLocalIncludesUseTheSameDataGrant) {
     seed("docs/linked-doc.tex", "\\input{linked}\\end");
     seed("denied.ls", "contains(input(\"@ROOT@/docs/linked-doc.tex\", 'tex')^.text, \"FORBIDDEN\")^\n");
     result = load_file("denied.ls"); ASSERT_NE(result, nullptr);
-    ASSERT_EQ(get_type_id(result->root), LMD_TYPE_BOOL); EXPECT_FALSE(result->root.bool_val);
+    expect_failed(result);
     EXPECT_GE(atomic_load32(&capture.denied_reads), 1);
 }
 
@@ -675,13 +694,7 @@ TEST_P(SecurityRuntimeTest, StructurizrIncludesRetainTheirNarrowerDocumentRoot) 
     bool configured = host_paths_set(HOST_PATH_HOME, asset_root);
     mem_free(asset_root);
     ASSERT_TRUE(configured);
-    char* package_root = host_path_join(HOST_PATH_HOME, "package");
-    ASSERT_NE(package_root, nullptr);
-    SecurityFileRootSpec shipped = {package_root, SECURITY_SCOPE_SHIPPED,
-        SECURITY_READ | SECURITY_METADATA | SECURITY_LOAD_SOURCE, 0, 0, true, false, nullptr};
-    uint64_t shipped_id = security_file_broker_admit_root(broker, &shipped);
-    mem_free(package_root);
-    ASSERT_NE(shipped_id, 0U);
+    ASSERT_NE(admit_shipped_packages(), 0U);
     seed("docs/model.dsl", "workspace { model {\n!include part.dsl\n!include ../secret.dsl\n} }\n");
     seed("docs/part.dsl", "person \"SAFE\"\n"); seed("secret.dsl", "person \"FORBIDDEN\"\n");
     seed("entry.ls", "let graph = input(\"@ROOT@/docs/model.dsl\", {type: 'graph', flavor: 'structurizr'})^\n"

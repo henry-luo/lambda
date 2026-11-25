@@ -1,0 +1,7 @@
+{
+  matches: true,
+  text: "Hello\n\n",
+  diagnostics: [],
+  messages: 58,
+  packages: []
+}

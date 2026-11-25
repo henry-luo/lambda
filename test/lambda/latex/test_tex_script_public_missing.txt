@@ -1,0 +1,37 @@
+[{
+    text: " ",
+    diagnostics: [{
+        code: "tex-file-not-found",
+        message: "File `definitely-absent' not found beside the document",
+        offset: 24,
+        line: 1
+      }],
+    messages: 58
+  }, {
+    text: "first\n ",
+    diagnostics: [{
+        code: "tex-file-not-found",
+        message: "File `definitely-absent' not found beside the document",
+        offset: 30,
+        line: 2
+      }],
+    messages: 58
+  }, {
+    text: " ",
+    diagnostics: [{
+        code: "tex-file-outside",
+        message: "file `../outside' is outside the document directory",
+        offset: 17,
+        line: 1
+      }],
+    messages: 58
+  }, {
+    text: "After ",
+    diagnostics: [{
+        code: "tex-file-not-found",
+        message: "File `definitely-absent.tex' not found beside the document",
+        offset: 28,
+        line: 1
+      }],
+    messages: 58
+  }]

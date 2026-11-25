@@ -33,28 +33,26 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
-- **Resource requests, 2026-11-25:** The Script expander can now report a
-  missing local or bundled resource by scope and name when the host opts in;
-  the facade can accept captured bytes or a confirmed missing file and restart
-  expansion. Default snapshot behavior and explicit unsupported outcomes are
-  unchanged. Extension fallback and bundled package probes have focused tests.
-  Runtime acquisition is not wired yet. The existing native path resolution
-  and containment helpers have been moved to the shared input boundary and the
-  main build passes and the native TeX unit suite passes 12 cases with two
-  skipped. The request regression passes both tiers under forced GC. Next use
-  the caller's `SecurityIOClient`
-  to capture scoped resources with the existing
-  limits, pass the document base, then rerun the included-file and security
-  suites. Do not treat access denial or an incomplete snapshot as absence
-  (D10.2.2v2, D9.1.2v2, D11.1.2, S1.8).
+- **Resource requests, 2026-11-25:** The Script expander requests missing local
+  or bundled resources by scope and name; the runtime captures authorized bytes
+  through `SecurityIOClient`, preserves a document base and restarts expansion.
+  The shared input boundary supplies the native path containment rules. Shipped
+  kernel bytes are also captured explicitly, so a restricted scope does not need
+  `sys.lambda.home`. The broker now distinguishes authorized absence from a
+  denied path. TeX and LaTeX include fixtures, no-base and missing-file
+  diagnostics, job names and automatic expl3 bootstrap have native-backed
+  regressions. The 10 focused script tests and all 27 file-broker tests pass;
+  four focused security runtime cases pass in both tiers, also under forced GC,
+  and the broker's absence, denial and symlink regression passes. The old native engine
+  remains for automatic dispatch, standalone Input, math and embedded math;
+  resource behavior for those paths and the full corpus remains to migrate and
+  qualify (D10.2.2v2, D9.1.2v2, D11.1.2, S1.8).
 
 - **Retirement ordered before parity, 2026-11-25:** The user explicitly
   directed retirement first and repair of failing Script tests afterwards.
   Runtime `parse` for explicit `tex`, `latex` and `latex-ts` and `input` with
   an explicit type now invoke the Script facade after authorized acquisition.
-  The archived native cases match through `parse`. Includes from `input`
-  currently fail at the explicit resource boundary; source-relative authorized
-  acquisition remains to be implemented. Automatic type detection, captured
+  The archived native cases match through `parse`. Automatic type detection, captured
   archive members, native Input clients, math and embedded math still use the
   native provider, so it has not yet been removed. Existing tests that compare
   `parse` against Script now compare the same implementation; preserve their

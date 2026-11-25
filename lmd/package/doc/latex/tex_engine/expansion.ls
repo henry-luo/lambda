@@ -33,6 +33,7 @@ pub fn options_map(value) map => match value { case map: ~ default: {} }
 fn result(input: map, definitions: map, groups: array, output: map[], count: int, issue: string? = null, options: map? = null) State =>
     {input: input, definitions: definitions, groups: groups, output: output,
         latex: options.latex == true, math_mode: options.math_mode == true, script_expl3: options.script_expl3 == true,
+        auto_expl3: options.auto_expl3 == true,
         constructor_argument_mode: options.constructor_argument_mode == true, expl_syntax: null, adapters: if (options.adapters == null) [] else options.adapters,
         chaptered: if (options.chaptered == null) [] else options.chaptered, packages: [], class_options: "",
         in_document: false, base_path: if (options.base_path is string) options.base_path else null,
@@ -46,6 +47,7 @@ fn result(input: map, definitions: map, groups: array, output: map[], count: int
         parameters: {endlinechar: input.reader.endline, escapechar: 92, mag: 1000, tolerance: 10000,
             newlinechar: if (options.latex == true) -1 else 0}, after_assignment: null, token_text_scan: false,
         resources: options.resources, resource_requests: options.resource_requests == true,
+        host_no_base: options.host_no_base == true,
         resources_seen: {}, resource_ids: {}, resource_count: 0, resource_bytes: 0,
         sources: [{id: input.reader.file_id, name: if (options.source_name == null) "<input>" else options.source_name,
             origin: if (input.reader.origin == "bundled") "bundled" else "local", data: input.reader.source}],
@@ -2198,7 +2200,8 @@ fn captured_resource(st, name, requested_scope = null) any^ {
         let entry = st.resources[scope][cleaned];
         if (entry == null and st.resource_requests)
             {state: request_resource(st, scope, cleaned), available: false, found: false, data: null}
-        else if (entry == null or entry.missing == true) {state: st, available: true, found: false, data: null}
+        else if (entry == null or entry.missing == true or entry.no_base == true)
+            {state: st, available: true, found: false, data: null, no_base:entry.no_base == true}
         else if (not (entry.data is string or entry.data is binary))
             {state: fail(st, "tex-resource-invalid"), available: true, found: false, data: null}
         else {
@@ -2378,9 +2381,16 @@ fn input_primitive(st: State, budget) State^ {
                 captured_resource(exact.state, name.name ++ ".tex")^ else exact;
             if (selected.state.issue != null) selected.state
             else if (not selected.available) unsupported(selected.state, "input")
-            else if (not selected.found) {*:selected.state,
-                diagnostics: [*selected.state.diagnostics, if (starts_with(name.name, "/") or contains(name.name, ".."))
-                    "tex-file-outside" else "tex-file-not-found"]}
+            else if (not selected.found) {
+                let outside = starts_with(name.name, "/") or contains(name.name, "..");
+                let active = stream.active_reader(selected.state.input)^;
+                let no_base = selected.no_base == true or
+                    (selected.state.host_no_base and (active == null or active.origin != "bundled"));
+                // The public TeX result needs the diagnostic's location and message as well as its code.
+                record_diagnostic(selected.state, if (no_base) "tex-no-base" else if (outside) "tex-file-outside" else "tex-file-not-found",
+                    (if (no_base or outside) "file `" else "File `") ++ name.name ++
+                    (if (no_base) "' needs a document location (base)" else if (outside) "' is outside the document directory" else "' not found beside the document"))^
+            }
             else push_resource_reader(selected)
         }
     }
@@ -4930,7 +4940,7 @@ fn probe_resource(st, name, scope) any^ {
         let entry = st.resources[scope][name];
         if (entry == null and st.resource_requests)
             {state:request_resource(st, scope, name), available:false, found:false}
-        else {state:st, available:true, found:entry != null and entry.missing != true}
+        else {state:st, available:true, found:entry != null and entry.missing != true and entry.no_base != true}
     }
 }
 
@@ -5006,7 +5016,10 @@ fn latex_usepackage(st: State, original, budget) State^ {
         let names = [for (part in (split(named.name, ",") ^ { [] }) where ((trim(part) != "") ^ { false })) trim(part)];
         // native chooses the expl3 format before resolving the package list.
         let requested = if (contains(names,"expl3")) {*:current, expl3_format_requested: true} else current;
-        let planned = package_plan(requested, names, opts)^;
+        // Restart before the kernel's expl3 bootstrap recursively expands itself.
+        let planned = if (requested.auto_expl3 and not requested.script_expl3 and contains(names,"expl3"))
+            {state:fail(requested, "tex-expl3-restart"), loads:[], passthrough:[]}
+            else package_plan(requested, names, opts)^;
         if (planned.state.issue != null) planned.state
         else {
             let closed = end_main_trace(planned.state, original)^;
