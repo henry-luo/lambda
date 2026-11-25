@@ -12796,9 +12796,25 @@ static Item js_throw_domexception_invalid_char(const char* msg) {
     return js_throw_value(ex);
 }
 
+extern "C" Item js_string_from_latin1(const unsigned char* bytes, size_t length) {
+    if (length > (SIZE_MAX - 1) / 2) return ItemError;
+    lam::Temp<char> text = lam::temp_array<char>(length * 2 + 1, MEM_CAT_JS_RUNTIME);
+    if (!text) return ItemError;
+    size_t written = 0;
+    for (size_t i = 0; i < length; i++) {
+        char encoded[4];
+        size_t size = utf8_encode(bytes[i], encoded);
+        memcpy(text.get() + written, encoded, size);
+        written += size;
+    }
+    return (Item){.item = s2it(heap_create_name(text.get(), written))};
+}
+
 extern "C" Item js_atob(Item str_item) {
-    Item str_val = js_to_string(str_item);
-    String* s = it2s(str_val);
+    RootFrame roots(1);
+    Rooted<Item> text(roots, js_to_string(str_item));
+    JS_RETURN_IF_ERROR(text.get());
+    String* s = it2s(text.get());
     if (!s || s->len == 0) return ItemEmptyString;
 
     const char* src = s->chars;
@@ -12815,8 +12831,19 @@ extern "C" Item js_atob(Item str_item) {
     }
 
     // Step 2: if length % 4 == 0, remove 1-2 trailing '='
-    if (clen > 0 && cleaned[clen - 1] == '=') clen--;
-    if (clen > 0 && cleaned[clen - 1] == '=') clen--;
+    if (clen % 4 == 0) {
+        if (clen > 0 && cleaned[clen - 1] == '=') clen--;
+        if (clen > 0 && cleaned[clen - 1] == '=') clen--;
+    }
+
+    // HTML ignores only ASCII whitespace; the shared decoder also accepts VT.
+    for (int i = 0; i < clen; i++) {
+        unsigned char c = (unsigned char)cleaned[i];
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+            (c >= '0' && c <= '9') || c == '+' || c == '/') continue;
+        mem_free(cleaned);
+        return js_throw_domexception_invalid_char("Invalid character");
+    }
 
     // Step 3: if length % 4 == 1, throw InvalidCharacterError
     if (clen % 4 == 1) {
@@ -12832,33 +12859,38 @@ extern "C" Item js_atob(Item str_item) {
         return js_throw_domexception_invalid_char("Invalid character");
     }
 
-    String* result = heap_create_name(decoded ? (const char*)decoded : "", out_len);
+    // decoded bytes are Latin1 code units, even when they resemble valid UTF-8.
+    Item result = js_string_from_latin1(decoded, out_len);
     if (decoded) mem_free(decoded);
     mem_free(cleaned);
-    return (Item){.item = s2it(result)};
+    return result;
 }
 
 extern "C" Item js_btoa(Item str_item) {
-    Item str_val = js_to_string(str_item);
-    String* s = it2s(str_val);
+    RootFrame roots(1);
+    Rooted<Item> text(roots, js_to_string(str_item));
+    JS_RETURN_IF_ERROR(text.get());
+    String* s = it2s(text.get());
     if (!s || s->len == 0) return ItemEmptyString;
 
-    // Check for characters outside Latin1 range (> 0xFF)
-    // In UTF-8, any byte >= 0xC4 followed by >= 0x80 means code point > 0xFF
-    const unsigned char* src = (const unsigned char*)s->chars;
-    int src_len = s->len;
-    for (int i = 0; i < src_len; i++) {
-        unsigned char c = src[i];
-        if (c >= 0xC4 && i + 1 < src_len && src[i + 1] >= 0x80) {
+    // btoa encodes Latin1 units rather than their internal UTF-8 storage bytes.
+    lam::Temp<uint8_t> bytes = lam::temp_array<uint8_t>(s->len, MEM_CAT_JS_RUNTIME);
+    if (!bytes) return ItemError;
+    Utf16Iterator iterator = {(const unsigned char*)s->chars, (int64_t)s->len, 0, -1};
+    uint16_t unit;
+    size_t src_len = 0;
+    while (utf16_iterator_next(&iterator, &unit)) {
+        if (unit > 255) {
             return js_throw_domexception_invalid_char(
                 "The string to be encoded contains characters outside of the Latin1 range.");
         }
+        bytes.get()[src_len++] = (uint8_t)unit;
     }
     size_t out_len = base64_encoded_len((size_t)src_len, BASE64_STD);
     char* buf = (char*)mem_alloc(out_len + 1, MEM_CAT_JS_RUNTIME);
     if (!buf) return ItemEmptyString;
 
-    size_t out = base64_encode(src, (size_t)src_len, buf, BASE64_STD);
+    size_t out = base64_encode(bytes.get(), src_len, buf, BASE64_STD);
 
     String* result = heap_create_name(buf, (int)out);
     mem_free(buf);
@@ -17806,8 +17838,19 @@ static Item js_readable_stream_pipe_writer_call(Item writer, const char* method,
 enum JsReadableStreamSlot {
     JS_READ_REQUESTS, JS_READ_REQUEST_INDEX, JS_READ_STARTED, JS_READ_PULLING,
     JS_READ_PULL_AGAIN, JS_READ_ERRORED, JS_READ_ERROR, JS_READ_CONTROLLER,
+    JS_READ_READER, JS_READ_BYTE_STREAM, JS_READ_CANCEL_ALGORITHM,
     JS_READ_SLOT_COUNT
 };
+
+enum JsReadableReaderSlot {
+    JS_READER_STREAM, JS_READER_BYOB, JS_READER_OBJECT, JS_READER_CLOSED,
+    JS_READER_SLOT_COUNT
+};
+
+static Item js_web_stream_callback(Item (*body)(Item, Item), Item owner, int tag) {
+    Item* env = js_alloc_env2(owner, (Item){.item = i2it(tag)});
+    return env ? js_new_native_closure(body, 1, env, 2) : ItemError;
+}
 
 static Item js_readable_stream_state(Item stream) {
     return js_native_private_array_state(stream, JS_CLASS_READABLE_STREAM,
@@ -17816,11 +17859,31 @@ static Item js_readable_stream_state(Item stream) {
 
 static Item js_readable_stream_pull_if_needed(Item stream);
 static Item js_readable_stream_drain_reads(Item stream);
+static Item js_readable_stream_tee(Item);
 
-static Item js_readable_stream_controller_enqueue(Item env_item, Item chunk) {
-    JS_ENV_OR_UNDEFINED(env, env_item);
-    RootFrame roots(4);
-    Rooted<Item> stream_root(roots, env[0]), chunk_root(roots, chunk);
+static Item js_readable_stream_settle_reader(Item state, bool closed, bool failed, bool empty) {
+    RootFrame roots(2);
+    Rooted<Item> record(roots, js_elements_get_int(state, JS_READ_READER));
+    Rooted<Item> promise(roots, ItemNull);
+    if (get_type_id(record.get()) != LMD_TYPE_ARRAY) return make_js_undefined();
+    promise.set(js_elements_get_int(record.get(), JS_READER_CLOSED));
+    if (failed) {
+        js_promise_reject_existing(promise.get(), js_elements_get_int(state, JS_READ_ERROR));
+        js_promise_mark_handled(promise.get());
+    }
+    else if (closed && empty) js_promise_fulfill_existing(promise.get(), make_js_undefined());
+    return make_js_undefined();
+}
+
+static Item js_readable_stream_enqueue(Item owner, Item chunk) {
+    RootFrame roots(5);
+    Rooted<Item> stream_root(roots, owner), chunk_root(roots, chunk);
+    Rooted<Item> state(roots, js_readable_stream_state(stream_root.get()));
+    JS_RETURN_IF_ERROR(state.get());
+    // a completed cancellation cannot be reopened by a late source callback.
+    if (js_is_truthy(js_get_key_cstr(stream_root.get(), "__closed__")) ||
+        js_is_truthy(js_elements_get_int(state.get(), JS_READ_ERRORED)))
+        return js_throw_type_error("ReadableStream is closed or errored");
     Rooted<Item> writer_root(roots, ItemNull), chunks(roots, ItemNull);
     chunks.set(js_get_key_cstr(stream_root.get(), "__chunks__"));
     JS_RETURN_IF_ERROR(js_array_push(chunks.get(), chunk_root.get()));
@@ -17833,10 +17896,9 @@ static Item js_readable_stream_controller_enqueue(Item env_item, Item chunk) {
     return js_readable_stream_pull_if_needed(stream_root.get());
 }
 
-static Item js_readable_stream_controller_close(Item env_item) {
-    JS_ENV_OR_UNDEFINED(env, env_item);
+static Item js_readable_stream_close(Item owner, Item) {
     RootFrame roots(2);
-    Rooted<Item> stream_root(roots, env[0]);
+    Rooted<Item> stream_root(roots, owner);
     Rooted<Item> writer_root(roots,
         js_get_key_cstr(stream_root.get(), "__pipe_writer__"));
     JS_RETURN_IF_ERROR(js_set_key_cstr(stream_root.get(), "__closed__", (Item){.item = b2it(true)}));
@@ -17847,10 +17909,9 @@ static Item js_readable_stream_controller_close(Item env_item) {
     return make_js_undefined();
 }
 
-static Item js_readable_stream_controller_error(Item env_item, Item reason) {
-    JS_ENV_OR_UNDEFINED(env, env_item);
+static Item js_readable_stream_error(Item owner, Item reason) {
     RootFrame roots(3);
-    Rooted<Item> stream(roots, env[0]), error(roots, reason);
+    Rooted<Item> stream(roots, owner), error(roots, reason);
     Rooted<Item> state(roots, js_readable_stream_state(stream.get()));
     JS_RETURN_IF_ERROR(state.get());
     if (js_is_truthy(js_elements_get_int(state.get(), JS_READ_ERRORED)) ||
@@ -17858,6 +17919,24 @@ static Item js_readable_stream_controller_error(Item env_item, Item reason) {
     JS_RETURN_IF_ERROR(js_elements_set_int(state.get(), JS_READ_ERROR, error.get()));
     JS_RETURN_IF_ERROR(js_elements_set_int(state.get(), JS_READ_ERRORED, (Item){.item = ITEM_TRUE}));
     return js_readable_stream_drain_reads(stream.get());
+}
+
+template <Item (*Operation)(Item, Item)>
+static Item js_readable_stream_controller_callback(Item env_item, Item value) {
+    JS_ENV_OR_UNDEFINED(env, env_item);
+    return Operation(env[0], value);
+}
+
+static Item js_readable_stream_controller_enqueue(Item env_item, Item value) {
+    return js_readable_stream_controller_callback<js_readable_stream_enqueue>(env_item, value);
+}
+
+static Item js_readable_stream_controller_error(Item env_item, Item value) {
+    return js_readable_stream_controller_callback<js_readable_stream_error>(env_item, value);
+}
+
+static Item js_readable_stream_controller_close(Item env_item) {
+    return js_readable_stream_controller_callback<js_readable_stream_close>(env_item, ItemNull);
 }
 
 static Item js_readable_stream_error_with_code(const char* name, const char* code, const char* message) {
@@ -17934,9 +18013,16 @@ static Item js_readable_stream_drain_reads(Item stream) {
     bool closed = js_is_truthy(js_get_key_cstr(owner.get(), "__closed__"));
     bool failed = js_is_truthy(js_elements_get_int(state.get(), JS_READ_ERRORED));
     while (pending < js_array_length(requests.get())) {
+        request.set(js_elements_get_int(requests.get(), pending));
+        // releasing a reader rejects only its requests; later readers keep the queue.
+        if (get_type_id(request.get()) != LMD_TYPE_ARRAY) {
+            JS_RETURN_IF_ERROR(js_elements_set_int(state.get(), JS_READ_REQUEST_INDEX,
+                (Item){.item = i2it(++pending)}));
+            continue;
+        }
         bool has_chunk = index < js_array_length(chunks.get());
         if (!failed && !has_chunk && !closed) break;
-        request.set(js_elements_get_int(requests.get(), pending++));
+        pending++;
         JS_RETURN_IF_ERROR(js_elements_set_int(state.get(), JS_READ_REQUEST_INDEX, (Item){.item = i2it(pending)}));
         JS_RETURN_IF_ERROR(js_elements_set_int(requests.get(), pending - 1, ItemNull));
         if (failed) {
@@ -17961,7 +18047,7 @@ static Item js_readable_stream_drain_reads(Item stream) {
         JS_RETURN_IF_ERROR(js_elements_set_int(state.get(), JS_READ_REQUESTS, requests.get()));
         JS_RETURN_IF_ERROR(js_elements_set_int(state.get(), JS_READ_REQUEST_INDEX, (Item){.item = i2it(0)}));
     }
-    return make_js_undefined();
+    return js_readable_stream_settle_reader(state.get(), closed, failed, index >= js_array_length(chunks.get()));
 }
 
 static Item js_readable_stream_algorithm_fulfilled(Item env_item, Item) {
@@ -18016,11 +18102,9 @@ static Item js_readable_stream_pull_if_needed(Item stream) {
     return js_readable_stream_observe_algorithm(owner.get(), completion, false);
 }
 
-static Item js_readable_stream_reader_read(Item env_item, Item view) {
-    JS_ENV_OR_UNDEFINED(env, env_item);
-    RootFrame roots(6);
-    Rooted<Item> stream(roots, env[0]), view_root(roots, view);
-    bool byob = js_is_truthy(env[1]);
+static Item js_readable_stream_read(Item owner, Item view, bool byob, Item reader) {
+    RootFrame roots(7);
+    Rooted<Item> stream(roots, owner), view_root(roots, view), reader_root(roots, reader);
     if (byob && js_is_typed_array(view_root.get()) && js_typed_array_byte_length(view_root.get()) == 0)
         return js_promise_reject(js_readable_stream_error_with_code("TypeError",
             "ERR_INVALID_STATE", "Invalid state: View has zero byteLength"));
@@ -18031,6 +18115,7 @@ static Item js_readable_stream_reader_read(Item env_item, Item view) {
     JS_RETURN_IF_ERROR(js_array_push(request.get(), promise.get()));
     JS_RETURN_IF_ERROR(js_array_push(request.get(), view_root.get()));
     JS_RETURN_IF_ERROR(js_array_push(request.get(), (Item){.item = b2it(byob)}));
+    JS_RETURN_IF_ERROR(js_array_push(request.get(), reader_root.get()));
     JS_RETURN_IF_ERROR(js_array_push(js_elements_get_int(state.get(), JS_READ_REQUESTS), request.get()));
     if (byob) {
         Rooted<Item> controller(roots, js_elements_get_int(state.get(), JS_READ_CONTROLLER));
@@ -18042,10 +18127,140 @@ static Item js_readable_stream_reader_read(Item env_item, Item view) {
     return promise.get();
 }
 
-static Item js_readable_stream_get_reader_stub(Item options) {
+static Item js_readable_stream_reader_record(Item env_item) {
+    JS_ENV_OR_UNDEFINED(env, env_item);
+    Item record = env[0];
+    return js_get_this().item == js_elements_get_int(record, JS_READER_OBJECT).item
+        ? record : js_throw_type_error("Illegal ReadableStream reader receiver");
+}
+
+static Item js_readable_stream_reader_read(Item env_item, Item view) {
+    RootFrame roots(2);
+    Rooted<Item> record(roots, js_readable_stream_reader_record(env_item)), value(roots, view);
+    if (item_is_error(record.get())) return js_promise_from_completion(record.get());
+    Item stream = js_elements_get_int(record.get(), JS_READER_STREAM);
+    if (get_type_id(stream) == LMD_TYPE_NULL)
+        return js_promise_from_completion(js_throw_type_error("Reader has released its lock"));
+    return js_readable_stream_read(stream, value.get(),
+        js_is_truthy(js_elements_get_int(record.get(), JS_READER_BYOB)), record.get());
+}
+
+static Item js_readable_stream_cancel_finish(Item) { return make_js_undefined(); }
+
+static Item js_readable_stream_cancel_internal(Item owner, Item reason) {
+    RootFrame roots(6);
+    Rooted<Item> stream(roots, owner), value(roots, reason), state(roots, js_readable_stream_state(stream.get()));
+    if (item_is_error(state.get())) return js_promise_from_completion(state.get());
+    if (js_is_truthy(js_elements_get_int(state.get(), JS_READ_ERRORED)))
+        return js_promise_reject(js_elements_get_int(state.get(), JS_READ_ERROR));
+    if (js_is_truthy(js_get_key_cstr(stream.get(), "__closed__")) &&
+        it2i(js_get_key_cstr(stream.get(), "__read_index__")) >=
+            js_array_length(js_get_key_cstr(stream.get(), "__chunks__")))
+        return js_promise_resolve(make_js_undefined());
+    JS_RETURN_IF_ERROR(js_set_key_cstr(stream.get(), "__chunks__", js_array_new(0)));
+    JS_RETURN_IF_ERROR(js_set_key_cstr(stream.get(), "__read_index__", (Item){.item = i2it(0)}));
+    JS_RETURN_IF_ERROR(js_set_key_cstr(stream.get(), "__closed__", (Item){.item = ITEM_TRUE}));
+    JS_RETURN_IF_ERROR(js_readable_stream_drain_reads(stream.get()));
+    Rooted<Item> source(roots, js_get_key_cstr(stream.get(), "__source__"));
+    Rooted<Item> method(roots, js_elements_get_int(state.get(), JS_READ_CANCEL_ALGORITHM));
+    if (!js_is_callable(method.get())) return js_promise_resolve(make_js_undefined());
+    Item argument = value.get();
+    value.set(js_promise_from_completion(js_call_function(method.get(), source.get(), &argument, 1)));
+    JS_RETURN_IF_ERROR(value.get());
+    method.set(js_new_native_function(js_readable_stream_cancel_finish));
+    return js_promise_then(value.get(), method.get(), ItemNull);
+}
+
+static Item js_readable_stream_cancel(Item reason) {
     RootFrame roots(3);
-    Rooted<Item> stream_root(roots, js_get_this()), method_root(roots, ItemNull), reader_root(roots, ItemNull);
-    Item stream = stream_root.get();
+    Rooted<Item> stream(roots, js_get_this()), value(roots, reason);
+    Rooted<Item> state(roots, js_readable_stream_state(stream.get()));
+    if (item_is_error(state.get())) return js_promise_from_completion(state.get());
+    if (get_type_id(js_elements_get_int(state.get(), JS_READ_READER)) != LMD_TYPE_NULL)
+        return js_promise_from_completion(js_throw_type_error("ReadableStream is locked"));
+    return js_readable_stream_cancel_internal(stream.get(), value.get());
+}
+
+static Item js_readable_stream_reader_cancel(Item env_item, Item reason) {
+    RootFrame roots(2);
+    Rooted<Item> record(roots, js_readable_stream_reader_record(env_item)), value(roots, reason);
+    if (item_is_error(record.get())) return js_promise_from_completion(record.get());
+    Item stream = js_elements_get_int(record.get(), JS_READER_STREAM);
+    if (get_type_id(stream) == LMD_TYPE_NULL)
+        return js_promise_from_completion(js_throw_type_error("Reader has released its lock"));
+    return js_readable_stream_cancel_internal(stream, value.get());
+}
+
+static Item js_readable_stream_reader_closed(Item env_item) {
+    Item record = js_readable_stream_reader_record(env_item);
+    return item_is_error(record) ? js_promise_from_completion(record)
+        : js_elements_get_int(record, JS_READER_CLOSED);
+}
+
+static Item js_readable_stream_reader_release(Item env_item) {
+    RootFrame roots(6);
+    Rooted<Item> record(roots, js_readable_stream_reader_record(env_item));
+    JS_RETURN_IF_ERROR(record.get());
+    Rooted<Item> stream(roots, js_elements_get_int(record.get(), JS_READER_STREAM));
+    if (get_type_id(stream.get()) == LMD_TYPE_NULL) return make_js_undefined();
+    Rooted<Item> state(roots, js_readable_stream_state(stream.get()));
+    JS_RETURN_IF_ERROR(state.get());
+    Rooted<Item> error(roots, js_new_error_with_name(js_web_stream_key("TypeError"),
+        js_web_stream_key("Reader has released its lock")));
+    Rooted<Item> closed(roots, js_elements_get_int(record.get(), JS_READER_CLOSED));
+    if (strcmp(js_promise_state_name(closed.get()), "pending") == 0)
+        js_promise_reject_existing(closed.get(), error.get());
+    else {
+        closed.set(js_promise_reject(error.get()));
+        JS_RETURN_IF_ERROR(js_elements_set_int(record.get(), JS_READER_CLOSED, closed.get()));
+    }
+    js_promise_mark_handled(closed.get());
+    Rooted<Item> requests(roots, js_elements_get_int(state.get(), JS_READ_REQUESTS));
+    for (int64_t i = it2i(js_elements_get_int(state.get(), JS_READ_REQUEST_INDEX)); i < js_array_length(requests.get()); i++) {
+        Item request = js_elements_get_int(requests.get(), i);
+        if (get_type_id(request) != LMD_TYPE_ARRAY ||
+            js_elements_get_int(request, 3).item != record.get().item) continue;
+        js_promise_reject_existing(js_elements_get_int(request, 0), error.get());
+        JS_RETURN_IF_ERROR(js_elements_set_int(requests.get(), i, ItemNull));
+    }
+    JS_RETURN_IF_ERROR(js_elements_set_int(record.get(), JS_READER_STREAM, ItemNull));
+    JS_RETURN_IF_ERROR(js_elements_set_int(state.get(), JS_READ_READER, ItemNull));
+    return js_readable_stream_drain_reads(stream.get());
+}
+
+static Item js_readable_stream_acquire_reader(Item owner, bool byob) {
+    RootFrame roots(6);
+    Rooted<Item> stream(roots, owner), state(roots, js_readable_stream_state(stream.get()));
+    JS_RETURN_IF_ERROR(state.get());
+    if (get_type_id(js_elements_get_int(state.get(), JS_READ_READER)) != LMD_TYPE_NULL)
+        return js_throw_type_error("ReadableStream is locked");
+    Rooted<Item> record(roots, js_array_new(0)), reader(roots, js_new_object());
+    Rooted<Item> method(roots, ItemNull), promise(roots, js_promise_create_pending());
+    JS_RETURN_IF_ERROR(js_array_push(record.get(), stream.get()));
+    JS_RETURN_IF_ERROR(js_array_push(record.get(), (Item){.item = b2it(byob)}));
+    JS_RETURN_IF_ERROR(js_array_push(record.get(), reader.get()));
+    JS_RETURN_IF_ERROR(js_array_push(record.get(), promise.get()));
+    JS_RETURN_IF_ERROR(js_elements_set_int(state.get(), JS_READ_READER, record.get()));
+    static const struct { const char* name; Item (*body)(Item, Item); } methods[] = {
+        {"read", js_readable_stream_reader_read}, {"cancel", js_readable_stream_reader_cancel}
+    };
+    for (const auto& entry : methods) {
+        method.set(js_web_stream_callback(entry.body, record.get(), 0));
+        JS_RETURN_IF_ERROR(js_set_key_cstr(reader.get(), entry.name, method.get()));
+    }
+    Item* env = js_alloc_env1(record.get());
+    if (!env) return ItemError;
+    method.set(js_new_native_closure(js_readable_stream_reader_release, 0, env, 1));
+    JS_RETURN_IF_ERROR(js_set_key_cstr(reader.get(), "releaseLock", method.get()));
+    method.set(js_new_native_closure(js_readable_stream_reader_closed, 0, env, 1));
+    js_install_native_accessor(reader.get(), js_web_stream_key("closed"), method.get(), ItemNull, 0);
+    JS_RETURN_IF_ERROR(js_readable_stream_drain_reads(stream.get()));
+    return reader.get();
+}
+
+static Item js_readable_stream_get_reader_stub(Item options) {
+    RootFrame roots(2);
+    Rooted<Item> stream_root(roots, js_get_this()), options_root(roots, options);
     bool byob = false;
     if (get_type_id(options) == LMD_TYPE_MAP || get_type_id(options) == LMD_TYPE_ELEMENT) {
         Item mode = js_get_key_cstr(options, "mode");
@@ -18054,12 +18269,13 @@ static Item js_readable_stream_get_reader_stub(Item options) {
             byob = s && s->len == 4 && memcmp(s->chars, "byob", 4) == 0;
         }
     }
-    Item* env = js_alloc_env2(stream, (Item){.item = b2it(byob)});
-    method_root.set(js_new_native_closure(js_readable_stream_reader_read, 1, env, 2));
-    Item reader = js_new_object();
-    reader_root.set(reader);
-    js_set_key_cstr(reader, "read", method_root.get());
-    return reader;
+    return js_readable_stream_acquire_reader(stream_root.get(), byob);
+}
+
+static Item js_readable_stream_locked(Item) {
+    Item state = js_readable_stream_state(js_get_this());
+    JS_RETURN_IF_ERROR(state);
+    return (Item){.item = b2it(get_type_id(js_elements_get_int(state, JS_READ_READER)) != LMD_TYPE_NULL)};
 }
 
 static Item js_readable_stream_pipe_to_destination(Item source, Item destination) {
@@ -18072,6 +18288,10 @@ static Item js_readable_stream_pipe_to_destination(Item source, Item destination
     Rooted<Item> chunks_root(roots,
         js_get_key_cstr(source_root.get(), "__chunks__"));
     Rooted<Item> chunk_root(roots, ItemNull);
+    Item readable_state = js_readable_stream_state(source_root.get());
+    JS_RETURN_IF_ERROR(readable_state);
+    if (get_type_id(js_elements_get_int(readable_state, JS_READ_READER)) != LMD_TYPE_NULL)
+        return js_promise_from_completion(js_throw_type_error("ReadableStream is locked"));
     if (!js_is_callable(get_writer_root.get())) {
         return js_throw_type_error("pipeTo destination is not a WritableStream");
     }
@@ -18136,13 +18356,27 @@ extern "C" Item js_readable_stream_new(Item underlying_source) {
     JS_RETURN_IF_ERROR(js_set_key_cstr(obj.get(), "__read_index__", (Item){.item = i2it(0)}));
     static const struct {const char* name; Item (*body)(Item);} methods[] = {
         {"getReader", js_readable_stream_get_reader_stub}, {"pipeTo", js_readable_stream_pipe_to},
-        {"pipeThrough", js_readable_stream_pipe_through}
+        {"pipeThrough", js_readable_stream_pipe_through}, {"tee", js_readable_stream_tee},
+        {"cancel", js_readable_stream_cancel}
     };
     for (const auto& entry : methods) {
         method.set(js_new_native_function(entry.body));
         JS_RETURN_IF_ERROR(js_set_key_cstr(obj.get(), entry.name, method.get()));
     }
+    method.set(js_new_native_function(js_readable_stream_locked));
+    js_install_native_accessor(obj.get(), js_web_stream_key("locked"), method.get(), ItemNull, 0);
+    method.set(js_get_key_cstr(source.get(), "type"));
+    JS_RETURN_IF_ERROR(method.get());
+    String* type = get_type_id(method.get()) == LMD_TYPE_STRING ? it2s(method.get()) : nullptr;
+    bool bytes = type && type->len == 5 && memcmp(type->chars, "bytes", 5) == 0;
+    JS_RETURN_IF_ERROR(js_elements_set_int(state.get(), JS_READ_BYTE_STREAM, (Item){.item = b2it(bytes)}));
     JS_RETURN_IF_ERROR(js_set_key_cstr(obj.get(), "__source__", source.get()));
+    // retain the construction-time algorithm, as with the existing pull callback.
+    method.set(js_get_key_cstr(source.get(), "cancel"));
+    JS_RETURN_IF_ERROR(method.get());
+    if (!js_is_nullish(method.get()) && !js_is_callable(method.get()))
+        return js_throw_type_error("ReadableStream cancel is not callable");
+    JS_RETURN_IF_ERROR(js_elements_set_int(state.get(), JS_READ_CANCEL_ALGORITHM, method.get()));
     method.set(js_get_key_cstr(source.get(), "pull"));
     JS_RETURN_IF_ERROR(method.get());
     JS_RETURN_IF_ERROR(js_set_key_cstr(obj.get(), "__pull__", method.get()));
@@ -18167,6 +18401,155 @@ extern "C" Item js_readable_stream_new(Item underlying_source) {
     }
     JS_RETURN_IF_ERROR(js_readable_stream_observe_algorithm(obj.get(), completion.get(), true));
     return obj.get();
+}
+
+enum JsReadableTeeSlot {
+    JS_TEE_READER, JS_TEE_BRANCH_0, JS_TEE_BRANCH_1, JS_TEE_READING, JS_TEE_READ_AGAIN,
+    JS_TEE_CANCELED_0, JS_TEE_CANCELED_1, JS_TEE_REASON_0, JS_TEE_REASON_1,
+    JS_TEE_CANCEL_PROMISE, JS_TEE_FINISHED, JS_TEE_SOURCE_CLOSED, JS_TEE_SLOT_COUNT
+};
+
+static Item js_readable_tee_pull(Item env_item, Item);
+
+static Item js_readable_tee_finish(Item record, Item reason, bool failed) {
+    RootFrame roots(3);
+    Rooted<Item> tee(roots, record), error(roots, reason), branch(roots, ItemNull);
+    if (js_is_truthy(js_elements_get_int(tee.get(), JS_TEE_FINISHED))) return make_js_undefined();
+    JS_RETURN_IF_ERROR(js_elements_set_int(tee.get(), JS_TEE_FINISHED, (Item){.item = ITEM_TRUE}));
+    for (int index = 0; index < 2; index++) {
+        if (js_is_truthy(js_elements_get_int(tee.get(), JS_TEE_CANCELED_0 + index))) continue;
+        branch.set(js_elements_get_int(tee.get(), JS_TEE_BRANCH_0 + index));
+        JS_RETURN_IF_ERROR(failed ? js_readable_stream_error(branch.get(), error.get())
+            : js_readable_stream_close(branch.get(), ItemNull));
+    }
+    // two canceled branches await the source's real cancellation result.
+    if (!(js_is_truthy(js_elements_get_int(tee.get(), JS_TEE_CANCELED_0)) &&
+          js_is_truthy(js_elements_get_int(tee.get(), JS_TEE_CANCELED_1))))
+        js_promise_fulfill_existing(js_elements_get_int(tee.get(), JS_TEE_CANCEL_PROMISE), make_js_undefined());
+    return make_js_undefined();
+}
+
+static Item js_readable_tee_source_error(Item env_item, Item reason) {
+    JS_ENV_OR_UNDEFINED(env, env_item);
+    return js_readable_tee_finish(env[0], reason, true);
+}
+
+static Item js_readable_tee_source_closed(Item env_item, Item) {
+    JS_ENV_OR_UNDEFINED(env, env_item);
+    RootFrame roots(1);
+    Rooted<Item> tee(roots, env[0]);
+    JS_RETURN_IF_ERROR(js_elements_set_int(tee.get(), JS_TEE_SOURCE_CLOSED, (Item){.item = ITEM_TRUE}));
+    // the final read reaction must distribute its chunk before branch closure.
+    return js_is_truthy(js_elements_get_int(tee.get(), JS_TEE_READING)) ? make_js_undefined()
+        : js_readable_tee_finish(tee.get(), ItemNull, false);
+}
+
+static Item js_readable_tee_chunk(Item env_item, Item result) {
+    JS_ENV_OR_UNDEFINED(env, env_item);
+    RootFrame roots(4);
+    Rooted<Item> tee(roots, env[0]), value(roots, result), branch(roots, ItemNull), chunk(roots, ItemNull);
+    if (js_is_truthy(js_elements_get_int(tee.get(), JS_TEE_FINISHED))) return make_js_undefined();
+    if (js_is_truthy(js_get_key_cstr(value.get(), "done")))
+        return js_readable_tee_finish(tee.get(), ItemNull, false);
+    chunk.set(js_get_key_cstr(value.get(), "value"));
+    JS_RETURN_IF_ERROR(chunk.get());
+    JS_RETURN_IF_ERROR(js_elements_set_int(tee.get(), JS_TEE_READ_AGAIN, (Item){.item = ITEM_FALSE}));
+    for (int index = 0; index < 2; index++) {
+        if (js_is_truthy(js_elements_get_int(tee.get(), JS_TEE_CANCELED_0 + index))) continue;
+        branch.set(js_elements_get_int(tee.get(), JS_TEE_BRANCH_0 + index));
+        // default-stream branches share chunk identity, with independent queues.
+        JS_RETURN_IF_ERROR(js_readable_stream_enqueue(branch.get(), chunk.get()));
+    }
+    JS_RETURN_IF_ERROR(js_elements_set_int(tee.get(), JS_TEE_READING, (Item){.item = ITEM_FALSE}));
+    if (js_is_truthy(js_elements_get_int(tee.get(), JS_TEE_SOURCE_CLOSED)))
+        return js_readable_tee_finish(tee.get(), ItemNull, false);
+    return js_is_truthy(js_elements_get_int(tee.get(), JS_TEE_READ_AGAIN))
+        ? js_readable_tee_pull(env_item, ItemNull) : make_js_undefined();
+}
+
+static Item js_readable_tee_pull(Item env_item, Item) {
+    JS_ENV_OR_UNDEFINED(env, env_item);
+    RootFrame roots(5);
+    Rooted<Item> tee(roots, env[0]), reader(roots, js_elements_get_int(tee.get(), JS_TEE_READER));
+    if (js_is_truthy(js_elements_get_int(tee.get(), JS_TEE_FINISHED))) return make_js_undefined();
+    if (js_is_truthy(js_elements_get_int(tee.get(), JS_TEE_READING))) {
+        JS_RETURN_IF_ERROR(js_elements_set_int(tee.get(), JS_TEE_READ_AGAIN, (Item){.item = ITEM_TRUE}));
+        return make_js_undefined();
+    }
+    JS_RETURN_IF_ERROR(js_elements_set_int(tee.get(), JS_TEE_READING, (Item){.item = ITEM_TRUE}));
+    Rooted<Item> promise(roots, js_readable_stream_read(
+        js_elements_get_int(reader.get(), JS_READER_STREAM), make_js_undefined(), false, reader.get()));
+    JS_RETURN_IF_ERROR(promise.get());
+    Rooted<Item> fulfilled(roots, js_web_stream_callback(js_readable_tee_chunk, tee.get(), 0));
+    Rooted<Item> rejected(roots, js_web_stream_callback(js_readable_tee_source_error, tee.get(), 0));
+    return js_promise_observe(promise.get(), fulfilled.get(), rejected.get(), ItemNull)
+        ? make_js_undefined() : ItemError;
+}
+
+static Item js_readable_tee_cancel_settled(Item env_item, Item value) {
+    JS_ENV_OR_UNDEFINED(env, env_item);
+    RootFrame roots(2);
+    Rooted<Item> tee(roots, env[0]), result(roots, value);
+    Item promise = js_elements_get_int(tee.get(), JS_TEE_CANCEL_PROMISE);
+    if (js_is_truthy(env[1])) js_promise_reject_existing(promise, result.get());
+    else js_promise_fulfill_existing(promise, make_js_undefined());
+    return make_js_undefined();
+}
+
+static Item js_readable_tee_cancel(Item env_item, Item reason) {
+    JS_ENV_OR_UNDEFINED(env, env_item);
+    RootFrame roots(6);
+    Rooted<Item> tee(roots, env[0]), value(roots, reason);
+    int index = (int)it2i(env[1]);
+    JS_RETURN_IF_ERROR(js_elements_set_int(tee.get(), JS_TEE_CANCELED_0 + index, (Item){.item = ITEM_TRUE}));
+    JS_RETURN_IF_ERROR(js_elements_set_int(tee.get(), JS_TEE_REASON_0 + index, value.get()));
+    Rooted<Item> promise(roots, js_elements_get_int(tee.get(), JS_TEE_CANCEL_PROMISE));
+    if (!(js_is_truthy(js_elements_get_int(tee.get(), JS_TEE_CANCELED_0)) &&
+          js_is_truthy(js_elements_get_int(tee.get(), JS_TEE_CANCELED_1)))) return promise.get();
+    Rooted<Item> reasons(roots, js_array_new(0));
+    for (int branch = 0; branch < 2; branch++)
+        JS_RETURN_IF_ERROR(js_array_push(reasons.get(), js_elements_get_int(tee.get(), JS_TEE_REASON_0 + branch)));
+    value.set(js_elements_get_int(tee.get(), JS_TEE_READER));
+    value.set(js_readable_stream_cancel_internal(js_elements_get_int(value.get(), JS_READER_STREAM), reasons.get()));
+    JS_RETURN_IF_ERROR(value.get());
+    Rooted<Item> fulfilled(roots, js_web_stream_callback(js_readable_tee_cancel_settled, tee.get(), 0));
+    Rooted<Item> rejected(roots, js_web_stream_callback(js_readable_tee_cancel_settled, tee.get(), 1));
+    return js_promise_observe(value.get(), fulfilled.get(), rejected.get(), ItemNull) ? promise.get() : ItemError;
+}
+
+static Item js_readable_stream_tee(Item) {
+    RootFrame roots(7);
+    Rooted<Item> stream(roots, js_get_this()), state(roots, js_readable_stream_state(stream.get()));
+    JS_RETURN_IF_ERROR(state.get());
+    if (js_is_truthy(js_elements_get_int(state.get(), JS_READ_BYTE_STREAM)))
+        return js_throw_type_error("Byte-stream tee is not supported");
+    Rooted<Item> reader(roots, js_readable_stream_acquire_reader(stream.get(), false));
+    JS_RETURN_IF_ERROR(reader.get());
+    Rooted<Item> tee(roots, js_array_new(0)), result(roots, js_array_new(0));
+    Rooted<Item> source(roots, ItemNull), method(roots, ItemNull);
+    for (int slot = 0; slot < JS_TEE_SLOT_COUNT; slot++) JS_RETURN_IF_ERROR(js_array_push(tee.get(), ItemNull));
+    reader.set(js_elements_get_int(state.get(), JS_READ_READER));
+    JS_RETURN_IF_ERROR(js_elements_set_int(tee.get(), JS_TEE_READER, reader.get()));
+    JS_RETURN_IF_ERROR(js_elements_set_int(tee.get(), JS_TEE_CANCEL_PROMISE, js_promise_create_pending()));
+    static const struct {const char* name; Item (*body)(Item, Item);} methods[] = {
+        {"pull", js_readable_tee_pull}, {"cancel", js_readable_tee_cancel}
+    };
+    for (int index = 0; index < 2; index++) {
+        source.set(js_new_object());
+        for (const auto& entry : methods) {
+            method.set(js_web_stream_callback(entry.body, tee.get(), index));
+            JS_RETURN_IF_ERROR(js_set_key_cstr(source.get(), entry.name, method.get()));
+        }
+        source.set(js_readable_stream_new(source.get()));
+        JS_RETURN_IF_ERROR(source.get());
+        JS_RETURN_IF_ERROR(js_elements_set_int(tee.get(), JS_TEE_BRANCH_0 + index, source.get()));
+        JS_RETURN_IF_ERROR(js_array_push(result.get(), source.get()));
+    }
+    source.set(js_web_stream_callback(js_readable_tee_source_closed, tee.get(), 0));
+    method.set(js_web_stream_callback(js_readable_tee_source_error, tee.get(), 0));
+    if (!js_promise_observe(js_elements_get_int(reader.get(), JS_READER_CLOSED), source.get(), method.get(), ItemNull))
+        return ItemError;
+    return result.get();
 }
 
 static Item js_writable_stream_writer_write(Item env_item, Item chunk) {

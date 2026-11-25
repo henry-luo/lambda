@@ -280,17 +280,8 @@ Item js_headers_create_http(char* const* lines, int count) {
         if (!strcmp(name, "set-cookie") || !strcmp(name, "set-cookie2")) continue;
         const unsigned char* bytes = (const unsigned char*)(colon + 1);
         size_t length = strlen((const char*)bytes);
-        char* utf8 = (char*)mem_alloc(length * 2 + 1, MEM_CAT_JS_RUNTIME);
-        if (!utf8) return ItemError;
-        size_t written = 0;
-        for (size_t j = 0; j < length; j++) {
-            char encoded[4];
-            size_t size = utf8_encode(bytes[j], encoded);
-            memcpy(utf8 + written, encoded, size);
-            written += size;
-        }
-        value.set(js_name_item(utf8, written));
-        mem_free(utf8);
+        value.set(js_string_from_latin1(bytes, length));
+        JS_RETURN_IF_ERROR(value.get());
         value.set(header_normalize(value.get(), false));
         JS_RETURN_IF_ERROR(value.get());
         list.set(header_update(list.get(), key.get(), value.get(), HEADER_APPEND));

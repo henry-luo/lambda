@@ -111,6 +111,8 @@ Item js_to_numeric(Item value);
 // ECMAScript ToInt32, used by bitwise operations and Web IDL integer adapters.
 int32_t js_to_int32(double value);
 LAMBDA_RT_API Item js_to_string(Item value);
+// binary web strings expose one UTF-16 code unit for each Latin1 byte.
+LAMBDA_RT_API Item js_string_from_latin1(const unsigned char* bytes, size_t length);
 Item js_to_boolean(Item value);
 Item js_to_object(Item value);
 Item js_to_property_key(Item value);

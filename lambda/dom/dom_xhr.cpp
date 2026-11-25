@@ -381,6 +381,19 @@ extern "C" void dom_xhr_install_interface(Item prototype) {
     RootFrame roots(4);
     Rooted<Item> object(roots, prototype), key(roots, ItemNull);
     Rooted<Item> getter(roots, ItemNull), setter(roots, ItemNull);
+    // instances must inherit methods so prototype wrappers observe every request.
+#define JS_XHR_METHODS(M) \
+    M("open", js_xhr_open) M("send", js_xhr_send) \
+    M("setRequestHeader", js_xhr_set_request_header) M("abort", js_xhr_abort) \
+    M("getResponseHeader", js_xhr_get_response_header) \
+    M("getAllResponseHeaders", js_xhr_get_all_response_headers) \
+    M("overrideMimeType", js_xhr_override_mime_type)
+#define JS_XHR_INSTALL_METHOD(name, target) \
+    dom_realm_install_method(object.get(), name, target);
+    JS_XHR_METHODS(JS_XHR_INSTALL_METHOD)
+#undef JS_XHR_INSTALL_METHOD
+#undef JS_XHR_METHODS
+
     for (int slot = 0; slot < XHR_PROPERTY_COUNT; slot++) {
         key.set(js_name_item(xhr_properties[slot].name));
         getter.set(js_new_native_payload_function(xhr_property_getter, slot, 0));
@@ -784,19 +797,6 @@ extern "C" Item js_xhr_new(void) {
     xhr_set_int(object.get(), "UNSENT", 0);
 
     xhr_set_str(object.get(), "", ""); // dummy to avoid collision
-    // attach the stable XHR surface from one method catalog.
-#define JS_XHR_METHODS(M) \
-    M("open", js_xhr_open) M("send", js_xhr_send) \
-    M("setRequestHeader", js_xhr_set_request_header) M("abort", js_xhr_abort) \
-    M("getResponseHeader", js_xhr_get_response_header) \
-    M("getAllResponseHeaders", js_xhr_get_all_response_headers) \
-    M("overrideMimeType", js_xhr_override_mime_type)
-#define JS_XHR_INSTALL_METHOD(name, target) \
-    dom_realm_install_method(object.get(), name, target);
-    JS_XHR_METHODS(JS_XHR_INSTALL_METHOD)
-#undef JS_XHR_INSTALL_METHOD
-#undef JS_XHR_METHODS
-
     // addEventListener / removeEventListener stubs (jQuery sets onreadystatechange directly)
     noop.set(dom_realm_new_function(js_xhr_noop));
     dom_realm_set_cstr(object.get(), "addEventListener", noop.get());

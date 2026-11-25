@@ -1831,6 +1831,24 @@ extern "C" void js_event_loop_pump_nowait(void) {
     }
 }
 
+extern "C" bool js_event_loop_pump_loading(void) {
+    if (!js_active_runtime_state || !auto_close_mode || auto_close_after_load ||
+        virtual_clock_enabled || dom_is_host_driven_loop() || !dom_get_document() ||
+        !dom_get_ui_context() || microtask_running ||
+        js_runtime_state.event_loop->callback_running || animation_frame_drain_active) return false;
+
+    js_event_loop_pump_nowait();
+    double now_ms = js_performance_monotonic_now_ms();
+    // load waits use real elapsed time; never synthesize catch-up frames or age CSS here.
+    if (js_animation_frame_has_pending() &&
+        now_ms - js_runtime_state.performance.frame_clock_ms >= 1000.0 / 60.0) {
+        animation_frame_drain_active = true;
+        js_animation_frame_flush(now_ms);
+        animation_frame_drain_active = false;
+    }
+    return true;
+}
+
 static bool event_loop_pump_native_wait(int max_wait_ms) {
     bool had_microtasks = js_microtask_pending_count() > 0;
     js_microtask_flush();
@@ -1964,7 +1982,9 @@ static int js_event_loop_drain_impl(bool keep_intervals) {
             }
         }
         stop_all_interval_timers();
-        for (int turn = 0; turn < 4 || event_loop_has_pending_requests(); turn++) {
+        // ready continuations belong to the selected frame even after native I/O finishes.
+        for (int turn = 0; turn < 4 || event_loop_has_pending_requests() ||
+                (virtual_clock_enabled && virtual_timer_next_due(virtual_clock_ms, next_timer_id)); turn++) {
             // NOWAIT polling can retire the realm before an admitted fetch/XHR
             // completes. Await its native completion within the existing drain
             // watchdog without advancing the requested virtual capture time.
@@ -1972,11 +1992,12 @@ static int js_event_loop_drain_impl(bool keep_intervals) {
                 uint64_t elapsed_ns = uv_hrtime() - drain_start_ns;
                 uint64_t budget_ns = (uint64_t)EVENT_LOOP_DRAIN_TIMEOUT_MS * 1000000ULL;
                 if (elapsed_ns >= budget_ns) {
-                    log_error("event_loop: pending native requests exceeded the snapshot drain watchdog");
+                    log_error("event_loop: %s exceeded the snapshot drain watchdog",
+                        event_loop_has_pending_requests() ? "pending native requests" : "ready snapshot tasks");
                     break;
                 }
                 int remaining_ms = (int)((budget_ns - elapsed_ns + 999999ULL) / 1000000ULL);
-                event_loop_pump_native_wait(remaining_ms);
+                if (event_loop_has_pending_requests()) event_loop_pump_native_wait(remaining_ms);
             }
             int active = lambda_uv_run_loop(loop, UV_RUN_NOWAIT);
             js_event_loop_render_checkpoint();

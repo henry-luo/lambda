@@ -28,7 +28,7 @@ take an `L` suffix (`JS05-L1`) so the two numbering spaces cannot collide.
 
 <a id="js02-l1"></a>
 
-### JS02-L1 — Control targets leak across nested bodies — **FIXED IN WORKTREE; page qualification pending**
+### JS02-L1 — Control targets leak across nested bodies — **FIXED for control-body scope**
 
 **2026-11-25.** Pelago's admitted 860839-byte reCAPTCHA release is rejected
 at byte120284 for a duplicate `a` label inside a nested anonymous function.
@@ -54,13 +54,19 @@ does not qualify SDK execution or remove Pelago's independent Worker gap.
 Evidence: `test/test_js_c_parser_gtest.cpp`, `test/js/label_body_scope.js` and
 `temp/online-visual-round217/{parser-before.json,parser-final.json,
 parser-unit-before.log,parser-unit-final.log,final-execution-ast.log,
-final-execution-mir.log,browser-final-results.json}`. The user cleared the goal
-before live page qualification; the candidate remains uninstalled and no
-comparison row is promoted for this repair.
+final-execution-mir.log,browser-final-results.json}`. The initial goal was cleared
+before release promotion. On resumption, all five saved source-overlay files
+match the committed source. A current release passes the ten assertions and
+three existing control-flow goldens in both backends. Its ordinary Pelago
+capture reports no parser failures and still shows the independent Worker
+error. Full SDK execution/lifecycle and whole-page clearance are not inferred
+from the absence of parser failures. Evidence:
+`temp/online-visual-round218/{focused-results.json,existing-control-results.json,
+live/saas_landing_234/after/}`.
 
 <a id="js02-l2"></a>
 
-### JS02-L2 — Arrow-head probes reparse nested defaults exponentially — **FIXED IN WORKTREE; page qualification pending**
+### JS02-L2 — Arrow-head probes reparse nested defaults exponentially — **FIXED for the qualified JavaScript precheck**
 
 **2026-11-25.** After JS02-L1 removes the false syntax error, full SDK parsing
 spends minutes repeatedly probing parenthesized assignment/default expressions
@@ -82,8 +88,10 @@ All 25 parser component tests pass. The final candidate passes ten AST and ten
 MIR execution assertions; Chromium passes 31 focused syntax/execution groups.
 Evidence: `temp/online-visual-round217/{parser-after.sample,
 arrow-probe-result.json,parser-unit-final.log,browser-final-results.json}`.
-The user cleared the goal before live page qualification. The candidate is
-uninstalled; no full baseline or page clearance is claimed.
+The initial goal was cleared before release promotion. The resumed release
+qualification is recorded under JS02-L1. The direct SDK parse and stress
+reductions qualify the parser repair; no SDK lifecycle, page-load performance
+improvement or whole-page clearance is claimed. No full baseline is repeated.
 
 ## 3. Value model, memory & GC interop (JS03)
 
@@ -653,6 +661,18 @@ partial and Getsafe stays high. Evidence: `temp/online-visual-round116/`, especi
 before/current captures. RI-166/RI-167/RI-168 separately repair native CSS defects
 and restore the cookie panel in its frozen source.
 
+**2026-11-25 Figma pricing recheck.** Its ordinary native frame remains blank
+and reports `RangeError: Unsupported NumberFormat option`. A read-only
+Chromium constructor observation records actual `en-us` requests with
+`style:'currency'`, `currency:'usd'`, including zero fractional digits. The
+ordinary Chromium reference renders the pricing table and consent panel.
+These are unsupported currency requests in the existing profile; no currency
+shim, ignored option or forced application fallback is introduced. Caught
+React stack probes are separate. This confirms the API gap on this page,
+without claiming it explains every later startup step. Evidence:
+`temp/online-visual-round228/{live/saas_landing_582/after,
+browser/saas_landing_582,intl-observer/calls.json}`.
+
 
 <a id="js10-l2"></a>
 
@@ -786,6 +806,217 @@ high review resolves; localized card and text differences remain.
 9. **The NULL-buffer `.buffer` synthesis path is vestigial.** `js_typed_array_new` now always allocates and wraps a backing `JsArrayBuffer` eagerly (`:2100`), so the exotic-gate fallback that lazily synthesizes a buffer for a `ta->buffer == NULL` array (`js_runtime.cpp:3283`) should be unreachable for engine-constructed arrays; it survives as a guard for exotic construction paths and could be demoted to an assert.
 
 ## 13. Web Platform: DOM, CSSOM, Events & Fetch (JS13)
+
+<a id="js13-l85"></a>
+
+### JS13-L85 — Empty service-worker container omits inherited event behavior — **FIXED for EventTarget; worker lifecycle remains unsupported**
+
+Found 2026-11-25 while continuing Linktree's DataGrail startup after JS13-L84.
+The existing `navigator.serviceWorker` was a plain object; the SDK's
+`addEventListener("message", ...)` threw. Its interception wrapper catches
+that exception, so it is not a unique explanation for the missing panel.
+The factory now reuses the existing EventTarget allocator and shared listener
+registry (**D8.4.4 / D9.5.6v2 / D6.3.3**). No duplicate methods or fabricated
+worker messages are installed. Readiness remains pending with no active
+registration, and registration enumeration remains empty.
+
+Both maintained regression groups fail before the change and pass afterward
+in native, MIR and Chromium. They cover inherited methods, real manual
+MessageEvent dispatch, target/currentTarget/receiver, removal, isolation,
+once, GC, identity and pending readiness. Chromium runs on a secure localhost
+origin with no registered workers. Three existing EventTarget controls also
+pass. The final combined native run passes 13 controls, shared with JS13-L84.
+JS13-L5 still owns worker execution/activation; full ServiceWorkerContainer
+branding, IDL and the old registration placeholder are not qualified.
+
+The final ordinary Linktree capture no longer reports this listener error.
+The panel exists, has display:block and opacity:1, but remains below the
+viewport because its positioning uses the open `:host` scope feature
+(JS13-L2). Keep high review. Evidence:
+`temp/online-visual-round226/{service-worker-events-before.log,
+service-worker-events-after.log,service-worker-events-mir.log,
+browser-service-events.json,focused-final.log,linktree-view.json,
+qualified-run/live/saas_landing_141/after}`.
+
+<a id="js13-l84"></a>
+
+### JS13-L84 — Base64 APIs confuse binary character codes with UTF-8 text — **FIXED**
+
+Found 2026-11-25 in Linktree's admitted DataGrail consent SDK. Its unchanged
+helper passes `atob(config)` through `Uint8Array.from(..., c=>c.codePointAt(0))`
+and TextDecoder before JSON.parse. Native atob exposed raw decoded bytes as
+UTF-8 text, combining byte sequences into code points above 255. Mapping these
+to bytes corrupts valid configuration JSON. The actual 149202-byte payload
+became 130289 characters before repair; afterward all 149202 byte-valued
+characters survive and JSON.parse succeeds. ASCII alone was unaffected.
+
+Atob now publishes Latin1 code units per byte through the existing Headers
+conversion, extracted as `js_string_from_latin1`. Btoa encodes Latin1 UTF-16
+units rather than their UTF-8 storage, rejecting units above 255. Validation
+preserves forgiving padding/ASCII whitespace while rejecting invalid alphabet,
+padding and vertical tab. Both APIs retain coercion values with precise roots
+and propagate conversion failures (**D8.4.4 / D6.3.3**). The shared decoder,
+vendor dependencies and runtime-state/class layouts are unchanged.
+
+Five of seven maintained native groups fail on the preceding host; all seven
+pass after repair in native, MIR and Chromium. All 256 bytes, UTF-8-looking
+sequences, multilingual JSON, input validation, surrogates and coercion/GC
+are covered. The actual payload also passes. Final combined qualification
+passes 13 native controls with JS13-L85. An initial Chromium data-URL run lacked
+UTF-8 metadata; its apparent Unicode failures are excluded. The corrected
+UTF-8 fixtures pass. No broad baseline repeats; the earlier 630/630 JS layout
+milestone predates this change.
+
+The ordinary page now decodes the SDK configuration, and the next confirmed
+listener error is separately repaired in JS13-L85. This does not clear its
+missing consent panel or establish full SDK conformance. Evidence:
+`temp/online-visual-round226/{base64-valid-before.log,base64-after.log,
+base64-mir.log,browser-fixtures.json,full-decode-before.log,
+full-decode-details.json,focused-final.log}`.
+
+<a id="js13-l83"></a>
+
+### JS13-L83 — Default readable-stream branching lacks its reader lifecycle — **FIXED for default streams; Linktree consent remains under review**
+
+**2026-11-25.** Linktree's exact Next.js bootstrap constructs a default
+`ReadableStream` from its server-data queue and calls `L.tee()`. The missing
+method throws before hydration, leaving the authored main hero hidden. Later
+fingerprinting AudioContext/Canvas errors are independent. The existing native
+stream already has asynchronous pull, queued reads, controllers and promise
+observers; branching extends that machinery (**D8.4.4 / D9.5.6v2**).
+
+Default-stream branches now own separate queues, share chunk identity and
+serialize source reads. Source closure/errors reach both branches. A canceled
+branch leaves its sibling readable; canceling both joins their reasons and
+waits for the source's actual asynchronous cancellation result. Reader locks,
+`closed`, `cancel` and `releaseLock`, plus stream `locked`/`cancel`, use the same
+private state. Release rejects only that reader's pending requests without
+discarding the stream's chunks. Cancellation captures its construction-time
+algorithm and late enqueue cannot reopen a closed/canceled/errored stream.
+The default branching contract follows the
+[Streams algorithm](https://streams.spec.whatwg.org/#readable-stream-default-tee).
+
+All state and callback captures use existing private arrays and precise roots
+(**D6.3.3 / D6.4.1**). No public RuntimeState/class layout or Node DSO ABI,
+vendor code, source budget, capture clock or navigation deadline changes.
+Byte-stream/BYOB tee is explicitly unsupported; the existing demand-driven
+pull profile remains. Full byte-stream, backpressure, piping and transfer
+conformance is not claimed. No buffered-copy fork or hidden API is used.
+
+The first seven maintained branching/reader groups fail on the preceding
+release. Final qualification passes **18 native controls** (11 new groups and
+seven existing readable/response-decoder controls), plus the **11 new groups
+in the MIR profile and Chromium**. Cancellation failure/late enqueue and
+construction-time method capture have separate failing diagnostic controls.
+No broad baseline is repeated after the preceding630/630 JS layout milestone;
+that earlier gate predates this change.
+
+The ordinary Linktree capture now renders the main heading, supporting copy,
+signup controls and large portraits. The large consent panel visible in the
+preserved current Chromium reference remains absent; retain manual high review
+even though the automated broad-difference flag clears. No complete SDK or
+consent-lifecycle claim. Frame selection remains **D10.1.7**. Evidence:
+`temp/online-visual-round224/linktree-flight.js`,
+`temp/online-visual-round225/{tee-before.log,cancel-edges-before.log,
+cancel-capture-before.log,focused-final.log,tee-mir-final.log,
+browser-fixtures.json,qualified-run/live/saas_landing_141,pairs.png}`.
+
+<a id="js13-l82"></a>
+
+### JS13-L82 — Snapshot teardown drops ready task continuations — **FIXED**
+
+**2026-11-25.** The one-shot snapshot drain allowed four final turns unless
+native requests remained pending. When those requests finished, ready
+virtual-timer continuations could still be queued, but teardown closed them.
+An otherwise finite 32-step `setImmediate` chain at the selected1000ms frame
+stops at11 on the preceding release. A later1200ms timer must remain unrun
+(**D6.4.1 / D8.4.4 / D10.1.7**).
+
+The drain now also tests for timers already due at the selected timestamp.
+Additional ready turns share the existing5000ms watchdog; the change neither
+advances virtual time nor increases a task, source or navigation budget.
+Native waiting occurs only while native requests remain. The maintained
+`render_snapshot_ready_tasks.test.cjs` fails before the repair and passes
+afterward, including the future-timer cutoff. Three existing capture-clock
+controls also pass.
+
+Jetty's ordinary AUTO capture now renders the large hero photograph, with
+**0.42% mean error /0.57% changed area**, compared with9.69%/27.30% before.
+The current Chromium reference and visual review support clearing its major
+omission. The preceding observer diagnostic had already confirmed geometry
+and delivery; the timing-traced AUTO control had zero compiled promotions.
+Neither a compiler workaround nor a forced visibility/API change is used.
+Evidence: `temp/online-visual-round222/{chain-before.log,test-ready-before.log,
+test-ready-after.log,test-capture-controls.log,qualified-run/live/saas_landing_111,
+pairs.png}`. Broader page lifecycle conformance is not inferred from this fix.
+
+<a id="js13-l81"></a>
+
+### JS13-L81 — Existing XHR methods are absent from its prototype — **FIXED for method publication**
+
+**2026-11-25.** Empathy's exact Sentry initialization reads
+`XMLHttpRequest.prototype` and constructs a Proxy around its `open` method.
+Native passes undefined and throws. All seven transport methods already
+exist, but `js_xhr_new` installed a separate copy on each instance, while
+`dom_xhr_install_interface` published only the property accessors. This also
+hid prototype replacements from existing and newly constructed requests
+(**D8.4.4 / D9.5.6v2**).
+
+The unchanged method catalog now installs on the intrinsic prototype. Instances
+inherit it; native receiver state, transport and event handling are unchanged.
+Two focused fixtures fail on the original release and pass after repair:
+shared/inherited method identity, and a prototype Proxy that observes both
+existing and new requests while borrowed header methods retain the receiver.
+The same two groups pass Chromium. One existing local HTTP JSON control passes.
+
+The normal Empathy capture no longer reports the missing-method Proxy failure
+and preserves its full primary photograph, main text, navigation and consent.
+Pixels are unchanged from the preceding qualified native frame; no additional
+severity clearance is attributed to this independent SDK repair. Other
+framework TypeErrors and a blob-script load failure remain; complete Sentry,
+XHR events or Web IDL conformance is not claimed. No browser API is hidden and
+no capture deadline, source budget or third-party code is changed. Evidence:
+`temp/online-visual-round220/{empathy-app.js,test-before.log,test-after.log,
+xhr-transport.log,browser-fixtures.json,qualified-run/live/saas_landing_679}`.
+
+<a id="js13-l80"></a>
+
+### JS13-L80 — Compiled literal fallback loses its prototype family — **FIXED for startup; Dreamcut media remains under review**
+
+**2026-11-25.** Dreamcut's admitted 2.09 MB entry left the native application
+root empty. The first React render callback started normally, then an engine
+capability failure bypassed ordinary JavaScript recovery and retained React's
+render-context bit. Later callbacks reported React error327; that was a
+consequence, rather than a scheduler or reentry defect. Exact Scheduler,
+bound-callback and control-flow reductions did not reproduce the failure.
+
+A release debugger trace locates the first failure in `for…in` prototype
+traversal while JSX copies an icon's props. The receiver's optimized literal
+shape has the private `MvpLmdObject` family. In `mvp_lmd_instantiate_unit`, a
+declined shared shape transition selects the private blueprint, whose nominal
+identity had not been updated to the actual runtime root. Prototype lookup
+therefore cannot recognize its Object family (**D8.4.4 / D8.4.5**).
+
+The blueprint now receives the same nominal identity as its allocation root
+before transition interning. Per-closure constructor templates retain their
+existing ownership path. No prototype fallback, API hiding, catch suppression,
+shape-budget increase or vendor edit is added. A focused regression forces
+the shared shape budget to decline: the original release fails with the same
+capability error; the repair preserves own-field copying, inherited-key order
+and Object.prototype identity. That regression and three existing checks for
+shape limits, constructor identity and inherited enumeration pass.
+
+The ordinary 1000ms/elapsed-clock Dreamcut capture now contains navigation,
+heading, copy and actions. Its large Vimeo-backed hero regions remain black
+and the main download action is faded; these remaining causes are not yet
+isolated. Dreamcut stays high despite the automated broad-difference flag
+clearing: the current pair has **14.88% mean error /32.29% changed area** and
+no blank mismatch. No complete media/startup lifecycle or performance repair
+is claimed. Diagnostic module exports/wrappers and replay frames are not
+promoted. Evidence: `temp/online-visual-round219/{capability-backtrace.txt,
+capability-shape.txt,test-before.log,test-after.log,qualified-run/live/saas_landing_370,
+browser/saas_landing_370,pairs.png}`; earlier empty-root evidence remains in
+round218.
 
 <a id="js13-l79"></a>
 
@@ -1248,6 +1479,18 @@ context is not assigned as the cause of these DOM-text fades. No native API
 is hidden or visibility forced. Evidence:
 `temp/online-visual-round216/{dia-hero.js,dia-motion/browser/saas_landing_542/animation-state.json,
 live/saas_landing_542/after,browser/saas_landing_542}/`.
+
+Agora's 2026-11-25 current about page confirms the same automatic-playback
+dependency. Its authored main wrapper starts at opacity zero. The ordinary
+native capture remains blank with no reported engine error, while current
+Chromium renders the full page. A behavior-preserving Chromium probe records
+the main wrapper's actual opacity `[0,1]`,500ms duration,`ease-out`,
+`fill: "both"` animation, plus a300ms announcement fade. This resolves the
+previously unisolated hidden-wrapper diagnosis; it does not establish a new
+scheduler or layout bug. The substantial playback lifecycle remains deferred
+under the existing scope (**D8.4.4 / D9.5.6v2**). No native API or opacity is
+changed. Evidence: `temp/online-visual-round221/{agora-source.html,agora-app.js,
+agora-animations.json,qualified-run/live/saas_landing_475,browser/saas_landing_475}`.
 
 The shared conversion now recognizes the standard legacy navigation names.
 In a Window realm, `navigationStart` is zero; other legacy timestamps are not
@@ -3208,6 +3451,16 @@ computed style and PNG paint. Selector parent relations stop at the shadow
 fragment boundary. Initial scoped link styles also enter the root cascade.
 Live linked-sheet lifecycle, adopted sheets, shadow name registries, `:host`
 and `::slotted` remain open (**D9.1.1v4 / D9.1.3v2 / D5.5.1**).
+
+The 2026-11-25 Linktree post-script layout places its visible consent aside at
+y=9262.3, width 1200 and height 264.8, with no fixed-position style. Its shadow
+stylesheet authors `:host(.dg-consent-banner){position:fixed;...}` and
+`:host(.dg-consent-banner.dg-left){left:...;bottom:...;width:400px}`.
+Configuration decoding and message-listener setup now succeed (JS13-L84/L85),
+so the panel is present but outside the viewport. This confirms the existing
+host-scoped cascade gap as a remaining cause; do not force page visibility or
+override authored positioning. Evidence: `temp/online-visual-round226/`
+(`datagrail-consent.js`, `linktree-view.json`, `pairs.png`).
 
 The 2026-11-24 Teachable reduction now paints its fixed consent notice at the
 correct document-root width and position after native RI-227. Its remaining

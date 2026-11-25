@@ -108,6 +108,29 @@ TEST_F(JsFormalMir, PrivateObjectGrowthAfterShapeBudgetDeclinesStaysLinear) {
         tree_after.cumulative_bytes - tree_before.cumulative_bytes, 4u * 1024u * 1024u);
 }
 
+TEST_F(JsFormalMir, LiteralFallbackRetainsPrototypeAndInheritedEnumeration) {
+    ASSERT_EQ(run("globalThis.literalPrototype=Object.prototype;true").item, ITEM_TRUE);
+    Input* tree = runtime_shape_tree();
+    ASSERT_NE(tree, nullptr);
+    ASSERT_GT(tree->shape_transition_shapes, 0u);
+    tree->shape_graph_budget = tree->shape_transition_shapes;
+    Item result = run(R"JS(
+        Object.prototype.inheritedLiteralKey=23;
+        function makeProps(){return {size:14,className:'icon'}}
+        function copyProps(props){
+            let copy={},keys=[];
+            for(let key in props){keys.push(key);if(Object.hasOwn(props,key))copy[key]=props[key]}
+            return copy.size===14&&copy.className==='icon'&&
+                keys.join(',')==='size,className,inheritedLiteralKey'&&
+                !Object.hasOwn(copy,'inheritedLiteralKey');
+        }
+        let props=makeProps();
+        copyProps(props)&&Object.getPrototypeOf(props)===literalPrototype;
+    )JS");
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+}
+
 TEST_F(JsFormalMir, StringEqualitySharesUtf16SemanticsAcrossEncodings) {
     ASSERT_FALSE(item_is_error(run("true")));
     RootFrame roots(4);

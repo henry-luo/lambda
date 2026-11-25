@@ -174,7 +174,7 @@
     {
       "label": "saas_landing_679",
       "url": "https://www.empathy.com/news-room",
-      "manual_major_remaining": "The large primary news photograph remains a blank placeholder; right-column cards and headline are present.",
+      "manual_major_remaining": "",
       "rechecks": [
         {
           "rechecked_at": "2026-11-18T04:43:31.020Z",
@@ -182,7 +182,12 @@
           "previous_manual_major_remaining": "The main news portrait remains absent. The fresh layout falls below the automated changed-area threshold while this large media omission persists.",
           "manual_major_remaining": "The large primary news photograph remains a blank placeholder; right-column cards and headline are present."
         }
-      ]
+      ],
+      "resolved_at": "2026-11-25T10:53:54.825Z",
+      "resolution": "The current ordinary native frame contains the main photograph, headline, side cards, navigation and consent panel, matching completed Chromium at 1.31% mean error /2.84% changed area. An initial Chromium frame had the primary image request pending; one unchanged-policy retry completes it. No unique attribution to the compiled-literal repair is established. Previous images and reviews are retained.",
+      "resolution_evidence": "comparison/repairs.html#round-193",
+      "resolved_previous_manual_major_remaining": "The large primary news photograph remains a blank placeholder; right-column cards and headline are present.",
+      "resolved_capture_settle_ms": 1000
     },
     {
       "label": "saas_landing_335",
@@ -539,7 +544,7 @@
     {
       "label": "saas_landing_309",
       "url": "https://prismic.io/pricing",
-      "manual_major_remaining": "Pricing cards and customer logos now render, but an extra large consent dialog and dark backdrop obscure the page. Current Chromium has no such overlay; its cause remains unisolated.",
+      "manual_major_remaining": "",
       "reviewed_at": "2026-11-18T04:43:31.020Z",
       "evidence": "comparison/repairs.html#round-83",
       "rechecks": [
@@ -549,7 +554,12 @@
           "previous_manual_major_remaining": "Pricing cards and customer logos remain absent below the heading; the primary pricing content does not match.",
           "manual_major_remaining": "Pricing cards and customer logos now render, but an extra large consent dialog and dark backdrop obscure the page. Current Chromium has no such overlay; its cause remains unisolated."
         }
-      ]
+      ],
+      "resolved_at": "2026-11-25T10:06:11.782Z",
+      "resolution": "The ordinary current pair contains the navigation, heading, logos and pricing cards without the earlier extra consent dialog/backdrop. Remaining differences are localized. This resolution follows accumulated shared repairs and current content; no unique attribution to the parser repair or complete consent lifecycle is claimed. The separate Usercentrics exception and pending-request snapshot watchdog remain.",
+      "resolution_evidence": "comparison/repairs.html#round-192",
+      "resolved_previous_manual_major_remaining": "Pricing cards and customer logos now render, but an extra large consent dialog and dark backdrop obscure the page. Current Chromium has no such overlay; its cause remains unisolated.",
+      "resolved_capture_settle_ms": 1000
     },
     {
       "label": "saas_landing_299",
@@ -593,9 +603,17 @@
     {
       "label": "saas_landing_382",
       "url": "https://frame.io/customers",
-      "manual_major_remaining": "The entire main customer-image montage remains absent below the header.",
+      "manual_major_remaining": "The normal native frame renders outer photographs but still omits the central customer-image montage. The normal post-script layout has central image boxes and nonzero opacity; a static reduction of the captured browser hero paints all central images. Basic transform/clip probes pass. The remaining live startup difference is unisolated; no new paint, image-download or scheduler root is claimed.",
       "reviewed_at": "2026-11-18T04:43:31.020Z",
-      "evidence": "comparison/repairs.html#round-83"
+      "evidence": "comparison/repairs.html#round-83",
+      "rechecks": [
+        {
+          "rechecked_at": "2026-11-25T12:03:17.820Z",
+          "evidence": "comparison/repairs.html#round-197",
+          "previous_manual_major_remaining": "The entire main customer-image montage remains absent below the header.",
+          "manual_major_remaining": "The normal native frame renders outer photographs but still omits the central customer-image montage. The normal post-script layout has central image boxes and nonzero opacity; a static reduction of the captured browser hero paints all central images. Basic transform/clip probes pass. The remaining live startup difference is unisolated; no new paint, image-download or scheduler root is claimed."
+        }
+      ]
     },
     {
       "label": "saas_landing_494",
@@ -690,7 +708,7 @@
     {
       "label": "saas_landing_234",
       "url": "https://www.pelagohealth.com/",
-      "manual_major_remaining": "The current page shows its own application-error screen after ReferenceError: Worker. Deleting only Worker in Chromium reproduces the same page, while the ordinary reference renders the full hero (JS13-L69). The consent panel now renders. The dedicated-worker feature gap remains high; no cause is assigned to the historical frame change.",
+      "manual_major_remaining": "The current page still shows its own application-error screen with ReferenceError: Worker; consent renders. The current release has no reported parser failures, and the parser reductions/direct SDK parse are repaired (JS02-L1/L2), but full SDK lifecycle is not inferred. The previously confirmed dedicated-worker dependency remains (JS13-L69); no whole-page clearance.",
       "evidence": "comparison/repairs.html#round-136",
       "rechecks": [
         {
@@ -698,6 +716,12 @@
           "evidence": "comparison/repairs.html#round-191",
           "previous_manual_major_remaining": "Hero media, heading and actions are present. The large browser consent dialog remains absent; retain the major review despite the lower coarse score.",
           "manual_major_remaining": "The current page shows its own application-error screen after ReferenceError: Worker. Deleting only Worker in Chromium reproduces the same page, while the ordinary reference renders the full hero (JS13-L69). The consent panel now renders. The dedicated-worker feature gap remains high; no cause is assigned to the historical frame change."
+        },
+        {
+          "rechecked_at": "2026-11-25T10:06:11.879Z",
+          "evidence": "comparison/repairs.html#round-192",
+          "previous_manual_major_remaining": "The current page shows its own application-error screen after ReferenceError: Worker. Deleting only Worker in Chromium reproduces the same page, while the ordinary reference renders the full hero (JS13-L69). The consent panel now renders. The dedicated-worker feature gap remains high; no cause is assigned to the historical frame change.",
+          "manual_major_remaining": "The current page still shows its own application-error screen with ReferenceError: Worker; consent renders. The current release has no reported parser failures, and the parser reductions/direct SDK parse are repaired (JS02-L1/L2), but full SDK lifecycle is not inferred. The previously confirmed dedicated-worker dependency remains (JS13-L69); no whole-page clearance."
         }
       ]
     },
@@ -750,9 +774,22 @@
     {
       "label": "saas_landing_111",
       "url": "https://www.jetty.com/",
-      "manual_major_remaining": "Navigation, heading, explanatory text, button and announcement render after the navigation-origin timing repair. The large lazy hero image remains absent despite correct geometry; its source is still the transparent placeholder.",
+      "manual_major_remaining": "",
       "reviewed_at": "2026-11-24T10:46:03.831Z",
-      "evidence": "comparison/repairs.html#round-174"
+      "evidence": "comparison/repairs.html#round-174",
+      "rechecks": [
+        {
+          "rechecked_at": "2026-11-25T11:34:10.846Z",
+          "evidence": "comparison/repairs.html#round-195",
+          "previous_manual_major_remaining": "Navigation, heading, explanatory text, button and announcement render after the navigation-origin timing repair. The large lazy hero image remains absent despite correct geometry; its source is still the transparent placeholder.",
+          "manual_major_remaining": "The ordinary native frame still omits the large hero image and retains its transparent placeholder despite a correct 1200x675 box. Native tracing confirms intersection and callback delivery. AST, an unmodified local replay and a timing-traced AUTO run show the image; the AUTO trace has zero compiled promotions. The task/resource-ordering cause remains unisolated. Diagnostic frames and tier restrictions are not promoted as a fix."
+        }
+      ],
+      "resolved_previous_manual_major_remaining": "The ordinary native frame still omits the large hero image and retains its transparent placeholder despite a correct 1200x675 box. Native tracing confirms intersection and callback delivery. AST, an unmodified local replay and a timing-traced AUTO run show the image; the AUTO trace has zero compiled promotions. The task/resource-ordering cause remains unisolated. Diagnostic frames and tier restrictions are not promoted as a fix.",
+      "resolved_at": "2026-11-25T11:45:39.116Z",
+      "resolution": "JS13-L82 keeps already-ready continuations in the selected snapshot frame after native requests finish. The ordinary AUTO capture restores Jetty’s full hero photograph, with 0.42% mean error /0.57% changed area against the preserved current Chromium reference. No tier restriction, forced visibility or timing/budget change is used.",
+      "resolution_evidence": "comparison/repairs.html#round-196",
+      "resolved_capture_settle_ms": 1000
     },
     {
       "label": "saas_landing_281",
@@ -798,6 +835,70 @@
       "resolution_evidence": "comparison/repairs.html#round-189",
       "resolved_previous_manual_major_remaining": "The main navigation, heading, copy, logos and product panel now render. The large Iubenda consent panel remains absent because Canvas getImageData/ImageData are unavailable (JS13-L77); the separate code-island stylesheet-adoption gap remains.",
       "resolved_capture_settle_ms": 1000
+    },
+    {
+      "label": "saas_landing_370",
+      "url": "https://dreamcut.ai/home",
+      "manual_major_remaining": "JS13-L80 repairs the compiled literal fallback and restores navigation, heading, copy and actions. The large embedded Vimeo hero regions remain black and the main download action is faded in the current matched frame; those remaining causes are unisolated. Retain high despite the cleared automated broad-difference flag.",
+      "reviewed_at": "2026-11-25T10:06:11.915Z",
+      "evidence": "comparison/repairs.html#round-192",
+      "rechecks": [
+        {
+          "rechecked_at": "2026-11-25T10:53:54.781Z",
+          "evidence": "comparison/repairs.html#round-193",
+          "previous_manual_major_remaining": "The admitted 2.09 MB main module leaves the native application root empty while current Chromium renders the full hero/navigation. A matching native view tree and unchanged-module replay reproduce the empty root; the Chromium replay renders. Startup cause remains unisolated (JS13-L80). No major-feature attribution, API hiding or forced visibility is used.",
+          "manual_major_remaining": "JS13-L80 repairs the compiled literal fallback and restores navigation, heading, copy and actions. The large embedded Vimeo hero regions remain black and the main download action is faded in the current matched frame; those remaining causes are unisolated. Retain high despite the cleared automated broad-difference flag."
+        }
+      ]
+    },
+    {
+      "label": "saas_landing_149",
+      "url": "https://www.modernlife.com/",
+      "manual_major_remaining": "The current native frame contains the main navigation, heading, action and large illustration, while the current Chromium frame is still on its authored intro screen. The pair is at different startup phases despite the same settling policy. Retain review pending a comparable completed reference; this current evidence does not establish a missing native hero or a confirmed renderer defect.",
+      "reviewed_at": "2026-11-25T10:06:11.959Z",
+      "evidence": "comparison/repairs.html#round-192"
+    },
+    {
+      "label": "saas_landing_475",
+      "url": "https://www.agora.xyz/about",
+      "manual_major_remaining": "The main wrapper remains invisible. Its actual browser animation is opacity [0,1], 500ms with fill both; the announcement also uses automatic playback. This matches the existing substantial Web Animations lifecycle gap (JS13-L66/L44), which is deferred. No visibility or API workaround is applied.",
+      "reviewed_at": "2026-11-25T11:34:10.765Z",
+      "evidence": "comparison/repairs.html#round-195"
+    },
+    {
+      "label": "saas_landing_083",
+      "url": "https://www.overpass.com/",
+      "manual_major_remaining": "Header and large hero remain hidden while the next section renders. First-party source gates page intro on WebFont active; its loader uses the existing pending FontFaceSet.load path (JS13-L33). This is a source-backed lead, without a native call-site proof or unique final root assignment. The separately traced load-handler TypeError is Bing analytics and is not assigned as the hero cause.",
+      "reviewed_at": "2026-11-25T11:34:10.809Z",
+      "evidence": "comparison/repairs.html#round-195"
+    },
+    {
+      "label": "saas_landing_141",
+      "url": "https://linktr.ee/",
+      "manual_major_remaining": "JS13-L83 restores the hero through default-stream branching. JS13-L84/L85 repair consent configuration decoding and inherited message listeners. The panel now exists and is visible in the post-script tree, but its :host-scoped fixed positioning is unsupported (JS13-L2): it remains below the viewport. Retain manual high for the large missing consent panel; no full SDK or shadow-scope conformance claim.",
+      "reviewed_at": "2026-11-25T12:13:34.624Z",
+      "evidence": "comparison/repairs.html#round-198",
+      "rechecks": [
+        {
+          "rechecked_at": "2026-11-25T12:30:24.649Z",
+          "evidence": "comparison/repairs.html#round-199",
+          "previous_manual_major_remaining": "Navigation and announcement render, but the main heading, actions and large portraits remain absent. The exact current Next.js bootstrap calls L.tee() on a newly constructed ReadableStream and aborts because tee is absent. The branching lifecycle is being assessed against existing stream machinery; no source workaround or repair is yet claimed. Fingerprinting AudioContext/Canvas errors are separate.",
+          "manual_major_remaining": "JS13-L83 restores the main heading, supporting copy, signup controls and large portraits through real default-stream branching. The large consent panel visible in the current Chromium reference remains absent. Retain manual high review despite the cleared automated broad-difference flag; consent startup is unisolated and later fingerprinting/analytics failures are separate."
+        },
+        {
+          "rechecked_at": "2026-11-25T13:00:30.697Z",
+          "evidence": "comparison/repairs.html#round-200",
+          "previous_manual_major_remaining": "JS13-L83 restores the main heading, supporting copy, signup controls and large portraits through real default-stream branching. The large consent panel visible in the current Chromium reference remains absent. Retain manual high review despite the cleared automated broad-difference flag; consent startup is unisolated and later fingerprinting/analytics failures are separate.",
+          "manual_major_remaining": "JS13-L83 restores the hero through default-stream branching. JS13-L84/L85 repair consent configuration decoding and inherited message listeners. The panel now exists and is visible in the post-script tree, but its :host-scoped fixed positioning is unsupported (JS13-L2): it remains below the viewport. Retain manual high for the large missing consent panel; no full SDK or shadow-scope conformance claim."
+        }
+      ]
+    },
+    {
+      "label": "saas_landing_198",
+      "url": "https://bento.me/en/home",
+      "manual_major_remaining": "Bento now redirects to Linktree. Shared stream/startup repairs restore the heading, copy, actions and large portrait; the large consent panel remains absent, matching the known host-scoped cascade gap (JS13-L2). Retain manual high despite the cleared automatic broad-difference flag.",
+      "reviewed_at": "2026-11-25T13:36:32.950Z",
+      "evidence": "comparison/repairs.html#round-202"
     }
   ]
 }

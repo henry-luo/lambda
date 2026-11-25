@@ -2611,7 +2611,7 @@ static bool script_runner_wait_for_load_blockers(Runtime* runtime, DomDocument* 
         if (mgr) resource_manager_flush_layout_updates(mgr);
         dom_document_has_pending_work(doc);
         if (runtime) {
-            if (scripts_pending()) js_event_loop_pump_nowait();
+            if (!js_event_loop_pump_loading() && scripts_pending()) js_event_loop_pump_nowait();
             if (item_is_error(js_execution_interrupt_status())) return false;
             // element completion precedes window.load; its promise jobs may add another stylesheet.
             dom_dispatch_pending_resource_loads();

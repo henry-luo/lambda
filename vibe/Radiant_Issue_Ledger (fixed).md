@@ -14,6 +14,41 @@ are unchanged. Full evidence is under `../../lambda/temp/kianhup-style/`.
 
 ## Fixed issues
 
+<a id="ri-240"></a>
+
+### RI-240 — Fixed-direction text edits force direction-dependent document rebuilds
+
+**Fixed, 2026-11-25.** Native mutation records marked every text and control
+value edit direction-sensitive. If any author or UA sheet used `:dir()`, the
+reconciler consequently fell back to a full-document cascade/layout even when
+the edited content had fixed inherited direction. Child-list records already
+checked the actual automatic-direction context. Shared DOM invalidation
+follows **D9.1.3v2 / D9.5.6v2**.
+
+Text, control values and child lists now reuse that existing context check.
+Text starts from its parent; control values include the control's own `dir`.
+An explicit LTR/RTL boundary prevents content changes from affecting automatic
+ancestors. `dir=auto`, default BDI behavior, hidden first-strong text and the
+existing conservative shadow-tree closure are preserved. The DOM direction
+algorithm itself is unchanged; see [HTML's dir rules](
+https://html.spec.whatwg.org/multipage/dom.html#the-dir-attribute).
+
+Three of eight maintained fixtures fail before repair. All eight pass after
+repair in AST, MIR and Chromium, including input/textarea values and automatic
+direction reversals. The fixed-direction reductions remove three unnecessary
+full-document direction fallbacks while keeping their measured widths. All
+35 focused AST mutation/relational checks and the Radiant integer-cast lint
+also pass. No source, timing, execution-budget or navigation-limit change.
+
+Superpower's complete pre-fix logs show DOMContentLoaded exhausting the
+120-second JS budget, after which settlement is skipped. The small reduction
+independently establishes an unnecessary-layout cause; it does not by itself
+prove that this is the only live-page cost. Ordinary page qualification is
+recorded in the online comparison report. Diagnostic frames are excluded.
+Evidence: `temp/online-visual-round229/` (`direction-text-before.log`,
+`direction-before.log`, `direction-and-relational-after.log`,
+`direction-mir.log`, `browser-fixtures.json`, `lint.log`, `qualified-run/`).
+
 <a id="ri-239"></a>
 
 ### RI-239 — Layout redirects leak state created by the source document

@@ -105,6 +105,11 @@ node --test test/online/render_session.test.cjs
 node --test test/online/render_stylesheet.test.cjs
 node --test test/online/render_clip.test.cjs
 node --test test/online/render_observers.test.cjs test/online/render_observer_zero_area.test.cjs
+node --test test/online/render_snapshot_ready_tasks.test.cjs
+node --test test/online/render_readable_stream.test.cjs test/online/render_readable_tee.test.cjs
+node --test test/online/render_base64.test.cjs test/online/render_service_worker_events.test.cjs
+node --test test/online/render_selector_roots.test.cjs test/online/render_selector_identifiers.test.cjs
+node --test test/online/render_direction_mutations.test.cjs test/online/render_relational_mutations.test.cjs
 node --test test/online/render_dataset_metadata.test.cjs
 node --test test/online/render_error_stack.test.cjs test/online/render_document_title.test.cjs
 node --test test/online/render_grid.test.cjs
@@ -4110,3 +4115,223 @@ changes evidence/annotations only; its release retains round190's **15 AST,
 baselines are not repeated. Inventory: **75 high, zero critical, 992 low**,
 severity sorted; prior frames/reviews, all URLs and 1063 other rows remain.
 See [round191](comparison/repairs.html#round-191).
+
+
+Round192 qualifies **JS02-L1/L2**: control targets are isolated across nested
+function/static bodies, and a token precheck prevents repeated non-arrow
+default-expression probes. The exact 860839-byte SDK parses; uncertain lexical
+goals and TypeScript/JSX keep the existing grammar probe (**D8.4.4**).
+
+**Prismic and Conductor clear high**, at **2.02% mean error /4.42% changed
+area** and **1.62% /4.17%**. Their major page regions match ordinary current
+Chromium. No unique parser-fix attribution is claimed; Prismic's separate
+Usercentrics exception and pending-request snapshot watchdog remain.
+**Pelago stays high** behind Worker, **Dreamcut stays high** with an empty
+application root (startup cause unisolated, JS13-L80), and **ModernLife stays
+under review** because native shows the complete hero while current Chromium
+is on its intro. This phase ambiguity does not establish a native defect.
+
+The current release passes **10 assertions +3 existing goldens per backend**
+in AST and MIR. Parser source is unchanged from the **25 component /31
+Chromium** qualification. Owner archives are rebuilt against the current
+checkout; no class/RuntimeState layout change or full baseline repeat.
+Timing, wire user agent, admission and deadlines are unchanged. Opus's
+current HTTP429 is not promoted. Inventory: **73 high, zero critical, 994
+low**, severity sorted. Five normal pairs refresh; previous images/reviews,
+all URLs and 1062 other rows remain. See [round192](comparison/repairs.html#round-192).
+
+
+Round193 repairs **JS13-L80**: optimized literal templates now retain their
+allocation root’s prototype family when shared shape interning declines
+(**D8.4.4 /D8.4.5**). A forced-decline regression fails before the fix;
+it and three focused existing shape/constructor/enumeration checks pass
+on the repaired release (**4 tests, zero failures**).
+
+**Dreamcut’s navigation, heading, copy and actions return**, replacing the
+empty root. It stays high because the large embedded hero media are black
+and the download action is faded; remaining causes are unisolated. The
+current pair is14.88% mean error /32.29% changed area, with no blank mismatch.
+**Empathy clears high**: its photograph, main text, side cards, navigation
+and consent match completed Chromium at **1.31% /2.84%**. A first Chromium
+frame had the primary image pending; one unchanged-policy retry completes
+it. No unique compiler-fix attribution is claimed for Empathy.
+
+Inventory: **72 high, zero critical,995 low**,1067 pairs, severity sorted.
+Two normal matched pairs refresh; all URLs,1065 other rows and prior
+images/reviews remain. No ABI change, broad baseline repeat, capture timing,
+source admission or deadline change. Diagnostic wrappers/replays and the
+incomplete reference are not promoted. See [round193](comparison/repairs.html#round-193).
+
+
+Round194 repairs **JS13-L81**: the seven existing XMLHttpRequest methods now
+live on its prototype, so SDK Proxy wrappers affect existing and new
+instances (**D8.4.4 /D9.5.6v2**). Two focused native fixtures fail before and
+pass after; two Chromium groups and one existing HTTP JSON control pass.
+Empathy’s missing-method SDK error disappears, with unchanged rendered
+pixels. Other framework/blob-script errors remain; full SDK lifecycle and
+additional page clearance are not claimed.
+
+Inventory stays **72 high, zero critical,995 low**. One normal native capture
+refreshes; round193’s completed browser reference, all URLs,1066 other rows
+and history remain. No ABI, timing, admission or deadline change; no broad
+baseline repeat. See [round194](comparison/repairs.html#round-194).
+
+
+Round195 refreshes three remaining high reviews, with **no new engine repair
+or page clearance**. Agora’s actual browser opacity animation confirms the
+existing automatic Web Animations playback gap (JS13-L66/L44). Overpass has
+a source-backed WebFont completion gate (JS13-L33), without a native
+call-site proof. Jetty’s native observer intersects and delivers normally,
+but its normal hero source stays a placeholder; AST/local/timing diagnostics
+vary without any compiled function promotions. Resource/task ordering remains
+unisolated. No diagnostic frame or tier restriction is promoted as a fix.
+
+Inventory remains **72 high, zero critical,995 low**,1067 pairs, severity
+sorted. Three ordinary pairs refresh; all URLs,1064 other rows and history
+remain. Temporary native logging was removed byte-for-byte and the normal
+runtime rebuilt. No baseline, timing, admission or deadline changes. See
+[round195](comparison/repairs.html#round-195).
+
+
+Round196 fixes **JS13-L82**: the snapshot drain discarded ready task
+continuations after four final turns once native requests finished. It now
+drains work already due at the selected timestamp within the existing5000ms
+watchdog (**D6.4.1 / D8.4.4 / D10.1.7**). A32-step continuation regression
+fails before and passes after; a future timer stays unrun. Three existing
+capture-clock controls pass.
+
+Jetty’s ordinary AUTO capture restores the large hero photograph and clears
+high severity: **9.69% →0.42% mean error**, **27.30% →0.57% changed area**.
+The current Chromium reference is preserved. Inventory is **71 high, zero
+critical,996 low**,1067 pairs, severity sorted. All URLs,1066 other rows and
+history remain. No tier restriction, forced visibility, API hiding or capture
+budget/timing change. See [round196](comparison/repairs.html#round-196).
+
+
+Round197 refreshes Frame.io’s ordinary current pair: **6.82% mean error /
+24.29% changed area**, still manually high because the central photograph
+montage is absent. A normal post-script layout has the image boxes and nonzero
+opacity; a static reduction paints all central images. Basic transform/clip
+controls pass. Its live startup cause remains unisolated; diagnostic frames
+are excluded. Dock reaches the unchanged150-second deadline and keeps its
+prior qualified pair, without a blind retry or failed-image promotion.
+
+After the accumulated JS13-L80/L81/L82 repairs, one broader **JS layout
+baseline passes630/630**, zero errors or skips. Full Lambda/Radiant gates are
+not repeated. Inventory stays **71 high, zero critical,996 low**,1067 pairs,
+severity sorted. Jetty’s clearance, all URLs,1066 other rows and history are
+preserved. See [round197](comparison/repairs.html#round-197).
+
+
+Round198 clears **Oku** under accumulated repairs: the current ordinary pair
+contains navigation, heading, actions and the full illustration at **0.30%
+mean error /0.29% changed area**. No unique new source attribution is inferred.
+Linktree remains high; its exact first-party Next.js bootstrap aborts at the
+missing `ReadableStream.tee()` method. Branching is being assessed against the
+existing stream lifecycle (**D8.4.4 / D9.5.6v2**), without a source workaround.
+
+Inventory is **70 high, zero critical,997 low**,1067 pairs, severity sorted.
+Two normal current pairs refresh; all URLs,1065 other rows and history remain.
+No broad baseline repeat after the630/630 milestone. See
+[round198](comparison/repairs.html#round-198).
+
+
+Round199 fixes **JS13-L83** for default readable streams. Real branching
+reuses existing asynchronous queues, controllers and promises; reader locks,
+close/error propagation and joined asynchronous cancellation are retained.
+Reader `closed`/`cancel`/`releaseLock` and stream `locked`/`cancel` share that
+lifecycle. Construction captures/validates cancellation; late enqueue cannot
+reopen the stream (**D8.4.4 / D9.5.6v2 / D6.3.3 / D6.4.1**).
+
+**18 native controls pass** (11 new groups and seven existing controls), plus
+the **11 new groups in MIR and Chromium**. No broad baseline repeats; the
+previous630/630 milestone predates this change. Byte-stream/BYOB tee remains
+explicitly unsupported, and full backpressure/piping/transfer conformance is
+not claimed. No public RuntimeState/class ABI or capture-policy change.
+
+Linktree’s ordinary final frame restores the heading, copy, signup controls
+and large portraits: **20.59% →10.34% mean error**, **52.22% →28.69% changed
+area**. Keep manual high because the large consent panel remains absent.
+Inventory stays **70 high, zero critical,997 low**,1067 pairs, severity sorted.
+All URLs,1066 other rows, browser reference and history are preserved. See
+[round199](comparison/repairs.html#round-199).
+
+
+Round 200 repairs **JS13-L84/L85**: binary-string base64 conversion and
+inherited event handling on the existing empty service-worker container.
+The unchanged SDK helper now decodes the actual 149202-byte configuration.
+The container reuses real EventTarget listeners and dispatch; `ready` stays
+pending, without implementing worker execution or activation
+(**D8.4.4 / D6.3.3 / D9.5.6v2**).
+
+**13 final native checks pass**; the nine new groups also pass in MIR and
+Chromium. Five base64 groups and both event groups fail before repair. The
+initial browser data URL lacked UTF-8 metadata; corrected fixtures pass and
+are the qualified result. No broad baseline repeats; the earlier 630/630
+JS layout milestone predates these changes.
+
+Linktree remains high: the consent aside exists with display:block and
+opacity:1 but sits below the viewport at y=9262.3. Its fixed positioning is
+authored in unsupported `:host(...)` rules (**JS13-L2**). The restored hero
+remains, at **10.34% mean error / 28.69% changed area**. Inventory stays
+**70 high, zero critical, 997 low**, 1067 pairs, severity sorted. All URLs,
+1066 other rows, reference and history are preserved. See
+[round 200](comparison/repairs.html#round-200).
+
+
+Round 201 refreshes **Superpower's ordinary matched pair** after accumulated
+shared repairs. Native completes near the unchanged deadline but remains
+blank; Chromium contains the full hero and consent panel. Mean error is
+**61.28%**, changed area **76.30%**. A focused CPU sample shows full-layout
+work at script boundaries. The exact anti-flicker class-removal control passes;
+the full-page blank cause remains unconfirmed. No page override is applied.
+
+Mailchimp's native diagnostic times out at 150 seconds. Its previous pair
+is retained; the caught cookie exception is not assigned as the UI cause.
+The preceding **JS13-L84/L85** source fixes remain installed. No new source
+change or broad baseline repeat. Inventory stays **70 high, zero critical,
+997 low**, 1067 pairs, severity sorted; all URLs, 1066 unselected rows and
+history remain. Capture policy is unchanged (**D10.1.7**). See
+[round 201](comparison/repairs.html#round-201).
+
+
+Round 202 fixes **LI-115**: Document/fragment storage no longer impersonates
+element ancestors. Explicit virtual scope remains featureless, and ordinary
+scope/language matching is preserved (**D9.1.1v4 / D9.5.6v2**).
+**Slack clears high severity**: its heading uses the correct English sizing
+and three-line wrapping, with hero media, cards and consent present.
+The current comparison improves **11.11% → 4.78% mean error** and
+**22.72% → 11.90% changed area**; smaller placement/frame differences remain.
+
+**19 C++ tests, eight AST controls, 14 focused MIR groups and five Chromium
+groups pass.** Four new groups fail the previous host. The corrected MIR run
+uses `JS_EXEC_BACKEND=mir`; the earlier ignored variable is not qualification.
+After accumulated repairs, one **JS-layout baseline passes 630/630** with
+zero errors/skips. No further broad gate repeats.
+
+Bento redirects to Linktree and retains a major consent omission despite
+its restored hero. Figma pricing remains blank with observed unsupported
+currency requests (**JS10-L1**). These ordinary captures retain their own
+preceding release pins. Inventory is **69 high, zero critical, 998 low**,
+1067 pairs, severity sorted. All URLs, 1064 other rows and frame history
+remain. No capture-policy change. See [round 202](comparison/repairs.html#round-202).
+
+
+Round 203 fixes **RI-240**: text/control mutations now share the existing
+automatic-direction context check. Fixed-direction edits no longer force
+full-document direction rebuilds solely because a `:dir()` rule exists.
+Real dir=auto, BDI, hidden text and form-control updates remain correct
+(**D9.1.3v2 / D9.5.6v2**).
+
+Three of eight new groups fail before repair; all eight pass AST/MIR/Chromium.
+**35 AST mutation/relational checks**, eight MIR groups and the Radiant
+integer-cast lint pass. No broad baseline repeats; the preceding 630/630
+JS-layout gate predates this repair.
+
+Superpower still exhausts the existing 120-second JS budget before final
+settlement and remains blank. RI-240 does not clear it. Webflow affiliate
+loads in Chromium but native times out; that failed attempt is not promoted.
+Only the ordinary final Superpower native frame refreshes. Inventory stays
+**69 high, zero critical, 998 low**, 1067 pairs, severity sorted. All URLs,
+1066 other rows, browser reference and frame history remain; capture policy
+is unchanged (**D10.1.7**). See [round 203](comparison/repairs.html#round-203).

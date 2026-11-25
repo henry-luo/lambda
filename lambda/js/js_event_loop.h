@@ -36,6 +36,8 @@ void js_event_loop_drain_script_turn(bool has_dom_document, bool drain_timers);
 bool js_event_loop_has_refed_handles(void);
 // Bounded non-blocking pump (fires ready timers + microtasks, no watchdog wait).
 void js_event_loop_pump_nowait(void);
+// Coalesced rendering opportunities while an elapsed-clock snapshot is loading.
+bool js_event_loop_pump_loading(void);
 // Wait for one JS/libuv event, capped by max_wait_ms. Returns true when work
 // other than the cap timer woke the loop, allowing condition waits to retry.
 bool js_event_loop_pump_wait(int max_wait_ms);

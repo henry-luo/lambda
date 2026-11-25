@@ -213,6 +213,18 @@ Elements with special behaviour:
 
 Selectors are parsed in `lambda/input/css/css_parser.cpp` and matched in `lambda/input/css/selector_matcher.cpp`; the same matcher serves stylesheets and the DOM query APIs (`querySelector`, `matches`, `closest`).
 
+Internal Document and DocumentFragment storage does not act as an element
+ancestor or query result. Explicit virtual `:scope` roots remain featureless,
+including logical combinations; ordinary element scope and language
+inheritance retain their behavior (**D9.1.1v4 / D9.5.6v2**;
+[LI-115](<../vibe/Lib_Input_Issue_Ledger (fixed).md#li-115>)).
+
+Direction-sensitive mutation invalidation follows the existing automatic
+direction context. Ordinary text/control edits keep their fixed direction;
+`dir=auto`, BDI and hidden first-strong text retain their updates
+(**D9.1.3v2 / D9.5.6v2**;
+[RI-240](<../vibe/Radiant_Issue_Ledger (fixed).md#ri-240>)).
+
 | Selector | Status | Notes |
 |---|---|---|
 | Type, universal `*`, class, ID | ✅ | Type names are case-insensitive for HTML and case-sensitive in XML/XHTML documents (D10.1.4); class and ID are case-sensitive, with the quirks-mode exception. |
