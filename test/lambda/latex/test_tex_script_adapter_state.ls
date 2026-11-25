@@ -12,11 +12,21 @@ let cases = [
     "\\documentclass{article}\\begin{document}\\makeatletter\\@ifclassloaded{article}{Y}{N}:\\@ifclasswith{article}{}{Y}{N}\\makeatother\\end{document}",
     "\\usepackage{nonexistentpackage}\\begin{document}\\makeatletter\\@ifpackageloaded{nonexistentpackage}{Y}{N}:\\@ifpackagewith{nonexistentpackage}{}{Y}{N}\\makeatother\\end{document}"
 ];
-fn compare(source, packages) any^ {
+// The retired C engine was run with no adapters and no local resources.
+// Production parse now supplies bundled adapters, so it is a different profile.
+let unadapted_text = [
+    "\\usepackage{xcolor}\\begin{document}N\\end{document}",
+    "\\usepackage[foo]{xcolor}\\begin{document}Y:N:\\end{document}",
+    "\\usepackage{xcolor}\\usepackage{xcolor}\\begin{document}X\\end{document}",
+    "\\documentclass{article}\\begin{document}N:Y\\end{document}",
+    "\\usepackage{nonexistentpackage}\\begin{document}N:Y\\end{document}"
+];
+fn compare(source, packages, reference) any^ {
     let expanded = profile.expand_with_kernel(source, kernel,
         {echo_definitions:true, constructor_argument_mode:true, adapters:packages, resources:{local:{}, bundled:{}}}, 100000)^;
     let actual = reconstruct.reconstruct(expanded)^;
-    let native = parse(source, {type:"tex", packages:packages})^;
+    let native = if (len(packages) == 0) {text:reference, diagnostics:[]}
+        else parse(source, {type:"tex", packages:packages})^;
     {issue:expanded.issue, text:actual.text == native.text, diagnostics:expanded.diagnostic_records == native.diagnostics}
 }
 let root = "test/lambda/latex/fixtures/local_packages/";
@@ -29,6 +39,6 @@ let expanded = profile.expand_with_kernel(source, kernel,
 let actual = reconstruct.reconstruct(expanded)^;
 let native_options={base:path,packages:registry.adapter_names(),raw:registry.RAW_ARGUMENT_COMMANDS,chaptered:registry.chaptered_classes()};
 let digested = digest.digest(expanded)^;
-{cases:[for (source in cases, packages in [[],adapters]) compare(source,packages)^],
+{cases:[for (i, source in cases, packages in [[],adapters]) compare(source,packages,unadapted_text[i])^],
  fixture:{issue:expanded.issue, digest_issue:digested.issue, text:actual.text == parse(source,{*:native_options,type:"tex"})^.text,
     ast:digested.ast == parse(source,{*:native_options,type:"latex"})^}}

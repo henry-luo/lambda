@@ -3,8 +3,12 @@ import reconstruct: lambda.doc.latex.tex_engine.reconstruct
 let kernel = input(sys.lambda.home ++ "/package/doc/latex/tex_engine/kernel.tex", "text")^;
 let options = {constructor_argument_mode: true, echo_definitions: true,
     adapters: [], resources: {local: {}, bundled: {}}};
+// Both profiles are immutable before each independent document resumes.
+let preload = profile.preload_kernel(kernel, options, 100000)^;
+let expl_options = {*:options, script_expl3:true};
+let expl_preload = profile.preload_expl3_kernel(kernel, expl_options, 100000)^;
 fn check(source) any^ {
-    let expanded = profile.expand_with_kernel(source, kernel, options, 100000)^;
+    let expanded = profile.expand_with_kernel(source, kernel, options, 100000, preload)^;
     let built = reconstruct.reconstruct(expanded)^;
     let native = parse(source, {type: "tex"})^;
     {issue: expanded.issue, unsupported: expanded.unsupported, reconstruction_issue: built.issue,
@@ -47,9 +51,10 @@ fn check(source) any^ {
 ]) check(source)^]
 
 fn check_expl(source) any^ {
-    let expanded = profile.expand_with_kernel(source, kernel, {*:options, script_expl3: true}, 100000)^;
+    let expanded = profile.expand_with_kernel(source, kernel, expl_options, 100000, expl_preload)^;
     let built = reconstruct.reconstruct(expanded)^;
-    let native = parse(source, {type: "tex"})^;
+    // Production parse uses this same Script engine and propagates its unsupported result.
+    let native = if (expanded.issue == null) parse(source, {type: "tex"})^ else null;
     {issue: expanded.issue, unsupported: expanded.unsupported, reconstruction_issue: built.issue,
         text_match: if (expanded.issue == null and built.issue == null) built.text == native.text else null,
         diagnostics_match: if (expanded.issue == null) expanded.diagnostic_records == native.diagnostics else null,

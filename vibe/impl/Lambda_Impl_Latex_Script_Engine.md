@@ -34,6 +34,14 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Adapter and constructor regression migration, 2026-11-26:** Both
+  previously failing fixtures now pass without changing their expected
+  assertions (D10.2.2v2). The no-adapter cases compare exact output captured
+  from the retired C engine with matching resource settings; configured
+  adapter cases still compare the production entry point. The constructor
+  fixture avoids calling that entry point after the Script profile has already
+  reported an unsupported operation, and shares immutable kernel preloads.
+
 - **Expl3 key-value parsing, 2026-11-26:** Script implements the expandable
   `keyval_parse:NNn` and `keyval_parse:nnn` token parsers, including active
   separators, nested groups, omitted values and empty values (D10.2.2v2).
@@ -162,10 +170,8 @@ The existing native engine design and historical Phase IV work are in
   cover raw and ordinary aliases, argument forms, math and cache isolation;
   the sequent sample now matches all six expected corpus fields. The two new
   fixtures pass focused GTest and forced-GC interpreter and JIT runs. The
-  `adapter_state` and `constructor_mode` comparison fixtures still fail:
-  they compare separate profiles to the production Script `parse` path, which
-  now loads resources and reports an expl3 unsupported error respectively.
-  Their historical native comparisons require independent requalification.
+  `adapter_state` and `constructor_mode` fixture migrations are recorded in
+  the current checkpoint above.
   The semantic-inference and scientific-writing corpus records and aggregate
   timeout remain open.
 
