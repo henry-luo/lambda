@@ -38,10 +38,10 @@ let ordinary_requests=[for(s in ["\\RequirePackage{expl3}X","\\usepackage{expl3}
 let malformed=[for(s in ["\\ProvidesExplPackage","\\ProvidesExplPackage{broken}"],mode in [false,true]) {
  let ex=profile.expand_with_kernel(s,kernel,{*:options,constructor_argument_mode:mode},100000)^;
  let tex=parse(s,{type:"tex"})^;
- {expected_error:ex.issue=="tex-runaway-argument",messages:ex.messages==tex.messages}
+ {recovered:ex.issue==null,messages:ex.messages==tex.messages,diagnostics:ex.diagnostic_records==tex.diagnostics}
 }];
-{cases:len(malformed),expected_error:all([for(r in malformed) r.expected_error]),
- messages:all([for(r in malformed) r.messages])};
+{cases:len(malformed),recovered:all([for(r in malformed) r.recovered]),
+ messages:all([for(r in malformed) r.messages]),diagnostics:all([for(r in malformed) r.diagnostics])};
 let root="test/lambda/latex/fixtures/local_packages/";
 let path=root ++ "script-kernel-messages-main.tex";
 let child="script-kernel-messages-child.tex";

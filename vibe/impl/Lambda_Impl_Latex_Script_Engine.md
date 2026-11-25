@@ -89,12 +89,15 @@ The existing native engine design and historical Phase IV work are in
   authorization regressions pass, including a cached math parse before kernel
   read authority is revoked (S1.8, D10.2.2v2, D6.4.2, D11.1.2).
 
-- **TeX error recovery, 2026-11-25:** `test_tex_script_kernel_messages` now
-  exposes a migrated public API failure: incomplete `\\ProvidesExplPackage`
-  causes `parse(..., 'tex')` to raise `tex-runaway-argument`, while the native
-  engine returned a partial result. Diagnose the declaration argument path and
-  recover its native diagnostics rather than suppressing the failure (S1.8,
-  D10.2.2v2).
+- **TeX error recovery, 2026-11-25:** Incomplete expl3 declarations previously
+  caused `parse(..., 'tex')` to raise `tex-runaway-argument` because their
+  implementation scanned every argument even after the first failure. They now
+  use the shared long-macro scanner and recovery, retaining partial output and
+  native-shaped diagnostics. Independent missing, unclosed and extra-brace
+  checks pass in both tiers, and all seven migrated native-engine regressions
+  pass. An interrupted 420-case LaTeX sweep exposed constructor-mode failures,
+  an environment-option mapping failure, and a phase-five math timeout; it is
+  not a passing suite (S1.8, D10.2.2v2).
 
 - **Earlier HTTP Path checkpoint:** The baseline did not finish:
   `ValueRepresentationTest.UnsupportedDirectTransitionFailsClosed` timed out

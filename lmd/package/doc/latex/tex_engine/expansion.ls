@@ -5155,20 +5155,17 @@ fn latex_provides(st: State, cmd, budget) State^ {
 
 // Expl3 package declarations enable their syntax for the rest of the file.
 fn latex_provides_expl(st: State, cmd, budget) State^ {
-    let name = stream.argument(st.input, true)^;
-    let date_arg = stream.argument(name.stream, true)^;
-    let version = stream.argument(date_arg.stream, true)^;
-    let description = stream.argument(version.stream, true)^;
-    let current = {*:st, input: description.stream};
-    if (name.error != null) fail(current, name.error)
-    else if (date_arg.error != null) fail(current, date_arg.error)
-    else if (version.error != null) fail(current, version.error)
-    else if (description.error != null) fail(current, description.error)
+    // The format implements these declarations as a long six-argument macro;
+    // its first two arguments are supplied by the public command itself.
+    let args = collect_args(st.input, [[],[],[],[]], false, true)^;
+    let current = {*:st, input: args.input};
+    if (args.issue != null) recover_macro_argument(current, args.issue, args.cause,
+        control_token("@expl@provides@file@@Nnnnnn"))
     else {
-        let named = expand_argument_name(current, name.tokens, budget)^;
-        let dated = expand_argument_name(named.state, date_arg.tokens, budget)^;
-        let numbered = expand_argument_name(dated.state, version.tokens, budget)^;
-        let described = expand_argument_name(numbered.state, description.tokens, budget)^;
+        let named = expand_argument_name(current, args.args[0], budget)^;
+        let dated = expand_argument_name(named.state, args.args[1], budget)^;
+        let numbered = expand_argument_name(dated.state, args.args[2], budget)^;
+        let described = expand_argument_name(numbered.state, args.args[3], budget)^;
         if (described.state.issue != null) described.state
         else {
             let suffix = if (cmd == "ProvidesExplPackage") ".sty" else if (cmd == "ProvidesExplClass") ".cls" else "";

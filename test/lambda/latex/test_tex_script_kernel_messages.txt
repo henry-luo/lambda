@@ -19,8 +19,9 @@
 }
 {
   cases: 4,
-  expected_error: true,
-  messages: true
+  recovered: true,
+  messages: true,
+  diagnostics: true
 }
 [{
     supported: true,
