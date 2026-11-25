@@ -3822,20 +3822,30 @@ fn blocks(tokens, sources, index = 0, nodes = [], environment = null) Parsed^ {
         else if (token.kind == "control" and
             contains(["part", "chapter", "section", "subsection", "subsubsection", "paragraph", "subparagraph"], token.value)) {
             let starred = index + 1 < len(tokens) and tokens[index + 1].kind == "char" and tokens[index + 1].value == "*";
-            let opt = read_optional(tokens, index + if (starred) 2 else 1)^;
-            let arg = if (opt.issue != null) opt else read_group(tokens, opt.end)^;
+            let start = index + if (starred) 2 else 1;
+            let candidate = nonspace_index(tokens, start)^;
+            let optional_at = if (candidate < len(tokens) and tokens[candidate].kind == "char" and
+                tokens[candidate].value == "[") candidate else start;
+            let opt = read_optional(tokens, optional_at)^;
+            let title_at = if (opt.issue == null) nonspace_index(tokens, opt.end)^ else opt.end;
+            let has_title = title_at != null and title_at < len(tokens) and opening(tokens[title_at]);
+            let arg = if (opt.issue != null) opt else if (has_title) read_group(tokens, title_at)^
+                else {issue:null, end:opt.end};
             if (opt.issue != null) opt
             else if (arg.issue != null) arg
             else {
-                let children = inline_group(arg, sources)^;
-                if (children.issue != null) children
-                else if (children.index != len(children.tokens)) unsupported(index, "heading title")
+                // Native leaves the following text untouched when no title group is present.
+                let children = if (has_title) inline_group(arg, sources)^ else null;
+                if (children != null and children.issue != null) children
+                else if (children != null and children.index != len(children.tokens)) unsupported(index, "heading title")
                 else {
-                    let title = <curly_group *children.items>;
                     let toc = if (opt.present) <brack_group group_text(opt)> else null;
                     let attrs = {source_offset: token.start, *:if (starred) {starred: true} else {},
-                        *:if (toc != null) {toc: toc} else {}, title: title};
-                    blocks(tokens, sources, arg.end, [*nodes, heading(token.value, attrs)], environment)
+                        *:if (toc != null) {toc: toc} else {},
+                        *:if (children != null) {title:<curly_group *children.items>} else {}};
+                    let rest = if (not has_title and not opt.present) restore_control_gap(tokens, sources, start - 1)^
+                        else tokens;
+                    blocks(rest, sources, arg.end, [*nodes, heading(token.value, attrs)], environment)
                 }
             }
         }

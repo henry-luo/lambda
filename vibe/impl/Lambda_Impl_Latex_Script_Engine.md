@@ -34,6 +34,14 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Optional heading titles, 2026-11-26:** The document parser now permits a
+  sectioning command without a required title group and leaves following text
+  and whitespace intact. This restores `\part` inside exam questions while
+  retaining optional and spaced title groups (D10.2.2v2). The formerly failing
+  phase-five class golden and three neighboring GTests pass; the exact heading
+  tree matches the isolated retired parser and passes interpreter and JIT
+  with forced GC and poisoning.
+
 - **Tabbing and alignment trees, 2026-11-26:** Script now parses `tabbing`
   using tab-stop meanings for top-level `\=`, `\'` and `\`` while keeping
   accents inside nested groups. Both captured trees match the isolated retired

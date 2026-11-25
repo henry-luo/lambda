@@ -1,0 +1,15 @@
+<latex_document
+  <document source_offset: 0,
+    <parts source_offset: 16,
+      <part source_offset: 29, toc: <brack_group
+          "1">>
+      <paragraph
+        " A">
+      <part source_offset: 39>
+      <paragraph
+        " B">>
+    <section source_offset: 57, toc: <brack_group
+        "Short">, title: <curly_group
+        "Long">>
+    <paragraph
+      "Text">>>
