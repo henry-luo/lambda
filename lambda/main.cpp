@@ -1424,7 +1424,10 @@ int run_script_file(Runtime *runtime, const char *script_path, bool run_main = f
     if (runtime->dry_run && !context &&
             !eval_context_init(runtime_get_eval_context(runtime))) return 1;
     Input* output_input = nullptr;
+    runtime->cli_shell_output = run_main;
+    runtime->cli_shell_output_consumed = false;
     output_input = run_script_mir(runtime, nullptr, (char*)script_path, run_main);
+    runtime->cli_shell_output = false;
 
     log_debug("run_script_file: output_input = %p", output_input);
     if (!output_input) {
@@ -1455,6 +1458,10 @@ int run_script_file(Runtime *runtime, const char *script_path, bool run_main = f
         return 1;  // failure
     }
 
+    if (runtime->cli_shell_output_consumed) {
+        if (output_input->pool) pool_destroy(output_input->pool);
+        return 0;
+    }
     StrBuf *output = strbuf_new_cap(256);
     print_root_item(output, output_input->root);
     log_debug("Script '%s' executed ====================", script_path);

@@ -1,0 +1,9 @@
+validated mixed under auto in 5930.1 ms
+validated mixed_terminal under auto in 669.3 ms
+validated mixed under jit in 800.0 ms
+timed diagnostic trial 1/3
+timed diagnostic trial 2/3
+timed diagnostic trial 3/3
+cat/auto: median 5927.808 ms (range 5927.793–5947.305, n=3)
+stdout/auto: median 679.457 ms (range 674.349–687.313, n=3)
+cat/jit: median 800.788 ms (range 795.399–841.278, n=3)

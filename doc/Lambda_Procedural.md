@@ -526,24 +526,49 @@ Lambda provides a unified I/O system that handles both local files and remote UR
 
 ### Shell pipelines
 
-**Adopted design, awaiting runtime support.** Use `sh.git("log", "--oneline")` to run Git with two arguments. It is the short form of `sh.cmd("git", ["log", "--oneline"])`. The generic form is useful when the script builds the argument array at runtime.
+Use `sh.git("log", "--oneline")` to run Git with two arguments. It is the short form of `sh.cmd("git", ["log", "--oneline"])`. The generic form is useful when the script builds the argument array at runtime.
 
 ```lambda
 import sh: lambda.shell
 
 pn main() {
-    sh.git("log", "--oneline") |: contains(~, "fix")
+    sh.git("log", "--oneline") |> sh.head(lines: 10)
 }
 ```
 
-Here `~` is one line of Git's stdout (**S14.3.5**). To send values in the other direction, pipe a list or an array to an external command. These expressions each send the UTF-8 bytes `pear\napple\n` to `sort`.
+This sends Git's stdout to `head` and prints up to ten lines. Direct wrappers for `grep`, `cut`, `tr`, `sed`, `awk`, `tee`, `wc`, `tail`, `paste`, `xargs`, `printf`, `find`, `yes` and `sleep` take pipeline input first, followed by executable arguments. A pipe fills that first position under **S10.1.2v7**. To start one of these commands with inherited stdin, pass `null` in that position:
+
+```lambda
+sh.grep(null, "^ERROR,", "input.csv") |> sh.cut("-d,", "-f2")
+["pear", "apple"] |> sh.grep("p") |> sh.tr("a-z", "A-Z")
+```
+
+Arguments are passed separately to the executable. Use `sh.cmd` when arguments are already in an array, or when a direct wrapper does not expose `stderr:` or `timeout_ms:`. `sh.cat`, `sh.sort`, `sh.uniq`, and `sh.head` provide dedicated filter options.
+
+To send values to a command, pipe a list or array into it. These expressions each send the UTF-8 bytes `pear\napple\n` to `sort`.
 
 ```lambda
 ("pear", "apple") |> sh.sort
 ["pear", "apple"] |> sh.sort
 ```
 
-Each outer item contributes one trailing LF. A nested array is rendered as a single item (**S14.3.6v2**). [Shell stream semantics](Lambda_Formal_Semantics.md#s143-streams-and-laziness)
+Each outer item contributes one trailing LF. A nested array is rendered as a single item (**S14.3.6v2**).
+
+Use `|:` to filter command output and a per-item `|>` to transform it. Each `~` is one UTF-8 line. The final external command receives the transformed strings as lines on stdin (**S14.3.5**, **S14.3.6v2**).
+
+```lambda
+pn main() {
+    sh.git("log", "--oneline")
+        |: contains(~, "fix")
+        |> upper(~)
+        |> sh.sort
+        |> \.'fixes.txt'
+}
+```
+
+The macOS interpreter and MIR JIT have been tested with these forms. [Shell stream semantics](Lambda_Formal_Semantics.md#s143-streams-and-laziness)
+
+When running from a separate data directory, set `LAMBDA_HOME` to the absolute path of the runtime's `lmd` directory so Lambda can resolve `lambda.shell` (**D9.3.4**). [Package resolution](Lambda_Modules.md#packages)
 
 ### Pure I/O Functions
 

@@ -381,6 +381,8 @@ enum {
 // return zero for a reduction the parser may pass on as a child: the parser
 // reads zero as "no value" and substitutes the reduction's structural hash.
 typedef uint64_t LambdaParseValue;
+typedef struct LambdaPipeRhs LambdaPipeRhs;
+
 typedef struct LambdaParseReduction {
     LambdaReductionKind kind;
     LambdaReductionForm form;
@@ -402,6 +404,9 @@ typedef struct LambdaParseReduction {
     uint32_t name_count;
     const LambdaParseValue* children;
     uint32_t child_count;
+    // A procedural pipe may need a second, separately scoped copy of its RHS.
+    // Valid only during the reduction.
+    const LambdaPipeRhs* pipe_rhs;
 } LambdaParseReduction;
 
 typedef struct LambdaParseSink {
@@ -438,6 +443,11 @@ const char* lambda_lexer_vocabulary_word(size_t index);
 LambdaParseStatus lambda_rd_parse_source(const char* source, size_t length,
     const LambdaParseSink* sink, void* sink_context, LambdaParseMetrics* metrics,
     LambdaParseError* error);
+
+// Replay the original RHS production, including its lexer and Pratt boundary.
+size_t lambda_rd_pipe_rhs_size(void);
+LambdaParseStatus lambda_rd_replay_pipe_rhs(const LambdaPipeRhs* rhs,
+    const LambdaParseSink* sink, void* context, LambdaParseValue* result);
 
 // Syntax-only entry point with separator-based recovery. It records the first
 // error and then retries after top-level ';' boundaries. No sink is

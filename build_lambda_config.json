@@ -587,6 +587,7 @@
         "lambda/runtime/build_ast.cpp",
         "lambda/runtime/lambda-data-runtime.cpp",
         "lambda/runtime/concurrency.cpp",
+        "lambda/runtime/shell_pipeline.cpp",
         "lambda/runtime/concurrency_js.cpp",
         "lambda/runtime/edit_bridge.cpp",
         "lambda/runtime/http_module.cpp",

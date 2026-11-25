@@ -10,6 +10,7 @@
 #include "recovery_frame.h"
 #include "lambda-stack.h"
 #include "concurrency.h"
+#include "shell_pipeline.hpp"
 #include "doc_context.hpp"
 #include "../js/js_runtime.h"
 #include "../js/js_runtime_state.hpp"
@@ -348,6 +349,7 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path,
                 lambda_recovery_frame_end(recovery_frame);
             }
         }
+        result = runtime_publish_result(runner.context, shell_script_result(runtime, result, run_main));
         preserve_context_last_error(result);
 
         // Create output

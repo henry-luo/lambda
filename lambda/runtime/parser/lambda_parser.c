@@ -30,6 +30,12 @@ typedef struct LambdaRdParser {
     uint32_t for_header_depth;
 } LambdaRdParser;
 
+struct LambdaPipeRhs {
+    LambdaRdParser parser;
+    int binding_power;
+};
+
+
 // keep parser diagnostics in one catalog. Call sites select a named message
 // so wording can change or be translated without editing grammar flows.
 /* generic and limit diagnostics */
@@ -237,7 +243,7 @@ static LambdaParseValue parser_reduction_fingerprint(const LambdaParseReduction*
     return value;
 }
 
-static LambdaParseValue parser_reduce_detail_ex(LambdaRdParser* parser, LambdaReductionKind kind, LambdaReductionForm form, SourceSpan span, LambdaToken detail_token, LambdaToken secondary_token, uint32_t flags, const LambdaToken* name_tokens, uint32_t name_count, const LambdaParseValue* children, uint32_t child_count) {
+static LambdaParseValue parser_reduce_detail_ex(LambdaRdParser* parser, LambdaReductionKind kind, LambdaReductionForm form, SourceSpan span, LambdaToken detail_token, LambdaToken secondary_token, uint32_t flags, const LambdaToken* name_tokens, uint32_t name_count, const LambdaParseValue* children, uint32_t child_count, const LambdaPipeRhs* rhs) {
     // Lookahead checks syntax and token position. Its reduction values only
     // indicate presence and never reach a sink or the structural fingerprint.
     if (parser->probing) return 1;
@@ -252,6 +258,7 @@ static LambdaParseValue parser_reduce_detail_ex(LambdaRdParser* parser, LambdaRe
         .name_count = name_count,
         .children = children,
         .child_count = child_count,
+        .pipe_rhs = rhs,
     };
     LambdaParseValue value = 0;
     if (parser->sink && parser->sink->reduce) {
@@ -269,7 +276,7 @@ static LambdaParseValue parser_reduce_detail_ex(LambdaRdParser* parser, LambdaRe
 }
 
 static LambdaParseValue parser_reduce_detail(LambdaRdParser* parser, LambdaReductionKind kind, LambdaReductionForm form, SourceSpan span, LambdaToken detail, const LambdaParseValue* children, uint32_t count) {
-    return parser_reduce_detail_ex(parser, kind, form, span, detail, (LambdaToken){0}, 0, NULL, 0, children, count);
+    return parser_reduce_detail_ex(parser, kind, form, span, detail, (LambdaToken){0}, 0, NULL, 0, children, count, NULL);
 }
 
 static LambdaParseValue parser_reduce(LambdaRdParser* parser, LambdaReductionKind kind, SourceSpan span, const LambdaParseValue* children, uint32_t count) {
@@ -281,11 +288,11 @@ static LambdaParseValue parser_reduce_token(LambdaRdParser* parser, LambdaReduct
 }
 
 static LambdaParseValue parser_reduce_tokens(LambdaRdParser* parser, LambdaReductionKind kind, LambdaReductionForm form, SourceSpan span, LambdaToken detail, LambdaToken secondary, uint32_t flags, const LambdaParseValue* children, uint32_t count) {
-    return parser_reduce_detail_ex(parser, kind, form, span, detail, secondary, flags, NULL, 0, children, count);
+    return parser_reduce_detail_ex(parser, kind, form, span, detail, secondary, flags, NULL, 0, children, count, NULL);
 }
 
 static LambdaParseValue parser_reduce_name_tokens(LambdaRdParser* parser, LambdaReductionKind kind, SourceSpan span, LambdaToken first, const LambdaToken* names, uint32_t name_count, uint32_t flags, const LambdaParseValue* children, uint32_t count) {
-    return parser_reduce_detail_ex(parser, kind, LAMBDA_REDUCTION_FORM_DECOMPOSE, span, first, (LambdaToken){0}, flags, names, name_count, children, count);
+    return parser_reduce_detail_ex(parser, kind, LAMBDA_REDUCTION_FORM_DECOMPOSE, span, first, (LambdaToken){0}, flags, names, name_count, children, count, NULL);
 }
 
 static LambdaParseValue parser_reduce_one(LambdaRdParser* parser, LambdaReductionKind kind, LambdaReductionForm form, SourceSpan span, LambdaToken detail, LambdaParseValue child) {
@@ -2231,10 +2238,15 @@ static LambdaParseValue parse_expression_tail(LambdaRdParser* parser, int min_bp
         if (op.kind == LAMBDA_TOK_THAT) {
             parser_context(parser, LAMBDA_REDUCTION_FORM_THAT_BEGIN, op.span, op);
         }
+        int rhs_bp = bp + (right_associative ? 0 : 1);
+        LambdaPipeRhs replay;
+        bool may_outline = !parser->probing && parser->sink && parser->procedural_depth &&
+            (op.kind == LAMBDA_TOK_PIPE_FORWARD || op.kind == LAMBDA_TOK_PIPE_FILTER);
+        if (may_outline) replay = (LambdaPipeRhs){*parser, rhs_bp};
         bool is_named_value_rhs = op.kind == LAMBDA_TOK_IS && parser->current.kind == LAMBDA_TOK_NAMED_VALUE;
         LambdaParseValue right = op.kind == LAMBDA_TOK_IS && !is_named_value_rhs
             ? parse_type_slot(parser)
-            : parse_expression(parser, bp + (right_associative ? 0 : 1));
+            : parse_expression(parser, rhs_bp);
         parser->pipe_rhs_depth = prior_pipe_rhs_depth;
         bool rhs_has_current = parser->pipe_rhs_has_current;
         parser->pipe_rhs_has_current = prior_pipe_rhs_has_current || rhs_has_current;
@@ -2249,7 +2261,11 @@ static LambdaParseValue parse_expression_tail(LambdaRdParser* parser, int min_bp
         }
         LambdaParseValue children[2] = {left, right};
         SourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
-        left = parser_reduce_token(parser, LAMBDA_REDUCE_BINARY, LAMBDA_REDUCTION_FORM_TOKEN, span, op, children, 2);
+        // Only forward pipes track explicit item references to choose call injection.
+        bool replay_body = may_outline && (rhs_has_current || op.kind == LAMBDA_TOK_PIPE_FILTER);
+        left = parser_reduce_detail_ex(parser, LAMBDA_REDUCE_BINARY, LAMBDA_REDUCTION_FORM_TOKEN,
+            span, op, (LambdaToken){0}, 0, NULL, 0, children, 2,
+            replay_body ? &replay : NULL);
         left_is_element = false;
     }
     return left;
@@ -2262,6 +2278,21 @@ static LambdaParseValue parse_expression(LambdaRdParser* parser, int min_bp) {
     LambdaParseValue value = parse_expression_tail(parser, min_bp, first, left);
     parser->expression_depth--;
     return value;
+}
+
+size_t lambda_rd_pipe_rhs_size(void) {
+    return sizeof(LambdaPipeRhs);
+}
+
+LambdaParseStatus lambda_rd_replay_pipe_rhs(const LambdaPipeRhs* rhs,
+        const LambdaParseSink* sink, void* context, LambdaParseValue* result) {
+    LambdaRdParser parser = rhs->parser;
+    parser.sink = sink;
+    parser.sink_context = context;
+    parser.metrics = NULL;
+    parser.error = NULL;
+    *result = parse_expression(&parser, rhs->binding_power);
+    return parser.status;
 }
 
 static IfStatementHead classify_if_statement_head(const LambdaRdParser* parser) {

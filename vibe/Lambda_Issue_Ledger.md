@@ -17,6 +17,22 @@
 > Semantic and design rulings are cited by `S#` / `D#` per CLAUDE.md rule 17;
 > where no formal ruling covers a point, the vibe ledger ID is given.
 
+## Interpreter task drain stalls a returned shell pipeline
+
+Fixed and archived. See the
+[resolution and benchmark evidence](<Lambda_Issue_Ledger (fixed).md#interpreter-task-drain-stalls-a-returned-shell-pipeline>).
+
+## Checked store diagnostics lose their message
+
+**Open, 2026-11-25.** Under **S7.7.6v2**, a rejected checked store reports its
+skipped tail and partial-state boundary. `ledger_containment.ls` still shows
+the expected control flow but prints bare `error[E201]` diagnostics.
+`lambda_report_boundary_failure` fills `LambdaError.message` while the
+length-aware formatter introduced in `dfd081189f` reads
+`LambdaError.message_length`, which this producer leaves zero. The shell
+qualification reproduced the diagnostic on an unmodified `cb10b30bab` host
+and on the candidate. See `temp/shell-pipeline/baseline.log`.
+
 <a id="formal-semantics-edge-cases-20261124"></a>
 
 ## Formal semantics edge cases reproduced on 2026-11-24

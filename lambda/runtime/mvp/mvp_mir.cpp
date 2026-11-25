@@ -7851,9 +7851,32 @@ static MirValue expression(MvpCompiler* c, AstNode* node, bool discard, bool tai
         }
         MirValue subject = convert(c, expression(c, pipe->left), VALUE_REP_ITEM);
         MirPipeContext saved = context_save(c);
-        if (pipe->op != OPERATOR_THAT)
+        if (pipe->op != OPERATOR_THAT) {
+#if !defined(LAMBDA_NO_FILE_IO) && !defined(LAMBDA_NO_TASKS)
+            MIR_reg_t stream = em_call_1(&c->em, "fn_shell_is_stream", MIR_T_I64,
+                MIR_T_I64, reg(c, subject.reg), true);
+            MIR_reg_t result = em_new_reg(&c->em, "pipe_result", MIR_T_I64);
+            MIR_label_t ordinary = label(c), done = label(c);
+            branch(c, MIR_BEQ, ordinary, reg(c, stream), imm(c, 0));
+            MirValue callback = pipe->shell_stage
+                ? convert(c, function_value(c, mvp_function(c->module, pipe->shell_stage), node), VALUE_REP_ITEM)
+                : null_value(c);
+            MIR_reg_t staged = em_call_5(&c->em, "fn_shell_record_stage", MIR_T_I64,
+                MIR_T_I64, reg(c, subject.reg), MIR_T_I64, reg(c, callback.reg),
+                MIR_T_I64, reg(c, saved.in_pipe ? saved.root : subject.reg),
+                MIR_T_I64, c->current_error ? reg(c, c->current_error) : imm(c, ITEM_NULL),
+                MIR_T_I64, imm(c, pipe->op == OPERATOR_FILTER), true);
+            move(c, result, reg(c, staged));
+            jump(c, done);
+            mark(c, ordinary);
+            move(c, result, reg(c, em_pipe_walk(&c->em, pipe, subject.reg, saved, mvp_emit_pipe_body)));
+            mark(c, done);
+            return value(c, result, LMD_TYPE_ANY, VALUE_REP_ITEM, &TYPE_ANY, node);
+#else
             return value(c, em_pipe_walk(&c->em, pipe, subject.reg, saved, mvp_emit_pipe_body),
                 LMD_TYPE_ANY, VALUE_REP_ITEM, &TYPE_ANY, node);
+#endif
+        }
         context_restore(c, em_subject_context(&c->em, saved, subject.reg));
         MirValue predicate = expression(c, pipe->right);
         MIR_reg_t accepted = truth(c, predicate);
@@ -9872,6 +9895,15 @@ bool mvp_emit_function(LambdaMvpModule* m, MvpFunction* fn) {
             c.current_item = mvp_binding(m, fn->ast->param->entry)->reg;
             c.current_root = c.current_item;
             c.current_parent = c.current_index = constant(&c, ITEM_NULL);
+        }
+        if (fn->ast->is_shell_pipe_stage) {
+            MIR_reg_t* context_registers[] = {&c.current_item, &c.current_index, &c.current_parent,
+                &c.current_root, &c.current_error};
+            AstNamedNode* parameter = fn->ast->param;
+            for (MIR_reg_t* target : context_registers) {
+                *target = mvp_binding(m, parameter->entry)->reg;
+                parameter = (AstNamedNode*)parameter->next;
+            }
         }
         bool snapshots = c.binder_env || c.captured_types || function_has_snapshots(m, fn);
         if (snapshots) {
