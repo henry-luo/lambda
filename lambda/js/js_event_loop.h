@@ -36,6 +36,8 @@ void js_event_loop_drain_script_turn(bool has_dom_document, bool drain_timers);
 bool js_event_loop_has_refed_handles(void);
 // Bounded non-blocking pump (fires ready timers + microtasks, no watchdog wait).
 void js_event_loop_pump_nowait(void);
+// Coalesced rendering opportunities while an elapsed-clock snapshot is loading.
+bool js_event_loop_pump_loading(void);
 // Wait for one JS/libuv event, capped by max_wait_ms. Returns true when work
 // other than the cap timer woke the loop, allowing condition waits to retry.
 bool js_event_loop_pump_wait(int max_wait_ms);
@@ -44,6 +46,8 @@ int js_event_loop_wait_until(int (*predicate)(void*), void* user, int watchdog_m
 // Deterministic clock used by headless browser fixtures. Advancing it fires
 // due timers and a bounded number of animation frames without sleeping.
 void js_event_loop_set_virtual_clock(bool enabled, double monotonic_ms);
+// preserve elapsed load time and pending timers before selecting a fixed export frame.
+void js_event_loop_freeze_load_clock(void);
 bool js_event_loop_virtual_clock_enabled(void);
 double js_event_loop_virtual_clock_now_ms(void);
 int js_event_loop_advance_virtual_time(double delta_ms, int frame_steps);

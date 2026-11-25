@@ -397,19 +397,6 @@ static bool radiant_dom_is_content_editable(DomElement* elem) {
     return false;
 }
 
-static String* radiant_dom_uppercase_name(const char* name) {
-    if (!name) return heap_create_name("");
-    size_t len = strlen(name);
-    char stack_buf[64];
-    char* upper = (len < sizeof(stack_buf)) ? stack_buf : (char*)mem_alloc(len + 1, MEM_CAT_JS_RUNTIME);
-    if (!upper) return heap_create_name("");
-    str_to_upper(upper, name, len);
-    upper[len] = '\0';
-    String* result = heap_create_name(upper);
-    if (upper != stack_buf) mem_free(upper);
-    return result;
-}
-
 static DomNode* radiant_dom_visible_child(DomElement* elem, bool first) {
     return (DomNode*)radiant_host_api->dom_catalog->visible_child(elem, first);
 }
@@ -1411,7 +1398,7 @@ static int radiant_dom_member_property(Item receiver, const char* property, Item
     }
 
 RADIANT_MEMBER_GET(radiant_dom_member_tag_name,
-    (Item){.item = s2it(radiant_dom_uppercase_name(elem->tag_name()))})
+    radiant_host_api->dom_catalog->node_name(receiver))
 RADIANT_C_API int radiant_dom_member_local_name(Item receiver, Item* out) {
     return radiant_dom_member_property(receiver, "localName", out);
 }

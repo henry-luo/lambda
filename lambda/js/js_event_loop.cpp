@@ -379,10 +379,11 @@ typedef struct JsTimerHandle {
     void*      runtime_doc;
     bool       closing;
     unsigned   html_nesting;
-    double     virtual_due_ms;
+    double     due_ms; // libuv milliseconds in wall mode, performance milliseconds in virtual mode
     uint64_t   repeat_ms;
     bool       virtual_active;
     bool       virtual_refed;
+    bool       resume_overdue_interval;
 } JsTimerHandle;
 
 #define timer_resources (*js_runtime_resource_table())
@@ -609,6 +610,9 @@ static void timer_fire_cb(uv_timer_t *handle) {
         return;
     }
     {
+        if (!virtual_clock_enabled && th->is_interval) {
+            th->due_ms = (double)uv_now(handle->loop) + (double)th->repeat_ms;
+        }
         // callback scopes and resource cleanup leave before restoring another agent's state.
         timer_progress_generation++;
         bool close_after_fire = th && !th->is_interval;
@@ -853,7 +857,7 @@ static void timer_start(uv_loop_t* loop, JsTimerHandle* timer,
     if (virtual_clock_enabled) {
         // A virtual timer stays initialized as a libuv handle for common close
         // cleanup, but readiness is driven exclusively by the headless clock.
-        timer->virtual_due_ms = virtual_clock_ms + (double)timeout_ms;
+        timer->due_ms = virtual_clock_ms + (double)timeout_ms;
         timer->virtual_active = true;
         timer->virtual_refed = true;
         return;
@@ -864,6 +868,7 @@ static void timer_start(uv_loop_t* loop, JsTimerHandle* timer,
     // A zero-delay timer created by a timer callback needs a new event-loop
     // turn. libuv can otherwise consume an endless chain inside one uv_run().
     if (timeout_ms == 0) timeout_ms = 1;
+    timer->due_ms = (double)uv_now(loop) + (double)timeout_ms;
     uv_timer_start(&timer->timer, timer_fire_cb, timeout_ms,
         timer->html_nesting ? 0 : repeat_ms);
 }
@@ -877,6 +882,26 @@ extern "C" void js_event_loop_set_virtual_clock(bool enabled, double monotonic_m
     js_performance_virtual_clock_set(enabled, virtual_clock_ms);
 }
 
+extern "C" void js_event_loop_freeze_load_clock(void) {
+    if (!js_active_runtime_state || virtual_clock_enabled) return;
+    uv_loop_t* loop = lambda_uv_loop();
+    if (!loop) return;
+    uv_update_time(loop);
+    double now_ms = js_performance_monotonic_now_ms();
+    double wall_now_ms = (double)uv_now(loop);
+    for (int index = 0; index < timer_slot_count; index++) {
+        JsTimerHandle* timer = timer_handle_at(index);
+        if (!timer || timer->closing || !uv_is_active((uv_handle_t*)&timer->timer)) continue;
+        // retain deadlines and ordering, including timers already overdue after a long task.
+        timer->due_ms = now_ms + (timer->due_ms - wall_now_ms);
+        timer->resume_overdue_interval = timer->is_interval && timer->due_ms <= now_ms;
+        timer->virtual_refed = uv_has_ref((uv_handle_t*)&timer->timer) != 0;
+        timer->virtual_active = true;
+        uv_timer_stop(&timer->timer);
+    }
+    js_event_loop_set_virtual_clock(true, now_ms);
+}
+
 JS_FORWARD_EXPRESSION(bool, js_event_loop_virtual_clock_enabled, (void),
     js_active_runtime_state ? virtual_clock_enabled : false)
 JS_FORWARD_EXPRESSION(double, js_event_loop_virtual_clock_now_ms, (void),
@@ -887,9 +912,9 @@ static JsTimerHandle* virtual_timer_next_due(double target_ms, int64_t before_id
     for (int index = 0; index < timer_slot_count; index++) {
         JsTimerHandle* timer = timer_handle_at(index);
         if (!timer || timer->closing || !timer->virtual_active ||
-            timer->job.id >= before_id || timer->virtual_due_ms > target_ms) continue;
-        if (!next || timer->virtual_due_ms < next->virtual_due_ms ||
-            (timer->virtual_due_ms == next->virtual_due_ms &&
+            timer->job.id >= before_id || timer->due_ms > target_ms) continue;
+        if (!next || timer->due_ms < next->due_ms ||
+            (timer->due_ms == next->due_ms &&
                 timer->job.id < next->job.id)) {
             next = timer;
         }
@@ -909,12 +934,15 @@ static int virtual_timer_fire_due(double target_ms) {
         if (!timer) break;
 
         // a callback deferred across a frame must not rewind the document clock.
-        if (timer->virtual_due_ms > virtual_clock_ms) virtual_clock_ms = timer->virtual_due_ms;
+        if (timer->due_ms > virtual_clock_ms) virtual_clock_ms = timer->due_ms;
         js_performance_virtual_clock_set(true, virtual_clock_ms);
         if (timer->is_interval && !timer->html_nesting) {
             // Publish the next interval deadline before the callback so
             // clearInterval and nested timer creation see browser ordering.
-            timer->virtual_due_ms += timer->repeat_ms > 0
+            // wall-time stalls coalesce an interval's missed ticks before virtual sampling begins.
+            if (timer->resume_overdue_interval) timer->due_ms = virtual_clock_ms;
+            timer->resume_overdue_interval = false;
+            timer->due_ms += timer->repeat_ms > 0
                 ? (double)timer->repeat_ms : 1.0;
         } else {
             timer->virtual_active = false;
@@ -1803,6 +1831,24 @@ extern "C" void js_event_loop_pump_nowait(void) {
     }
 }
 
+extern "C" bool js_event_loop_pump_loading(void) {
+    if (!js_active_runtime_state || !auto_close_mode || auto_close_after_load ||
+        virtual_clock_enabled || dom_is_host_driven_loop() || !dom_get_document() ||
+        !dom_get_ui_context() || microtask_running ||
+        js_runtime_state.event_loop->callback_running || animation_frame_drain_active) return false;
+
+    js_event_loop_pump_nowait();
+    double now_ms = js_performance_monotonic_now_ms();
+    // load waits use real elapsed time; never synthesize catch-up frames or age CSS here.
+    if (js_animation_frame_has_pending() &&
+        now_ms - js_runtime_state.performance.frame_clock_ms >= 1000.0 / 60.0) {
+        animation_frame_drain_active = true;
+        js_animation_frame_flush(now_ms);
+        animation_frame_drain_active = false;
+    }
+    return true;
+}
+
 static bool event_loop_pump_native_wait(int max_wait_ms) {
     bool had_microtasks = js_microtask_pending_count() > 0;
     js_microtask_flush();
@@ -1872,7 +1918,7 @@ extern "C" int js_event_loop_wait_until(int (*predicate)(void*), void* user, int
             bool frame = js_animation_frame_has_pending();
             if (next || frame) {
                 // explicit readiness follows scheduled work, including delayed action ticks.
-                double delta = next ? next->virtual_due_ms - virtual_clock_ms : 1000.0 / 60.0;
+                double delta = next ? next->due_ms - virtual_clock_ms : 1000.0 / 60.0;
                 if (frame && delta > 1000.0 / 60.0) delta = 1000.0 / 60.0;
                 if (virtual_clock_ms + delta > virtual_limit) break;
                 js_event_loop_advance_virtual_time(delta, frame ? 1 : 0);
@@ -1936,7 +1982,9 @@ static int js_event_loop_drain_impl(bool keep_intervals) {
             }
         }
         stop_all_interval_timers();
-        for (int turn = 0; turn < 4 || event_loop_has_pending_requests(); turn++) {
+        // ready continuations belong to the selected frame even after native I/O finishes.
+        for (int turn = 0; turn < 4 || event_loop_has_pending_requests() ||
+                (virtual_clock_enabled && virtual_timer_next_due(virtual_clock_ms, next_timer_id)); turn++) {
             // NOWAIT polling can retire the realm before an admitted fetch/XHR
             // completes. Await its native completion within the existing drain
             // watchdog without advancing the requested virtual capture time.
@@ -1944,11 +1992,12 @@ static int js_event_loop_drain_impl(bool keep_intervals) {
                 uint64_t elapsed_ns = uv_hrtime() - drain_start_ns;
                 uint64_t budget_ns = (uint64_t)EVENT_LOOP_DRAIN_TIMEOUT_MS * 1000000ULL;
                 if (elapsed_ns >= budget_ns) {
-                    log_error("event_loop: pending native requests exceeded the snapshot drain watchdog");
+                    log_error("event_loop: %s exceeded the snapshot drain watchdog",
+                        event_loop_has_pending_requests() ? "pending native requests" : "ready snapshot tasks");
                     break;
                 }
                 int remaining_ms = (int)((budget_ns - elapsed_ns + 999999ULL) / 1000000ULL);
-                event_loop_pump_native_wait(remaining_ms);
+                if (event_loop_has_pending_requests()) event_loop_pump_native_wait(remaining_ms);
             }
             int active = lambda_uv_run_loop(loop, UV_RUN_NOWAIT);
             js_event_loop_render_checkpoint();

@@ -12463,6 +12463,8 @@ static Item mvp_lmd_instantiate_unit(MvpLmdExecution* e, MvpLmdProgram* p, const
         // ordinary source templates acquire their nominal identity per constructor closure.
         if (plan->constructor && !plan->constructor->home) continue;
         TypeMap* shape = plan->constructor ? &plan->constructor->home->shape : p->roots[0];
+        // a declined transition must keep the same prototype family in the private fallback.
+        plan->blueprint->nominal = shape->nominal;
         Input* tree = runtime_shape_tree();
         FOR_EACH_MAP_FIELD(plan->blueprint, field) {
             shape = shape && tree ? type_tree_add_map_field_chars(tree, shape,

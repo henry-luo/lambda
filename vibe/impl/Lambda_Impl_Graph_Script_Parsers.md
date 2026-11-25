@@ -66,7 +66,7 @@ are under `temp/graph-parser-tuning/`.
 - The macOS arm64 native oracle is `temp/graph-parser-port/native.exe` with SHA-256 `1e03da788674eaec609591e980e42e1c998a0d9c8955c1c232ecbf93a0389f15`. `*-corpus.ls` and `*-corpus.log` there record exact serialized source Mark equality over 3 D2, 21 DOT, 13 Structurizr, 47 Mermaid, and 8 TikZ fixtures. The DOT grammar probe in §2 characterizes the recovery tradeoff.
 - `make build` and `make test-graph-graphviz test-graph-mermaid test-graph-structurizr` passed. The hosted parser, formatter, and Mermaid suites passed 23, 9 and 40 assertions respectively. The focused script runner passed 94 graph, TikZ and archive integration cases. The security-runtime suite passed all 126 cases. Both Radiant tests covering retained TikZ paint and shared loader equivalence passed. CLI checks covered DOT-to-Mark, schema validation, selected-view Structurizr HTML, D2 layout, Mermaid and TikZ SVG rendering, and headless `.gv` and `.dsl` viewing. The scripts total 3,851 lines against the 4,000-line source budget. Logs are under `temp/graph-parser-port/`.
 - The source-contract golden covers malformed input, byte spans, archive-member dispatch, TikZ numeric underflow and nested diagnostics. It matched the oracle under `interp`, `jit`, `auto`, and collection on every allocation with freed memory poisoned. The restricted Structurizr include cases also passed under forced collection (D8.3.1v3, D6.3.3).
-- The full Lambda baseline recorded 6,107 passes of 6,130 before the shipped-source test fixture update. The two Structurizr failures passed in the final security suite. Other failures include denied loopback binds and a DOM media playback case. The standalone input baseline reported loopback-related HTTP failures and a Bootstrap CSS round-trip failure. The archive header and native ownership audits passed. The staged input isolation rebuild stopped on obsolete Premake targets ([LI-115](../Lib_Input_Issue_Ledger.md#li-115)). The supplementary LaTeX-wide replay was stopped after a TeX expansion timeout. The full Radiant baseline was skipped.
+- The full Lambda baseline recorded 6,107 passes of 6,130 before the shipped-source test fixture update. The two Structurizr failures passed in the final security suite. Other failures include denied loopback binds and a DOM media playback case. The standalone input baseline reported loopback-related HTTP failures and a Bootstrap CSS round-trip failure. The archive header and native ownership audits passed. The staged input isolation rebuild stopped on obsolete Premake targets ([LI-121](../Lib_Input_Issue_Ledger.md#li-121)). The supplementary LaTeX-wide replay was stopped after a TeX expansion timeout. The full Radiant baseline was skipped.
 
 ## Follow-up upstream render comparison
 
@@ -112,7 +112,7 @@ under `temp/graph-reference/`.
 
 The selected viewport encloses every fixture. Without explicit viewport
 dimensions, continuous export clips some large graphs
-([RI-236](../Radiant_Issue_Ledger.md#ri-236)). Exploratory samples also
+([RI-241](../Radiant_Issue_Ledger.md#ri-241)). Exploratory samples also
 exposed remaining D2 gaps in nested containers and arrowhead maps and TikZ
 gaps in bounding-box commands and bracketed ellipse radii.
 
@@ -139,7 +139,7 @@ rendered node glyph titles. D2 paint observations check authored stroke
 and opacity. TikZ lengths include SVG close-path segments and use the
 same physical-unit tolerance. The empty DOT label fix uses the element
 child axis under S8.3.1v3 and preserves SVG node metadata under
-[RI-237](<../Radiant_Issue_Ledger (fixed).md#ri-237>).
+[RI-242](<../Radiant_Issue_Ledger (fixed).md#ri-242>).
 
 All 111 cases pass under automatic, interpreter and JIT execution
 (D8.3.1v3). The saved observations reproduce byte for byte from the
@@ -159,7 +159,7 @@ reference to other subgraphs, Structurizr deployment node-to-node
 relationship lifting and `-/>` exclusions, and TikZ library-specific
 path operators and styles. Large exploratory graphs still require a
 viewport that encompasses the measured geometry under
-[RI-236](../Radiant_Issue_Ledger.md#ri-236).
+[RI-241](../Radiant_Issue_Ledger.md#ri-241).
 
 ## Release loading benchmark
 

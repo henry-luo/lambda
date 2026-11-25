@@ -114,7 +114,7 @@ test('online default selects the same one-second frame for both captures', async
 
 test('explicit zero overrides a host settling window', async () => {
     const {result, image} = await native('frozen', ['--settle-ms=0'],
-        {...process.env, LAMBDA_POST_LOAD_SETTLE_MS: '250'});
+        {...process.env, LAMBDA_POST_LOAD_SETTLE_MS: '250', LAMBDA_CAPTURE_LOAD_CLOCK:'frozen'});
     assert.equal(result.settleMs, 0);
     assert.deepEqual(rgb(image, 50, 50), [255, 0, 0]);
 });

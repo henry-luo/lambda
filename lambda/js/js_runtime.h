@@ -111,6 +111,8 @@ Item js_to_numeric(Item value);
 // ECMAScript ToInt32, used by bitwise operations and Web IDL integer adapters.
 int32_t js_to_int32(double value);
 LAMBDA_RT_API Item js_to_string(Item value);
+// binary web strings expose one UTF-16 code unit for each Latin1 byte.
+LAMBDA_RT_API Item js_string_from_latin1(const unsigned char* bytes, size_t length);
 Item js_to_boolean(Item value);
 Item js_to_object(Item value);
 Item js_to_property_key(Item value);
@@ -442,6 +444,7 @@ void js_set_function_home_class(Item fn_item, Item home_class);
 void js_mark_derived_constructor_func(Item fn_item);
 Item js_get_constructor(Item name_item);
 Item js_get_intrinsic_prototype_for_class(int class_id);
+Item js_set_intrinsic_prototype_for_class(int class_id, Item prototype);
 Item js_get_typed_array_per_type_proto(int element_type);
 // O5: the one RangeError message for the call-depth guard, shared by the
 // kernel and the JIT's inline source-invocation guard (same counter/limit).

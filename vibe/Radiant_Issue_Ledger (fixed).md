@@ -14,9 +14,9 @@ are unchanged. Full evidence is under `../../lambda/temp/kianhup-style/`.
 
 ## Fixed issues
 
-<a id="ri-239"></a>
+<a id="ri-244"></a>
 
-### RI-239 — Textarea caret geometry ignores soft-wrapped lines
+### RI-244 — Textarea caret geometry ignores soft-wrapped lines
 
 **Fixed, 2026-11-25.** Radiant painted textarea values on multiple visual
 lines but used only newline characters for pointer positions, the caret and
@@ -38,9 +38,9 @@ textarea interaction selection has 16 passing and nine state-dump failures,
 and the same nine fail with the original Radiant files. No baseline was
 changed.
 
-<a id="ri-238"></a>
+<a id="ri-243"></a>
 
-### RI-238 — Default focus outline misses dialogs and sits away from text fields
+### RI-243 — Default focus outline misses dialogs and sits away from text fields
 
 **Fixed, 2026-11-25.** An open dialog without `tabindex` acquired
 `:focus-visible` through keyboard-mode focus and computed
@@ -62,9 +62,9 @@ The 148 native dynamic layout tests, seven focus and editor UI replays,
 and the Radiant layout lint pass.
 Evidence is under `temp/ua-focus/`.
 
-<a id="ri-237"></a>
+<a id="ri-242"></a>
 
-### RI-237 — SVG export omits metadata for graph nodes with empty labels
+### RI-242 — SVG export omits metadata for graph nodes with empty labels
 
 **Fixed, 2026-11-25.** The DOT corpus fixture `switch.gv` paints visible
 unlabeled circles. The SVG walker emitted metadata only when a block
@@ -74,6 +74,130 @@ childless graph node during content paint. Its bounds and paint still
 come from the existing layout and render path (D9.1.3v2, D9.5.6v2).
 The upstream comparison verifies visible node identities and the absence
 of label glyphs. [Upstream graph corpus](../test/lambda/graph/upstream/README.md)
+
+<a id="ri-240"></a>
+
+### RI-240 — Fixed-direction text edits force direction-dependent document rebuilds
+
+**Fixed, 2026-11-25.** Native mutation records marked every text and control
+value edit direction-sensitive. If any author or UA sheet used `:dir()`, the
+reconciler consequently fell back to a full-document cascade/layout even when
+the edited content had fixed inherited direction. Child-list records already
+checked the actual automatic-direction context. Shared DOM invalidation
+follows **D9.1.3v2 / D9.5.6v2**.
+
+Text, control values and child lists now reuse that existing context check.
+Text starts from its parent; control values include the control's own `dir`.
+An explicit LTR/RTL boundary prevents content changes from affecting automatic
+ancestors. `dir=auto`, default BDI behavior, hidden first-strong text and the
+existing conservative shadow-tree closure are preserved. The DOM direction
+algorithm itself is unchanged; see [HTML's dir rules](
+https://html.spec.whatwg.org/multipage/dom.html#the-dir-attribute).
+
+Three of eight maintained fixtures fail before repair. All eight pass after
+repair in AST, MIR and Chromium, including input/textarea values and automatic
+direction reversals. The fixed-direction reductions remove three unnecessary
+full-document direction fallbacks while keeping their measured widths. All
+35 focused AST mutation/relational checks and the Radiant integer-cast lint
+also pass. No source, timing, execution-budget or navigation-limit change.
+
+Superpower's complete pre-fix logs show DOMContentLoaded exhausting the
+120-second JS budget, after which settlement is skipped. The small reduction
+independently establishes an unnecessary-layout cause; it does not by itself
+prove that this is the only live-page cost. Ordinary page qualification is
+recorded in the online comparison report. Diagnostic frames are excluded.
+Evidence: `temp/online-visual-round229/` (`direction-text-before.log`,
+`direction-before.log`, `direction-and-relational-after.log`,
+`direction-mir.log`, `browser-fixtures.json`, `lint.log`, `qualified-run/`).
+
+<a id="ri-239"></a>
+
+### RI-239 — Layout redirects leak state created by the source document
+
+**Fixed, 2026-11-25.** A page that reads a bounding rectangle and then
+navigates leaves two render allocations (152 bytes) live at shutdown. The
+redirect path destroyed the input DOM directly and skipped the owner-side
+teardown of the view and retained display list. The layout CLI now uses its
+normal document teardown for redirects and layout initialization failures
+(**D5.5.1**, **D9.1.3v2**).
+
+The debug memory tracker reports zero errors for redirects to a valid page
+and to a missing page. The missing destination still reports a layout load
+failure. The regression control is in
+[`test_input_layout_runner.py`](../test/wpt/test_input_layout_runner.py).
+
+<a id="ri-238"></a>
+
+### RI-238 — Layout format detection reads the URL query and fragment
+
+**Fixed, 2026-11-25.** A layout invocation for an HTML page with a query
+ending in `.md` routed the page through the Markdown loader. Format selection
+now reads the parsed pathname (**D9.1.3v2**).
+
+The WPT runner now passes each variant as part of the document URL. Its former
+assignment to the global `location` invoked the navigation setter and made
+11 layout children try to load `[object Object]` (**D8.4.4**). Regression
+controls cover extension-like suffixes and shell metacharacters. The
+`wpt-input-events` category has 20 passes and 12 skips. The full layout
+baseline has 5,630 passes, 294 partial results, 12 skips and zero failures.
+Evidence is in [the layout report](../temp/wpt-input-events-fix/final-layout-report.json).
+
+<a id="ri-237"></a>
+
+### RI-237 — Native Canvas pixel readback is missing
+
+**Fixed, 2026-11-25, for bounded RGBA8/sRGB readback.** Ebury's consent SDK
+draws two colors then reads their actual pixels; the missing operation aborts
+its banner. Root's JS13-L77 records the API failure and Chromium control.
+Native already owns the bitmap, so the repair adds a synchronous copy through
+the existing graphics waist (**D9.1.3v2 / D9.5.1 / D9.5.6v2**).
+
+The copy borrows the surface inside ImageSurfaceReadScope, reverses alpha
+premultiplication through the shared image helper, and pads samples outside
+the bitmap with transparent black. Drawing transform, clip and global alpha
+do not affect reads. JS owns the destination storage; no GC pixel pointer or
+renderer pointer is retained across the boundary (**D5.5.2 / D6.3.3**).
+Existing bitmap limits move to the shared canvas contract without changing
+their values. No vendor or layout algorithm is modified.
+
+Eleven native AST/MIR and eleven Chromium readback groups pass, plus fourteen
+existing native Canvas transform/path groups. They exercise real painted
+samples, negative/outside rectangles, alpha, state independence, copies,
+resize, construction, receiver brands and coercion ownership. Integer-cast
+lint and one accumulated dynamic baseline (**630/630**, zero errors/skips)
+pass. Ebury's ordinary capture restores its consent panel at 1.10%
+mean error /1.92% changed area against Chromium. Full image-origin taint
+tracking, wide-gamut/float16 readback and other missing pixel APIs remain
+unqualified. Evidence: Lambda `temp/online-visual-round214/`.
+
+<a id="ri-236"></a>
+
+### RI-236 — Wrapping flex children lose fitted cross sizes
+
+**Fixed 2026-11-25.** A non-stretched row-flex child with `flex-wrap:wrap`
+inside a column flex container received the parent's full cross width during
+alignment. `flex_apply_intrinsic_cross_size` overwrote its hypothetical fitted
+width merely because its contents could wrap. A centered 80px item in a 600px
+parent consequently became 600px wide with its button at the left edge.
+
+The wrapping-only override and its parameter are removed. The existing shared
+fit-content calculation now supplies the cross width, retaining the later
+min/max clamp and genuine stretch handling. This follows
+[CSS Flexbox §9.4](https://www.w3.org/TR/css-flexbox-1/#algo-cross-item);
+Radiant owns the layout repair under **D9.1.3v2**. No selector, site or authored
+dimension receives special treatment.
+
+Seven of fourteen focused cases fail before repair; all fourteen native cases
+and fourteen Chromium controls pass afterward. Cases include wrap-reverse,
+multiple items/gaps, constrained available width, min/max sizes, decorations,
+start/end alignment, explicit widths, stretch, auto margins and a row-parent
+control. The layout integer-cast lint passes. One ordinary Gladia capture
+confirms that its action container moves to the center; its action text/filter
+rendering and large Canvas background remain incorrect, so the page stays high.
+No broad baseline repeats immediately after the preceding 630/630 dynamic
+milestone. Evidence: `temp/online-visual-round212/{flex-wrap-before.log,
+flex-wrap-after.log,browser-flex-wrap.json,int-cast-lint.log}` and
+`test/online/render_flex_wrap_cross.test.cjs`.
 
 <a id="ri-235"></a>
 

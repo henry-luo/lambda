@@ -15,6 +15,18 @@ Resolved records are in the [fixed issue ledger](<Lib_Input_Issue_Ledger (fixed)
 
 ## Open issues
 
+<a id="li-121"></a>
+
+### LI-121 — The isolated input check expects removed Premake targets
+
+**Open, 2026-11-25.** `make check-input-isolation` stages
+`lambda-lib-cpp.make` and `lambda-data-cpp.make` through
+`utils/check_input_isolation.py`. The split build creates the two archives
+through the input owner's Makefile (D9.1.1v4, D9.1.3v2, D9.1.5), so the
+staging script stops on the first missing Premake file. The archive-header
+audit passes before this failure. The staged rebuild needs to use the input
+owner's build targets. This blocks the extra isolated rebuild gate.
+
 <a id="li-118"></a>
 
 ### LI-118 — Unbraced Unicode math scripts produce invalid UTF-8
@@ -59,18 +71,6 @@ conversion or a bounded, explicit unsupported result. The root cause is not
 yet confirmed. Evidence is in `temp/latex-parity/case-candidate/single-*.out`
 and `.err`. This blocks using native output as a reliable reference for the
 Script engine's Unicode text-case port (S1.8, D10.2.2; ownership D9.1.3v2).
-
-<a id="li-115"></a>
-
-### LI-115 — The isolated input check expects removed Premake targets
-
-**Open, 2026-11-25.** `make check-input-isolation` stages
-`lambda-lib-cpp.make` and `lambda-data-cpp.make` through
-`utils/check_input_isolation.py`. The split build creates the two archives
-through the input owner's Makefile (D9.1.1v4, D9.1.3v2, D9.1.5), so the
-staging script stops on the first missing Premake file. The archive-header
-audit passes before this failure. The staged rebuild needs to use the input
-owner's build targets. This blocks the extra isolated rebuild gate.
 
 <a id="li-114"></a>
 

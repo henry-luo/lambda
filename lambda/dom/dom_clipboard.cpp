@@ -2168,7 +2168,9 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
         permissions_root.set(js_new_object());
         js_clipboard_set_method(permissions_root.get(), "query", js_permissions_query);
 
-        service_worker_root.set(js_new_object());
+        // the empty registration profile still inherits the real EventTarget surface.
+        service_worker_root.set(js_create_event_target());
+        if (item_is_error(service_worker_root.get())) return;
         js_clipboard_set_method(service_worker_root.get(), "getRegistrations",
             js_service_worker_get_registrations);
         js_clipboard_set_method(service_worker_root.get(), "register",

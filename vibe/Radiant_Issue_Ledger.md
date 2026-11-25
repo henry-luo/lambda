@@ -20,9 +20,9 @@ observations still require re-verification. Add new Radiant issues here.
 
 ## Open issues
 
-<a id="ri-240"></a>
+<a id="ri-245"></a>
 
-### RI-240 — Textarea caret needs affinity at a soft-wrap boundary
+### RI-245 — Textarea caret needs affinity at a soft-wrap boundary
 
 **Status:** Open, observed 2026-11-25. **Owner:** Radiant text-control
 selection and painting (D9.1.3v2). This limits wrapped textarea navigation.
@@ -36,17 +36,17 @@ to preserve visual affinity through pointer and keyboard selection, redraw,
 and text-control state transitions. Reproduction and capture are in
 `temp/textarea-end-boundary.json` and `temp/textarea-end-boundary.png`.
 
-<a id="ri-239"></a>
+<a id="ri-244"></a>
 
-- [RI-239 — Textarea caret geometry ignores soft-wrapped lines](<Radiant_Issue_Ledger (fixed).md#ri-239>).
+- [RI-244 — Textarea caret geometry ignores soft-wrapped lines](<Radiant_Issue_Ledger (fixed).md#ri-244>).
 
-<a id="ri-238"></a>
+<a id="ri-243"></a>
 
-- [RI-238 — Default focus outline misses dialogs and sits away from text fields](<Radiant_Issue_Ledger (fixed).md#ri-238>).
+- [RI-243 — Default focus outline misses dialogs and sits away from text fields](<Radiant_Issue_Ledger (fixed).md#ri-243>).
 
-<a id="ri-236"></a>
+<a id="ri-241"></a>
 
-### RI-236 — Automatic SVG export clips diagrams to the initial viewport
+### RI-241 — Automatic SVG export clips diagrams to the initial viewport
 
 **Status:** Open, observed 2026-11-25. **Owner:** Radiant continuous export
 (D9.1.3v2, D9.5.6v2).
@@ -59,6 +59,22 @@ The final nodes and their links fall past the clip. Automatic export should
 include the graph's visible extent. The reference test supplies explicit
 dimensions that fit its fixtures, so this issue does not block that test.
 The extent and root clip behavior in continuous export need owner-side tracing.
+
+<a id="ri-239"></a>
+
+- [RI-239 — Layout redirects leak state created by the source document](<Radiant_Issue_Ledger (fixed).md#ri-239>).
+
+<a id="ri-238"></a>
+
+- [RI-238 — Layout format detection reads the URL query and fragment](<Radiant_Issue_Ledger (fixed).md#ri-238>).
+
+<a id="ri-237"></a>
+
+- [RI-237 — Native Canvas pixel readback is missing](<Radiant_Issue_Ledger (fixed).md#ri-237>).
+
+<a id="ri-236"></a>
+
+- [RI-236 — Wrapping flex children lose fitted cross sizes](<Radiant_Issue_Ledger (fixed).md#ri-236>).
 
 <a id="ri-235"></a>
 

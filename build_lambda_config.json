@@ -4734,7 +4734,9 @@
             "name": "WPT DOM Events Tests",
             "category": "extended",
             "parallel": false,
-            "dependencies": [],
+            "dependencies": [
+              "lambda-lib"
+            ],
             "binary": "test_wpt_dom_events_gtest.exe",
             "libraries": [
               "gtest"
@@ -4747,7 +4749,9 @@
             "name": "WPT Contenteditable Tests",
             "category": "extended",
             "parallel": false,
-            "dependencies": [],
+            "dependencies": [
+              "lambda-lib"
+            ],
             "binary": "test_wpt_contenteditable_gtest.exe",
             "libraries": [
               "gtest"
@@ -4786,7 +4790,9 @@
             "name": "WPT CSSOM View Tests",
             "category": "extended",
             "parallel": false,
-            "dependencies": [],
+            "dependencies": [
+              "lambda-lib"
+            ],
             "binary": "test_wpt_cssom_view_gtest.exe",
             "libraries": [
               "gtest"
@@ -4799,7 +4805,9 @@
             "name": "WPT DOM Nodes Tests",
             "category": "extended",
             "parallel": false,
-            "dependencies": [],
+            "dependencies": [
+              "lambda-lib"
+            ],
             "binary": "test_wpt_dom_nodes_gtest.exe",
             "libraries": [
               "gtest"
@@ -4812,7 +4820,9 @@
             "name": "WPT ResizeObserver Tests",
             "category": "extended",
             "parallel": false,
-            "dependencies": [],
+            "dependencies": [
+              "lambda-lib"
+            ],
             "binary": "test_wpt_resize_observer_gtest.exe",
             "libraries": [
               "gtest"
@@ -4825,7 +4835,9 @@
             "name": "WPT IntersectionObserver Tests",
             "category": "extended",
             "parallel": false,
-            "dependencies": [],
+            "dependencies": [
+              "lambda-lib"
+            ],
             "binary": "test_wpt_intersection_observer_gtest.exe",
             "libraries": [
               "gtest"
@@ -4838,7 +4850,9 @@
             "name": "WPT CSS Transitions Tests",
             "category": "extended",
             "parallel": false,
-            "dependencies": [],
+            "dependencies": [
+              "lambda-lib"
+            ],
             "binary": "test_wpt_css_transitions_gtest.exe",
             "libraries": [
               "gtest"
@@ -4855,7 +4869,9 @@
             "worker_args": [
               "--jobs"
             ],
-            "dependencies": [],
+            "dependencies": [
+              "lambda-lib"
+            ],
             "binary": "test_wpt_input_events_gtest.exe",
             "libraries": [
               "gtest"
@@ -4868,7 +4884,9 @@
             "name": "WPT DOM Ranges Tests",
             "category": "extended",
             "parallel": false,
-            "dependencies": [],
+            "dependencies": [
+              "lambda-lib"
+            ],
             "binary": "test_wpt_dom_ranges_gtest.exe",
             "libraries": [
               "gtest"
@@ -4881,7 +4899,9 @@
             "name": "WPT HTML Reflection Tests",
             "category": "extended",
             "parallel": false,
-            "dependencies": [],
+            "dependencies": [
+              "lambda-lib"
+            ],
             "binary": "test_wpt_html_reflection_gtest.exe",
             "libraries": [
               "gtest"

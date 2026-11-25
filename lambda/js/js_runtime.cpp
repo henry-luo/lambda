@@ -24767,7 +24767,17 @@ static Item js_intl_locale_install(Item intl) {
 
 enum JsIntlNumberField { JS_INTL_NUMBER_LOCALE, JS_INTL_NUMBER_GROUP,
     JS_INTL_NUMBER_MIN_INTEGER, JS_INTL_NUMBER_MIN_FRACTION, JS_INTL_NUMBER_MAX_FRACTION,
-    JS_INTL_NUMBER_STRIP_ZEROS, JS_INTL_NUMBER_BOUND_FORMAT, JS_INTL_NUMBER_FIELDS };
+    JS_INTL_NUMBER_STRIP_ZEROS, JS_INTL_NUMBER_BOUND_FORMAT, JS_INTL_NUMBER_PERCENT,
+    JS_INTL_NUMBER_COMPACT, JS_INTL_NUMBER_COMPACT_LONG, JS_INTL_NUMBER_COMPACT_DEFAULT,
+    JS_INTL_NUMBER_FIELDS };
+
+enum JsIntlNumberGrouping { JS_INTL_GROUP_OFF, JS_INTL_GROUP_ALWAYS, JS_INTL_GROUP_AUTO, JS_INTL_GROUP_MIN2 };
+static const char* js_intl_number_group_names[] = {"", "always", "auto", "min2"};
+// compact decimal patterns from CLDR English; locale selection retains the existing English profile.
+static const struct { int exponent; const char* short_name; const char* long_name; } js_intl_number_compact[] = {
+    {0, "", ""}, {3, "K", "thousand"}, {6, "M", "million"},
+    {9, "B", "billion"}, {12, "T", "trillion"}
+};
 
 static Item js_intl_number_state(Item receiver) {
     return js_native_private_array_state(receiver, JS_CLASS_INTL_NUMBER_FORMAT,
@@ -24791,6 +24801,8 @@ static Item js_intl_number_render(Item state, Item input, bool parts) {
     JS_RETURN_IF_ERROR(number.get());
     double value = 0;
     if (!item_try_to_double(number.get(), &value)) return ItemError;
+    bool percent = it2b(js_elements_get_int(record.get(), JS_INTL_NUMBER_PERCENT));
+    bool compact = it2b(js_elements_get_int(record.get(), JS_INTL_NUMBER_COMPACT));
     bool negative = signbit(value) && !isnan(value);
     if (negative) JS_RETURN_IF_ERROR(js_intl_number_part(result.get(), "minusSign", "-", 1));
     if (!isfinite(value)) {
@@ -24809,21 +24821,40 @@ static Item js_intl_number_render(Item state, Item input, bool parts) {
             if (significant_count < sizeof(significant)) significant[significant_count++] = c;
             if (!dot) decimal_position++;
         }
+        size_t leading = 0;
+        while (leading + 1 < significant_count && significant[leading] == '0') leading++;
+        memmove(significant, significant + leading, significant_count - leading);
+        significant_count -= leading; decimal_position -= (int)leading;
+        // decimal shifts preserve finite extremes and avoid binary rounding from multiplication/division.
+        if (percent && value != 0) decimal_position += 2;
         int minimum_integer = (int)it2i(js_elements_get_int(record.get(), JS_INTL_NUMBER_MIN_INTEGER));
         int minimum_fraction = (int)it2i(js_elements_get_int(record.get(), JS_INTL_NUMBER_MIN_FRACTION));
-        int fraction = (int)it2i(js_elements_get_int(record.get(), JS_INTL_NUMBER_MAX_FRACTION));
-        int integer = decimal_position > 0 ? decimal_position : 1;
-        // binary64's shortest decimal plus 100 fraction digits fits this native buffer.
-        char digits[512]; memset(digits, '0', sizeof(digits));
-        for (size_t i = 0; i < significant_count; i++) {
-            int position = integer + (int)i - decimal_position;
-            if (position >= 0 && position <= integer + fraction) digits[position] = significant[i];
-        }
-        if (digits[integer + fraction] >= '5') {
-            int position = integer + fraction - 1;
-            while (position >= 0 && digits[position] == '9') digits[position--] = '0';
-            if (position >= 0) digits[position]++;
-            else { memmove(digits + 1, digits, integer + fraction); digits[0] = '1'; integer++; }
+        int maximum_fraction = (int)it2i(js_elements_get_int(record.get(), JS_INTL_NUMBER_MAX_FRACTION));
+        bool compact_default = it2b(js_elements_get_int(record.get(), JS_INTL_NUMBER_COMPACT_DEFAULT));
+        int unit = compact && decimal_position > 3 ? (decimal_position - 1) / 3 : 0;
+        int last_unit = (int)(sizeof(js_intl_number_compact) / sizeof(*js_intl_number_compact)) - 1;
+        if (unit > last_unit) unit = last_unit;
+        int fraction = 0, integer = 0;
+        // binary64's decimal range, percent shift and compact rounding guard fit this buffer.
+        char digits[512];
+        for (;;) {
+            int position = decimal_position - js_intl_number_compact[unit].exponent;
+            fraction = compact_default ? (value != 0 && position < 2 ? 2 - position : 0) : maximum_fraction;
+            integer = position > 0 ? position : 1;
+            memset(digits, '0', sizeof(digits));
+            for (size_t i = 0; i < significant_count; i++) {
+                int index = integer + (int)i - position;
+                if (index >= 0 && index <= integer + fraction) digits[index] = significant[i];
+            }
+            if (digits[integer + fraction] >= '5') {
+                int index = integer + fraction - 1;
+                while (index >= 0 && digits[index] == '9') digits[index--] = '0';
+                if (index >= 0) digits[index]++;
+                else { memmove(digits + 1, digits, integer + fraction); digits[0] = '1'; integer++; }
+            }
+            // rounding across 999… selects the next compact pattern, then recomputes its precision.
+            if (compact && integer > 3 && unit < last_unit) { unit++; continue; }
+            break;
         }
         bool whole = true;
         for (int i = 0; i < fraction; i++) if (digits[integer + i] != '0') whole = false;
@@ -24834,7 +24865,9 @@ static Item js_intl_number_render(Item state, Item input, bool parts) {
             memmove(digits + padding, digits, integer + fraction);
             memset(digits, '0', padding); integer = minimum_integer;
         }
-        bool grouping = it2b(js_elements_get_int(record.get(), JS_INTL_NUMBER_GROUP));
+        int group_mode = (int)it2i(js_elements_get_int(record.get(), JS_INTL_NUMBER_GROUP));
+        bool minimum_two = group_mode == JS_INTL_GROUP_MIN2 || (compact && group_mode == JS_INTL_GROUP_AUTO);
+        bool grouping = group_mode != JS_INTL_GROUP_OFF && (!minimum_two || integer >= 5);
         for (int start = 0; start < integer;) {
             int length = grouping ? (start ? 3 : (integer - 1) % 3 + 1) : integer;
             JS_RETURN_IF_ERROR(js_intl_number_part(result.get(), "integer", digits + start, length));
@@ -24845,7 +24878,14 @@ static Item js_intl_number_render(Item state, Item input, bool parts) {
             JS_RETURN_IF_ERROR(js_intl_number_part(result.get(), "decimal", ".", 1));
             JS_RETURN_IF_ERROR(js_intl_number_part(result.get(), "fraction", digits + integer, fraction));
         }
+        if (unit) {
+            bool long_name = it2b(js_elements_get_int(record.get(), JS_INTL_NUMBER_COMPACT_LONG));
+            const char* name = long_name ? js_intl_number_compact[unit].long_name : js_intl_number_compact[unit].short_name;
+            if (long_name) JS_RETURN_IF_ERROR(js_intl_number_part(result.get(), "literal", " ", 1));
+            JS_RETURN_IF_ERROR(js_intl_number_part(result.get(), "compact", name, strlen(name)));
+        }
     }
+    if (percent) JS_RETURN_IF_ERROR(js_intl_number_part(result.get(), "percentSign", "%", 1));
     if (parts) return result.get();
     StrBuf* buffer = strbuf_new();
     if (!buffer) return ItemError;
@@ -24886,18 +24926,34 @@ static Item js_intl_number_format_options(Item receiver, Item*, int) {
     Rooted<Item> record(roots, js_intl_number_state(receiver));
     JS_RETURN_IF_ERROR(record.get());
     Rooted<Item> result(roots, js_new_object()), value(roots, ItemNull);
+    bool compact = it2b(js_elements_get_int(record.get(), JS_INTL_NUMBER_COMPACT));
+    bool compact_default = it2b(js_elements_get_int(record.get(), JS_INTL_NUMBER_COMPACT_DEFAULT));
     const char* numeric[] = {"locale", "useGrouping", "minimumIntegerDigits", "minimumFractionDigits", "maximumFractionDigits"};
     for (size_t i = 0; i < sizeof(numeric) / sizeof(*numeric); i++) {
         value.set(js_elements_get_int(record.get(), i));
-        if (i == JS_INTL_NUMBER_GROUP && it2b(value.get())) value.set(js_name_item("auto"));
+        if (i == JS_INTL_NUMBER_GROUP) {
+            int mode = (int)it2i(value.get());
+            value.set(mode ? js_name_item(js_intl_number_group_names[mode]) : (Item){.item = ITEM_FALSE});
+        }
         JS_RETURN_IF_ERROR(js_create_data_property(result.get(), js_name_item(numeric[i]), value.get()));
     }
     const struct { const char* name; const char* value; } settings[] = {
-        {"numberingSystem", "latn"}, {"style", "decimal"}, {"notation", "standard"},
-        {"signDisplay", "auto"}, {"roundingMode", "halfExpand"}, {"roundingPriority", "auto"}
+        {"numberingSystem", "latn"},
+        {"style", it2b(js_elements_get_int(record.get(), JS_INTL_NUMBER_PERCENT)) ? "percent" : "decimal"},
+        {"notation", compact ? "compact" : "standard"},
+        {"signDisplay", "auto"}, {"roundingMode", "halfExpand"},
+        {"roundingPriority", compact_default ? "morePrecision" : "auto"}
     };
     for (const auto& setting : settings)
         JS_RETURN_IF_ERROR(js_create_data_property(result.get(), js_name_item(setting.name), js_name_item(setting.value)));
+    if (compact) {
+        value.set(js_name_item(it2b(js_elements_get_int(record.get(), JS_INTL_NUMBER_COMPACT_LONG)) ? "long" : "short"));
+        JS_RETURN_IF_ERROR(js_create_data_property(result.get(), js_name_item("compactDisplay"), value.get()));
+    }
+    if (compact_default) {
+        JS_RETURN_IF_ERROR(js_create_data_property(result.get(), js_name_item("minimumSignificantDigits"), (Item){.item = i2it(1)}));
+        JS_RETURN_IF_ERROR(js_create_data_property(result.get(), js_name_item("maximumSignificantDigits"), (Item){.item = i2it(2)}));
+    }
     value.set(js_name_item(it2b(js_elements_get_int(record.get(), JS_INTL_NUMBER_STRIP_ZEROS)) ? "stripIfInteger" : "auto"));
     JS_RETURN_IF_ERROR(js_create_data_property(result.get(), js_name_item("trailingZeroDisplay"), value.get()));
     JS_RETURN_IF_ERROR(js_create_data_property(result.get(), js_name_item("roundingIncrement"), (Item){.item = i2it(1)}));
@@ -24922,28 +24978,46 @@ static Item js_intl_number_format_construct_body(Item callee, Item* args,
     }
     js_array_push(record.get(), value.get());
     if (get_type_id(options.get()) == LMD_TYPE_NULL) return js_throw_type_error("NumberFormat options cannot be null");
-    const struct { const char* name; const char* supported; } strings[] = {
-        {"style", "decimal"}, {"notation", "standard"}, {"signDisplay", "auto"}, {"numberingSystem", "latn"},
-        {"roundingMode", "halfExpand"}, {"roundingPriority", "auto"}
+    bool percent = false, compact = false, long_compact = false;
+    const struct { const char* name; const char* supported; const char* alternate; bool* selected; } strings[] = {
+        {"style", "decimal", "percent", &percent}, {"notation", "standard", "compact", &compact},
+        {"compactDisplay", "short", "long", &long_compact}, {"signDisplay", "auto", nullptr, nullptr},
+        {"numberingSystem", "latn", nullptr, nullptr}, {"roundingMode", "halfExpand", nullptr, nullptr},
+        {"roundingPriority", "auto", nullptr, nullptr}
     };
     if (get_type_id(options.get()) != LMD_TYPE_UNDEFINED) for (const auto& option : strings) {
         value.set(js_get_key_cstr(options.get(), option.name)); JS_RETURN_IF_ERROR(value.get());
         if (get_type_id(value.get()) == LMD_TYPE_UNDEFINED) continue;
         value.set(js_to_string(value.get())); JS_RETURN_IF_ERROR(value.get());
-        if (!js_string_equals(value.get(), option.supported)) return js_throw_range_error("Unsupported NumberFormat option");
+        if (js_string_equals(value.get(), option.supported)) continue;
+        if (!option.alternate || !js_string_equals(value.get(), option.alternate))
+            return js_throw_range_error("Unsupported NumberFormat option");
+        *option.selected = true;
     }
     value.set(get_type_id(options.get()) == LMD_TYPE_UNDEFINED ? make_js_undefined() : js_get_key_cstr(options.get(), "useGrouping"));
     JS_RETURN_IF_ERROR(value.get());
-    js_array_push(record.get(), (Item){.item = b2it(get_type_id(value.get()) == LMD_TYPE_UNDEFINED || js_is_truthy(value.get()))});
+    int group_default = compact ? JS_INTL_GROUP_MIN2 : JS_INTL_GROUP_AUTO, group = group_default;
+    if (get_type_id(value.get()) == LMD_TYPE_STRING) {
+        if (!js_string_equals(value.get(), "true") && !js_string_equals(value.get(), "false")) {
+            for (group = JS_INTL_GROUP_ALWAYS; group <= JS_INTL_GROUP_MIN2; group++)
+                if (js_string_equals(value.get(), js_intl_number_group_names[group])) break;
+            if (group > JS_INTL_GROUP_MIN2) return js_throw_range_error("Invalid NumberFormat useGrouping");
+        }
+    } else if (get_type_id(value.get()) != LMD_TYPE_UNDEFINED)
+        group = js_is_truthy(value.get()) ? JS_INTL_GROUP_ALWAYS : JS_INTL_GROUP_OFF;
+    js_array_push(record.get(), (Item){.item = i2it(group)});
     const char* digits[] = {"minimumIntegerDigits", "minimumFractionDigits", "maximumFractionDigits"};
     int minimum_fraction = 0;
+    bool fraction_options = false;
     for (size_t i = 0; i < 3; i++) {
-        int fallback = i == 0 ? 1 : i == 1 ? 0 : minimum_fraction > 3 ? minimum_fraction : 3;
+        int maximum_default = percent ? 0 : 3;
+        int fallback = i == 0 ? 1 : i == 1 ? 0 : minimum_fraction > maximum_default ? minimum_fraction : maximum_default;
         int low = i == 0 ? 1 : 0, high = i == 0 ? 21 : 100;
         value.set(get_type_id(options.get()) == LMD_TYPE_UNDEFINED ? make_js_undefined() : js_get_key_cstr(options.get(), digits[i]));
         JS_RETURN_IF_ERROR(value.get());
         double number = fallback;
         if (get_type_id(value.get()) != LMD_TYPE_UNDEFINED) {
+            if (i) fraction_options = true;
             value.set(js_to_number(value.get())); JS_RETURN_IF_ERROR(value.get());
             item_try_to_double(value.get(), &number);
             if (!isfinite(number) || number < low || number > high) return js_throw_range_error("Invalid NumberFormat digit option");
@@ -24952,6 +25026,14 @@ static Item js_intl_number_format_construct_body(Item callee, Item* args,
         if (i == 1) minimum_fraction = integer;
         if (i == 2 && integer < minimum_fraction) return js_throw_range_error("Invalid fraction digit range");
         js_array_push(record.get(), (Item){.item = i2it(integer)});
+    }
+    if (compact && get_type_id(options.get()) != LMD_TYPE_UNDEFINED) {
+        const char* significant[] = {"minimumSignificantDigits", "maximumSignificantDigits"};
+        for (const char* name : significant) {
+            value.set(js_get_key_cstr(options.get(), name)); JS_RETURN_IF_ERROR(value.get());
+            if (get_type_id(value.get()) != LMD_TYPE_UNDEFINED)
+                return js_throw_range_error("Explicit significant-digit precision is not supported");
+        }
     }
     value.set(get_type_id(options.get()) == LMD_TYPE_UNDEFINED ? make_js_undefined() : js_get_key_cstr(options.get(), "trailingZeroDisplay"));
     JS_RETURN_IF_ERROR(value.get());
@@ -24963,6 +25045,10 @@ static Item js_intl_number_format_construct_body(Item callee, Item* args,
     }
     js_array_push(record.get(), (Item){.item = b2it(strip)});
     js_array_push(record.get(), make_js_undefined());
+    bool compact_default = compact && !fraction_options;
+    if (compact_default) js_elements_set_int(record.get(), JS_INTL_NUMBER_MAX_FRACTION, (Item){.item = i2it(0)});
+    const bool flags[] = {percent, compact, long_compact, compact_default};
+    for (bool flag : flags) JS_RETURN_IF_ERROR(js_array_push(record.get(), (Item){.item = b2it(flag)}));
     value.set(js_private_key_for_class(constructor.get(), js_name_item("#IntlNumberFormat")));
     JS_RETURN_IF_ERROR(value.get());
     result.set(js_native_private_array_object(JS_CLASS_INTL_NUMBER_FORMAT, value.get(), record.get(), ItemNull));

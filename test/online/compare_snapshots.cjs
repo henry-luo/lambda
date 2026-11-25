@@ -69,6 +69,10 @@ const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g,
     (character) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[character]));
 
 function captureTimingError(capture) {
+    const leftClock = capture?.lambda_script_load_clock ?? '';
+    const rightClock = capture?.browser_script_load_clock ?? '';
+    if (leftClock !== rightClock || (leftClock && leftClock !== 'elapsed'))
+        return 'Capture script load clocks differ or are invalid; recapture both renderers with elapsed loading.';
     const leftOrigin = capture?.lambda_animation_origin ?? '';
     const rightOrigin = capture?.browser_animation_origin ?? '';
     if (leftOrigin !== rightOrigin || (leftOrigin && leftOrigin !== 'post-load'))
@@ -106,6 +110,8 @@ ${row.lambda_settle_ms !== undefined || row.browser_settle_ms !== undefined ?
     `<small>Post-load window: Lambda ${escapeHtml(row.lambda_settle_ms)} ms · Chromium ${escapeHtml(row.browser_settle_ms)} ms.</small>` : ''}
 ${row.lambda_animation_origin || row.browser_animation_origin ?
     `<small>Animation origin: Lambda ${escapeHtml(row.lambda_animation_origin)} · Chromium ${escapeHtml(row.browser_animation_origin)}.</small>` : ''}
+${row.lambda_script_load_clock || row.browser_script_load_clock ?
+    `<small>Script load clock: Lambda ${escapeHtml(row.lambda_script_load_clock)} · Chromium ${escapeHtml(row.browser_script_load_clock)}.</small>` : ''}
 ${row.severity_reason ? `<small>${escapeHtml(row.severity_reason)}</small>` : ''}
 <small>Lambda ${row.lambda_width || '?'} × ${row.lambda_height || '?'} · ${escapeHtml(row.lambda_attempt_utc || 'capture date not recorded')}
  / Chromium ${row.browser_width || '?'} × ${row.browser_height || '?'} · ${escapeHtml(row.browser_attempt_utc || 'capture date not recorded')}</small>
@@ -139,6 +145,7 @@ function main(args = process.argv.slice(2)) {
         const row = {label: page.label, url: page.url, status: 'compared', error: '',
             lambda_snapshot: capture?.lambda_snapshot || '', browser_snapshot: capture?.browser_snapshot || '',
             lambda_attempt_utc: capture?.lambda_attempt_utc || '', browser_attempt_utc: capture?.browser_attempt_utc || ''};
+        if (capture?.browser_http_user_agent) row.browser_http_user_agent = capture.browser_http_user_agent;
         if ((capture?.lambda_settle_ms ?? '') !== '' || (capture?.browser_settle_ms ?? '') !== '') {
             row.lambda_settle_ms = capture?.lambda_settle_ms ?? '';
             row.browser_settle_ms = capture?.browser_settle_ms ?? '';
@@ -146,6 +153,10 @@ function main(args = process.argv.slice(2)) {
         if (capture?.lambda_animation_origin || capture?.browser_animation_origin) {
             row.lambda_animation_origin = capture.lambda_animation_origin || '';
             row.browser_animation_origin = capture.browser_animation_origin || '';
+        }
+        if (capture?.lambda_script_load_clock || capture?.browser_script_load_clock) {
+            row.lambda_script_load_clock = capture.lambda_script_load_clock || '';
+            row.browser_script_load_clock = capture.browser_script_load_clock || '';
         }
         if (!capture || capture.url !== page.url || capture.lambda_ok !== 'true' || capture.browser_ok !== 'true') {
             return {...row, status: 'capture_unavailable', error: capture?.lambda_error || capture?.browser_error || 'missing or stale capture'};

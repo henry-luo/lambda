@@ -40,7 +40,8 @@ mail 0 0 1280 687 420 110
 archive 0 0 960 516
 readability 0 0 1000 537
 book 0 242 1040 558
-midtown 0 0 1280 687 324 541"
+midtown 0 0 1280 687 324 541
+fishing 0 0 1280 687"
 
 echo "$SHOTS" | while read -r name x y w h cx cy; do
     if [ $# -gt 0 ] && ! echo " $* " | grep -q " $name "; then continue; fi

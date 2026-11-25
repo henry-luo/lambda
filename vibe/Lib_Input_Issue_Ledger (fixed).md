@@ -25,6 +25,41 @@ TeX/LaTeX handoff tests, including escaped filenames and a no-request NUL
 check. See `temp/latex-retirement/path-length-native-test.log` and
 `test/latex/test_http_handoff.py`.
 
+<a id="li-115"></a>
+
+### LI-115 — Document and fragment storage incorrectly match element selectors
+
+**Fixed 2026-11-25.** Shared matching ownership follows **D9.1.1v4 /
+D9.1.3v2 / D9.5.6v2**. Document and fragment wrappers reuse DomElement
+storage, so the matcher accepted them as ordinary selector subjects and
+ancestors. On an English document, `:not(:lang(en)) h1` could match its
+untagged document wrapper and apply non-English styles. Slack's heading was
+38px instead of the browser's 50px. A real-URL layout dump and an isolated
+English-document regression reproduce the fault.
+
+The shared compound matcher now excludes those containers from ordinary
+matches. Explicit virtual `:scope` roots remain featureless: allowed logical
+combinations retain scope relationships, while universal, attribute and
+language selectors cannot select a wrapper. Query enumeration cannot return
+the virtual root itself. This follows [Selectors §3.2.1 and §8.4](
+https://drafts.csswg.org/selectors/#featureless) and also fixes `matches`,
+`closest` and stylesheet matching without changing document/fragment identity.
+No tag, locale, site or font result is substituted.
+
+Four of five maintained browser regression groups fail on the prior host;
+all five pass after repair in native AST, MIR and Chromium. Nineteen focused
+C++ tests pass, including document ancestry and virtual-scope combinations.
+Three existing identifier/invalid-selector controls also pass in AST. The
+actual CLI captures keep the same 1000ms elapsed settlement and deadline
+(**D10.1.7**). Slack's final pair restores the three-line heading, with main
+media, cards and consent present: 11.11% to 4.78% mean difference and 22.72%
+to 11.90% changed area. Its high review clears; other accumulated media
+improvements and video-frame differences are not uniquely attributed to this
+selector repair. Evidence: `temp/online-visual-round228/`
+(`language-ancestor-before.log`, `selector-roots-before.log`,
+`selector-unit.log`, `focused-ast.log`, `focused-mir-qualified.log`,
+`browser-fixtures.json`, `slack-view.json`, `qualified-run/`, `after-compare/`).
+
 <a id="li-114"></a>
 
 ### LI-114 — Native JSX and LaTeX writers silently omitted large strings

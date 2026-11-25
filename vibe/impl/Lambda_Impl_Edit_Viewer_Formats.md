@@ -44,7 +44,7 @@ Structured property values wrap in an editable multiline control whose height
 follows its content. Dragging a separator adjusts the shared name/value split.
 The existing single-line commit semantics remain on formats that require them
 (D9.3.4, D10.2.5). Radiant's wrapped caret and selection geometry are tracked
-under RI-239. The focused structured-editor selection passes 83 replays.
+under RI-244. The focused structured-editor selection passes 83 replays.
 
 ## Shared document presentation — 2026-11-25
 

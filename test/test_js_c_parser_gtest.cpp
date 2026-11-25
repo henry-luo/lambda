@@ -396,6 +396,82 @@ TEST(JsCParser, ReportsContextAndLineTerminatorErrors) {
     EXPECT_EQ(error.code, JS_PARSE_ERROR_CONTEXT);
 }
 
+TEST(JsCParser, BoundsNestedDefaultExpressionArrowProbes) {
+    enum { NESTING_DEPTH = 64 };
+    char source[1024];
+    const bool arrow_modes[] = {false, true};
+    for (bool arrow : arrow_modes) {
+        const char* prefix = arrow ? "const make=(value=" : "const value=";
+        size_t length = strlen(prefix);
+        memcpy(source, prefix, length);
+        for (int i = 0; i < NESTING_DEPTH; i++) {
+            memcpy(source + length, "(item=", 6);
+            length += 6;
+        }
+        source[length++] = '1';
+        for (int i = 0; i < NESTING_DEPTH; i++) source[length++] = ')';
+        const char* suffix = arrow ? ")=>value;" : ";";
+        memcpy(source + length, suffix, strlen(suffix) + 1);
+        length += strlen(suffix);
+        JsParseError error = {};
+        EXPECT_EQ(js_parser_parse_source(source, length, JS_PARSE_SCRIPT,
+            NULL, NULL, NULL, &error), JS_PARSE_OK)
+            << (error.message ? error.message : "");
+    }
+}
+
+TEST(JsCParser, PreservesComplexArrowParameterLexicalGoals) {
+    const char* cases[] = {
+        "const f=(x=/\\)/)=>x;",
+        "const f=(x=`a${(() => ')')()}`)=>x;",
+        "const f=(x='())')=>x;",
+        "const f=(x=(()=>({value:1}))())=>x.value;",
+        "const f=(x=function(){return /\\)/;})=>x();",
+        "const f=(x=1/2)=>x;",
+    };
+    for (const char* source : cases) {
+        JsParseError error = {};
+        EXPECT_EQ(js_parser_parse_source(source, strlen(source), JS_PARSE_SCRIPT,
+            NULL, NULL, NULL, &error), JS_PARSE_OK)
+            << source << ": " << (error.message ? error.message : "");
+    }
+}
+
+TEST(JsCParser, KeepsControlTargetsInsideTheirFunctionOrStaticBody) {
+    const struct { const char* source; JsParseStatus status; } cases[] = {
+        {"outer: { function f(){ outer: { break outer; } } break outer; }", JS_PARSE_OK},
+        {"outer: { const f=function(){ outer: { break outer; } }; break outer; }", JS_PARSE_OK},
+        {"outer: { const f=()=>{ outer: { break outer; } }; break outer; }", JS_PARSE_OK},
+        {"outer: { const o={method(){ outer: { break outer; } }}; break outer; }", JS_PARSE_OK},
+        {"outer: { const o={get x(){ outer: { break outer; } return 1; }}; break outer; }", JS_PARSE_OK},
+        {"outer: { class C { method(){ outer: { break outer; } } } break outer; }", JS_PARSE_OK},
+        {"outer: { async function* f(){ outer: for(;;){ yield 1; break outer; } } break outer; }", JS_PARSE_OK},
+        {"outer: { class C { static { outer: { break outer; } } } break outer; }", JS_PARSE_OK},
+        {"outer: for(;;){ function f(){ inner: while(false){ continue inner; } } continue outer; }", JS_PARSE_OK},
+        {"while(false){ function f(){ while(true){ break; } } break; }", JS_PARSE_OK},
+        {"outer: while(false){ const f=()=>({run(){ outer: { break outer; } }}); continue outer; }", JS_PARSE_OK},
+        {"function f(){ class C { static {} } return 1; }", JS_PARSE_OK},
+        {"outer: { outer: {} }", JS_PARSE_ERROR},
+        {"outer: { function f(){ break outer; } }", JS_PARSE_ERROR},
+        {"outer: while(false){ const f=()=>{ continue outer; }; }", JS_PARSE_ERROR},
+        {"while(false){ const f=()=>{ break; }; }", JS_PARSE_ERROR},
+        {"while(false){ function f(){ continue; } }", JS_PARSE_ERROR},
+        {"switch(1){case 1: const o={method(){ break; }}; }", JS_PARSE_ERROR},
+        {"outer: { class C { static { break outer; } } }", JS_PARSE_ERROR},
+        {"outer: while(false){ class C { static { continue outer; } } }", JS_PARSE_ERROR},
+        {"while(false){ class C { static { break; } } }", JS_PARSE_ERROR},
+        {"function f(){ class C { static { return; } } }", JS_PARSE_ERROR},
+        {"outer: { continue outer; }", JS_PARSE_ERROR},
+        {"while(false){ break missing; }", JS_PARSE_ERROR},
+    };
+    for (const auto& entry : cases) {
+        JsParseError error = {};
+        EXPECT_EQ(js_parser_parse_source(entry.source, strlen(entry.source),
+            JS_PARSE_SCRIPT, NULL, NULL, NULL, &error), entry.status)
+            << entry.source << ": " << (error.message ? error.message : "");
+    }
+}
+
 TEST(JsCParser, RejectsUnclosedAndInvalidSourcesAsIncompleteOrError) {
     JsParseError error = {};
     EXPECT_EQ(js_parser_parse_source("function f() {", 14, JS_PARSE_SCRIPT,

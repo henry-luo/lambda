@@ -221,6 +221,18 @@ static void dom_walk_elements(DomNode* node, DomElementVisit visit, void* ctx) {
     }
 }
 
+static bool dom_subtree_has_frames(DomNode* node) {
+    DomElement* element = node ? node->as_element() : nullptr;
+    if (!element) return false;
+    bool found = dom_element_is_html_tag(element, MARKUP_NAME_IFRAME);
+    dom_walk_elements(element->first_child, [](DomElement* child, void* context) {
+        bool* found = (bool*)context;
+        if (!*found) *found = dom_element_is_html_tag(child, MARKUP_NAME_IFRAME);
+        return !*found;
+    }, &found);
+    return found;
+}
+
 static void _collect_form_controls_rec(DomNode* node, Item arr);
 static bool _is_listed_form_control(DomElement* elem);
 static bool _get_selectedness(DomElement* opt);
@@ -474,9 +486,9 @@ JS_FORWARD_EXPRESSION(bool, dom_is_host_driven_loop, (void), (_js_host_driven_lo
 
 static Item js_create_document_fonts_object(void) {
     RootFrame roots(2);
-    Rooted<Item> fonts(roots, js_new_object());
-    // Font loading is complete before scripts execute, so expose the settled
-    // promise rather than a then-only object that breaks chained handlers.
+    // font-set listeners use the shared EventTarget registry, not own method shims.
+    Rooted<Item> fonts(roots, js_create_event_target());
+    // retain the existing ready-promise policy; font-resource completion is separate.
     // promise creation and property-name interning can collect either unpublished value (D6.3.3).
     Rooted<Item> ready(roots, dom_realm_promise_resolve(make_js_undefined()));
     dom_realm_set_cstr(fonts.get(), "ready", ready.get());
@@ -1242,6 +1254,8 @@ static bool dom_remove_and_update_slots(DomElement* parent, DomNode* child,
     bool (*remove)(DomElement*, DomNode*)) {
     if (!parent || !child) return false;
     DomDocument* doc = parent->doc;
+    bool frames_changed = js_active_runtime_state && doc == _js_main_document &&
+        dom_node_is_connected(parent) && dom_subtree_has_frames(child);
     DomNodeRef detached_slot_tree = {};
     if (doc && doc->js.has_shadow_roots && child->is_element() && dom_shadow_root(parent)) {
         // A removed subtree may contain slots whose previous assignment must clear.
@@ -1253,6 +1267,7 @@ static bool dom_remove_and_update_slots(DomElement* parent, DomNode* child,
         dom_slots_after_child_change(parent);
         if (DomNode* detached = detached_slot_tree.address)
             dom_update_slots_in_tree(detached);
+        if (frames_changed) dom_install_window_frames_global();
     }
     if (detached_slot_tree.address) dom_node_unpin(doc, detached_slot_tree, DOM_NODE_PIN_RECONCILE);
     return removed;
@@ -1290,6 +1305,9 @@ static inline void dom_post_insert(DomNode* parent, DomNode* node,
         dom_record_mutation_detail(DOM_JS_MUTATION_CHILD_INSERT, node, parent, 0);
     }
     if (node && dom_node_is_connected(node)) {
+        // indexed Window access must see inserted frames before scripts or connection callbacks run.
+        if (js_active_runtime_state && document == _js_main_document && dom_subtree_has_frames(node))
+            dom_install_window_frames_global();
         if (document && document->js.prepare_inline_script) {
             dom_enqueue_script_reaction(document, parent);
             dom_enqueue_connected_script_tree(document, node);
@@ -3487,6 +3505,7 @@ struct JsDomForeignDocumentRuntimeState {
     int doc_with_window_count = 0;
     IframeContentEntry iframe_cache[IFRAME_CACHE_SIZE] = {};
     int iframe_cache_count = 0;
+    int64_t published_frame_count = 0;
     DomElement* pending_iframe_loads[16] = {};
     DomNodeRef pending_iframe_refs[16] = {};
     DomDocument* pending_iframe_docs[16] = {};
@@ -4060,6 +4079,14 @@ extern "C" Item dom_collect_frame_windows_array(void) {
         dom_collect_frame_windows(doc->root, frames.get());
     }
     return frames.get();
+}
+
+extern "C" int64_t dom_update_window_frame_count(int64_t count) {
+    if (!dom_foreign_document_state_ensure()) return 0;
+    auto* state = dom_foreign_document_rt_state;
+    int64_t previous = state->published_frame_count;
+    state->published_frame_count = count;
+    return previous;
 }
 
 
@@ -6599,6 +6626,8 @@ static String* uppercase_tag_name(const char* tag_name) {
     if (upper != buf) mem_free(upper);
     return result;
 }
+
+static DomElement* dom_html_element_receiver(Item receiver);
 
 static int64_t dom_text_measure(DomNode* node) {
     if (!node) return 0;
@@ -10338,7 +10367,10 @@ extern "C" Item dom_core_node_name(Item n) {
     // tag names: uppercasing them yields "#DOCUMENT", which no DOM exposes
     // (ESO93).
     if (elem->tag_name() && elem->tag_name()[0] == '#') return js_name_item(elem->tag_name());
-    return (Item){.item = s2it(uppercase_tag_name(elem->tag_name()))};
+    // only HTML-namespace elements in an HTML document have uppercase qualified names.
+    if (elem->doc && !elem->doc->xml_document && dom_html_element_receiver(n))
+        return (Item){.item = s2it(uppercase_tag_name(elem->tag_name()))};
+    return js_name_item(elem->tag_name());
 }
 
 extern "C" Item dom_core_node_value(Item n) {
@@ -10812,9 +10844,9 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         }
     }
 
-    // tagName (uppercased per spec)
+    // tagName and element nodeName share the document/namespace case policy.
     if (prop_id == JS_DOM_PROP_TAG_NAME) {
-        return (Item){.item = s2it(uppercase_tag_name(elem->tag_name()))};
+        return dom_core_node_name(elem_item);
     }
 
     // localName excludes the qualified XML prefix while preserving parsed name case.
@@ -14413,7 +14445,8 @@ extern "C" Item dom_document_open_bridge(void* doc_ptr) {
         // clearing only native links lets the next Mark-aware write resurrect the old body.
         dom_replace_inner_html(body, strview_init("", 0), true);
     }
-    return js_get_document_object_value();
+    // chaining open().write() must retain the receiving document, including iframe documents.
+    return doc_to_proxy_item(doc);
 }
 
 extern "C" Item dom_document_write_bridge(void* doc_ptr, Item text_arg) {

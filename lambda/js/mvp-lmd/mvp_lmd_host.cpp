@@ -80,14 +80,14 @@ static Item host_console_group(Context* context, MvpLmdProgram* program,
 static Item host_console_group_end(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item, Item) {
     return js_console_groupEnd_fn();
 }
-struct MvpLmdConsoleLabelBinding { const char* name; Item (*call)(Item); };
-static Item host_console_label(Context*, MvpLmdProgram*, Item* arguments, uint64_t count, Item self, Item, Item) {
-    const auto* binding = (const MvpLmdConsoleLabelBinding*)((MvpLmdNativeCallable*)self.function)->state;
+struct MvpLmdConsoleArgumentBinding { const char* name; Item (*call)(Item); bool coerce_label = true; };
+static Item host_console_argument(Context*, MvpLmdProgram*, Item* arguments, uint64_t count, Item self, Item, Item) {
+    const auto* binding = (const MvpLmdConsoleArgumentBinding*)((MvpLmdNativeCallable*)self.function)->state;
     RootFrame roots(1);
     if (!roots.valid()) return ItemError;
     Rooted<Item> label(roots, count ? arguments[0] : make_js_undefined());
-    // shared console records consume primitives; object coercion belongs to MVP.
-    if (get_type_id(label.get()) != LMD_TYPE_UNDEFINED)
+    // counters/timers convert labels; trace forwards data without observable coercion.
+    if (binding->coerce_label && get_type_id(label.get()) != LMD_TYPE_UNDEFINED)
         label.set(mvp_lmd_primitive_to_string(label.get()));
     return item_is_error(label.get()) ? label.get() : binding->call(label.get());
 }
@@ -308,15 +308,17 @@ Item mvp_lmd_host_initialize(MvpLmdProgram* program, MvpLmdHostState* state,
         if (!native_realm) result = mvp_lmd_named_set(state->values[LMD_HOST_PERFORMANCE], "timeOrigin",
             push_d(js_performance_time_origin_ms()));
         if (item_is_error(result)) return result;
-        static const MvpLmdConsoleLabelBinding labels[] = {
+        static const MvpLmdConsoleArgumentBinding console_arguments[] = {
             {"count", js_console_count_fn}, {"countReset", js_console_countReset_fn},
             {"time", js_console_time_fn}, {"timeEnd", js_console_timeEnd_fn},
-            {"timeLog", js_console_timeLog_fn}
+            {"timeLog", js_console_timeLog_fn},
+            // client instrumentation binds this native method in MVP realms too.
+            {"trace", js_console_trace_fn, false}
         };
-        for (const auto& binding : labels) {
+        for (const auto& binding : console_arguments) {
             if (native_realm) break;
             result = mvp_lmd_named_set(state->values[LMD_HOST_CONSOLE], binding.name,
-                mvp_lmd_native_function(program, (void*)&binding, host_console_label, 0, binding.name));
+                mvp_lmd_native_function(program, (void*)&binding, host_console_argument, 0, binding.name));
             if (item_is_error(result)) return result;
         }
     }

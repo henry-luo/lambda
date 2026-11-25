@@ -58,6 +58,7 @@ typedef struct JsParser {
         bool iteration;
     } labels[JS_MAX_PARSE_DEPTH];
     uint32_t label_depth;
+    uint32_t label_base;
 } JsParser;
 
 typedef struct JsParserProbe {
@@ -397,7 +398,7 @@ static bool js_parser_parser_label_matches(JsParser* parser, JsToken label,
 static bool js_parser_parser_label_find(JsParser* parser, JsToken label,
         bool* iteration_out) {
     if (!parser || label.span.end_byte <= label.span.start_byte) return false;
-    for (uint32_t i = parser->label_depth; i > 0; i--) {
+    for (uint32_t i = parser->label_depth; i > parser->label_base; i--) {
         if (js_parser_parser_label_matches(parser, label, i - 1)) {
             if (iteration_out) *iteration_out = parser->labels[i - 1].iteration;
             return true;
@@ -638,16 +639,37 @@ static bool js_parser_parse_type_before_arrow(JsParser* parser) {
     return ok;
 }
 
+enum JsParserBodyKind { JS_BODY_FUNCTION, JS_BODY_ARROW, JS_BODY_STATIC_BLOCK };
+
+static bool js_parser_parse_control_body(JsParser* parser, enum JsParserBodyKind kind) {
+    uint32_t old_function = parser->function_depth, old_loop = parser->loop_depth;
+    uint32_t old_switch = parser->switch_depth, old_label_base = parser->label_base;
+    bool old_async = parser->in_async_function, old_generator = parser->in_generator;
+    // nested bodies cannot jump to outer control targets or overwrite their label entries.
+    parser->label_base = parser->label_depth;
+    parser->loop_depth = parser->switch_depth = 0;
+    parser->function_depth = kind == JS_BODY_STATIC_BLOCK ? 0 : old_function + 1;
+    if (kind == JS_BODY_STATIC_BLOCK) {
+        parser->in_async_function = parser->in_generator = false;
+    }
+    bool ok = kind == JS_BODY_ARROW && parser->current.kind != JS_TOK_LBRACE
+        ? js_parser_parse_expression(parser, JS_BP_ASSIGNMENT, NULL) : js_parser_parse_block(parser);
+    parser->function_depth = old_function;
+    parser->loop_depth = old_loop;
+    parser->switch_depth = old_switch;
+    parser->label_base = old_label_base;
+    parser->in_async_function = old_async;
+    parser->in_generator = old_generator;
+    return ok;
+}
+
 static bool js_parser_parse_arrow_body_with_context(JsParser* parser, bool async,
         bool generator) {
     bool old_async = parser->in_async_function;
     bool old_generator = parser->in_generator;
     parser->in_async_function = async;
     parser->in_generator = generator;
-    parser->function_depth++;
-    bool ok = parser->current.kind == JS_TOK_LBRACE
-        ? js_parser_parse_block(parser) : js_parser_parse_expression(parser, JS_BP_ASSIGNMENT, NULL);
-    parser->function_depth--;
+    bool ok = js_parser_parse_control_body(parser, JS_BODY_ARROW);
     parser->in_async_function = old_async;
     parser->in_generator = old_generator;
     return ok;
@@ -949,9 +971,7 @@ static bool js_parser_parse_object(JsParser* parser, SourceSpan* js_parser_span_
                     (method_flags & JS_REDUCTION_FLAG_ASYNC) != 0;
                 parser->in_generator =
                     (method_flags & JS_REDUCTION_FLAG_GENERATOR) != 0;
-                parser->function_depth++;
-                bool body_ok = js_parser_parse_block(parser);
-                parser->function_depth--;
+                bool body_ok = js_parser_parse_control_body(parser, JS_BODY_FUNCTION);
                 parser->in_async_function = old_async;
                 parser->in_generator = old_generator;
                 if (!body_ok) return false;
@@ -1071,9 +1091,7 @@ static bool js_parser_parse_function(JsParser* parser, bool declaration, bool as
         if (!js_parser_parse_type(parser, JS_BP_SEQUENCE, NULL)) return false;
         has_return_type = true;
     }
-    parser->function_depth++;
-    bool ok = js_parser_parse_block(parser);
-    parser->function_depth--;
+    bool ok = js_parser_parse_control_body(parser, JS_BODY_FUNCTION);
     parser->in_async_function = old_async;
     parser->in_generator = old_generator;
     if (!ok) return false;
@@ -1114,7 +1132,7 @@ static bool js_parser_parse_class_member(JsParser* parser, uint32_t* count_out) 
         flags |= JS_REDUCTION_FLAG_STATIC;
         js_parser_parser_advance(parser);
         if (parser->current.kind == JS_TOK_LBRACE) {
-            if (!js_parser_parse_block(parser)) return false;
+            if (!js_parser_parse_control_body(parser, JS_BODY_STATIC_BLOCK)) return false;
             if (!js_parser_parser_reduce(parser, JS_REDUCE_CLASS_MEMBER,
                     JS_REDUCTION_STATIC_BLOCK,
                     js_parser_span_from_start(first, parser->previous.span), first,
@@ -1178,9 +1196,7 @@ static bool js_parser_parse_class_member(JsParser* parser, uint32_t* count_out) 
         bool old_generator = parser->in_generator;
         parser->in_async_function = (flags & JS_REDUCTION_FLAG_ASYNC) != 0;
         parser->in_generator = (flags & JS_REDUCTION_FLAG_GENERATOR) != 0;
-        parser->function_depth++;
-        bool body_ok = js_parser_parse_block(parser);
-        parser->function_depth--;
+        bool body_ok = js_parser_parse_control_body(parser, JS_BODY_FUNCTION);
         parser->in_async_function = old_async;
         parser->in_generator = old_generator;
         if (!body_ok) return false;
@@ -1304,7 +1320,29 @@ static void js_parser_parser_probe_end(JsParser* parser, const JsParserProbe* pr
     if (probe->parser.error) *probe->parser.error = probe->error;
 }
 
+static bool js_parser_parser_maybe_arrow_head(JsParser* parser) {
+    if (parser->mode & (JS_PARSE_TYPESCRIPT | JS_PARSE_JSX)) return true;
+    JsLexer lexer = parser->current_start;
+    uint32_t parentheses = 1;
+    for (;;) {
+        JsToken token = js_lexer_next(&lexer);
+        // uncertain lexical goals and template tails retain the full grammar probe.
+        if (token.kind == JS_TOK_ERROR || token.kind == JS_TOK_TEMPLATE ||
+                token.kind == JS_TOK_SLASH || token.kind == JS_TOK_SLASH_EQUAL ||
+                token.kind == JS_TOK_REGEXP) return true;
+        if (token.kind == JS_TOK_EOF) return false;
+        if (token.kind == JS_TOK_LPAREN) parentheses++;
+        else if (token.kind == JS_TOK_RPAREN && --parentheses == 0) {
+            token = js_lexer_next(&lexer);
+            return token.kind == JS_TOK_ARROW && !token.line_terminator_before;
+        }
+        js_lexer_set_goal(&lexer, js_parser_parser_goal_after(token.kind));
+    }
+}
+
 static bool js_parser_parser_has_arrow_head(JsParser* parser) {
+    // nested parenthesized defaults otherwise reparse exponentially before discovering no arrow.
+    if (!js_parser_parser_maybe_arrow_head(parser)) return false;
     JsParserProbe probe;
     js_parser_parser_probe_begin(parser, &probe);
     bool valid = js_parser_parse_parameter_list_contents(parser, NULL);

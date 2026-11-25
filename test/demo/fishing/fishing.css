@@ -1,0 +1,15 @@
+html, body { margin: 0; height: 100%; background: #6f9a4a; overflow: hidden; }
+body { font-family: -apple-system, "Helvetica Neue", Arial, sans-serif; color: #263b39; }
+.fishing { position: relative; width: 100vw; height: 100vh; }
+.card { position: absolute; left: 22px; top: 18px; padding: 10px 16px 9px; border-radius: 14px;
+    background: rgba(253, 248, 236, 0.86); box-shadow: 0 2px 10px rgba(20, 50, 45, 0.18); }
+.card h1 { margin: 0; font-size: 19px; letter-spacing: 0.02em; color: #24514b; }
+.card p { margin: 1px 0 0; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: #6c8a7c; }
+.badge { position: absolute; right: 26px; bottom: 26px; display: flex; align-items: center; gap: 8px;
+    padding: 9px 16px 9px 13px; border-radius: 16px; background: #fbf5e6; color: #2f5f58;
+    font-size: 22px; font-weight: 700; box-shadow: 0 2px 10px rgba(20, 50, 45, 0.22); transform: scale(1); }
+.toast { position: absolute; left: 50%; top: 26px; padding: 10px 20px; border-radius: 16px; background: #fbf5e6;
+    color: #24514b; font-size: 18px; font-weight: 600; box-shadow: 0 3px 14px rgba(20, 50, 45, 0.25);
+    opacity: 0; transform: translateX(-50%) scale(0.8); white-space: nowrap; }
+.hint { position: absolute; left: 50%; bottom: 22px; margin: 0; transform: translateX(-50%); padding: 7px 14px; border-radius: 12px;
+    background: rgba(20, 52, 48, 0.5); color: #f3f6ef; font-size: 14px; letter-spacing: 0.02em; white-space: nowrap; }
