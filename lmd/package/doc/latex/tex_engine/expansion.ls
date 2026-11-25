@@ -592,6 +592,7 @@ fn expand_one(st: State, t, budget) State^ {
                 else if (macro.source_mapping_guard == "bool_expr") {*:st, expl3_bool_expr_seen:true}
                 else if (macro.source_mapping_guard == "str_case") {*:st, expl3_str_case_seen:true}
                 else if (macro.source_mapping_guard == "seq_map") {*:st, expl3_seq_map_seen:true}
+                else if (macro.source_mapping_guard == "tl_map") {*:st, expl3_tl_map_seen:true}
                 else if (macro.source_mapping_guard == "int_math") {*:st, expl3_int_math_seen: true} else st;
             let traced = if (st.prefix_scan == true) {*:marked, prefixed_macro_seen: true} else marked;
             expand_macro(traced, macro, budget, t)
@@ -6663,6 +6664,7 @@ pub fn enable_script_expl3(st: State) State^ {
         {name: "if_predicate:w", kind: "primitive", value: "ifodd"},
         {name: "s__str_mark", kind: "primitive", value: "relax"},
         {name: "s__str_stop", kind: "primitive", value: "relax"},
+        {name: "s__tl_stop", kind: "primitive", value: "relax"},
         {name: "if_int_compare:w", kind: "primitive", value: "ifnum"},
         {name: "if_int_odd:w", kind: "primitive", value: "ifodd"},
         {name: "int_value:w", kind: "primitive", value: "number"},
@@ -6729,6 +6731,8 @@ pub fn enable_script_expl3(st: State) State^ {
     let property_in_body="\\__prop_if_flat:NTF#1{\\exp_after:wN\\prop_map_tokens:Nn\\exp_after:wN#1{\\exp_after:wN\\__prop_if_in_flat:nnn\\exp_after:wN{\\tl_to_str:n{#2}}}\\prg_return_false:}{\\exp_after:wN\\__prop_get_linked:w#1{#2}\\use_none:n\\prg_return_true:\\prg_return_false:}\\exp_end:";
     let prop_map_terminator="\\__prop_pair:wn\\fi:\\prop_map_break:\\s__prop{}";
     let prop_map_steps=join([for(i in [2,4,6,8]) "\\if_false:#" ++ string(i) ++ "\\fi:\\use:n{#1}{#" ++ string(i) ++ "}{#" ++ string(i+1) ++ "}"],"");
+    let tl_map_stops = repeated("\\s__tl_stop", 8)^;
+    let tl_map_steps = join([for (i in [2,3,4,5,6,7,8,9]) "#1{#" ++ string(i) ++ "}"], "")^;
     // Preserve definitions supplied by the caller's kernel during bootstrap.
     let property_support=if(support.definitions["control:c_empty_prop"]!=null) support else
         assign_meaning(support,"control:c_empty_prop",expl3.token_list([control_token("s__prop"),control_token("__prop_chk:w")])^,true)^;
@@ -6849,6 +6853,15 @@ pub fn enable_script_expl3(st: State) State^ {
         {source:"\\__seq_map_indexed:Nw#1#2;#3\\__seq_item:n#4{#3#1{#2}{#4}\\exp_after:wN\\__seq_map_indexed:Nw\\exp_after:wN#1\\int_value:w\\int_eval:w1+#2;}",protected_flag:false},
         {source:"\\clist_map_break:{\\prg_map_break:Nn\\clist_map_break:{}}",protected_flag:false},
         {source:"\\clist_map_break:n{\\prg_map_break:Nn\\clist_map_break:}",protected_flag:false},
+        {source:"\\tl_map_break:{\\prg_map_break:Nn\\tl_map_break:{}}",protected_flag:false},
+        {source:"\\tl_map_break:n{\\prg_map_break:Nn\\tl_map_break:}",protected_flag:false},
+        {source:"\\tl_map_function:nN#1#2{\\__tl_map_function:Nnnnnnnnn#2#1" ++ tl_map_stops ++ "\\prg_break_point:Nn\\tl_map_break:{}}",protected_flag:false,source_mapping_guard:"tl_map"},
+        {source:"\\tl_map_function:NN{\\exp_args:No\\tl_map_function:nN}",protected_flag:false,source_mapping_guard:"tl_map"},
+        {source:"\\__tl_map_function:Nnnnnnnnn#1#2#3#4#5#6#7#8#9{\\__tl_use_none_delimit_by_s_stop:w#9\\__tl_map_function_end:w\\s__tl_stop" ++ tl_map_steps ++ "\\__tl_map_function:Nnnnnnnnn#1}",protected_flag:false},
+        {source:"\\__tl_map_function_end:w\\s__tl_stop#1#2{\\__tl_use_none_delimit_by_s_stop:w#2\\tl_map_break:\\s__tl_stop#1{#2}\\__tl_map_function_end:w\\s__tl_stop}",protected_flag:false},
+        {source:"\\__tl_use_none_delimit_by_s_stop:w#1\\s__tl_stop{}",protected_flag:false},
+        {source:"\\tl_map_inline:nn#1#2{\\int_gincr:N\\g__kernel_prg_map_int\\cs_gset_protected:cpn{__tl_map_\\int_use:N\\g__kernel_prg_map_int :w}##1{#2}\\exp_args:Nc\\__tl_map_function:Nnnnnnnnn{__tl_map_\\int_use:N\\g__kernel_prg_map_int :w}#1" ++ tl_map_stops ++ "\\prg_break_point:Nn\\tl_map_break:{\\int_gdecr:N\\g__kernel_prg_map_int}}",protected_flag:true,source_mapping_guard:"tl_map",argument_unqualified:true},
+        {source:"\\tl_map_inline:Nn{\\exp_args:No\\tl_map_inline:nn}",protected_flag:true,source_mapping_guard:"tl_map",argument_unqualified:true},
         {source:"\\seq_map_function:NN#1#2{\\exp_after:wN\\use_i_ii:nnn\\exp_after:wN\\__seq_map_function:Nw\\exp_after:wN#2#1\\prg_break:\\__seq_item:n{}\\__seq_item:n{}\\__seq_item:n{}\\__seq_item:n{}\\prg_break_point:\\prg_break_point:Nn\\seq_map_break:{}}",protected_flag:false},
         {source:"\\__seq_map_function:Nw#1#2\\__seq_item:n#3#4\\__seq_item:n#5#6\\__seq_item:n#7#8\\__seq_item:n#9{#2#1{#3}#4#1{#5}#6#1{#7}#8#1{#9}\\__seq_map_function:Nw#1}",protected_flag:false},
         {source:"\\seq_map_function:cN{\\exp_args:Nc\\seq_map_function:NN}",protected_flag:false},
@@ -7351,7 +7364,7 @@ pub fn resume(st: State, source: string, name: string = "<input>", budget: int =
             mathchardef_emission_seen: false,
             expl3_tl_head_seen: false, expl3_tl_tail_seen: false, expl3_keyval_seen: false, expl3_keys_seen:false,
             expl3_clist_map_seen:false, expl3_bool_expr_seen:false, expl3_tl_replace_seen:false, expl3_str_case_seen:false,
-            expl3_seq_map_seen:false,
+            expl3_seq_map_seen:false, expl3_tl_map_seen:false,
             expl3_exp_args_once_seen: false, expl3_exp_args_value_seen: false, expl3_exp_args_f_seen: false,
             sources: [*st.sources, {id: id, name: name, origin: origin, data: source}]};
         run(resumed, budget)

@@ -34,12 +34,20 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Expl3 token-list mapping, 2026-11-26:** Script preloads the native
+  inline and expandable function maps with their eight-item scanner, break
+  points and global nesting counter (D10.2.2v2). TeX Live comparisons cover
+  groups, ignored spaces, the scanner boundary, nested maps and breaks.
+  The simple csvsimple probe now completes TeX expansion but the document
+  digester rejects boolean-expression source mapping. Constructor argument
+  handling and token-map source mapping remain unsupported.
+
 - **Expl3 Roman integer conversion, 2026-11-26:** Script preloads the native
   lower- and upper-case conversion macros and their letter emitters
   (D10.2.2v2). TeX Live comparisons cover arithmetic, zero and negative
   inputs, output category codes and generated control-sequence names. This
-  fixes csvsimple's missing `endcsname`; its next missing operation is
-  `tl_map_inline:nn`. Integer source mapping remains explicitly unsupported.
+  fixes csvsimple's missing `endcsname`; the later expansion outcome is in the
+  token-map checkpoint above. Integer source mapping remains unsupported.
 
 - **Expl3 dynamic token-list assignment, 2026-11-26:** Script preloads the
   standard local/global `:cn` and `:cx` setters (D10.2.2v2). TeX Live
