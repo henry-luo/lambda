@@ -34,6 +34,34 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Token and source reconstruction cost, 2026-11-26:** A symbolized optimized
+  profile showed repeated nested contract admission while the output token
+  array grew. Token emission and reconstructed segments now use concatenation
+  that retains the existing array certificate; reconstruction also caches
+  immutable source/output bytes, derives prefix lengths from its last segment,
+  and searches ordered source segments by offset (D10.2.2v2, D4.3.3). Exact
+  source-mapping and document fixtures pass, including both tiers with forced
+  GC and poisoning. A reconstruction matrix that timed out now passes in
+  2.4 seconds after sharing its unchanged kernel preload. With the same release
+  host, single samples for the algebra parse changed from 78.94 to 41.97
+  seconds, and the complete 31-document corpus changed from 226.31 to 186.60
+  seconds while matching the same golden byte for byte. These are single
+  samples, not a statistical benchmark; the 60-second corpus timeout remains
+  open. Logs and profiles are under `temp/latex-retirement/`.
+
+- **Full phase-three corpus, 2026-11-26:** The complete 31-document release
+  run now matches the existing golden byte for byte (SHA-256
+  `dd575e39107edf5a83033846084f77a62a2d481b9ea9c370e70b855920eedd76`).
+  It took 226.31 seconds, exceeding the unchanged 60-second GTest limit. The
+  process was observed using about 3.2 GB RSS near completion; the sandbox
+  denied `time -l`'s final sysctl, so that value is an observation rather than
+  a reported peak. `temp/latex-retirement/corpus-release-after.out` and
+  `corpus-release-after.err` preserve the run (D10.2.2v2). A separate release
+  measurement of the 35 KB algebra document took 78.94 seconds to parse and
+  82.26 seconds to parse and render. These are single samples; they show the
+  document exceeds the limit even without the rest of the corpus. An optimized
+  profiling build is in progress to locate the parsing cost.
+
 - **Expl3 sequence splitting, 2026-11-26:** Script now implements local and
   global `seq_set_split` and `seq_set_split_keep_spaces` with top-level token
   delimiters, empty fields and empty-delimiter token mapping (D10.2.2v2).

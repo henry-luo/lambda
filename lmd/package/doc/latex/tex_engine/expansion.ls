@@ -2622,7 +2622,7 @@ fn terminal_message(st: State, budget, is_error) State^ {
 fn emit_traced_span(closed, name) any^ {
     let raw = closed.span.tokens;
     if (raw == null or len(raw) == 0) unsupported(closed.state, name)
-    else {*:closed.state, output: [*closed.state.output,
+    else {*:closed.state, output: closed.state.output ++ [
         {*:raw[0], echo_span: closed.span, echo_count: len(raw)}, *slice(raw, 1, len(raw))^]}
 }
 fn emit_spacing(st: State, original, command, budget) State^ {
@@ -2639,7 +2639,7 @@ fn emit_spacing(st: State, original, command, budget) State^ {
         let value = if (is_glue) glue.format(scanned.value, mu)^
             else dimension.format(scanned.value, if (mu) "mu" else "pt")^;
         let tokens = [control_token(name), brace_token(true), *text_tokens(value), brace_token(false)];
-        {*:closed.state, output: [*closed.state.output,
+        {*:closed.state, output: closed.state.output ++ [
             *[for (token in tokens) {*:token, emit_origin: closed.state.input.last_main_offset}]]}
     }
 }
@@ -2691,7 +2691,7 @@ fn emit_rule(st: State, original, command, budget) State^ {
             else text_tokens(dimension.format(rule.height + if (rule.depth > 0) rule.depth else 0, "pt")^)^;
         let tokens = [control_token("rule"), brace_token(true), *width, brace_token(false),
             brace_token(true), *height, brace_token(false)];
-        {*:closed.state, output: [*closed.state.output,
+        {*:closed.state, output: closed.state.output ++ [
             *[for (token in tokens) {*:token, emit_origin: closed.state.input.last_main_offset}]]}
     }
 }
@@ -2717,7 +2717,7 @@ fn emit_character(st: State, budget) State^ {
         let category = if ((code >= 65 and code <= 90) or (code >= 97 and code <= 122)) 11 else 12;
         let token = {kind: "char", value: chr(code), cat: category, start: -1, end: -1,
             read_offset: scanned.state.input.last_main_offset, read_file: scanned.state.main_file};
-        {*:scanned.state, output: [*scanned.state.output, token]}
+        {*:scanned.state, output: scanned.state.output ++ [token]}
     }
 }
 fn emit_accent(st: State, budget) State^ {
@@ -2742,7 +2742,7 @@ fn emit_accent(st: State, budget) State^ {
             let body = if (character.value == null) [] else text_tokens(raw_character)^;
             let tokens = if (name == null) body else [control_token(name), brace_token(true), *body, brace_token(false)];
             let raw = if (name == null) raw_character else "\\" ++ name ++ "{" ++ raw_character ++ "}";
-            {*:character.state, output: [*character.state.output,
+            {*:character.state, output: character.state.output ++ [
                 *[for (i, token in tokens) {*:token, emit_origin: character.state.input.last_main_offset,
                     *:if (i == 0) {reconstruct_text: raw, reconstruct_count: len(tokens)} else {}}]]}
         }
@@ -4020,7 +4020,7 @@ fn begin_group(st: State, token, explicit) State^ =>
     {*:st, groups: [*st.groups, {definitions: st.definitions, counts: st.counts, dimens: st.dimens, skips: st.skips, muskips: st.muskips, boxes: st.boxes, box_written: {}, toks: st.toks,
         lowercase: st.lowercase, uppercase: st.uppercase, code_tables: st.code_tables, current_font: st.current_font, parameters: st.parameters,
         catcodes: st.input.reader.catcodes, expl_syntax: st.expl_syntax, explicit: explicit, aftergroup: []}],
-        output: if (token == null) st.output else [*st.output, token]}
+        output: if (token == null) st.output else st.output ++ [token]}
 
 // discarded groups execute normally but remove their output on close.
 fn open_discard_scope(st: State) State^ {
@@ -4059,7 +4059,7 @@ fn open_inline_body(opened, prefix, bare, hook) State^ {
     let origin = opened.input.last_main_offset;
     let current = {*:opened, groups: [for (i, scope in opened.groups)
             if (i == depth - 1) {*:scope, inline_box: not bare, inline_bare: bare} else scope],
-        output: [*opened.output, *[for (i, token in prefix) {*:token, emit_origin: origin,
+        output: opened.output ++ [*[for (i, token in prefix) {*:token, emit_origin: origin,
             emit_file: opened.main_file, box_open: charcat(token, 1) and i == len(prefix) - 1}]]};
     if (hook == null) current else inject_box_hook(current, hook)
 }
@@ -4128,7 +4128,7 @@ fn emit_box(st: State, budget, command) State^ {
     let taken = scan_box_reference(st,budget,command)^;
     if (taken.state.issue != null) taken.state
     else {*:taken.state,box_replay_seen:true,
-        output:if(taken.box == null) taken.state.output else [*taken.state.output,
+        output:if(taken.box == null) taken.state.output else taken.state.output ++ [
             *[for (token in taken.box.output) {*:token,box_replayed:true}]]}
 }
 
@@ -4188,7 +4188,7 @@ fn end_group(st: State, token, explicit, environment = false, math = false, reco
             let message = if (explicit) "Extra \\endgroup" else if (depth == 0) "Too many }'s"
                 else "Extra }, or forgotten \\endgroup";
             let diagnosed = record_diagnostic(st, if (explicit) "tex-extra-endgroup" else "tex-extra-brace", message)^;
-            if (explicit) diagnosed else {*:diagnosed, output: [*diagnosed.output,
+            if (explicit) diagnosed else {*:diagnosed, output: diagnosed.output ++ [
                 {*:token, emit_origin: diagnosed.input.last_main_offset}]}
         }
     else {
@@ -4201,9 +4201,9 @@ fn end_group(st: State, token, explicit, environment = false, math = false, reco
             input: stream.push(restored, scope.aftergroup), groups: slice(st.groups, 0, depth - 1),
             output: if (scope.box_target != null) slice(st.output,0,scope.box_start)^
                 else if (scope.discard_output != null) slice(st.output, 0, scope.discard_output)^
-                else if (scope.inline_box == true) [*st.output,
+                else if (scope.inline_box == true) st.output ++ [
                     {*:brace_token(false), emit_origin: st.input.last_main_offset, emit_file: st.main_file, box_close: true}]
-                else if (scope.inline_bare == true or token == null) st.output else [*st.output, token]};
+                else if (scope.inline_bare == true or token == null) st.output else st.output ++ [token]};
         if (scope.box_target == null) returned
         else save_box({*:returned,box_serial:returned.box_serial + 1},scope.box_target,
             {id:returned.box_serial + 1,kind:scope.box_kind,output:captured},scope.box_global)
@@ -4221,7 +4221,7 @@ fn begin_math(st: State, token, display, second = null, run_hook = false) State^
     let hook = if (run_hook) opened.toks[parameter_index(if (display) "everydisplay" else "everymath")] else null;
     {*:opened, groups: math_groups, math_depth: st.math_depth + 1,
         display_math: if (run_hook) display else st.display_math,
-        output: if (second == null) opened.output else [*opened.output, second],
+        output: if (second == null) opened.output else opened.output ++ [second],
         input: if (hook == null) opened.input else stream.push(opened.input, hook)}
 }
 
@@ -4229,7 +4229,7 @@ fn finish_math(st: State, token, second = null, reset_display = true) State^ {
     let ended = end_group(st, null, true, false, true)^;
     if (ended.issue != null) ended else {*:ended, math_depth: if (st.math_depth > 0) st.math_depth - 1 else 0,
         display_math: if (reset_display) false else st.display_math,
-        output: [*ended.output, token, *(if (second == null) [] else [second])]}
+        output: ended.output ++ [token, *(if (second == null) [] else [second])]}
 }
 
 fn math_shift(st: State, token) State^ {
@@ -4254,7 +4254,7 @@ fn latex_math_switch(st: State, token, cmd) State^ {
     else {
         let depth = len(st.groups);
         if (depth > 0 and st.groups[depth - 1].math == true) finish_math(st, token, null, false)
-        else {*:st, output: [*st.output, token]}
+        else {*:st, output: st.output ++ [token]}
     }
 }
 
@@ -4604,7 +4604,7 @@ fn latex_length_command(st: State, original, command, budget) State^ {
         let meaning_value = meaning(scanned,cs);
         let closed = end_main_trace(scanned,original)^;
         let original_tokens = [original,*target.raw,*value.raw];
-        let emitted = if (closed.echo) {*:closed.state,output:[*closed.state.output,
+        let emitted = if (closed.echo) {*:closed.state,output:closed.state.output ++ [
             {*:original,echo_span:closed.span,echo_count:len(original_tokens)},*slice(original_tokens,1,len(original_tokens))]}
             else closed.state;
         if (command == "newlength") {
@@ -4621,7 +4621,7 @@ fn latex_length_command(st: State, original, command, budget) State^ {
                 contains(["int","dimen","glue","mu"],kind);
             let synthetic = [control_token(command),brace_token(true),cs,brace_token(false),
                 brace_token(true),*value.tokens,brace_token(false)];
-            let shown = if (closed.echo) emitted else {*:emitted,output:[*emitted.output,
+            let shown = if (closed.echo) emitted else {*:emitted,output:emitted.output ++ [
                 *[for (token in synthetic) {*:token,emit_origin:emitted.input.last_main_offset}]]};
             let assigned = if (not assignable) shown else {
                 let assignment = [*(if (command == "addtolength") [control_token("advance")] else []),
@@ -4653,7 +4653,7 @@ fn latex_newcounter(st: State, original, budget) State^ {
         let existing = counter_meaning(current, named.name)^;
         if (existing.kind == "register") {
             let closed = end_main_trace(current, original)^;
-            let emitted = if (closed.echo) {*:closed.state, output: [*closed.state.output, original, *named.raw, *opt.raw]} else closed.state;
+            let emitted = if (closed.echo) {*:closed.state, output: closed.state.output ++ [original, *named.raw, *opt.raw]} else closed.state;
             counter_diagnostic(emitted, "latex-counter-defined")
         }
         else {
@@ -4666,7 +4666,7 @@ fn latex_newcounter(st: State, original, budget) State^ {
             let parent = if (opt.present) expand_argument_name(formatted, opt.tokens, budget)^
                 else {state: formatted, name: ""};
             let closed = end_main_trace(parent.state, original)^;
-            let emitted = if (closed.echo) {*:closed.state, output: [*closed.state.output, original, *named.raw, *opt.raw]} else closed.state;
+            let emitted = if (closed.echo) {*:closed.state, output: closed.state.output ++ [original, *named.raw, *opt.raw]} else closed.state;
             if (emitted.issue != null) emitted
             else {*:emitted, counter_resets: if (opt.present)
                 [*emitted.counter_resets, {parent: parent.name, child: named.name}] else emitted.counter_resets,
@@ -4723,9 +4723,9 @@ fn latex_counter_command(st: State, original, command, budget) State^ {
         let raw = [*named.raw, *arg.raw];
         let echo = closed.echo;
         if (stepped.issue != null) stepped
-        else if (echo) {*:stepped, output: [*stepped.output, original, *raw]}
+        else if (echo) {*:stepped, output: stepped.output ++ [original, *raw]}
         else if (contains(stepped.engine_counters, named.name)) stepped
-        else {*:stepped, output: [*stepped.output,
+        else {*:stepped, output: stepped.output ++ [
             *counter_command_tokens(named.name, command, if (has_value and len(arg.tokens) > 0)
                 if (found.kind == "register") text_tokens(string(next)) else arg.tokens else null)]}
     }
@@ -4845,7 +4845,7 @@ fn latex_raw_environment(st: State, original, name, source: map) State^ {
     let input = stream.replace_reader(diagnosed.input,source.index,captured.reader)^;
     let span = {file:original.file,start:original.start,end:captured.end,
         first_seq:original.seq,last_seq:source.reader.seq};
-    {*:diagnosed,input:input,output:[*diagnosed.output,
+    {*:diagnosed,input:input,output:diagnosed.output ++ [
         {*:original,echo_span:span,echo_count:1,raw_environment:name}]}
 }
 
@@ -4860,7 +4860,7 @@ fn latex_begin_regular(st: State, original, argument, named, closed, budget, beg
     }
     else {
         let emitted = environment_output(opened, original, argument.raw, named.name, "begin", closed.echo, closed.span)^;
-        let passed = {*:opened, output: [*opened.output, *emitted]};
+        let passed = {*:opened, output: opened.output ++ emitted};
         if (named.name != "document")
             // native scans passthrough environment arguments in either expansion mode.
             if (passed.math_mode != true) constructor_arguments(passed, budget)^ else passed
@@ -4923,12 +4923,12 @@ fn latex_end(st: State, original, budget) State^ {
                 else ready.groups[depth - 1].environment;
             let diagnosed = record_diagnostic(ready,"latex-env-mismatch",
                 "LaTeX Error: \\begin{" ++ opened ++ "} ended by \\end{" ++ named.name ++ "}")^;
-            {*:diagnosed, output: [*diagnosed.output, *emitted]}
+            {*:diagnosed, output: diagnosed.output ++ emitted}
         }
         else if (ready.groups[depth - 1].passthrough) {
             let emitted = environment_output(ready, original, argument.raw, named.name, "end", closed.echo, closed.span)^;
             let ended = end_group(ready, null, true, true)^;
-            {*:ended, output: [*ended.output, *emitted]}
+            {*:ended, output: ended.output ++ emitted}
         }
         else {*:ready, input: stream.push(ready.input,
             [control_token("end" ++ named.name), {kind: "env-close", value: named.name}])}
@@ -5060,7 +5060,7 @@ fn latex_usepackage(st: State, original, budget) State^ {
                 else if (len(planned.passthrough) > 0)
                     declaration_tokens("usepackage", opts, planned.passthrough, closed.state.input.last_main_offset)^
                 else [];
-            {*:closed.state, output: [*closed.state.output, *passed],
+            {*:closed.state, output: closed.state.output ++ passed,
                 input: stream.push(closed.state.input, planned.loads)}
         }
     }
@@ -5544,7 +5544,7 @@ fn latex_documentclass(st: State, original, budget, cmd) State^ {
             let passed = if (closed.echo)
                 [{*:original, echo_span: closed.span, echo_count: len(raw)}, *slice(raw, 1, len(raw))^]
                 else declaration_tokens("documentclass", opts, [named.name], with_chapter.input.last_main_offset)^;
-            {*:with_chapter, output: [*with_chapter.output, *passed]}
+            {*:with_chapter, output: with_chapter.output ++ passed}
         }
     }
 }
@@ -5578,7 +5578,7 @@ fn latex_verb(st: State, token) State^ {
             let span = {file: token.file, start: token.start, end: scanned.end,
                 first_seq: token.seq, last_seq: source.reader.seq};
             let captured = {*:token, echo_span: span, echo_count: 1, raw_verb: true};
-            {*:st, input: input, raw_inline_seen: true, output: [*st.output, captured]}
+            {*:st, input: input, raw_inline_seen: true, output: st.output ++ [captured]}
         }
     }
 }
@@ -5588,9 +5588,9 @@ fn latex_verb(st: State, token) State^ {
 fn latex_math_raw_group(st: State, token) State^ {
     let arg = stream.raw_argument(st.input)^;
     if (arg.error != null or len(arg.raw) == 0 or not charcat(arg.raw[0],1))
-        {*:st, output:[*st.output,token]}
+        {*:st, output:st.output ++ [token]}
     else {*:st, input:stream.push(arg.stream,[for (part in arg.raw) {*:part,noexpand:true}]),
-        output:[*st.output,token]}
+        output:st.output ++ [token]}
 }
 
 fn raw_inline_command(name) => contains(["lstinline", "Verb", "mint", "mintinline"],name)
@@ -5598,7 +5598,7 @@ fn raw_inline_command(name) => contains(["lstinline", "Verb", "mint", "mintinlin
 // raw command bodies bypass token expansion while a source reader is available.
 fn latex_raw_group(st: State, token, inline_kind = null) State^ {
     let source = stream.raw_reader(st.input, token)^;
-    if (source == null) {*:st, output: [*st.output, token]}
+    if (source == null) {*:st, output: st.output ++ [token]}
     else {
         let scanned = if (inline_kind == null) reader.raw_group_command(source.reader)^
             else reader.raw_inline_command(source.reader,contains(["mint","mintinline"],inline_kind)) ^reader.CaptureError { {issue: ^.message} }^;
@@ -5608,7 +5608,7 @@ fn latex_raw_group(st: State, token, inline_kind = null) State^ {
             let span = {file: token.file, start: token.start, end: scanned.end,
                 first_seq: token.seq, last_seq: source.reader.seq};
             {*:st, input: input, raw_inline_seen: true,
-                output: [*st.output, {*:token, echo_span: span, echo_count: 1,
+                output: st.output ++ [{*:token, echo_span: span, echo_count: 1,
                     *:if(inline_kind == null) {raw_group_kind:token.value} else {raw_inline_kind:inline_kind}}]}
         }
     }
@@ -5649,7 +5649,7 @@ fn finish_definition_echo(st: State, after, tracing, emit) State^ {
                 else {
                     let raw = utf8.decode(slice(bytes, traced.start, traced.end)^) ^ { null };
                     if (raw == null) {*:finished, echo_incomplete: true}
-                    else {*:finished, output: [*finished.output, {kind: "source-span", value: raw,
+                    else {*:finished, output: finished.output ++ [{kind: "source-span", value: raw,
                         file: traced.file, start: traced.start, end: traced.end, seq: traced.first_seq,
                         last_seq: traced.last_seq, catcodes: st.input.reader.catcodes}]}
                 }
@@ -5717,7 +5717,7 @@ fn constructor_environment(st: State, token, budget) State^ {
             // passthrough tokens are emitted after the complete name is read.
             let emitted = [for (raw in [token, *argument.raw])
                 {*:emission_token(named.state, named.state.input, raw)^, emit_origin: named.state.input.last_main_offset}];
-            {*:named.state, output: [*named.state.output, *emitted]}
+            {*:named.state, output: named.state.output ++ emitted}
         }
     }
 }
@@ -5778,7 +5778,7 @@ fn constructor_argument(st: State, budget, bracket, depth) State^ {
     else {
         let emitted = if (token.noexpand == true) {*:token, noexpand: false} else token;
         // argument-mode tokens also need their emission-time source position.
-        let next = {*:current, output: [*current.output,
+        let next = {*:current, output: current.output ++ [
             {*:emitted, emit_origin: current.input.last_main_offset,
                 *:if (is_control(token) and reader.definition_command(token.value))
                     {definition_catcodes:current.input.reader.catcodes} else {}}]};
@@ -5796,7 +5796,7 @@ fn constructor_raw_span(st: State, mode, depth) State^ {
     let current = {*:st,input:read.stream};
     if (token == null) current
     else {
-        let emitted = {*:current,output:[*current.output,token]};
+        let emitted = {*:current,output:current.output ++ [token]};
         let level = depth + if (charcat(token,1)) 1 else if (charcat(token,2)) -1 else 0;
         if ((mode == "math" and charcat(token,3)) or (mode == "group" and level == 0) or
             (mode == "bracket" and depth == 0 and other(token,"]")) or (mode != "math" and level < 0)) emitted
@@ -5810,16 +5810,16 @@ fn constructor_arguments(st: State, budget, first = true, raw = false) State^ {
     let current = {*:st, input: read.stream};
     if (token == null) current
     else if (first and other(token, "*"))
-        constructor_arguments({*:current, output: [*current.output, token]}, budget, false, raw)
+        constructor_arguments({*:current, output: current.output ++ [token]}, budget, false, raw)
     else if (charcat(token, 1) or other(token, "[")) {
         let bracket = other(token, "[");
-        let entered = {*:current, output: [*current.output, token]};
+        let entered = {*:current, output: current.output ++ [token]};
         let after = if (raw) constructor_raw_span(entered, if (bracket) "bracket" else "group", if (bracket) 0 else 1)^
             else constructor_argument(entered, budget, bracket, if (bracket) 0 else 1)^;
         if (after.issue != null) after else constructor_arguments(after, budget, false, raw)
     }
     else if (raw and charcat(token,3)) {
-        let entered = {*:current,output:[*current.output,token]};
+        let entered = {*:current,output:current.output ++ [token]};
         let after = constructor_raw_span(entered,"math",0)^;
         if (after.issue != null) after else constructor_arguments(after,budget,false,raw)
     }
@@ -5873,10 +5873,11 @@ fn step(st: State, budget) State^ {
     else if (t.kind == "package-pop") finish_package(current)
     else if (t.kind == "document-close") {
         let emitted = environment_output(current, t.original, t.raw, "document", "end", t.echo, t.span)^;
-        {*:current, output: [*current.output, *emitted],
+        {*:current, output: current.output ++ emitted,
             trailing_source: if (t.root_tail) stream.root_tail(current.input) else null, finished: true}
     }
-    else if (t.noexpand == true) {*:current, output: [*st.output, {*:t, noexpand: false}]}
+    // Concatenation preserves the output array's verified element contract.
+    else if (t.noexpand == true) {*:current, output: st.output ++ [{*:t, noexpand: false}]}
     else if (redefined_document_command(current, t)^) echo_redefined_command(current, t)
     else if (st.math_mode and t.kind == "control" and reader.math_raw_group_command(t.value) and resolved.kind != "macro")
         latex_math_raw_group(current, t)
@@ -5888,7 +5889,7 @@ fn step(st: State, budget) State^ {
         "displaystyle", "textstyle", "scriptstyle", "scriptscriptstyle", "limits", "nolimits", "displaylimits",
         "nonscript", "eqno", "leqno", "mathchoice", "left", "right", "middle", "over", "atop", "above",
         "overwithdelims", "atopwithdelims", "abovewithdelims"], cmd))
-        {*:current, output: [*st.output, t]}
+        {*:current, output: st.output ++ [t]}
     else if (contains(["hskip", "vskip", "mskip", "kern", "mkern"], cmd))
         emit_spacing(current, t, cmd, budget)
     else if (contains(["hbox", "vbox", "vtop"], cmd)) begin_inline_box(current, budget, cmd)
@@ -6061,7 +6062,7 @@ fn step(st: State, budget) State^ {
     else if (resolved.kind == "constructor") {
         // A constructor alias emits the target name, as TeX's copied meaning does.
         let constructor = if (t.value == resolved.name) t else {*:t,value:resolved.name};
-        let emitted = {*:current, output: [*st.output, constructor]};
+        let emitted = {*:current, output: st.output ++ [constructor]};
         if (resolved.raw == true or (current.constructor_argument_mode and current.latex and current.math_mode != true))
             constructor_arguments(emitted, budget, true, resolved.raw == true) else emitted
     }
@@ -6070,27 +6071,27 @@ fn step(st: State, budget) State^ {
         [{kind: "char", value: resolved.value, cat: resolved.cat, start: t.start, end: t.end}])}
     else if (resolved.kind == "chardef") {
         // synthesized characters need the current main-source position.
-        {*:current, output: [*st.output,
+        {*:current, output: st.output ++ [
             {kind: "char", value: chr(resolved.value), cat: 12, start: t.start, end: t.end,
                 chardef_emission: true, chardef_origin: t, read_offset: current.input.last_main_offset, read_file: current.main_file}]}
     }
     else if (resolved.kind == "mathchardef")
-        {*:current, output: [*st.output, t], mathchardef_emission_seen:
+        {*:current, output: st.output ++ [t], mathchardef_emission_seen:
             current.mathchardef_emission_seen == true or mathchardef_name_needs_mapping(t)^}
-    else if (cmd == "par") {*:current, output: [*st.output, t]}
+    else if (cmd == "par") {*:current, output: st.output ++ [t]}
     else if (cmd != null) unsupported(current, cmd)
     else if (st.script_expl3 and is_control(t) and index_of(t.value, ":") != null)
         unsupported(current, t.value)
     else if (current.constructor_argument_mode and current.latex and current.math_mode != true and
             is_control(t) and resolved.kind == "undefined") {
-        let emitted = {*:current, output: [*st.output, t]};
+        let emitted = {*:current, output: st.output ++ [t]};
         constructor_arguments(emitted, budget)
     }
     else if (charcat(t, 3)) math_shift(current, t)
     else if (charcat(t, 1)) begin_group(current, t, false)
     else if (charcat(t, 2)) end_group(current, t, false, false, false, true)
     // the output serializer needs the reader position at emission, including lookahead.
-    else {*:current, output: [*st.output, {*:t, emit_origin: current.input.last_main_offset}]}
+    else {*:current, output: st.output ++ [{*:t, emit_origin: current.input.last_main_offset}]}
 }
 
 // the native LaTeX scanner splits control words at non-letter characters.

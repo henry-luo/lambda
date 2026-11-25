@@ -1,9 +1,11 @@
 import profile: lambda.doc.latex.tex_engine.profile
 import reconstruct: lambda.doc.latex.tex_engine.reconstruct
 let kernel = input(sys.lambda.home ++ "/package/doc/latex/tex_engine/kernel.tex", "text")^;
+let options = {echo_definitions: true, adapters: [], resources: {local: {}, bundled: {}}};
+// Each case resumes the same immutable kernel with its own source.
+let preload = profile.preload_kernel(kernel, options, 100000)^;
 fn matches(source) any^ {
-    let expanded = profile.expand_with_kernel(source, kernel,
-        {echo_definitions: true, adapters: [], resources: {local: {}, bundled: {}}}, 100000)^;
+    let expanded = profile.expand_with_kernel(source, kernel, options, 100000, preload)^;
     let result = reconstruct.reconstruct(expanded)^;
     let native = parse(source, {type: "tex"})^;
     expanded.issue == null and result.issue == null and result.text == native.text

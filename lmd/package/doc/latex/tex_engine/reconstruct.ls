@@ -8,11 +8,16 @@ pub type Reconstruction = {text: string, segments: Segment[], definition_spans: 
     track_tokens?: bool, token_spans?: map[], failed_index?: int}
 
 fn utf8_length(text: string) int^ => len(binary(text)^)
+// The source remains immutable throughout reconstruction and digestion.
+pub fn cache_sources(sources: map[]) array^ => [for (source in sources)
+    {*:source, reconstruct_bytes:binary(source.data) ^ { null }}]
+pub fn source_bytes(source) any^ => if (source.reconstruct_bytes is binary) source.reconstruct_bytes
+    else binary(source.data)
 fn source_text(sources: map[], file: int?, start: int, end: int) string | null | error {
     let found = [for (source in sources where source.id == file) source];
     if (len(found) == 0 or start < 0 or end < start) null
     else {
-        let bytes = binary(found[0].data)^;
+        let bytes = source_bytes(found[0])^;
         // stale spans can end inside a UTF-8 character; canonicalize those tokens.
         if (end > len(bytes)) null else utf8.decode(slice(bytes, start, end)) ^ { null }
     }
@@ -59,9 +64,15 @@ fn needs_separator(text: string, next: string) bool {
     let begin = ending_letters(text, end);
     next != "" and letter(reader.text_span(next, 0, 1)) and begin < end and slash_count(text, begin) % 2 == 1
 }
+// The last segment already records the byte length of the complete prefix.
+fn output_length(st: Reconstruction) int {
+    let size = len(st.segments);
+    if (size == 0) 0 else st.segments[size - 1].out_start + st.segments[size - 1].length
+}
 fn append(st: Reconstruction, data: string, src: int?, synthetic: bool) Reconstruction^ {
     if (data == "") st else {*:st, text: st.text ++ data,
-        segments: [*st.segments, {out_start: utf8_length(st.text)^, length: utf8_length(data)^,
+        // Keep the verified segment contract as reconstructed output grows.
+        segments: st.segments ++ [{out_start: output_length(st), length: utf8_length(data)^,
             src_start: src, synthesized: synthetic}]}
 }
 fn separate(st: Reconstruction, data: string, origin: int?) Reconstruction^ {
@@ -116,15 +127,15 @@ fn rebuild(st: Reconstruction, tokens: map[], sources: map[], main: int, index: 
             else if (adjacent) gap_state else separate(gap_state, body, emission)^;
         let appended = if (before.issue != null) before else append(before, body, origin, not main_direct)^;
         let after = if (item.kind != "source-span" or appended.issue != null) appended
-            else {*:appended, definition_spans: [*appended.definition_spans,
-                {start: utf8_length(before.text)^, end: utf8_length(appended.text)^,
+            else {*:appended, definition_spans: appended.definition_spans ++ [
+                {start: output_length(before), end: output_length(appended),
                     value: body, catcodes: item.catcodes}]};
         let count = if (item.reconstruct_text != null) item.reconstruct_count
             else if (echo == null) 1 else item.echo_count;
         // spans exclude gaps; coalesced output has no interior token positions.
         let marked = if (after.issue != null or st.track_tokens != true) after else
-            {*:after, token_spans: [*after.token_spans, {index: index, count: count,
-                start: utf8_length(before.text)^, end: utf8_length(appended.text)^}]};
+            {*:after, token_spans: after.token_spans ++ [{index: index, count: count,
+                start: output_length(before), end: output_length(appended)}]};
         if (marked.issue != null) {*:marked, failed_index: index}
         else rebuild({*:marked, prev_valid: direct, prev_file: t.file, prev_seq: if (span) t.last_seq else t.seq,
             prev_end: t.end}, tokens, sources, main, index + count)
@@ -132,16 +143,18 @@ fn rebuild(st: Reconstruction, tokens: map[], sources: map[], main: int, index: 
 }
 
 pub fn reconstruct(result: map, track_tokens: bool = false) Reconstruction^ {
+    // Token spans repeatedly address the same source bytes; convert each source once.
+    let sources = cache_sources(result.sources)^;
     let built = rebuild({text: "", segments: [], definition_spans: [], issue: null, prev_valid: false, prev_end: 0,
             *:if (track_tokens) {track_tokens: true, token_spans: []} else {}},
-        result.output, result.sources, result.main_file, 0)^;
+        result.output, sources, result.main_file, 0)^;
     let tail = result.trailing_source;
     if (built.issue != null or tail == null or tail.text == "") built
     else {
         let adjacent = built.prev_valid and built.prev_file == tail.file and
             result.input.reader.seq + 1 == built.prev_seq + 1;
         let gap = if (adjacent and tail.start > built.prev_end)
-            source_text(result.sources, tail.file, built.prev_end, tail.start)^ else "";
+            source_text(sources, tail.file, built.prev_end, tail.start)^ else "";
         let with_gap = if (gap == null) {*:built, issue: "tex-reconstruct-source-range"}
             else append(built, gap, built.prev_end, false)^;
         let before = if (adjacent) with_gap else separate(with_gap, tail.text, tail.start)^;
@@ -149,12 +162,21 @@ pub fn reconstruct(result: map, track_tokens: bool = false) Reconstruction^ {
     }
 }
 
+// Appended segments have increasing output offsets, so locate the last match.
+fn segment_index(segments: Segment[], offset: int, low: int, high: int) int^ {
+    if (low >= high) low
+    else {
+        let middle = low + (high - low + 1) div 2;
+        if (segments[middle].out_start <= offset) segment_index(segments, offset, middle, high)
+        else segment_index(segments, offset, low, middle - 1)
+    }
+}
+
 pub fn map_offset(segments: Segment[], offset: int, index: int = 0) int^ {
     if (len(segments) == 0) offset
-    else if (index + 1 < len(segments) and segments[index + 1].out_start <= offset)
-        map_offset(segments, offset, index + 1)
     else {
-        let seg = segments[index];
+        let found = segment_index(segments, offset, index, len(segments) - 1)^;
+        let seg = segments[found];
         if (seg.synthesized or offset < seg.out_start) seg.src_start
         else seg.src_start + min(offset - seg.out_start, seg.length)
     }
