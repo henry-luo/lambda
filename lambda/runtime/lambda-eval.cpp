@@ -7341,6 +7341,7 @@ struct TexKernelCache {
     Item options;
     Item preload;
     bool rooted;
+    bool math;
 };
 static const uint32_t tex_kernel_cache_owner = 0x5445584B; // TEXK
 
@@ -7374,10 +7375,10 @@ static TexKernelCache* tex_kernel_cache() {
     return cache;
 }
 
-static void tex_kernel_cache_store(TexKernelCache* cache, Item options, Item preload) {
+static void tex_kernel_cache_store(TexKernelCache* cache, Item options, Item preload, bool math) {
     if (!cache) return;
     tex_kernel_cache_clear(cache);
-    cache->options = options; cache->preload = preload;
+    cache->options = options; cache->preload = preload; cache->math = math;
     if (!heap_register_gc_root_for(cache->owner, &cache->options.item)) return;
     if (!heap_register_gc_root_for(cache->owner, &cache->preload.item)) {
         heap_unregister_gc_root_for(cache->owner, &cache->options.item); return;
@@ -7443,20 +7444,20 @@ static Item parse_tex_script(Item source, Item options, const char* format, cons
     uint64_t captured = 0; int local_files = 0; int requests = 0;
     for (;;) {
         bool math = !strcmp(format, "math");
-        TexKernelCache* cache = math ? tex_kernel_cache() : nullptr;
-        if (cache && cache->rooted && item_deep_equal(cache->options, settings.get())) {
+        TexKernelCache* cache = tex_kernel_cache();
+        if (cache && cache->rooted && cache->math == math && item_deep_equal(cache->options, settings.get())) {
             preload.set(cache->preload);
         } else if (cache) {
-            Item args[] = {settings.get()};
-            preload.set(interp_call_package_export(runtime, package, "host_math_preload", args, 1));
+            Item args[] = {settings.get(), (Item){.item = b2it(math)}};
+            preload.set(interp_call_package_export(runtime, package, "host_kernel_preload", args, 2));
             if (get_type_id(preload.get()) == LMD_TYPE_MAP)
-                tex_kernel_cache_store(cache, settings.get(), preload.get());
+                tex_kernel_cache_store(cache, settings.get(), preload.get(), math);
             else preload.set(ItemNull);
         }
-        Item args[] = {text.get(), settings.get(), preload.get()};
-        const char* entry = !strcmp(format, "tex") ? "tex" : math && get_type_id(preload.get()) == LMD_TYPE_MAP
-            ? "host_math" : math ? "math" : "latex";
-        result.set(interp_call_package_export(runtime, package, entry, args, !strcmp(entry, "host_math") ? 3 : 2));
+        bool reused = get_type_id(preload.get()) == LMD_TYPE_MAP;
+        Item args[] = {text.get(), settings.get(), math ? preload.get() : (Item){.item = i2it(20000000)}, preload.get()};
+        const char* entry = !strcmp(format, "tex") ? "tex" : math && reused ? "host_math" : math ? "math" : "latex";
+        result.set(interp_call_package_export(runtime, package, entry, args, reused ? (math ? 3 : 4) : 2));
         if (get_type_id(result.get()) != LMD_TYPE_MAP)
             return runtime_error_itemf(ERR_PARSE_ERROR, "parse: Script %s engine failed", format);
         MapReader reply(result.get().map);

@@ -48,18 +48,19 @@ pub fn host_capture(options: map, scope: string, name: string, data, no_base = f
 }
 
 // Only resource-free preloads can be reused without retaining a file grant.
-pub fn host_math_preload(options: map) any^ {
-    if (options.ini == true or not (options.kernel_source is string)) null
+pub fn host_kernel_preload(options: map, math: bool) any^ {
+    if (options.ini == true or options.script_expl3 == true or not (options.kernel_source is string)) null
     else {
-        let configured = {*:options, math_mode:true, echo_definitions:false, auto_expl3:true};
+        let configured = {*:options, *:if (math) {math_mode:true} else {},
+            echo_definitions:not math, auto_expl3:true};
         let loaded = profile.preload_kernel(options.kernel_source, configured)^;
         if (loaded.issue != null or len(loaded.resources_seen) != 0) null else loaded
     }
 }
 
 // Native TeX returns diagnostics and local package names alongside expanded text.
-pub fn tex(source: string, options = null, budget: int = 20000000) any^ {
-    let expanded = expand(source, options, budget)^;
+pub fn tex(source: string, options = null, budget: int = 20000000, preload = null) any^ {
+    let expanded = expand(source, options, budget, true, preload)^;
     if (expanded.issue != null) failure(expanded.issue, expanded.unsupported, expanded.resource_request)
     else if (not complete_diagnostics(expanded)^)
         failure("tex-diagnostic-unsupported")
@@ -74,8 +75,8 @@ pub fn tex(source: string, options = null, budget: int = 20000000) any^ {
 }
 
 // Definition spans are required by the source-aware LaTeX digester.
-pub fn latex(source: string, options = null, budget: int = 20000000) any^ {
-    let expanded = expand(source, options, budget)^;
+pub fn latex(source: string, options = null, budget: int = 20000000, preload = null) any^ {
+    let expanded = expand(source, options, budget, true, preload)^;
     if (expanded.issue != null) failure(expanded.issue, expanded.unsupported, expanded.resource_request)
     else if (not complete_diagnostics(expanded)^) failure("tex-diagnostic-unsupported")
     else {
