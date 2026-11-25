@@ -15,6 +15,21 @@ Resolved records are in the [fixed issue ledger](<Lib_Input_Issue_Ledger (fixed)
 
 ## Open issues
 
+<a id="li-120"></a>
+
+### LI-120 — HTTP Path targets are formatted as Lambda syntax instead of URLs
+
+**Open, 2026-11-25.** `input(\.http["127.0.0.1:PORT"]["document.tex"], 'latex')`
+fails to load a reachable loopback document, while the equivalent HTTP URL
+string succeeds. `input_from_target_impl` sends `path_to_string` output to the
+HTTP loader; that function intentionally prints the Lambda path spelling, not
+an HTTP URL. `target_to_url_string` has the same conversion for Path targets.
+The shared target boundary needs a URI renderer that preserves ordered path
+keys and enforces the URL and authority rules. Until it exists, the TeX/LaTeX
+HTTP Path handoff is unreachable; URL-string handoff works. Reproduction:
+`temp/latex-retirement/http-path-driver.py` (S2.4.2v6, S2.4.3v4,
+D9.1.3v2, D11.1.2).
+
 <a id="li-118"></a>
 
 ### LI-118 — Unbraced Unicode math scripts produce invalid UTF-8

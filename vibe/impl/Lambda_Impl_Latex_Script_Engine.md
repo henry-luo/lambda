@@ -34,6 +34,19 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **HTTP handoff, 2026-11-25:** The downloader now passes the existing deferred
+  source handoff through URL and HTTP Path targets, preserving the original
+  standalone HTTP entry point and its format detection. Runtime `input()` sends
+  detected and explicitly typed TeX/LaTeX URL inputs to Script without an
+  Input-to-runtime callback (S1.8, D9.1.3v2, D10.2.2v2). A local HTTP regression demonstrates
+  that the previous native route disagreed with direct Script parsing and the
+  new route agrees. The Input HTTP test covers fresh and cached bytes; a runtime
+  loopback test covers both routes and confirms a remote document does not fetch
+  a relative TeX input (D11.1.2). The full loopback test runs as part of
+  `make test-lambda-full`. HTTP Path targets cannot reach that handoff until
+  [LI-120](../Lib_Input_Issue_Ledger.md#li-120) fixes their URL serialization;
+  standalone HTTP callers still use the native path (S2.4.2v6, S2.4.3v4).
+
 - **Captured archive members, 2026-11-25:** Explicit `input(member, 'tex' | 'latex')`
   and `parse(member, ...)` now hand the captured source to the Script engine.
   Input caches the captured source, not a runtime-owned result; repeated Script
@@ -44,7 +57,8 @@ The existing native engine design and historical Phase IV work are in
   migration of the lazy virtual-content interface remains open. Two captured
   member regressions pass in both tiers under forced GC; the security isolation
   tests pass in both tiers under forced GC, and five native ZIP cache/member
-  tests pass. The HTTP, standalone document and math paths still need migration.
+  tests pass. At that checkpoint the HTTP, standalone document and math paths
+  still needed migration.
 
 - **Automatic detection handoff, 2026-11-25:** Local `input()` and `parse()`
   can ask Input to return the acquired TeX/LaTeX source and detected format to
