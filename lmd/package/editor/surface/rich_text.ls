@@ -129,6 +129,7 @@ fn render_node(n, kids) any^ {
   else if (tag == 'h5') <h5 *kids>
   else if (tag == 'h6') <h6 *kids>
   else if (tag == 'blockquote') <blockquote *kids>
+  else if (tag == 'md_html_group') <div class:"edit-html-group", *kids>
   else if (member(flow_tags, tag)) <div class: "edit-flow", *kids>
   else if (tag == 'figure') <figure *kids>
   else if (tag == 'figcaption') <figcaption *kids>

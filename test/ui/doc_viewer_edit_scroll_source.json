@@ -1,0 +1,74 @@
+{
+  "name": "embedded source editor scrolls while the file tree and bars stay visible",
+  "html": "temp/view-pane-scroll-source",
+  "prepare": [
+    "python3",
+    "-c",
+    "from pathlib import Path;p=Path('temp/view-pane-scroll-source');p.mkdir(parents=True,exist_ok=True);(p/'long.txt').write_text(''.join('line %06d: text\\n'%i for i in range(1,301)))"
+  ],
+  "viewport": {
+    "width": 1100,
+    "height": 700
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry .tree-label"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tab-edit"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".file-panel"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface"
+      },
+      "contains": "line 000002"
+    },
+    {
+      "type": "scroll",
+      "x": 650,
+      "y": 300,
+      "dx": 0,
+      "dy": -5
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface"
+      },
+      "contains": "line 000026"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface"
+      },
+      "not_contains": "line 000025"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 1090,
+      "y": 5,
+      "expected_selector": ".edit-document-bar"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 1090,
+      "y": 694,
+      "expected_selector": ".edit-status"
+    }
+  ]
+}

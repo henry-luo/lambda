@@ -18,6 +18,7 @@ import rich: lambda.editor.surface.rich_text
 import dr: lambda.editor.surface.drawing
 import src: lambda.editor.surface.source
 import controller: lambda.editor.controller
+import image: lambda.editor.image
 import lambda.editor.format.model
 
 // ---------------------------------------------------------------------------
@@ -40,6 +41,9 @@ let shell_css = "
                      border-radius: 6px; padding: 4px; box-shadow: 0 4px 16px rgba(0,0,0,.18); }
   .edit-table-menu .edit-group { display: flex; flex-direction: column; align-items: stretch; }
   .edit-table-menu .edit-btn { width: 150px; text-align: left; }
+  .edit-image-size { display: flex; align-items: center; gap: 6px; padding: 5px 20px;
+                     background: var(--document-chrome); border-bottom: 1px solid var(--document-rule); }
+  .edit-image-size input { width: 70px; }
 "
 
 // The surfaces' own stylesheets; the edit application adds the shared ones.
@@ -268,6 +272,37 @@ fn surface_of(session, editor, ds) any =>
   else rich.surface(editor, "edit-" ++ string(session.format.id),
     if (session.format.surface_style == null) null else session.format.surface_style(session.envelope))
 
+fn image_width_value(width) any^ {
+  if (width is number) string(width)
+  else if (width is string and string(int(width) ^ { -1 }) == width) width
+  else ""
+}
+
+view <image_size_tools> {
+  <div class:"edit-image-size", contenteditable:"false",
+    <span "Image width">
+    <input id:"edit-image-width", type:"number", min:"16", max:"4096", ['aria-label']:"Image width in pixels",
+      value: image_width_value(~.width)>
+    <span "px">
+    <button class:"edit-image-smaller", type:"button", title:"Make image smaller", "−">
+    <button class:"edit-image-larger", type:"button", title:"Make image larger", "+">
+    <button class:"edit-image-original", type:"button", "Original size">
+  >
+}
+on mousedown(evt) {
+  if (dom.closest(evt.target, "button") != null) { return 'prevent-default' }
+  return 'pass'
+}
+on click(evt) {
+  let button = dom.closest(evt.target, "button")
+  if (button != null) {
+    let action = if (dom.matches(button, ".edit-image-smaller")) 'smaller'
+      else if (dom.matches(button, ".edit-image-larger")) 'larger' else 'original'
+    emit("edit_image_size", {action:action, node:evt.target})
+  }
+}
+on change(evt) { emit("edit_image_size", {action:'width', node:evt.target}) }
+
 view <table_context> {
   <div class: "edit-table-menu", role: "group", ['aria-label']: "Table actions", style: "left:" ++ string(~.x) ++ "px;top:" ++ string(~.y) ++ "px",
     tools.group(tools.table_menu, ~.editor, ~.dirty, null)>
@@ -283,11 +318,13 @@ on render(evt) {
 edit <edit_app> state editor: ~.editor, session: ~.session, status: ~.status, dialog: null, after_save: null,
                       ds: dr.new_state(), table_menu: null {
   let dirty = sess.is_dirty(session, editor.doc);
+  let selected_image = if (session.format.id == 'markdown') image.selected(editor) ^ { null } else null;
   <body class: "edit-app edit-format-" ++ string(session.format.id),
     tools.toolbar(files.file_label(session, dirty), editor, dirty,
                   if (is_drawing(session)) ds else null, format_groups(session),
                   if (session.format.binary == true) [] else tools.source_view_group,
                   not member(session.format.unsupported_input_types, "insertTable"));
+    if (selected_image != null) apply(<image_size_tools width:attr_get(selected_image.node,'width')>) else null;
     <div class: "edit-main", surface_of(session, editor, ds)>
     <div class: "edit-status", role: "status", status>
     if (table_menu != null) apply(<table_context x: table_menu.x, y: table_menu.y, keyboard: table_menu.keyboard, editor: editor, dirty: dirty>) else null
@@ -296,6 +333,34 @@ edit <edit_app> state editor: ~.editor, session: ~.session, status: ~.status, di
 }
 on beforeinput(evt) {
   return 'pass'
+}
+on click(evt) {
+  let target = if (dom.node_type(evt.target) == 1) evt.target else dom.parent_node(evt.target)
+  tools.dismiss_compact(evt.target, target)^
+  if (table_menu != null and (target == null or dom.closest(target, ".edit-table-menu") == null)) { table_menu = null }
+  return 'pass'
+}
+on editor_dismiss_menu(evt) {
+  tools.dismiss_compact(evt.target)^
+  if (table_menu != null) { table_menu = null }
+}
+on edit_image_size(req) {
+  let selected = image.selected(editor)^
+  if (selected == null) { return }
+  let target = image.image_element(editor, controller.surface(req.node), selected.path)
+  let box = if (target == null) null else dom.bounding_box(target)
+  if ((box == null or box.width <= 0 or box.height <= 0)^) { status = "Image dimensions are not available."; return }
+  let width = if (req.action == 'original') null else if (req.action == 'width')
+    (int(files.field_value(req.node, "edit-image-width")) ^ { null })
+    else round(box.width * (if (req.action == 'larger') 1.25 else 0.8))
+  if (req.action != 'original' and (width == null or width < 16 or width > 4096)) {
+    status = "Image width must be between 16 and 4096 pixels."; return
+  }
+  let height = if (width == null) null else round(max(1, box.height * width / box.width))
+  let resized = image.resize_image(editor, selected.path, width, height) ^ { status = ^.message; return }
+  editor = resized
+  status = if (width == null) "Image restored to its original size." else "Image resized."
+  files.sync_window(req.node, session, editor.doc)^
 }
 on contextmenu(evt) {
   let target = if (dom.node_type(evt.target) == 1) evt.target else dom.parent_node(evt.target)
@@ -353,8 +418,13 @@ on selectionchange(evt) {
   }
 }
 on edit_cmd(req) {
+  tools.dismiss_compact(req.node)^
   table_menu = null
   editor = mounted(editor, req.node, session.format)
+  // A toolbar command can follow a native selection before selectionchange arrives.
+  if ((req.event != null and session.format.surface == 'rich_text')^) {
+    editor = (controller.adopt(editor, req.event, session.format.schema_preset)^).editor
+  }
   let cmd = req.cmd
   if ((cmd == "view_source" and session.format.binary != true)^) {
     emit("edit_switch", source_view(session, editor)^)
@@ -429,6 +499,11 @@ on edit_dialog(req) {
   // the file dialogs' actions are shared with the source surface (files.ls)
   let filed = files.dialog_action(action, req.node,
     {session: session, doc: editor.doc, status: status, dialog: dialog, after_save: after_save})^
+  if ((filed.navigation != null)^) {
+    session = filed.session; status = filed.status; dialog = filed.dialog; after_save = filed.after_save
+    emit("viewer_navigation", {entry:filed.navigation, node:req.node})
+    return
+  }
   if ((filed.source_text != null)^) {
     emit("edit_switch", src.reloaded_view(session, filed.source_text, filed.status)^)
     return
@@ -499,6 +574,12 @@ on edit_dialog(req) {
     // caret back where the model has it (proposal §5 selection bookmark)
     if (not edited) { controller.restore(editor) }
   }
+}
+on editor_navigate(evt) {
+  if ((dialog != null)^) { return }
+  let decision = files.navigation_decision(evt.target, session, editor.doc, evt.detail)^
+  if (decision.navigate) { emit("viewer_navigation", {entry:evt.detail, node:evt.target}); return }
+  dialog = decision.dialog
 }
 on keydown(evt) {
   if ((dialog != null)^) {
@@ -628,6 +709,16 @@ on keydown(evt) {
 // object, handle, or start point; the release commits one transaction; Escape
 // in between cancels. Without pointer moves the surface shows no preview.
 on mousedown(evt) {
+  if ((session.format.id == 'markdown' and evt.button == 0 and dialog == null)^) {
+    let path = image.hit(editor, evt.target, controller.surface(evt.target))
+    if ((path != null)^) {
+      // Select the image atom before the native caret can replace its selection.
+      editor = image.select_image(mounted(editor, evt.target, session.format), path)^
+      controller.focus(evt.target)^
+      controller.restore(editor)^
+      return 'prevent-default'
+    }
+  }
   if ((not is_drawing(session) and evt.source_pos != null)^) {
     let rich_surface = dom.get_element_by_id(doc_root(evt.target), "edit-surface")
     if (rich_surface != null and dom.contains(rich_surface, evt.target)) {

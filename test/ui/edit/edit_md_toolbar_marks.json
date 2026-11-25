@@ -7,7 +7,8 @@
   "events": [
     {"type": "mouse_drag", "target": {"text": "short paragraph"}, "to_target": {"text": "for testing"}, "button": 0},
     {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
-    {"type": "click", "target": {"selector": ".edit-compact-format summary"}},
+    {"type": "assert_count", "target": {"selector": ".edit-format-bar > .edit-group .edit-btn-bold, .edit-format-bar > .edit-group .edit-btn-italic, .edit-format-bar > .edit-group .edit-btn-strike, .edit-format-bar > .edit-group .edit-btn-code"}, "count": 4},
+    {"type": "assert_count", "target": {"selector": ".edit-compact-format .edit-btn-bold, .edit-compact-format .edit-btn-italic, .edit-compact-format .edit-btn-strike, .edit-compact-format .edit-btn-code"}, "count": 0},
     {"type": "click", "target": {"selector": ".edit-btn-bold"}},
     {"type": "assert_count", "target": {"selector": "#edit-surface p strong"}, "min_count": 2},
     {"type": "assert_class", "target": {"selector": ".edit-btn-bold"}, "class": "active"},

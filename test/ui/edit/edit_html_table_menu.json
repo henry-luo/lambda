@@ -8,7 +8,12 @@
     {"type": "click", "target": {"selector": ".edit-surface td"}},
     {"type": "click", "target": {"selector": ".edit-surface td"}, "button": 1},
     {"type": "assert_count", "target": {"selector": ".edit-table-menu"}, "count": 1},
+    {"type": "click", "target": {"selector": ".edit-surface p"}},
+    {"type": "assert_count", "target": {"selector": ".edit-table-menu"}, "count": 0},
+    {"type": "click", "target": {"selector": ".edit-surface td"}, "button": 1},
+    {"type": "assert_count", "target": {"selector": ".edit-table-menu"}, "count": 1},
     {"type": "click", "target": {"selector": ".edit-btn-table_row_add"}},
+    {"type": "assert_count", "target": {"selector": ".edit-table-menu"}, "count": 0},
     {"type": "assert_count", "target": {"selector": ".edit-surface tbody tr"}, "count": 2},
     {"type": "key_combo", "key": "s", "mods_str": "super"},
     {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""}

@@ -274,6 +274,7 @@ on click(evt) {
   if (menu != null and (target == null or dom.closest(target, ".property-menu,.property-toolbar_add") == null)) { menu = null }
   return 'pass'
 }
+on editor_dismiss_menu(_) { menu = null }
 on contextmenu(evt) {
   let target = if (dom.node_type(evt.target) == 1) evt.target else dom.parent_node(evt.target)
   let row = if (target == null) null else dom.closest(target, ".property-row")
@@ -436,6 +437,11 @@ on edit_dialog(req) {
   }
   let result = files.dialog_action(req.action, req.node,
     {session: session, doc: doc, status: status, dialog: dialog, after_save: after_save})^
+  if ((result.navigation != null)^) {
+    session = result.session; status = result.status; dialog = result.dialog; after_save = result.after_save
+    emit("viewer_navigation", {entry:result.navigation, node:req.node})
+    return
+  }
   if ((result.source_text != null)^) {
     emit("edit_switch", src.reloaded_view(session, result.source_text, result.status)^)
     return
@@ -446,6 +452,22 @@ on edit_dialog(req) {
   after_save = result.after_save
   if (result.reloaded != null) { doc = result.reloaded; undo = []; redo = []; branches = {} }
   if (dialog == null) { files.focus_surface(req.node)^ }
+}
+on editor_navigate(evt) {
+  if ((dialog != null)^) { return }
+  if ((draft != null)^) { status = "Correct the invalid value before continuing."; return }
+  // A tree click may arrive before the focused field's change event.
+  let fields = dom.query_selector_all(dom.root_node(evt.target), ".property-value,.property-key")
+  let changed = [for (field in fields where ((dom.get_state(field, "value") != dom.get_attribute(field, "data-original")) ^ { false })) field]
+  if (len(changed) > 0) {
+    let result = commit_field(session.format, doc, undo, redo, changed[0])^
+    draft = result.draft; status = result.status
+    if (not result.ok) { return }
+    doc = result.doc; undo = result.undo; redo = result.redo
+  }
+  let decision = files.navigation_decision(evt.target, session, doc, evt.detail)^
+  if (decision.navigate) { emit("viewer_navigation", {entry:evt.detail, node:evt.target}); return }
+  dialog = decision.dialog
 }
 on keydown(evt) {
   if (evt.key == "Escape" and menu != null) { menu = null; return 'prevent-default' }

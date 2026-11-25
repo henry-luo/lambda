@@ -35,6 +35,29 @@
     {
       "type": "assert_count",
       "target": {
+        "selector": ".file-panel"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#file-filter"
+      },
+      "equals": "property-tree.json"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": ".viewer-edit-host"
+      },
+      "x": 300,
+      "width": 800,
+      "tolerance": 2
+    },
+    {
+      "type": "assert_count",
+      "target": {
         "selector": ".edit-format-property"
       },
       "count": 1

@@ -738,3 +738,19 @@ open [LI-002](#li-002) external-parent admission test failed. Its TeX engine
 suite passed 12 tests and skipped two expl3 tests without the optional resource
 setting; the separate focused run with that setting passed all 14. This does
 not qualify the full Input baseline as passing.
+
+
+<a id="li-119"></a>
+
+### LI-119 — RDB parameter ABI cannot preserve binary bytes or embedded NUL
+
+**Open, 2026-11-25.** `lib/rdb_abi.h` defines `RdbParam` text and binary
+payloads with a pointer but no byte length. The `lambda.io.rdb` host rejects
+binary parameters and text containing NUL before driver binding. Connector/J
+can bind both without truncation, so Acro's exact MySQL ORM port cannot yet
+bind those values. The current behavior is an explicit rejection, not silent
+truncation. A length-aware, version-compatible driver capability is needed;
+do not weaken read-only sessions. Reproduction: the isolated MariaDB and Java
+fixture `../erp/acro-lmd/test/legacy_mysql_integer_mariadb_test.py` exercises
+the text case. This blocks full JDBC parameter compatibility (D9.1.1v4,
+D9.1.3v2 and D11.1.2; resource ownership S12.4.2–S12.4.3).

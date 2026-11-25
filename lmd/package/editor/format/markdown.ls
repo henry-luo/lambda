@@ -24,6 +24,7 @@ import lambda.editor.format.view
 import lambda.editor.core.doc
 import lambda.editor.core.step
 import schemas: lambda.editor.schema.markdown
+import html: lambda.editor.format.html
 
 // ---------------------------------------------------------------------------
 // Profile
@@ -46,6 +47,7 @@ pub let schema = {
                 attrs: [{name: 'label', required: true, type: 'string'}]},
   html_block: {role: 'block',  content: [], marks: 'none', atomic: true, selectable: true,
                attrs: [{name: 'html', required: true, type: 'string'}]},
+  md_html_group: {role: 'block', content: [{role: 'block', qty: 'plus'}], marks: 'none'},
   math_block: {role: 'block',  content: [], marks: 'none', atomic: true, selectable: true,
                attrs: [{name: 'tex', required: true, type: 'string'}]},
   md_source:  {role: 'block',  content: [], marks: 'none', atomic: true, selectable: true,
@@ -122,6 +124,47 @@ fn kept_atom(tag, key, text, shown) any^ => node_attrs(tag, attr_list([[key, tex
 
 fn marked(item, marks, mark) any => inline_children(item, with_mark(marks, mark, true))
 
+// Markdown has no image dimensions; a simple HTML image is its portable spelling.
+fn html_fragment_items(source) any^ {
+  let parsed = parse("<body>" ++ source ++ "</body>", 'html') ^ { null }
+  let html = if (parsed == null) null else [for (c in content(parsed)^ where (type(c) == element and name(c) == 'html')^) c][0]
+  let body = if (html == null) null else [for (c in content(html)^ where (type(c) == element and name(c) == 'body')^) c][0]
+  if (body == null) [] else [for (c in content(body)^ where (type(c) != string or trim(c) != "")^) c]
+}
+
+fn sized_html_image(source) any^ {
+  let items = html_fragment_items(source)^
+  let img = if (len(items) == 1 and type(items[0]) == element and name(items[0]) == 'img') items[0] else null
+  let extra = if (img == null) [] else [for (k, v at map(img) where not member(['src','alt','title','width','height'], k)) k]
+  if (img == null or img.src == null or len(extra) > 0 or (img.width == null and img.height == null)) null
+  else node_attrs('img', attr_list([['src', img.src], ['alt', img.alt], ['title', img.title],
+                                   ['width', if (img.width == null) null else int(img.width)],
+                                   ['height', if (img.height == null) null else int(img.height)]]), [])
+}
+
+fn image_html_paragraph(para) any^ {
+  if (type(para) != element or name(para) != 'p') { return null }
+  let children = if (para == null) [] else [for (c in content(para)^ where (type(c) != string or trim(c) != "")^) c]
+  if (len(children) == 0 or not all([for (c in children) type(c) == element and name(c) == 'img'])) null
+  else {
+    let images = [for (c in children) node_attrs('img', [for (k, v at map(c)) {name:k,value:v}], [])]
+    let attrs = [for (k, v at map(para)) {name:k,value:v}]
+    node_attrs('p', [*attrs, {name:'edit html attrs',value:attrs}, {name:'edit source',value:html.retained_html(para)},
+                     {name:'edit original',value:images}], images)
+  }
+}
+
+fn image_html_block(source) any^ {
+  let items = html_fragment_items(source)^
+  let groups = [for (item in items) image_html_paragraph(item) ^ { null }]
+  if (not any([for (group in groups) group != null])) null
+  else {
+    let blocks = [for (i, item in items) if (groups[i] != null) groups[i] else
+      kept_atom('html_block', 'html', html.retained_html(item), html_view([item]))]
+    node_attrs('md_html_group', [{name:'edit source',value:source}, {name:'edit original',value:blocks}], blocks)
+  }
+}
+
 // an emoji atom retains the distinction from literal or escaped shortcode text on save.
 fn emoji_atom(item, alias, marks) any^ => node_attrs('emoji',
   attr_list([['name', alias], [view_attr, html_view(format([item], 'html'))],
@@ -152,7 +195,10 @@ fn inline_items(item, marks) any^ {
       [node_attrs('footnote_ref', attr_list([['label', item.ref], [view_attr, markdown_view(item)],
         [node_marks_attr, if (len(marks) > 0) marks else null]]), [])]
     }
-    else if (tag == 'raw-html') { [kept_atom('raw_html', 'html', plain_text(item), html_view(plain_text(item)))] }
+    else if (tag == 'raw-html') {
+      let image = sized_html_image(plain_text(item)) ^ { null };
+      [if (image == null) kept_atom('raw_html', 'html', plain_text(item), html_view(plain_text(item))) else image]
+    }
     else if (tag == 'math') { [kept_atom('math', 'tex', plain_text(item), math_view(plain_text(item), false))] }
     else { [] }
   }
@@ -210,7 +256,13 @@ fn block_nodes(item) any^ {
     else if (tag == 'table') {
       [node('table', [for (p in ((content(item)) ^ { [] }) where type(p) == element) table_part(p)])]
     }
-    else if (tag == 'html-block') { [kept_atom('html_block', 'html', plain_text(item), html_view(plain_text(item)))] }
+    else if (tag == 'html-block') {
+      let source = plain_text(item)
+      let group = image_html_block(source) ^ { null }
+      let image = sized_html_image(source) ^ { null };
+      [if (group != null) group else if (image != null) node('p', [image])
+       else kept_atom('html_block', 'html', source, html_view(source))]
+    }
     else if (tag == 'math') { [kept_atom('math_block', 'tex', plain_text(item), math_view(plain_text(item), true))] }
     else if (member(inline_tags, tag)) { [node('p', inline_items(item, []))] }
     else { [] }
@@ -267,7 +319,9 @@ fn survives(nodes) any^ {
 
 // A block the editor only shows — raw HTML, display math — is kept as
 // written rather than as an atom the formatter would respell.
-fn shown_only(item) => name(item) == 'html-block' or name(item) == 'footnote' or (name(item) == 'math' and item.type == "block")
+fn shown_only(item) => (name(item) == 'html-block' and (sized_html_image(plain_text(item)) ^ { null }) == null and
+  (image_html_block(plain_text(item)) ^ { null }) == null) or
+  name(item) == 'footnote' or (name(item) == 'math' and item.type == "block")
 
 fn contains_parsed_tag(item, tag) any^ => type(item) == element and
   (name(item) == tag or any([for (child in content(item)^) contains_parsed_tag(child, tag)^]))
@@ -375,7 +429,16 @@ fn export_atom(item) any^ {
     [<a href: attr_get(item, 'href'), title: attr_get(item, 'title'), *export_inline(item.content, 0)>]
   }
   else if (item.tag == 'img') {
-    [<img src: attr_get(item, 'src'), alt: attr_get(item, 'alt'), title: attr_get(item, 'title')>]
+    let width = attr_get(item, 'width')
+    let height = attr_get(item, 'height')
+    if (width == null and height == null) [<img src: attr_get(item, 'src'), alt: attr_get(item, 'alt'), title: attr_get(item, 'title')>]
+    else {
+      let attrs = [['src', attr_get(item, 'src')], ['alt', attr_get(item, 'alt')], ['title', attr_get(item, 'title')],
+                   ['width', width], ['height', height]]
+      let raw = "<img" ++ join([for (pair in attrs where pair[1] != null)
+        " " ++ string(pair[0]) ++ "=\"" ++ escape_attr(string(pair[1])) ++ "\""], "") ++ ">";
+      [<'raw-html' raw>]
+    }
   }
   else if (item.tag == 'emoji') {
     let parsed = parse(":" ++ attr_get(item, 'name') ++ ":", 'markdown')^;
@@ -435,12 +498,26 @@ fn heading_mark(tag, kids) {
   else <h6 level: "6", *kids>
 }
 
+fn html_attr_text(attrs) any^ => join([for (a in attrs where a.value != null)
+  " " ++ string(a.name) ++ "=\"" ++ escape_attr(string(a.value)) ++ "\""], "")
+
+fn image_block_text(n) any^ =>
+  if (n.content == attr_get(n, 'edit original')) attr_get(n, 'edit source')
+  else "<p" ++ html_attr_text(attr_get(n, 'edit html attrs')) ++ ">\n" ++
+    html.inline_html(n.content) ++ "\n</p>"
+
+fn html_group_text(n) any^ =>
+  if (n.content == attr_get(n, 'edit original')) attr_get(n, 'edit source')
+  else join([for (child in n.content) if (child.tag == 'p') image_block_text(child) else attr_get(child, 'html')], "\n")
+
 fn export_block(n) any^ {
   if (is_text(n)) { [<p n.text>] }
   else if (not is_node(n)) { [] }
   else {
     let tag = n.tag
-    if (tag == 'p') { [<p *export_inline(n.content, 0)>] }
+    if (tag == 'md_html_group') { [<'html-block' html_group_text(n)>] }
+    else if (tag == 'p' and attr_get(n, 'edit html attrs') != null) { [<'html-block' image_block_text(n)>] }
+    else if (tag == 'p') { [<p *export_inline(n.content, 0)>] }
     else if (is_heading_tag(tag)) { [heading_mark(tag, export_inline(n.content, 0))] }
     else if (tag == 'blockquote') { [<blockquote *export_blocks(n.content)>] }
     else if (tag == 'ul') { [<ul loose: loose_attr(n), *[for (li in n.content) export_li(li)]>] }
@@ -515,7 +592,12 @@ fn norm_inline_item(it) any^ {
     // a mark node is its content with that mark applied
     it
   }
-  else if (is_node(it)) { node_attrs(it.tag, sorted_attrs(it), norm_inline_seq(it.content, false, false)) }
+  else if (is_node(it)) {
+    let attrs = sorted_attrs(it)
+    let comparable = if (it.tag == 'img') [for (a in attrs)
+      if (a.name == 'width' or a.name == 'height') {*:a, value:string(a.value)} else a] else attrs
+    node_attrs(it.tag, comparable, norm_inline_seq(it.content, false, false))
+  }
   else { it }
 }
 
@@ -600,7 +682,7 @@ fn norm_block(n) any^ {
       if (len(seq) == 0) [] else [node('p', seq)]
     }
     else if (is_heading_tag(tag)) { [node(tag, norm_inline_seq(n.content, true))] }
-    else if (tag == 'blockquote') { [node('blockquote', norm_blocks(n.content))] }
+    else if (tag == 'blockquote' or tag == 'md_html_group') { [node(tag, norm_blocks(n.content))] }
     else if (tag == 'ul' or tag == 'ol') { [norm_list(n)] }
     else if (tag == 'pre' or tag == 'code_block') {
       let code = node_plain_text(n)

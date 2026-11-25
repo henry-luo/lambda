@@ -1,0 +1,19 @@
+{
+  "name": "embedded HTML source highlights after scrolling beyond the initial window",
+  "html": "temp/view-html-highlight",
+  "prepare": ["python3", "-c", "from pathlib import Path;p=Path('temp/view-html-highlight');p.mkdir(parents=True,exist_ok=True);(p/'long.html').write_text('<!doctype html><html><body>\\n'+''.join('<p class=\"item\">row %03d</p>\\n'%i for i in range(300))+'</body></html>\\n')"],
+  "viewport": {"width": 1100, "height": 700},
+  "events": [
+    {"type":"click", "target":{"selector":".tree-entry .tree-label"}},
+    {"type":"click", "target":{"selector":".tab-edit"}},
+    {"type":"click", "target":{"selector":".edit-btn-view_source"}},
+    {"type":"click", "target":{"text":"row 000"}},
+    {"type":"key_combo", "key":"ArrowDown", "mods_str":"super"},
+    {"type":"assert_text", "target":{"selector":"#edit-surface"}, "contains":"row 299"},
+    {"type":"assert_count", "target":{"selector":".tok-tag"}, "min_count":2},
+    {"type":"assert_count", "target":{"selector":".tok-attr-value"}, "min_count":1},
+    {"type":"scroll", "x":650, "y":300, "dx":0, "dy":13},
+    {"type":"assert_count", "target":{"selector":".tok-tag"}, "min_count":2},
+    {"type":"assert_count", "target":{"selector":".tok-attr-value"}, "min_count":1}
+  ]
+}

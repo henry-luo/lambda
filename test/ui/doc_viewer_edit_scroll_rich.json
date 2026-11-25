@@ -1,0 +1,68 @@
+{
+  "name": "embedded rich editor scrolls while the file tree and bars stay visible",
+  "html": "temp/view-pane-scroll-rich",
+  "prepare": [
+    "python3",
+    "-c",
+    "from pathlib import Path;import shutil;p=Path('temp/view-pane-scroll-rich');p.mkdir(parents=True,exist_ok=True);shutil.copyfile('test/ui/edit/long.md',p/'long.md')"
+  ],
+  "viewport": {
+    "width": 1100,
+    "height": 700
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry .tree-label"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tab-edit"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".file-panel"
+      },
+      "count": 1
+    },
+    {
+      "type": "scroll",
+      "x": 650,
+      "y": 300,
+      "dx": 0,
+      "dy": -10
+    },
+    {
+      "type": "scroll",
+      "x": 650,
+      "y": 300,
+      "dx": 0,
+      "dy": -10
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": ".edit-main"
+      },
+      "view_scroll_y": 1000,
+      "tolerance": 999
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 1090,
+      "y": 5,
+      "expected_selector": ".edit-document-bar"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 1090,
+      "y": 694,
+      "expected_selector": ".edit-status"
+    }
+  ]
+}

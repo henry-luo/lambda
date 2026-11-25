@@ -94,7 +94,15 @@ pub fn dialog_frame(kind, title, text, fields, buttons) =>
     >
   >
 
-pub let dialog_kinds = ['close', 'changed', 'exists', 'save_as']
+pub let dialog_kinds = ['close', 'navigate', 'changed', 'exists', 'save_as']
+
+pub pn navigation_decision(node, session, doc, entry) {
+  if (sess.is_dirty(session, doc)^) {
+    release_focus(node)^;
+    return {navigate:false, dialog:{kind:'navigate', entry:entry}}
+  }
+  return {navigate:true, dialog:null}
+}
 
 // The file dialogs; null for no dialog or another kind.
 pub fn dialog_view(dialog, session) any^ {
@@ -102,6 +110,12 @@ pub fn dialog_view(dialog, session) any^ {
   else if (dialog.kind == 'close') {
     dialog_frame("close", "Unsaved changes",
       "Save the changes to " ++ session.name ++ " before closing?", [],
+      [dialog_button("cancel", "Cancel", false, true), dialog_button("discard", "Don't Save", false),
+       dialog_button("save", "Save", true)])
+  }
+  else if (dialog.kind == 'navigate') {
+    dialog_frame("navigate", "Unsaved changes",
+      "Save the changes to " ++ session.name ++ " before opening another file?", [],
       [dialog_button("cancel", "Cancel", false, true), dialog_button("discard", "Don't Save", false),
        dialog_button("save", "Save", true)])
   }
@@ -171,13 +185,17 @@ pub pn save_now(session, doc, node) {
 // belongs to the surface) and `reloaded` (the document read back from disk,
 // or null).
 pub pn dialog_action(action, node, before) {
-  let st = {*: before, source_text: null}
+  let st = {*: before, source_text: null, navigation: null}
   let session = st.session
   let dialog = st.dialog
+  let navigation = if (dialog != null and dialog.kind == 'navigate') dialog.entry
+    else if (type(st.after_save) == map and st.after_save.kind == 'navigate') st.after_save.entry
+    else null
   if (action == "cancel") {
     return {*: st, dialog: null, after_save: null, handled: true, reloaded: null}
   }
   if (action == "discard") {
+    if (navigation != null) { return {*:st, dialog:null, after_save:null, handled:true, reloaded:null, navigation:navigation} }
     dom.request_window_close(node)
     return {*: st, dialog: null, handled: true, reloaded: null}
   }
@@ -185,6 +203,7 @@ pub pn dialog_action(action, node, before) {
     return {*: st, dialog: save_as_dialog(session, node)^, handled: true, reloaded: null}
   }
   if (action == "reload") {
+    if (navigation != null) { return {*:st, dialog:null, after_save:null, handled:true, reloaded:null, navigation:navigation} }
     let result = sess.reload(session)
     if ((not result.ok)^) { return {*: st, status: result.status, handled: true, reloaded: null} }
     if ((result.source_text != null)^) {
@@ -211,10 +230,11 @@ pub pn dialog_action(action, node, before) {
   let saved = {*: st, session: result.session, status: result.status, handled: true, reloaded: null}
   if (result.ok^) {
     if (closing) { dom.request_window_close(node) }
-    return {*: saved, dialog: null, after_save: null}
+    return {*: saved, dialog: null, after_save: null, navigation:navigation}
   }
   if ((result.conflict != null)^) {
-    return {*: saved, dialog: {kind: result.conflict, path: target}, after_save: if (closing) 'close' else null}
+    return {*: saved, dialog: {kind: result.conflict, path: target},
+      after_save: if (closing) 'close' else if (navigation != null) {kind:'navigate', entry:navigation} else null}
   }
   // a refused Save As keeps its dialog, showing the path it tried
   if (typed != null) { return {*: saved, dialog: {kind: 'save_as', path: target}} }

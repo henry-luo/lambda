@@ -1,0 +1,82 @@
+{
+  "name": "embedded Markdown source highlights after jumping and editing",
+  "html": "temp/view-source-highlight",
+  "prepare": [
+    "python3",
+    "-c",
+    "from pathlib import Path;p=Path('temp/view-source-highlight');p.mkdir(parents=True,exist_ok=True);(p/'long.md').write_text(''.join('# Heading %03d\\n\\n**bold %03d**\\n\\n'%(i,i) for i in range(300)))"
+  ],
+  "viewport": {
+    "width": 1100,
+    "height": 700
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry .tree-label"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tab-edit"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-btn-view_source"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".tok-heading"
+      },
+      "contains": "Heading 000"
+    },
+    {
+      "type": "click",
+      "target": {
+        "text": "Heading 000"
+      }
+    },
+    {
+      "type": "key_combo",
+      "key": "ArrowDown",
+      "mods_str": "super"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".tok-heading"
+      },
+      "contains": "Heading 292"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".tok-strong"
+      },
+      "contains": "bold 292"
+    },
+    {
+      "type": "click",
+      "target": {
+        "text": "bold 292"
+      }
+    },
+    {
+      "type": "type",
+      "text": "new"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".tok-strong"
+      },
+      "contains": "new"
+    }
+  ]
+}

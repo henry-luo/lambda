@@ -7,6 +7,7 @@
 // same descriptor/request path as keyboard input (Lambda DOM Editable §8.3).
 // Active and disabled state come from model queries, never a UI switch.
 
+import dom
 import lambda.editor.model
 import lambda.editor.format.model
 
@@ -200,8 +201,9 @@ pub fn toolbar(file, editor, dirty, ds, groups, view_items, table_allowed = true
       history;
       if (ds != null) [for (items in groups) group(items, editor, dirty, ds)]
       else [
-        compact_group("Format", "format", [*groups[0], *groups[1]], editor, dirty),
-        compact_group("Lists", "lists", groups[2], editor, dirty),
+        compact_group("Format", "format", groups[0], editor, dirty),
+        group(groups[1], editor, dirty, null),
+        group(groups[2], editor, dirty, null),
         if (table_allowed) group(table_insert, editor, dirty, null) else null,
         compact_group("Insert", "insert", groups[3], editor, dirty)
       ]
@@ -212,6 +214,16 @@ pub fn toolbar(file, editor, dirty, ds, groups, view_items, table_allowed = true
 
 fn compact_group(label, id, items, editor, dirty) =>
   if (len(items) == 0) null else apply(<edit_compact label: label, id: id, items: items, editor: editor, dirty: dirty>)
+
+pub pn dismiss_compact(node, target = null) {
+  let menus = dom.query_selector_all(dom.root_node(node), ".edit-format-bar .edit-compact[open]")
+  for (menu in menus) {
+    if (target == null or not dom.contains(menu, target)) {
+      dom.remove_attribute(menu, "open")
+      dom.dispatch(menu, "toggle")
+    }
+  }
+}
 
 view <edit_compact> {
   <details class: "edit-compact edit-compact-" ++ ~.id,
@@ -245,7 +257,7 @@ on mousedown(evt) {
   'prevent-default'
 }
 on click(evt) {
-  if (not ~.disabled) { emit("edit_cmd", {cmd: ~.cmd, node: evt.target}) }
+  if (not ~.disabled) { emit("edit_cmd", {cmd: ~.cmd, node: evt.target, event: evt}) }
 }
 
 pub let css = "

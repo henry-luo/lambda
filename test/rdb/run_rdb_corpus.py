@@ -44,7 +44,7 @@ BACKENDS = [
 ]
 
 
-def run_script(source: str, name: str, env: dict = None) -> str:
+def run_script(source: str, name: str, env: dict = None, procedure: bool = False) -> str:
     WORK.mkdir(parents=True, exist_ok=True)
     script = WORK / name
     # The generated script contains credentials; restrict even an existing file
@@ -53,7 +53,7 @@ def run_script(source: str, name: str, env: dict = None) -> str:
         with open(script, "w", encoding="utf-8", opener=lambda path, flags: os.open(path, flags, 0o600)) as output:
             os.chmod(script, 0o600)
             output.write(source)
-        proc = subprocess.run([str(LAMBDA), str(script)], cwd=ROOT, capture_output=True,
+        proc = subprocess.run([str(LAMBDA)] + (["run"] if procedure else []) + [str(script)], cwd=ROOT, capture_output=True,
                               text=True, timeout=120, env={**os.environ, **(env or {})})
     finally:
         script.unlink(missing_ok=True)
@@ -111,6 +111,35 @@ def main() -> int:
                 failures.append(f"{label}: output differs from {golden.name}\n{out}")
             elif leaked(secret):
                 failures.append(f"{label}: password reached log.txt")
+            else:
+                passes += 1
+        if backend == "mysql" and not update:
+            # MySQL uses numeric coercion for numeric parameters compared to
+            # text; PostgreSQL uses different coercion rules. Keep this driver
+            # regression specific to MySQL rather than adding it to every
+            # backend's ordinary corpus.
+            typed_script = CORPUS / "fixture" / "mysql_bind_types.ls"
+            out = run_script(typed_script.read_text(), "mysql_bind_types.ls", procedure=True).strip()
+            if out != "true":
+                failures.append("mysql/typed-bindings: expected true, got " + out)
+            elif leaked(secret):
+                failures.append("mysql/typed-bindings: password reached log.txt")
+            else:
+                passes += 1
+            tiny_script = CORPUS / "fixture" / "mysql_tinyint_option.ls"
+            out = run_script(tiny_script.read_text(), "mysql_tinyint_option.ls", procedure=True).strip()
+            if out != "true":
+                failures.append("mysql/tinyint-option: expected true, got " + out)
+            elif leaked(secret):
+                failures.append("mysql/tinyint-option: password reached log.txt")
+            else:
+                passes += 1
+            unsigned_script = CORPUS / "fixture" / "mysql_unsigned_bigint_option.ls"
+            out = run_script(unsigned_script.read_text(), "mysql_unsigned_bigint_option.ls", procedure=True).strip()
+            if out != "true":
+                failures.append("mysql/unsigned-bigint-option: expected true, got " + out)
+            elif leaked(secret):
+                failures.append("mysql/unsigned-bigint-option: password reached log.txt")
             else:
                 passes += 1
         if update:

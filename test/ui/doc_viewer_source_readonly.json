@@ -1,0 +1,195 @@
+{
+  "name": "viewer source shares editor highlighting and rejects edits",
+  "html": "temp/view-source-readonly",
+  "prepare": [
+    "python3",
+    "-c",
+    "from pathlib import Path;p=Path('temp/view-source-readonly');p.mkdir(parents=True,exist_ok=True);(p/'long.md').write_text(''.join('# Heading %03d\\n\\n**bold %03d**\\n\\n'%(i,i) for i in range(300)))"
+  ],
+  "viewport": {
+    "width": 1100,
+    "height": 700
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry .tree-label"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tab-source"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".file-panel"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".src-gutter .src-num"
+      },
+      "min_count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface[aria-readonly='true']"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".tok-heading"
+      },
+      "contains": "Heading 000"
+    },
+    {
+      "type": "click",
+      "target": {
+        "text": "Heading 000"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "Home"
+    },
+    {
+      "type": "key_combo",
+      "key": "End",
+      "mods_str": "shift"
+    },
+    {
+      "type": "key_combo",
+      "key": "c",
+      "mods_str": "super"
+    },
+    {
+      "type": "assert_clipboard",
+      "equals": "# Heading 000"
+    },
+    {
+      "type": "type",
+      "text": "MUTATED"
+    },
+    {
+      "type": "key_combo",
+      "key": "x",
+      "mods_str": "super"
+    },
+    {
+      "type": "key_combo",
+      "key": "v",
+      "mods_str": "super"
+    },
+    {
+      "type": "key_press",
+      "key": "Backspace"
+    },
+    {
+      "type": "key_combo",
+      "key": "s",
+      "mods_str": "super"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#source-preview"
+      },
+      "contains": "# Heading 000"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#source-preview"
+      },
+      "not_contains": "MUTATED"
+    },
+    {
+      "type": "assert_file",
+      "path": "temp/view-source-readonly/long.md",
+      "contains": "# Heading 000"
+    },
+    {
+      "type": "assert_file",
+      "path": "temp/view-source-readonly/long.md",
+      "not_contains": "MUTATED"
+    },
+    {
+      "type": "key_combo",
+      "key": "ArrowDown",
+      "mods_str": "super"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".tok-heading"
+      },
+      "contains": "Heading 293"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".tok-strong"
+      },
+      "contains": "bold 293"
+    },
+    {
+      "type": "key_combo",
+      "key": "a",
+      "mods_str": "super"
+    },
+    {
+      "type": "key_combo",
+      "key": "c",
+      "mods_str": "super"
+    },
+    {
+      "type": "assert_clipboard",
+      "contains": "# Heading 000"
+    },
+    {
+      "type": "assert_clipboard",
+      "contains": "**bold 299**"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tab-view"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tab-source"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".tok-heading"
+      },
+      "contains": "Heading 000"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tab-edit"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-format-markdown"
+      },
+      "count": 1
+    }
+  ]
+}

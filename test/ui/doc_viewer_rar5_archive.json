@@ -29,9 +29,10 @@
     {
       "type": "assert_text",
       "target": {
-        "selector": "#source-preview"
+        "selector": "#source-preview .edit-doc > div",
+        "index": 0
       },
-      "equals": "hello libarchive test suite!\n"
+      "equals": "hello libarchive test suite!"
     }
   ]
 }

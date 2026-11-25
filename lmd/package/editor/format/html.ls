@@ -395,7 +395,7 @@ fn close_tag(tag) => "</" ++ string(tag) ++ ">"
 
 // Retained source: an element (or comment) through the HTML formatter, a
 // kept run item by item, text escaped.
-fn retained_html(source) any^ {
+pub fn retained_html(source) any^ {
   if (type(source) == string) escape_text(source)
   else if (type(source) == array) join([for (x in source) retained_html(x)], "")
   else format([source], 'html') or ""

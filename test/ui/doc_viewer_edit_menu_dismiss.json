@@ -1,0 +1,19 @@
+{
+  "name": "project editor dismisses a table menu from the file panel",
+  "html": "temp/view-menu-files",
+  "prepare": ["python3", "-c", "from pathlib import Path;import shutil;p=Path('temp/view-menu-files');p.mkdir(parents=True,exist_ok=True);shutil.copyfile('test/ui/edit/sample.html',p/'sample.html')"],
+  "viewport": {"width": 1100, "height": 700},
+  "events": [
+    {"type": "click", "target": {"selector": ".tree-entry[data-tree-path$='/sample.html'] .tree-label"}},
+    {"type": "click", "target": {"selector": ".tab-edit"}},
+    {"type": "click", "target": {"selector": ".edit-surface td"}, "button": 1},
+    {"type": "assert_count", "target": {"selector": ".edit-table-menu"}, "count": 1},
+    {"type": "click", "target": {"selector": "#file-filter"}},
+    {"type": "assert_count", "target": {"selector": ".edit-table-menu"}, "count": 0},
+    {"type": "click", "target": {"selector": ".edit-compact-format summary"}},
+    {"type": "assert_count", "target": {"selector": ".edit-compact-format[open]"}, "count": 1},
+    {"type": "click", "target": {"selector": "#file-filter"}},
+    {"type": "assert_count", "target": {"selector": ".edit-compact[open]"}, "count": 0},
+    {"type": "assert_count", "target": {"selector": ".edit-surface"}, "count": 1}
+  ]
+}

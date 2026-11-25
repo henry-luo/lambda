@@ -2390,7 +2390,17 @@ appear in `fetch`. No statement is automatically retried.
 Parameters are bound separately from SQL. The current common driver ABI
 accepts null, boolean, signed integer, finite float, and UTF-8 text without
 embedded NUL; binary parameters and embedded-NUL text are rejected rather
-than truncated. Decimal, datetime and JSON result values arrive as text;
+than truncated. MySQL sends integer, float and Boolean parameters with their
+native numeric types; text parameters remain text. This distinction matters
+when MySQL compares a text column with a numeric parameter. MySQL ordinarily
+reports `TINYINT(1)` as a Boolean; the URI option `tinyint-as-integer=true`
+instead exposes its physical integer value and integer descriptor, including
+negative values. `false` selects the default behavior; other values are
+rejected (RDB6). The MySQL URI option
+`unsigned-bigint-as-decimal=true` similarly exposes unsigned BIGINT values as
+exact decimal text and a decimal descriptor, avoiding the default signed
+64-bit conversion's saturation. `false` retains the default; other values are
+rejected (RDB6). Decimal, datetime and JSON result values arrive as text;
 binary values remain binary. Individual batches are capped at 1,024 columns
 and 16 MiB of copied text/binary values. The PostgreSQL client may allocate a
 large individual value before this application-side limit is checked.

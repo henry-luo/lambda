@@ -759,9 +759,15 @@ fn exact(hs, b, vw) any^ {
 // Ask for pass 2 on the next frame, unless one is already asked for or the
 // window is exact; returns the outstanding request's token (0 for none). The
 // frame event targets the body, the element this template renders.
+fn source_body(node) {
+  let target = if (dom.node_type(node) == 1) node else dom.parent_node(node)
+  if (target == null) null else dom.closest(target, "body.edit-format-source")
+}
+
 pn request_exact(node, hs, b, vw, token) {
   if ((token != 0 or not needs_exact(hs, b, vw))^) { return token }
-  let body = dom.query_selector(dom.root_node(node), "body")
+  // A viewer can embed this body inside another one; frames belong to this editor.
+  let body = source_body(node)
   if (body == null) { return 0 }
   dom.request_frame(body, "source_frame")
 }
@@ -952,8 +958,16 @@ pub let surface_css = source_css ++ syn.css
 // first window at once: at the top of the file the parse starts at line 0 with
 // no restart scan, so it costs one pass 2 whatever the file's size.
 pub fn app(session, b, status) =>
-  apply(<source_app session: session, buf: b, status: status,
+  apply(<source_app session: session, buf: b, status: status, readonly:false,
                     hs: exact(new_highlight(session.path), b, new_view())>, {mode: "edit"})
+
+// The viewer supplies its already-decoded text, including archive members.
+pub fn readonly(path, text) {
+  let b = buf.from_text(text)
+  let session = sess.new_session(path, descriptor, text, {doc:b, envelope:null});
+  apply(<source_app session:session, buf:b, status:"", readonly:true,
+                    hs:exact(new_highlight(path), b, new_view())>, {mode:"edit"})
+}
 
 // ---------------------------------------------------------------------------
 // Switching views (OQ7, CED20): the application shows the rich surface or
@@ -1044,14 +1058,16 @@ edit <source_app> state session: ~.session, b: ~.buf, status: ~.status, sel: car
                          after_save: null, selection_drag: null, selection_frame: 0 {
   let dirty = sess.is_dirty(session, b);
   <body class: "edit-app edit-format-source",
-    tools.toolbar(files.file_label(session, dirty, true), history_probe(hist), dirty, null, [],
-                  if (session.rich_format != null) tools.rich_view_group else []);
+    if (not ~.readonly) tools.toolbar(files.file_label(session, dirty, true), history_probe(hist), dirty, null, [],
+                  if (session.rich_format != null) tools.rich_view_group else []) else null;
     <div class: "src-main",
       gutter(b, vw);
       <div id: "src-pane", class: "src-pane",
         <div id: "src-viewport", class: "src-viewport",
           <div id: "edit-surface", class: if (vw.wrap) "src-text src-wrap" else "src-text", contenteditable: "true",
-               spellcheck: "false", tabindex: "0", style: surface_style(vw), apply(window_doc(b, vw, hs))>
+               role: if (~.readonly) "textbox" else null, ['aria-readonly']: if (~.readonly) "true" else null,
+               spellcheck: "false", tabindex: "0", style: surface_style(vw),
+               if (~.readonly) <div id:"source-preview", apply(window_doc(b, vw, hs))> else apply(window_doc(b, vw, hs))>
         >
         horizontal_bar(vw)
       >
@@ -1059,8 +1075,8 @@ edit <source_app> state session: ~.session, b: ~.buf, status: ~.status, sel: car
       <span id: "src-measure", class: "src-measure", ["aria-hidden"]: "true", MEASURE_TEXT>
       if (hs.find != null) find_bar(hs.find) else null
     >
-    status_line(b, sel, hs, status, dirty)
-    files.dialog_view(dialog, session)
+    if (~.readonly) null else status_line(b, sel, hs, status, dirty)
+    if (~.readonly) null else files.dialog_view(dialog, session)
   >
 }
 on beforeinput(evt) {
@@ -1079,6 +1095,10 @@ on editaction(evt) {
   if (input_type == "copy") {
     return edit_result.with_clipboard_text(
       edit_result.model_applied(false, false, false, "", source_selection_of(b, vw, hs, sel), rev), copied)
+  }
+  // Claim mutation intents so the native editable host cannot change the projection.
+  if (~.readonly) {
+    return edit_result.model_applied(false, false, false, "", source_selection_of(b, vw, hs, sel), rev)
   }
   let history = input_type == "historyUndo" or input_type == "historyRedo"
   let composing = contains(composition_types, input_type)
@@ -1158,6 +1178,11 @@ on edit_cmd(req) {
 on edit_dialog(req) {
   let filed = files.dialog_action(req.action, req.node,
     {session: session, doc: b, status: status, dialog: dialog, after_save: after_save})^
+  if ((filed.navigation != null)^) {
+    session = filed.session; status = filed.status; dialog = filed.dialog; after_save = filed.after_save
+    emit("viewer_navigation", {entry:filed.navigation, node:req.node})
+    return
+  }
   session = filed.session
   status = filed.status
   dialog = filed.dialog
@@ -1175,10 +1200,18 @@ on edit_dialog(req) {
     rev = project(vw, b, hs, sel, rev)
   }
 }
+on editor_navigate(evt) {
+  if ((dialog != null)^) { return }
+  let decision = files.navigation_decision(evt.target, session, b, evt.detail)^
+  if (decision.navigate) { emit("viewer_navigation", {entry:evt.detail, node:evt.target}); return }
+  dialog = decision.dialog
+}
 on keydown(evt) {
   // assigning unchanged state rebuilds the rows before the pending text input
   if ((vw.handle == null)^) { vw = mounted(b, vw, evt.target, rev) }
   let primary = evt.metaKey == true or evt.ctrlKey == true
+  if ((~.readonly and primary and contains(["s", "z"], lower(string(evt.key))))^) { return 'prevent-default' }
+  if ((~.readonly and evt.key == "Tab")^) { return 'pass' }
   if ((dialog != null)^) {
     return files.dialog_keydown(dialog, evt)^
   }
@@ -1337,7 +1370,7 @@ on selectiondrag(evt) {
   rev = project(vw, b, hs, sel, rev)
   if ((moving and selection_frame == 0)^) {
     selection_drag = {*: selection_drag, time: evt.time_stamp, dx: 0.0, dy: 0.0}
-    selection_frame = dom.request_frame(dom.query_selector(root, "body"), "source_selection_frame")
+    selection_frame = dom.request_frame(source_body(evt.target), "source_selection_frame")
   }
   'prevent-default'
 }

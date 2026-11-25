@@ -128,6 +128,8 @@ typedef struct {
     char       ca_file[1024];
     RdbTlsMode tls;
     int64_t    connect_timeout_ms;
+    bool       tinyint_as_integer;
+    bool       unsigned_bigint_as_decimal;
 } MysqlUri;
 
 static int mysql_hex(char c) {
@@ -230,6 +232,14 @@ static bool mysql_parse_uri(const char* uri, MysqlUri* u) {
                 snprintf(u->ca_file, sizeof(u->ca_file), "%s", value);
             } else if (strcasecmp(key, "socket") == 0) {
                 snprintf(u->socket, sizeof(u->socket), "%s", value);
+            } else if (strcasecmp(key, "tinyint-as-integer") == 0) {
+                if (strcasecmp(value, "true") == 0) u->tinyint_as_integer = true;
+                else if (strcasecmp(value, "false") == 0) u->tinyint_as_integer = false;
+                else return false;
+            } else if (strcasecmp(key, "unsigned-bigint-as-decimal") == 0) {
+                if (strcasecmp(value, "true") == 0) u->unsigned_bigint_as_decimal = true;
+                else if (strcasecmp(value, "false") == 0) u->unsigned_bigint_as_decimal = false;
+                else return false;
             } else if (strcasecmp(key, "connect-timeout") == 0) {
                 u->connect_timeout_ms = (int64_t)atol(value) * 1000;
             }
@@ -276,6 +286,8 @@ static int mysql_resolve_targets(const char* uri, RdbTarget* out, int cap, int* 
 typedef struct {
     MYSQL*       my;
     bool         mariadb;
+    bool         tinyint_as_integer;
+    bool         unsigned_bigint_as_decimal;
     void*        active_stmt;       // an open cursor owns the connection
     // what a cancel helper session needs to reach the same server (§13.5.3)
     char         endpoint[1024];    // the host bridge's local socket
@@ -351,6 +363,8 @@ static int mysql_open(const RdbHostAPI* host, void* open_ctx, const char* uri,
     bool upstream_tls = spec.tls >= RDB_TLS_REQUIRE;
     MYSQL* my = mysql_connect_endpoint(endpoint, u.user, u.password ? u.password : "",
                                        u.database[0] ? u.database : NULL, timeout_s, upstream_tls);
+    bool tinyint_as_integer = u.tinyint_as_integer;
+    bool unsigned_bigint_as_decimal = u.unsigned_bigint_as_decimal;
     mysql_uri_free(&u);
     if (!my) return RDB_ERROR;
     if (opts->readonly && !mysql_command(my, "SET SESSION TRANSACTION READ ONLY")) {
@@ -360,6 +374,8 @@ static int mysql_open(const RdbHostAPI* host, void* open_ctx, const char* uri,
 
     MysqlConn* conn = (MysqlConn*)calloc(1, sizeof(MysqlConn));
     conn->my = my;
+    conn->tinyint_as_integer = tinyint_as_integer;
+    conn->unsigned_bigint_as_decimal = unsigned_bigint_as_decimal;
     snprintf(conn->endpoint, sizeof(conn->endpoint), "%s", endpoint);
     conn->upstream_tls = upstream_tls;
     conn->connect_timeout_s = timeout_s;
@@ -441,11 +457,13 @@ static bool mysql_lost(unsigned int err) {
  * Types
  * ══════════════════════════════════════════════════════════════════════ */
 
-static RdbType mysql_type_for_field(const MYSQL_FIELD* f) {
+static RdbType mysql_type_for_field(const MYSQL_FIELD* f, bool tinyint_as_integer, bool unsigned_bigint_as_decimal) {
     switch (f->type) {
         case MYSQL_TYPE_TINY:
-            return f->length == 1 ? RDB_TYPE_BOOL : RDB_TYPE_INT;   // TINYINT(1) is BOOLEAN
-        case MYSQL_TYPE_SHORT: case MYSQL_TYPE_LONG: case MYSQL_TYPE_LONGLONG:
+            return f->length == 1 && !tinyint_as_integer ? RDB_TYPE_BOOL : RDB_TYPE_INT;
+        case MYSQL_TYPE_LONGLONG:
+            return unsigned_bigint_as_decimal && (f->flags & UNSIGNED_FLAG) ? RDB_TYPE_DECIMAL : RDB_TYPE_INT;
+        case MYSQL_TYPE_SHORT: case MYSQL_TYPE_LONG:
         case MYSQL_TYPE_INT24: case MYSQL_TYPE_YEAR:
             return RDB_TYPE_INT;
         case MYSQL_TYPE_FLOAT: case MYSQL_TYPE_DOUBLE:
@@ -466,7 +484,15 @@ static RdbType mysql_type_for_field(const MYSQL_FIELD* f) {
 }
 
 /** schema type from information_schema DATA_TYPE / COLUMN_TYPE */
-static RdbType mysql_type_for_decl(const char* data_type, const char* column_type) {
+static bool mysql_decl_unsigned(const char* column_type) {
+    for (const char* p = column_type; p && *p; p++) {
+        if (strncasecmp(p, "unsigned", 8) == 0) return true;
+    }
+    return false;
+}
+
+static RdbType mysql_type_for_decl(const char* data_type, const char* column_type, bool tinyint_as_integer, bool unsigned_bigint_as_decimal) {
+    if (unsigned_bigint_as_decimal && strcasecmp(data_type, "bigint") == 0 && mysql_decl_unsigned(column_type)) return RDB_TYPE_DECIMAL;
     static const struct { const char* name; RdbType type; } map[] = {
         { "tinyint", RDB_TYPE_INT }, { "smallint", RDB_TYPE_INT }, { "mediumint", RDB_TYPE_INT },
         { "int", RDB_TYPE_INT }, { "bigint", RDB_TYPE_INT }, { "year", RDB_TYPE_INT },
@@ -477,7 +503,7 @@ static RdbType mysql_type_for_decl(const char* data_type, const char* column_typ
         { "tinyblob", RDB_TYPE_BLOB }, { "blob", RDB_TYPE_BLOB }, { "mediumblob", RDB_TYPE_BLOB },
         { "longblob", RDB_TYPE_BLOB }, { "binary", RDB_TYPE_BLOB }, { "varbinary", RDB_TYPE_BLOB },
     };
-    if (column_type && strncasecmp(column_type, "tinyint(1)", 10) == 0) return RDB_TYPE_BOOL;
+    if (!tinyint_as_integer && column_type && strncasecmp(column_type, "tinyint(1)", 10) == 0) return RDB_TYPE_BOOL;
     for (size_t i = 0; i < sizeof(map) / sizeof(map[0]); i++) {
         if (strcasecmp(data_type, map[i].name) == 0) return map[i].type;
     }
@@ -489,10 +515,18 @@ static RdbType mysql_type_for_decl(const char* data_type, const char* column_typ
  * ══════════════════════════════════════════════════════════════════════ */
 
 typedef struct {
+    RdbType type;
+    int64_t integer;
+    double floating;
+    unsigned char boolean;
+    char* text;
+} MysqlBoundParam;
+
+typedef struct {
     MysqlConn*     conn;
     MYSQL_STMT*    st;
     int            param_count;
-    char**         params;          // text values; NULL = SQL NULL
+    MysqlBoundParam* params;
     bool           executed;
     bool           done;
     int            result;
@@ -518,19 +552,33 @@ static int mysql_prepare_stmt(void* conn, const char* sql, void** out_stmt) {
         return RDB_ERROR;
     }
     MysqlStmt* s = (MysqlStmt*)calloc(1, sizeof(MysqlStmt));
+    if (!s) { mysql_stmt_close(st); return RDB_ERROR; }
     s->conn = c;
     s->st = st;
     s->param_count = (int)mysql_stmt_param_count(st);
-    s->params = (char**)calloc((size_t)(s->param_count ? s->param_count : 1), sizeof(char*));
+    s->params = (MysqlBoundParam*)calloc((size_t)(s->param_count ? s->param_count : 1), sizeof(MysqlBoundParam));
+    if (!s->params) { mysql_stmt_close(st); free(s); return RDB_ERROR; }
     *out_stmt = s;
     return RDB_OK;
 }
 
 static int mysql_bind(void* stmt, int index, const RdbParam* param) {
     MysqlStmt* s = (MysqlStmt*)stmt;
-    if (index < 1 || index > s->param_count || s->executed) return RDB_ERROR;
-    free(s->params[index - 1]);
-    s->params[index - 1] = rdb_mod_param_text(param);
+    if (!param || index < 1 || index > s->param_count || s->executed) return RDB_ERROR;
+    MysqlBoundParam* bound = &s->params[index - 1];
+    free(bound->text);
+    memset(bound, 0, sizeof(*bound));
+    bound->type = param->type;
+    switch (param->type) {
+        case RDB_TYPE_NULL: break;
+        case RDB_TYPE_INT: bound->integer = param->int_val; break;
+        case RDB_TYPE_FLOAT: bound->floating = param->float_val; break;
+        case RDB_TYPE_BOOL: bound->boolean = param->bool_val ? 1 : 0; break;
+        default:
+            bound->text = rdb_mod_param_text(param);
+            if (!bound->text) return RDB_ERROR;
+            break;
+    }
     return RDB_OK;
 }
 
@@ -541,10 +589,32 @@ static int mysql_execute(MysqlStmt* s) {
     if (s->conn->active_stmt) return RDB_ERROR;
     s->executed = true;
     MYSQL_BIND* binds = (MYSQL_BIND*)calloc((size_t)(s->param_count ? s->param_count : 1), sizeof(MYSQL_BIND));
+    if (!binds) return s->result = RDB_ERROR;
     for (int i = 0; i < s->param_count; i++) {
-        binds[i].buffer_type = s->params[i] ? MYSQL_TYPE_STRING : MYSQL_TYPE_NULL;
-        binds[i].buffer = s->params[i];
-        binds[i].buffer_length = s->params[i] ? strlen(s->params[i]) : 0;
+        MysqlBoundParam* bound = &s->params[i];
+        switch (bound->type) {
+            case RDB_TYPE_NULL: binds[i].buffer_type = MYSQL_TYPE_NULL; break;
+            case RDB_TYPE_INT:
+                binds[i].buffer_type = MYSQL_TYPE_LONGLONG;
+                binds[i].buffer = &bound->integer;
+                binds[i].buffer_length = sizeof(bound->integer);
+                break;
+            case RDB_TYPE_FLOAT:
+                binds[i].buffer_type = MYSQL_TYPE_DOUBLE;
+                binds[i].buffer = &bound->floating;
+                binds[i].buffer_length = sizeof(bound->floating);
+                break;
+            case RDB_TYPE_BOOL:
+                binds[i].buffer_type = MYSQL_TYPE_TINY;
+                binds[i].buffer = &bound->boolean;
+                binds[i].buffer_length = sizeof(bound->boolean);
+                break;
+            default:
+                binds[i].buffer_type = MYSQL_TYPE_STRING;
+                binds[i].buffer = bound->text;
+                binds[i].buffer_length = bound->text ? strlen(bound->text) : 0;
+                break;
+        }
     }
     unsigned long cursor = CURSOR_TYPE_READ_ONLY;
     // MySQL rejects cursor mode for commands such as CREATE and UPDATE.
@@ -635,7 +705,7 @@ static int mysql_column_desc(void* stmt, int col, RdbColumnDesc* out) {
     MysqlStmt* s = (MysqlStmt*)stmt;
     if (mysql_execute(s) != RDB_OK || col < 0 || col >= s->column_count) return RDB_ERROR;
     out->name = s->fields[col].name;
-    out->type = mysql_type_for_field(&s->fields[col]);
+    out->type = mysql_type_for_field(&s->fields[col], s->conn->tinyint_as_integer, s->conn->unsigned_bigint_as_decimal);
     return RDB_OK;
 }
 
@@ -648,7 +718,7 @@ static RdbValue mysql_column_value(void* stmt, int col) {
     if (!s->meta || col < 0 || col >= s->column_count || s->nulls[col]) return v;
     const char* text = s->buffers[col];
     v.is_null = false;
-    v.type = mysql_type_for_field(&s->fields[col]);
+    v.type = mysql_type_for_field(&s->fields[col], s->conn->tinyint_as_integer, s->conn->unsigned_bigint_as_decimal);
     switch (v.type) {
         case RDB_TYPE_INT:   v.int_val = strtoll(text, NULL, 10); break;
         case RDB_TYPE_FLOAT: v.float_val = strtod(text, NULL); break;
@@ -676,7 +746,7 @@ static void mysql_finalize(void* stmt) {
     }
     if (s->meta) mysql_free_result(s->meta);
     mysql_stmt_close(s->st);
-    for (int i = 0; i < s->param_count; i++) free(s->params[i]);
+    for (int i = 0; i < s->param_count; i++) free(s->params[i].text);
     for (int c = 0; s->buffers && c < s->column_count; c++) free(s->buffers[c]);
     free(s->params);
     free(s->results);
@@ -776,7 +846,7 @@ static int mysql_load_schema(void* conn, const RdbHostAPI* host, void* meta, Rdb
             RdbColumn* c = &tbl->columns[i++];
             c->name = rdb_mod_meta_dup(&m, mysql_cell(&columns, r, 1));
             c->type_decl = rdb_mod_meta_dup(&m, mysql_cell(&columns, r, 2));
-            c->type = mysql_type_for_decl(mysql_cell(&columns, r, 3), mysql_cell(&columns, r, 2));
+            c->type = mysql_type_for_decl(mysql_cell(&columns, r, 3), mysql_cell(&columns, r, 2), ((MysqlConn*)conn)->tinyint_as_integer, ((MysqlConn*)conn)->unsigned_bigint_as_decimal);
             c->nullable = strcmp(mysql_cell(&columns, r, 4), "YES") == 0;
             c->pk_index = atoi(mysql_cell(&columns, r, 5));
             c->primary_key = c->pk_index > 0;

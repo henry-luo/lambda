@@ -3535,6 +3535,8 @@ RADIANT_C_API Item fn_radiant_range_max(Item n) { return radiant_range_field(n, 
 // how a step computes from a stale number.
 static const char* radiant_input_current_value(DomElement* elem) {
     if (elem && tc_is_text_control(elem)) {
+        // Textarea defaults are child text and must be materialized before a state read.
+        tc_ensure_init(elem);
         FormControlProp* f = elem->form_control();
         if (f && f->current_value) return f->current_value;
     }

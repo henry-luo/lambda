@@ -15,19 +15,22 @@ pub fn selected(editor) any^ {
     let n = if (editor.selection.kind=='node') node_at(editor.doc,path) else null
     if (image_node(n)) {path:path,node:n} else null
 }
+// Retained source may render images that have no corresponding model image.
+pn projected_images(surface) { return [for (node in dom.query_selector_all(surface,"img")
+    where dom.closest(node,".edit-view-only")==null) node] }
 pub pn image_element(editor,surface,path=null) {
     let target = if (path==null) selected(editor).path else path
     let entries = [for (entry in ((images(editor.doc)) ^ { [] }) where entry.node.tag=='img') entry]
     let index = [for (i,entry in entries where (entry.path==target)^) i][0]
-    return if (surface==null or index==null) null else dom.query_selector_all(surface,"img")[index]
+    return if (surface==null or index==null) null else projected_images(surface)[index]
 }
 // The projection preserves image order; a press selects its model atom before native caret placement.
 pub pn hit(editor,node,surface) {
     let target = dom.closest(node,"img")
     if (target==null or surface==null or not dom.contains(surface,target)) { return null }
-    let nodes = dom.query_selector_all(surface,"img")
+    let nodes = projected_images(surface)
     let index = [for (i,n in nodes where n==target) i][0]
-    return [for (entry in ((images(editor.doc)) ^ { [] }) where entry.node.tag=='img') entry.path][index]
+    return if (index==null) null else [for (entry in ((images(editor.doc)) ^ { [] }) where entry.node.tag=='img') entry.path][index]
 }
 pub fn select_image(editor,path) any^ => if (image_node(node_at(editor.doc,path)))
     edit_set_selection(editor,node_selection(path)) else editor

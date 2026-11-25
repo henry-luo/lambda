@@ -1,0 +1,256 @@
+{
+  "name": "resize Markdown and grouped HTML images and retain their dimensions",
+  "command": "edit",
+  "html": "test/ui/edit/image-resize.md",
+  "working_copy": "temp/edit-ui/edit_md_image_resize.md",
+  "viewport": {
+    "width": 1100,
+    "height": 800
+  },
+  "events": [
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface img"
+      },
+      "count": 3
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface img",
+        "index": 0
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-image-size"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-image-larger"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface img",
+        "index": 0
+      },
+      "attribute": "width",
+      "equals": "200"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface img",
+        "index": 0
+      },
+      "attribute": "height",
+      "equals": "125"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-btn-undo"
+      }
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#edit-surface img",
+        "index": 0
+      },
+      "width": 160,
+      "tolerance": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-btn-redo"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface img",
+        "index": 0
+      },
+      "attribute": "width",
+      "equals": "200"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-image-width"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#edit-image-width"
+      },
+      "text": "240",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "Tab"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface img",
+        "index": 0
+      },
+      "attribute": "width",
+      "equals": "240"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface img",
+        "index": 0
+      },
+      "attribute": "height",
+      "equals": "150"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface img",
+        "index": 1
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-image-smaller"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface img",
+        "index": 1
+      },
+      "attribute": "width",
+      "equals": "356"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface img",
+        "index": 2
+      },
+      "attribute": "width",
+      "equals": "49%"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-btn-save"
+      }
+    },
+    {
+      "type": "assert_file",
+      "path": "temp/edit-ui/edit_md_image_resize.md",
+      "contains": "width=\"240\" height=\"150\""
+    },
+    {
+      "type": "assert_file",
+      "path": "temp/edit-ui/edit_md_image_resize.md",
+      "contains": "width=\"356\""
+    },
+    {
+      "type": "assert_file",
+      "path": "temp/edit-ui/edit_md_image_resize.md",
+      "contains": "alt=\"Second\""
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".edit-dirty"
+      },
+      "equals": ""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-btn-view_source"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-btn-view_rich"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface img",
+        "index": 0
+      },
+      "attribute": "width",
+      "equals": "240"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface img",
+        "index": 1
+      },
+      "attribute": "width",
+      "equals": "356"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface img",
+        "index": 1
+      }
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#edit-image-width"
+      },
+      "equals": "356"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-image-original"
+      }
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#edit-surface img",
+        "index": 1
+      },
+      "width": 160,
+      "tolerance": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-btn-undo"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface img",
+        "index": 1
+      },
+      "attribute": "width",
+      "equals": "356"
+    }
+  ]
+}

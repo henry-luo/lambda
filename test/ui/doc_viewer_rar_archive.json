@@ -29,9 +29,10 @@
     {
       "type": "assert_text",
       "target": {
-        "selector": "#source-preview"
+        "selector": "#source-preview .edit-doc > div",
+        "index": 0
       },
-      "equals": "test text file\r\n"
+      "equals": "test text file"
     }
   ]
 }

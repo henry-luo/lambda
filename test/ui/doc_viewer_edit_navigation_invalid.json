@@ -1,0 +1,122 @@
+{
+  "name": "invalid property draft stays editable during navigation",
+  "html": "temp/view-pane-invalid",
+  "prepare": [
+    "python3",
+    "-c",
+    "from pathlib import Path;import shutil;p=Path('temp/view-pane-invalid');p.mkdir(parents=True,exist_ok=True);shutil.copyfile('test/fixtures/edit/property-tree.json',p/'first.json');shutil.copyfile('test/fixtures/edit/sample.json',p/'second.json')"
+  ],
+  "viewport": {
+    "width": 1100,
+    "height": 700
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='/first.json'] .tree-label"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tab-edit"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "textarea[aria-label='name']"
+      }
+    },
+    {
+      "type": "key_combo",
+      "key": "a",
+      "mods_str": "super"
+    },
+    {
+      "type": "type",
+      "text": "invalid"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='/second.json'] .tree-label"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-format-property"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".property-status"
+      },
+      "contains": "invalid"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "textarea[aria-label='name']"
+      },
+      "equals": "invalid"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='/first.json'] .tree-row.selected"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "textarea[aria-label='name']"
+      }
+    },
+    {
+      "type": "key_combo",
+      "key": "a",
+      "mods_str": "super"
+    },
+    {
+      "type": "type",
+      "text": "\"Fixed\""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='/second.json'] .tree-label"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-dialog-navigate"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-save"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".document-name"
+      },
+      "equals": "second.json"
+    },
+    {
+      "type": "assert_file",
+      "path": "temp/view-pane-invalid/first.json",
+      "contains": "\"name\": \"Fixed\""
+    }
+  ]
+}

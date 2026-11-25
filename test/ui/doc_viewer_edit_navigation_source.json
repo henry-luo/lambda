@@ -1,0 +1,72 @@
+{
+  "name": "project editor navigation source",
+  "html": "temp/view-pane-source",
+  "prepare": [
+    "python3",
+    "-c",
+    "from pathlib import Path;import shutil;p=Path('temp/view-pane-source');p.mkdir(parents=True,exist_ok=True);shutil.copyfile('test/ui/edit/sample.txt',p/'first.txt');shutil.copyfile('test/fixtures/edit/sample.json',p/'second.json')"
+  ],
+  "viewport": {
+    "width": 1100,
+    "height": 700
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='/first.txt'] .tree-label"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tab-edit"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".src-text .edit-doc > div:first-child"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "End"
+    },
+    {
+      "type": "type",
+      "text": " CHANGED"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='/second.json'] .tree-label"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-dialog-navigate"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-discard"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".document-name"
+      },
+      "equals": "second.json"
+    },
+    {
+      "type": "assert_file",
+      "path": "temp/view-pane-source/first.txt",
+      "not_contains": "CHANGED"
+    }
+  ]
+}

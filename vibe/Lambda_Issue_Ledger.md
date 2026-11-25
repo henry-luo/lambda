@@ -3572,3 +3572,102 @@ error contract failure and is not a sync performance acceptance case.
 
 Fresh Chromium captures and the repaired DOM methods qualify both fixtures.
 See the [fixed record](<Lambda_Issue_Ledger (fixed).md#online-form-baseline-20261121>).
+
+
+<a id="acro-mysql-transaction-gap-20261125"></a>
+
+## Native MySQL needs a writable scoped transaction surface for Acro
+
+**Open, 2026-11-25.** `lambda.io.rdb.database` opens a read-only session;
+the MySQL driver sets the server session transaction to read-only. The Acro
+ORM requires prepared writes, generated keys, explicit commits and rollback,
+including a separate audit commit. The isolated MariaDB fixture
+`../erp/acro-lmd/test/legacy_mysql_integer_mariadb_test.py` grants its test
+account write privileges and verifies that direct and procedure writes are
+still rejected. This is the intended boundary of the existing read API, not
+a request to weaken it. A separately authorized writable scope must preserve
+the host IO gate, cancellation and cleanup; byte-parameter capability is
+tracked in LI-119. This blocks full native MySQL write integration for Acro
+(S12.4.1v3–S12.4.4v4, D11.1.2).
+
+
+<a id="acro-mysql-tinyint-value-20261125"></a>
+
+## Native MySQL TINYINT(1) loses values needed by JDBC consumers
+
+**Open, 2026-11-25.** The MySQL driver exposes signed `TINYINT(1)` as a
+Boolean, so distinct values such as -2 and -1 become the same result.
+Connector/J exposes them as false and true, respectively. Acro's adapter
+therefore rejects signed `TINYINT(1)` rather than returning a wrong value.
+The isolated MariaDB and Connector/J comparison in
+`../erp/acro-lmd/test/legacy_mysql_integer_mariadb_test.py` reproduces this
+with both values. A generic lossless result representation or capability is
+needed without changing the existing Boolean contract. This blocks full
+JDBC result compatibility (D9.4.3, D11.1.2).
+
+**Update, 2026-11-25:** The MySQL URI option `tinyint-as-integer=true` now
+returns physical integer values and descriptors while retaining the existing
+Boolean behavior by default (RDB6). The Acro adapter applies Connector/J's
+conversion to these integers. Its isolated MariaDB/Java comparison covers
+signed and unsigned boundaries, negative values, nulls, entity results and
+raw maps. `test/rdb/fixture/mysql_tinyint_option.ls` checks the default and
+lossless modes and rejects invalid option values. The lossless path resolves
+the JDBC consumer gap when the option is enabled.
+
+
+<a id="mysql-readonly-mode-can-be-overridden-20261125"></a>
+
+## MySQL read-only RDB sessions can be switched to read-write
+
+**Open, 2026-11-25.** `lambda.io.rdb.database` opens a MySQL connection with
+`SET SESSION TRANSACTION READ ONLY`, but `rdb.execute` accepts
+`SET SESSION TRANSACTION READ WRITE`. On a disposable MariaDB instance where
+the test account has INSERT privilege, a following INSERT succeeds. The
+normal read-only test only verifies that direct writes and a writing procedure
+are rejected before this mode change. Reproduce with
+`ACRO_TEST_READONLY_OVERRIDE=1 python3 ../erp/acro-lmd/test/legacy_mysql_integer_mariadb_test.py`;
+the fixture fails when the persistent write succeeds. This is a runtime/driver
+read-only enforcement gap, and it blocks treating that session as a reliable
+write boundary with write-capable credentials. A fix must also assess stored
+procedures, transaction/session settings, and other indirect mode changes,
+while preserving resource cleanup and the host IO policy (RDB11, S12.4.2,
+S12.4.3, D11.1.2). Use a database principal without write privileges until
+the full boundary is qualified.
+
+
+<a id="mysql-readonly-procedure-followup-20261125"></a>
+
+**MySQL read-only follow-up, 2026-11-25.** A disposable MariaDB procedure
+that runs `SET SESSION TRANSACTION READ WRITE` and then INSERT succeeds in a
+single `CALL` on the initially read-only RDB session. Reproduce with
+`ACRO_TEST_READONLY_PROCEDURE=1 python3 ../erp/acro-lmd/test/legacy_mysql_integer_mariadb_test.py`.
+Filtering only direct `SET` statements is insufficient. This confirms the
+indirect mode-change case in
+[the read-only enforcement issue](#mysql-readonly-mode-can-be-overridden-20261125)
+(RDB11, D11.1.2). Use credentials without write privileges until the boundary
+is qualified.
+
+
+<a id="acro-mysql-unsigned-bigint-overflow-20261125"></a>
+
+## MySQL unsigned BIGINT results saturate at the signed maximum
+
+**Open, 2026-11-25.** The MySQL driver's integer result conversion uses
+`strtoll`, while the RDB integer representation is signed 64-bit. An unsigned
+BIGINT at or above 9223372036854775807 is therefore indistinguishable from a
+saturated larger value; Connector/J returns a lossless BigInteger. The Acro
+adapter currently rejects the ambiguous boundary and larger results rather
+than silently returning the wrong value. The synthetic MariaDB fixture
+`../erp/acro-lmd/test/legacy_mysql_integer_mariadb_test.py` covers the
+boundary and the unsigned maximum. A lossless representation or explicit
+overflow error needs to preserve the existing RDB ABI and consumer behavior
+(RDB6, D9.4.3).
+
+**Update, 2026-11-25:** The optional MySQL URI setting
+`unsigned-bigint-as-decimal=true` exposes the original unsigned BIGINT text
+with a decimal descriptor, preserving existing default behavior and the ABI
+(RDB6). The Acro adapter converts it to its JDBC-compatible BigInteger
+representation. Its isolated MariaDB/Connector-J comparison covers the
+signed boundary and unsigned maximum in entity and raw-map results;
+`test/rdb/fixture/mysql_unsigned_bigint_option.ls` checks the driver option
+and invalid values. Consumers must explicitly enable the lossless mode.

@@ -1,0 +1,17 @@
+{
+  "name": "list and quote controls are directly accessible on the toolbar",
+  "command": "edit",
+  "html": "test/ui/edit/sample.md",
+  "working_copy": "temp/edit-ui/edit_toolbar_lists.md",
+  "viewport": {"width": 1100, "height": 720},
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".edit-compact-lists"}, "count": 0},
+    {"type": "assert_count", "target": {"selector": ".edit-format-bar > .edit-group .edit-btn-ul, .edit-format-bar > .edit-group .edit-btn-ol, .edit-format-bar > .edit-group .edit-btn-indent, .edit-format-bar > .edit-group .edit-btn-outdent, .edit-format-bar > .edit-group .edit-btn-quote"}, "count": 5},
+    {"type": "click", "target": {"text": "short paragraph"}},
+    {"type": "click", "target": {"selector": ".edit-btn-ul"}},
+    {"type": "assert_count", "target": {"selector": "#edit-surface ul"}, "count": 2},
+    {"type": "assert_class", "target": {"selector": ".edit-btn-ul"}, "class": "active"},
+    {"type": "click", "target": {"selector": ".edit-btn-save"}},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_toolbar_lists.md", "contains": "- This is a short paragraph"}
+  ]
+}

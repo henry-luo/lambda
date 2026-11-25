@@ -30,6 +30,7 @@ import chrome: .document_chrome
 import paths: lambda.io.path
 import editor: lambda.editor.app
 import editor_session: lambda.editor.session
+import source_editor: lambda.editor.surface.source
 
 let PROJECT_ROOT = "."
 // Transformed browsers retain the source directory as their URL, so bundle the icon font.
@@ -990,9 +991,10 @@ view <document_pane> () any^ state preview_mode: "view", property_filter: "", pr
         } else if (is_epub_document(~.file["extension"])) {
           if (not (~.file.ebook.error is null)) ~.file.ebook.error else parse(~.file.ebook.resources[~.file.ebook.package], 'text')^
         } else selected_source(~.file);
-        <section class:"source-tab-panel"
-        , <pre id:"source-preview", class:"source-preview", source>
-        >
+        // Office source is generated HTML; EPUB exposes its package markup.
+        let path = if (is_office_document(~.file.extension) or is_epub_document(~.file.extension))
+          ~.file.file_path ++ ".html" else ~.file.file_path;
+        <section class:"source-tab-panel", source_editor.readonly(path, source)>
       }
       >
       <nav class:"document-tabs"
@@ -1008,9 +1010,7 @@ view <document_pane> () any^ state preview_mode: "view", property_filter: "", pr
     let source = selected_source(~.file);
     <main class:"document-panel"
     , chrome.header(~.file["file_path"], ~.file["name"], "Source", "source");
-      <section class:"source-tab-panel"
-      , <pre id:"source-preview", class:"source-preview", source>
-      >
+      <section class:"source-tab-panel", source_editor.readonly(~.file.file_path, source)>
       <nav class:"document-tabs", if (type(~.file.source) != element) <button class:"document-tab tab-edit", "Edit"> else null>
       if (edit_error != null) <div class:"preview-error", role:"alert", edit_error> else null
     >
@@ -1159,9 +1159,9 @@ on file_select(entry) {
   // Row-local toggles do not rebuild the tree; snapshot open rows only when
   // selection will rebuild it for the selected highlight.
   open_paths = visible_open_paths(entry["target"])
-  selected_path = entry["file_path"]
   emit("document_select", entry)
 }
+on viewer_selected(evt) { selected_path = evt.detail }
 
 fn document_pane_model(file, property_data, open_paths, eml_data, office_data, csv_data, csv_widths, csv_visible_rows) =>
   <document_pane file:file, property_data:property_data, initial_open_paths:open_paths,
@@ -1194,16 +1194,56 @@ fn table_pane(pane:element, widths, rows) element^ =>
     pane.eml_data, pane.office_data, pane.csv_data, widths, rows)
 
 edit <doc_editor_app> state csv_resize: null, pane: ~.initial_pane, editing: null {
-  if (editing != null) <div class:"viewer-edit-host", <style editor.stylesheet> editor.surface(editing)>
-  else <div class:"doc-editor",
+  <div class:"doc-editor",
     if (~.tree_model != null) apply(~.tree_model, {mode:"edit"});
-    apply(pane)
+    if (editing != null) <div class:"viewer-edit-host", <style editor.stylesheet> editor.surface(editing)>
+    else apply(pane)
   >
 }
 on viewer_edit(document) { editing = document }
+on click(evt) {
+  if (editing != null) {
+    let root = dom.root_node(evt.target)
+    let target = if (dom.node_type(evt.target) == 1) evt.target else dom.parent_node(evt.target)
+    // The file panel is outside the editor's event subtree.
+    if (target == null or dom.closest(target, ".viewer-edit-host") == null) {
+      let menu = dom.query_selector(root, ".viewer-edit-host .edit-table-menu,.viewer-edit-host .property-menu,.viewer-edit-host .edit-compact[open]")
+      if (menu != null) {
+        let surface = dom.query_selector(root, ".viewer-edit-host .edit-app")
+        if (surface != null) { dom.dispatch(surface, {type:"editor_dismiss_menu"}) }
+      }
+    }
+  }
+  return 'pass'
+}
 on document_select(entry) {
+  if (editing != null) {
+    let root = dom.root_node(entry.target)
+    let surface = dom.query_selector(root, ".viewer-edit-host .edit-app")
+    if (surface != null) {
+      // Keep the file description independent of the clicked DOM node.
+      let next = {file_path:entry.file_path, source:entry.source, name:entry.name,
+                  extension:entry.extension, text_width_px:entry.text_width_px}
+      dom.dispatch(surface, {type:"editor_navigate", detail:next})
+    }
+    return
+  }
   csv_resize = null
   pane = load_pane(entry)^
+  let tree = dom.closest(entry.target, ".file-panel")
+  if (tree != null) { dom.dispatch(tree, {type:"viewer_selected", detail:entry.file_path}) }
+}
+on viewer_navigation(req) {
+  // Keep the current editor and its close guard if the next document fails to load.
+  let next = load_pane(req.entry)^
+  let root = dom.root_node(req.node)
+  let tree = dom.query_selector(root, ".file-panel")
+  if (tree != null) { dom.dispatch(tree, {type:"viewer_selected", detail:req.entry.file_path}) }
+  dom.set_close_guard(req.node, false)
+  dom.set_window_title(req.node, "Lambda Document Viewer")
+  csv_resize = null
+  pane = next
+  editing = null
 }
 // A release can land over the file panel after shrinking a wide column.
 on csv_resize_start(gesture) { csv_resize = gesture }
@@ -1231,6 +1271,7 @@ fn viewer_document(tree_model, initial_pane = <document_pane file:null, initial_
     <meta charset:"UTF-8">
     <title if (initial_pane.file != null) initial_pane.file.name else "Lambda Document Viewer">
     <style chrome.css>
+    <style source_editor.surface_css>
     latex.font_stylesheet();
     <style pdf_html.DEFAULT_CSS>
     <style latex_css.STYLESHEET>
@@ -1243,6 +1284,9 @@ fn viewer_document(tree_model, initial_pane = <document_pane file:null, initial_
       body { margin: 0; height: 100vh; overflow: hidden; background: #eef1f5; color: #20242c;
              font-family: var(--document-font); }
       .doc-editor { display: flex; height: 100vh; overflow: hidden; }
+      .viewer-edit-host { flex: 1; min-width: 0; min-height: 0; height: 100%; overflow: hidden; }
+      .viewer-edit-host body.edit-app { height: 100%; min-height: 0; overflow: hidden; }
+      .viewer-edit-host .edit-main { min-height: 0; overflow: auto; }
 
       .file-panel { width: 300px; min-width: 240px; max-width: 40vw; display: flex;
                     min-height: 0; flex-direction: column; background: #1f2430; color: #d7dce5;
@@ -1304,9 +1348,8 @@ fn viewer_document(tree_model, initial_pane = <document_pane file:null, initial_
       .empty-preview h1 { margin: 14px 0 7px; color: #2b3545; font-size: 24px; }
       .empty-preview p { margin: 5px 0; line-height: 1.5; }
       .empty-preview-note { margin-top: 18px !important; color: #8491a1; font-size: 13px; }
-      .source-tab-panel { min-height: 0; flex: 1; overflow: auto; background: var(--document-source); }
-      .source-preview { min-height: 100%; margin: 0; padding: 26px 30px;
-                        color: #293545; font: 13px/1.55 var(--document-mono); white-space: pre; }
+      .source-tab-panel { min-height: 0; flex: 1; overflow: hidden; background: var(--document-source); }
+      .source-tab-panel body.edit-format-source { height: 100%; min-height: 0; }
       .rendered-preview { min-height: 0; flex: 1; overflow: auto; padding: 30px clamp(24px, 6vw, 80px) 60px; }
       .rtf-preview { background: #eef1f5; }
       .rtf-preview .document-body { box-sizing: border-box; min-height: 100%; padding: 42px 52px;

@@ -1,0 +1,24 @@
+{
+  "name": "toolbar dropdowns close on outside clicks and commands",
+  "command": "edit",
+  "html": "test/ui/edit/sample.md",
+  "working_copy": "temp/edit-ui/edit_toolbar_dropdown_dismiss.md",
+  "viewport": {"width": 1000, "height": 720},
+  "events": [
+    {"type": "click", "target": {"selector": ".edit-compact-format summary"}},
+    {"type": "assert_count", "target": {"selector": ".edit-compact-format[open]"}, "count": 1},
+    {"type": "click", "target": {"selector": ".edit-compact-insert summary"}},
+    {"type": "assert_count", "target": {"selector": ".edit-compact-format[open]"}, "count": 0},
+    {"type": "assert_count", "target": {"selector": ".edit-compact-insert[open]"}, "count": 1},
+    {"type": "click", "target": {"selector": "#edit-surface p"}},
+    {"type": "assert_count", "target": {"selector": ".edit-compact[open]"}, "count": 0},
+    {"type": "click", "target": {"selector": ".edit-compact-format summary"}},
+    {"type": "click", "target": {"selector": ".edit-compact-format .edit-btn-h2"}},
+    {"type": "assert_count", "target": {"selector": ".edit-compact[open]"}, "count": 0},
+    {"type": "assert_count", "target": {"selector": "#edit-surface h2"}, "min_count": 1},
+    {"type": "click", "target": {"selector": ".edit-compact-insert summary"}},
+    {"type": "assert_count", "target": {"selector": ".edit-compact-insert[open]"}, "count": 1},
+    {"type": "click", "target": {"selector": ".edit-document-bar"}},
+    {"type": "assert_count", "target": {"selector": ".edit-compact[open]"}, "count": 0}
+  ]
+}

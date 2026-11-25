@@ -25,12 +25,6 @@
       "check_dom": true
     },
     {
-      "type": "click",
-      "target": {
-        "selector": ".edit-compact-format summary"
-      }
-    },
-    {
       "type": "assert_selection",
       "is_collapsed": false,
       "check_dom": true

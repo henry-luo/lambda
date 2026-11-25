@@ -1,10 +1,32 @@
 # Editing viewer document formats
 
+## Read-only viewer source — 2026-11-25
+
+The viewer mounts the source editor in read-only mode for file and archive
+contents and converted office source. It shares the editor's virtualized
+lines, selection, scrolling and syntax highlighting while rejecting mutation
+and save commands (D9.3.4, D10.2.1, S12.1.3v6). The viewer keeps its own
+header and navigation. Replays exercise copying, attempted edits, navigation,
+long files and archive members; source editor regressions remain covered.
+
+## Markdown image sizing — 2026-11-25
+
+Selecting an editable image exposes proportional width controls. Resizing uses
+one model transaction, so undo restores the previous dimensions (D10.2.1).
+Sized Markdown images are written as HTML image tags and reimported with their
+dimensions. Image-only paragraphs in an HTML block remain editable even when
+the block also contains other HTML, as in the README Demo section. The original
+block is retained until changed; other HTML is retained on export (D9.3.4,
+S12.1.3v6). Replays cover sizing, undo, saving, source switching and reopening.
+
 ## Viewer to editor — 2026-11-25
 
 The viewer's Edit control opens a local file in the same editor session used
 by `lambda edit`, including its save, source-switch and close handling
-(D9.3.4, D10.2.5). The editor occupies the window after the switch. Archive
+(D9.3.4, D10.2.5). In the project browser, the tree remains mounted and the
+editor occupies the right pane; its content scrolls within that pane. Selecting
+another file asks to save or discard unsaved changes, and cancellation keeps
+the current editor and tree selection (S12.1.3v6). Archive
 members remain preview-only because editing them requires archive-specific
 write support. An editor open failure is shown in the viewer.
 
@@ -12,6 +34,9 @@ Property and source surfaces measure their viewport on their first render so
 they can mount after the viewer document has loaded. Direct file, project
 tree, JSON, Markdown, source-only, invalid binary and large-tree replays cover
 the transition. The long-source visual check was moved above the new footer.
+The Radiant host initializes text controls before reading their live value,
+so checking a pending property edit preserves untouched textarea defaults
+(D9.1.1v4, D9.1.3v2).
 
 ## Property wrapping and column sizing — 2026-11-25
 

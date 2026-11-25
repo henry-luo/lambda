@@ -1,0 +1,232 @@
+{
+  "name": "project editor preserves changes when selecting another file",
+  "html": "temp/view-pane-files",
+  "prepare": [
+    "python3",
+    "-c",
+    "from pathlib import Path;import shutil;p=Path('temp/view-pane-files');p.mkdir(parents=True,exist_ok=True);shutil.copyfile('test/fixtures/edit/property-tree.json',p/'first.json');shutil.copyfile('test/fixtures/edit/sample.json',p/'second.json')"
+  ],
+  "viewport": {
+    "width": 1100,
+    "height": 700
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='/first.json'] .tree-label"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tab-edit"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".file-panel"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "textarea[aria-label='name']"
+      }
+    },
+    {
+      "type": "key_combo",
+      "key": "a",
+      "mods_str": "super"
+    },
+    {
+      "type": "type",
+      "text": "\"Edited\""
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-filter"
+      },
+      "text": "second"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "textarea[aria-label='name']"
+      },
+      "equals": "\"Edited\""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-filter-clear"
+      }
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "textarea[aria-label='name']"
+      },
+      "equals": "\"Edited\""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='/second.json'] .tree-label"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-dialog-navigate"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='/first.json'] .tree-row.selected"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-cancel"
+      }
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "textarea[aria-label='name']"
+      },
+      "equals": "\"Edited\""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='/second.json'] .tree-label"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-save"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-format-property"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".file-panel"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".document-name"
+      },
+      "equals": "second.json"
+    },
+    {
+      "type": "assert_file",
+      "path": "temp/view-pane-files/first.json",
+      "contains": "\"name\": \"Edited\""
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='/second.json'] .tree-row.selected"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tab-edit"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "textarea[aria-label='name']"
+      }
+    },
+    {
+      "type": "key_combo",
+      "key": "a",
+      "mods_str": "super"
+    },
+    {
+      "type": "type",
+      "text": "\"Discarded\""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='/first.json'] .tree-label"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-dialog-navigate"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-discard"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".document-name"
+      },
+      "equals": "first.json"
+    },
+    {
+      "type": "assert_file",
+      "path": "temp/view-pane-files/second.json",
+      "contains": "\"name\":\"sample\""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tab-edit"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='/second.json'] .tree-label"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-dialog-navigate"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".document-name"
+      },
+      "equals": "second.json"
+    }
+  ]
+}

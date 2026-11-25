@@ -29,9 +29,34 @@
     {
       "type": "assert_text",
       "target": {
-        "selector": "#source-preview"
+        "selector": "#source-preview .edit-doc > div",
+        "index": 0
       },
-      "equals": "aaaaaaaaaaaa\nbbbbbbbbbbbb\ncccccccccccc\ndddddddddddd\n"
+      "equals": "aaaaaaaaaaaa"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#source-preview .edit-doc > div",
+        "index": 1
+      },
+      "equals": "bbbbbbbbbbbb"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#source-preview .edit-doc > div",
+        "index": 2
+      },
+      "equals": "cccccccccccc"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#source-preview .edit-doc > div",
+        "index": 3
+      },
+      "equals": "dddddddddddd"
     }
   ]
 }
