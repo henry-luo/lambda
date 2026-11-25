@@ -6,6 +6,7 @@ pub type TokenList = {kind: string, count: int, prefix: map[], delimiters: map[]
 let CS_NEW = ["cs_new:Npn", "cs_new_protected:Npn"]
 let CS_LOCAL = ["cs_set:Npn", "cs_set_protected:Npn"]
 let CS_GLOBAL = ["cs_gset:Npn", "cs_gset_protected:Npn"]
+let CS_VARIANT = ["cs_generate_variant:Nn"]
 let TL_NEW = ["tl_new:N", "tl_const:Nn"]
 let TL_SET = ["tl_set:Nn", "tl_set:Nx", "tl_gset:Nn", "tl_gset:Nx", "tl_clear:N", "tl_gclear:N"]
 let TL_PUT = ["tl_put_left:Nn", "tl_put_right:Nn", "tl_gput_left:Nn", "tl_gput_right:Nn",
@@ -42,12 +43,13 @@ let INT_TEST = ["int_if_zero:nTF", "int_if_zero:nT", "int_if_zero:nF",
     "int_if_even:nTF", "int_if_even:nT", "int_if_even:nF"]
 
 pub fn exists(name) bool => contains(SEQ_EMPTY, name) or contains(INT_TEST, name) or contains(INT_COMPARE_EXPR, name) or contains(INT_COMPARE, name) or contains(INT_MATH, name) or contains(CS_NEW, name) or contains(CS_LOCAL, name) or
-    contains(CS_GLOBAL, name) or contains(TL_NEW, name) or contains(TL_SET, name) or contains(TL_PUT, name) or contains(TL_REPLACE, name) or contains(TL_EMPTY, name) or contains(TL_BLANK, name) or contains(TL_EQUAL, name) or contains(TL_STRING, name) or contains(TL_COUNT, name) or
+    contains(CS_GLOBAL, name) or contains(CS_VARIANT, name) or contains(TL_NEW, name) or contains(TL_SET, name) or contains(TL_PUT, name) or contains(TL_REPLACE, name) or contains(TL_EMPTY, name) or contains(TL_BLANK, name) or contains(TL_EQUAL, name) or contains(TL_STRING, name) or contains(TL_COUNT, name) or
     contains(SEQ_NEW, name) or contains(SEQ_SET, name) or contains(SEQ_EXPAND, name) or
     contains(SEQ_SORT, name) or contains(SORT_RETURN, name) or contains(STR_COMPARE, name) or contains(TOKEN_EXPANDABLE, name) or contains(TEXT_CASE, name) or
     contains(["ExplSyntaxOn", "ExplSyntaxOff", "ProvidesExplPackage", "ProvidesExplClass", "ProvidesExplFile", "tl_use:N", "int_eval:n", "fp_eval:n", "cs_new_eq:NN"], name)
 pub fn expandable(name) bool => contains(SEQ_EMPTY, name) or contains(INT_TEST, name) or contains(INT_COMPARE_EXPR, name) or contains(INT_COMPARE, name) or contains(INT_MATH, name) or contains(["tl_use:N", "int_eval:n", "fp_eval:n"], name) or contains(SEQ_EXPAND, name) or contains(STR_COMPARE, name) or contains(TOKEN_EXPANDABLE, name) or contains(TEXT_CASE, name) or contains(TL_EMPTY, name) or contains(TL_BLANK, name) or contains(TL_EQUAL, name) or contains(TL_STRING, name) or contains(TL_COUNT, name)
 pub fn cs_definition(name) bool => contains(CS_NEW, name) or contains(CS_LOCAL, name) or contains(CS_GLOBAL, name)
+pub fn cs_variant(name) bool => contains(CS_VARIANT, name)
 pub fn fresh(name) bool => contains(CS_NEW, name) or contains(TL_NEW, name) or contains(SEQ_NEW, name)
 pub fn global(name) bool => contains(CS_NEW, name) or contains(CS_GLOBAL, name) or contains(TL_NEW, name) or
     contains(SEQ_NEW, name) or contains(["tl_gset:Nn", "tl_gset:Nx", "tl_gclear:N", "tl_gput_left:Nn", "tl_gput_right:Nn",
@@ -150,3 +152,48 @@ pub fn from_split(tokens: map[], delimiter: map[], trim_spaces: bool) array^ =>
     else split_tokens(tokens, delimiter, trim_spaces, true, true, false)
 pub fn replace_tokens(tokens: map[], search: map[], replacement: map[], once: bool) array^ =>
     stream.join_tokens(split_tokens(tokens, search, false, true, false, once)^, replacement)
+
+// Build the same expandable argument adapter used by expl3's generated variants.
+fn variant_argument(mode, position) any^ {
+    let arg = "#" ++ string(position);
+    if (mode == "N") "\\exp_not:N" ++ arg
+    else if (mode == "n") "{\\exp_not:n{" ++ arg ++ "}}"
+    else if (mode == "c") "\\exp_after:wN\\exp_not:N\\cs:w" ++ arg ++ "\\cs_end:"
+    else if (mode == "V") "{\\__kernel_exp_not:w\\exp_after:wN{\\exp:w\\__exp_eval_register:N" ++ arg ++ "}}"
+    else if (mode == "v") "{\\__kernel_exp_not:w\\exp_after:wN{\\exp:w\\__exp_eval_register:c{" ++ arg ++ "}}}"
+    else if (mode == "o") "{\\__kernel_exp_not:w\\exp_after:wN{" ++ arg ++ "}}"
+    else if (mode == "e") "{\\__kernel_exp_not:w\\tex_expanded:D{{" ++ arg ++ "}}}"
+    else null
+}
+
+pub fn variant_plan(base, requested) any^ {
+    let colon = index_of(base, ":");
+    let tail = if (colon == null) "" else slice(base, colon + 1, len(base))^;
+    let conditional = if (ends_with(tail, "TF")) "TF"
+        else if (ends_with(tail, "T")) "T" else if (ends_with(tail, "F")) "F" else "";
+    let signature = split(slice(tail, 0, len(tail) - len(conditional))^, "")^;
+    let changes = split(requested, "")^;
+    if (colon == null or len(signature) == 0 or len(changes) == 0 or len(changes) > len(signature) or
+            len(signature) > 8 or not all([for (mode in signature) contains(["N", "n"], mode)])) null
+    else {
+        let modes = [for (i, mode in signature) if (i < len(changes)) changes[i] else mode];
+        let legal = all([for (i, mode in modes)
+            if (signature[i] == "N") contains(["N", "c"], mode)
+            else contains(["n", "V", "v", "o", "e"], mode)]);
+        let differences = [for (i, mode in modes where mode != signature[i]) i];
+        if (not legal) null
+        else if (len(differences) == 0) {unchanged:true}
+        else {
+            let used = slice(modes, 0, differences[len(differences) - 1] + 1)^;
+            let helper = "exp_args:N" ++ join(used, "")^;
+            let params = join([for (i in 1 to len(used) + 1) "#" ++ string(i)], "")^;
+            let body = "\\exp_not:N#1" ++ join([for (i, mode in used) variant_argument(mode, i + 2)^], "")^;
+            let value = contains(used, "V") or contains(used, "v");
+            let once = contains(used, "o");
+            {unchanged:false, name:slice(base, 0, colon + 1)^ ++ join(modes, "")^ ++ conditional,
+                helper:helper, source:"\\" ++ helper ++ params ++ "{\\tex_expanded:D{" ++ body ++ "}}",
+                guard:if (value and once) "exp_args_value_once" else if (value) "exp_args_value"
+                    else if (once) "exp_args_once" else null}
+        }
+    }
+}

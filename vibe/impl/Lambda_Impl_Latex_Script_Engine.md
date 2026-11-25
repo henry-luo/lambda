@@ -34,6 +34,18 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Expl3 generated variants, 2026-11-26:** Script now builds ordinary TeX
+  macros for `cs_generate_variant:Nn` over `N`/`n` base signatures with
+  `N`, `n`, `c`, `V`, `v`, `o` and `e` argument forms (D10.2.2v2). The
+  generated expansion helpers preserve the existing source-mapping guards.
+  TeX Live comparisons cover expansion order, protected meanings, aliases,
+  global definitions, later base redefinition, conditional variants and the
+  sequence and token-list operations used by csvsimple. The fixture passes
+  interpreter and JIT under forced GC, and four focused GTests pass. Other
+  forms, including `x` and `f`, remain explicitly unsupported. The phase-five
+  tables test still fails: csvsimple now reaches the unported `ior_new:N`
+  instead of stopping at variant generation.
+
 - **Expl3 token-list replacement, 2026-11-26:** Local and global `tl_replace`
   operations now replace the first or all top-level matches without expanding
   search or replacement tokens (D10.2.2v2). Ten cases match TeX Live,

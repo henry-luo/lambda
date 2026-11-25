@@ -587,6 +587,8 @@ fn expand_one(st: State, t, budget) State^ {
                 else if (macro.source_mapping_guard == "exp_args_once") {*:st, expl3_exp_args_once_seen: true}
                 else if (macro.source_mapping_guard == "exp_args_f") {*:st, expl3_exp_args_f_seen: true}
                 else if (macro.source_mapping_guard == "exp_args_value") {*:st, expl3_exp_args_value_seen: true}
+                else if (macro.source_mapping_guard == "exp_args_value_once")
+                    {*:st, expl3_exp_args_value_seen:true, expl3_exp_args_once_seen:true}
                 else if (macro.source_mapping_guard == "int_math") {*:st, expl3_int_math_seen: true} else st;
             let traced = if (st.prefix_scan == true) {*:marked, prefixed_macro_seen: true} else marked;
             expand_macro(traced, macro, budget, t)
@@ -2916,6 +2918,51 @@ fn expl3_cs_new_equal(st: State) State^ {
         let equal = {kind: "char", value: "=", cat: 12, start: -1, end: -1};
         let input = stream.push(target.stream, [target.token, equal])^;
         assign_let({*:current, input: input, expl3_tl_put_seen: true}, effective_global(st, true)^)
+    }
+}
+
+// Generated variants are ordinary macros, so aliases and later base redefinitions retain TeX semantics.
+fn expl3_install_variants(st: State, base, variants, protected_flag, index = 0) State^ {
+    if (index >= len(variants) or st.issue != null) st
+    else {
+        let part = variants[index];
+        let valid = all([for (token in part) token.kind == "char"]);
+        let requested = if (valid) join([for (token in part) token.value], "")^ else "";
+        let plan = if (valid) expl3.variant_plan(base, requested)^ else null;
+        if (plan == null) unsupported(st, "expl3 variant signature")
+        else if (plan.unchanged) expl3_install_variants(st, base, variants, protected_flag, index + 1)
+        else {
+            let ready = enable_expl_macro_sources(st, [{source:plan.source, protected_flag:false,
+                source_mapping_guard:plan.guard}])^;
+            let wrapper = latex_macro(0, false, protected_flag, false, [],
+                [control_token(plan.helper), control_token(base)])^;
+            let prior = ready.definitions["control:" ++ plan.name];
+            if (ready.issue != null) ready
+            else if (prior != null and not meanings_equal(prior, wrapper)^)
+                unsupported(ready, "expl3 existing variant")
+            else {
+                let next = if (prior != null) ready else assign_meaning(ready, "control:" ++ plan.name, wrapper, true)^;
+                expl3_install_variants(next, base, variants, protected_flag, index + 1)
+            }
+        }
+    }
+}
+
+fn expl3_cs_generate_variant(st: State) State^ {
+    let target = nonspace(st.input)^;
+    let current = {*:st, input:target.stream};
+    if (not is_control(target.token) or target.token.kind != "control") fail(current, "tex-missing-cs")
+    else {
+        let variants = stream.argument(current.input, true)^;
+        let advanced = {*:current, input:variants.stream};
+        let base = meaning(advanced, target.token);
+        if (variants.error != null) fail(advanced, variants.error)
+        else if (base.kind == "undefined") fail(advanced, "expl3-undefined-function")
+        else {
+            let protected_flag = base.protected_flag == true or
+                (base.kind == "primitive" and expl3.exists(base.name) and not expl3.expandable(base.name));
+            expl3_install_variants(advanced, target.token.value, expl3.from_clist(variants.tokens)^, protected_flag)
+        }
     }
 }
 
@@ -5976,6 +6023,8 @@ fn step(st: State, budget) State^ {
         after_assignment(current, expl3_cs_new_equal(current))
     else if (st.script_expl3 and expl3.cs_definition(cmd))
         after_assignment(current, expl3_cs_define(current, cmd, budget))
+    else if (st.script_expl3 and expl3.cs_variant(cmd))
+        after_assignment(current, expl3_cs_generate_variant(current))
     else if (st.script_expl3 and expl3.token_assignment(cmd))
         after_assignment(current, expl3_tl_assign(current, cmd, budget))
     else if (st.script_expl3 and expl3.token_replacement(cmd))

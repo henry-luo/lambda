@@ -1,0 +1,25 @@
+{
+  issue: null,
+  unsupported: null,
+  text: "[A/B]|[A/C]|[C/B]|[A/C]|[C/B]|[C/EXP]|[C/EXP]|\\long macro:->\\exp_args:NNVV \\demo:Nnn |(A+B)"
+}
+{
+  issue: null,
+  unsupported: null,
+  text: "\\second: |Z|\\first: |\\first: |\\protected\\long macro:->\\exp_args:NNV \\guard:Nn |YES"
+}
+{
+  issue: null,
+  unsupported: null,
+  text: "a|b|c/a+b+c"
+}
+[{
+    issue: "expl3-undefined-function",
+    unsupported: null
+  }, {
+    issue: "tex-unsupported-primitive",
+    unsupported: "expl3 variant signature"
+  }, {
+    issue: "tex-unsupported-primitive",
+    unsupported: "expl3 variant signature"
+  }]
