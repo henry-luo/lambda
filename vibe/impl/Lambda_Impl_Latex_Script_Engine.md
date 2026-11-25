@@ -34,6 +34,15 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Package argument definitions, 2026-11-26:** Script now implements
+  `\@yargdef` using the existing control-target, numeric scanner, argument
+  converter and scoped-definition machinery. Six independent retired-engine
+  comparisons cover ordinary and bracket-delimited arguments, zero and invalid
+  counts, protected definitions and illegal parameter recovery. The exact
+  golden passes interpreter and JIT with forced GC and poisoning (S1.8,
+  D10.2.2v2). The bundled-package fixture progresses to the still-unported
+  `\IfFormatAtLeastTF`; it is not yet passing.
+
 - **Generated document environments, 2026-11-26:** Script digestion accepts
   generated environment boundaries after checking their reconstructed opening
   and closing bytes, maps their offsets back to the source, and reads

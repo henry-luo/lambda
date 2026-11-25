@@ -1,0 +1,19 @@
+[{
+    text: "<A>",
+    diagnostics: []
+  }, {
+    text: "O/R",
+    diagnostics: []
+  }, {
+    text: "Z",
+    diagnostics: []
+  }, {
+    text: "Z",
+    diagnostics: ["latex-bad-arg-count"]
+  }, {
+    text: "\\edef\\a{\\foo{A}}<A>",
+    diagnostics: []
+  }, {
+    text: "#2",
+    diagnostics: ["latex-illegal-param"]
+  }]

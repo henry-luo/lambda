@@ -5389,17 +5389,22 @@ fn latex_for_steps(variable, items, body, index = 0, output = []) any^ {
         variable, brace_token(true), *stored_tokens(items[index]), brace_token(false), *stored_tokens(body)])
 }
 
-fn latex_for(st: State, tokens_loop) State^ {
+// TeX inserts an inaccessible control sequence and leaves a bad target unread.
+fn latex_required_control(st: State) any^ {
     let target = nonspace(st.input)^;
     let missing = target.token != null and not is_control(target.token);
     let noted = if (missing) record_diagnostic({*:st, input:target.stream}, "tex-missing-cs",
         "Missing control sequence inserted")^ else st;
-    // A non-control target is put back before the syntax scanner reads ':'.
     let input = if (missing) stream.push(target.stream, [target.token]) else target.stream;
     let variable = if (is_control(target.token)) target.token else control_token(chr(2) ++ "inaccessible");
-    let colon = stream.next(input)^;
+    {state:{*:noted,input:input}, token:variable}
+}
+
+fn latex_for(st: State, tokens_loop) State^ {
+    let target = latex_required_control(st)^;
+    let colon = stream.next(target.state.input)^;
     let equals = stream.next(colon.stream)^;
-    let current = {*:noted, input:equals.stream};
+    let current = {*:target.state, input:equals.stream};
     if (not other(colon.token, ":") or not other(equals.token, "="))
         record_diagnostic(current, "latex-for-syntax", "\\@for expects \\var:=list\\do{body}")
     else {
@@ -5417,8 +5422,51 @@ fn latex_for(st: State, tokens_loop) State^ {
                     first.count == 0 and first.document_specs == null)
                 [*first.body, *slice(scanned.tokens, 1, len(scanned.tokens))] else scanned.tokens;
             let items = if (tokens_loop) latex_tfor_items(values)^ else latex_for_items(values)^;
-            let steps = latex_for_steps(stored_tokens([variable])[0], items, body.tokens)^;
+            let steps = latex_for_steps(stored_tokens([target.token])[0], items, body.tokens)^;
             {*:ready, input:stream.push(ready.input, steps)}
+        }
+    }
+}
+
+// The kernel stores these definition prefixes in a primitive or macro alias.
+fn latex_definition_prefixes(st: State) any^ {
+    let found = meaning(st, control_token("l@ngrel@x"));
+    if (found.kind == "primitive") [found.name]
+    else if (found.kind == "macro") [for (token in (found.body)^ where is_control(token)^) primitive(st, token)^]
+    else []
+}
+
+fn latex_yargdef(st: State, budget) State^ {
+    let target = latex_required_control(st)^;
+    let mode = scan_number(target.state, budget)^;
+    if (mode.state.issue != null) mode.state
+    else {
+        let count = stream.argument(mode.state.input, true)^;
+        let body = stream.argument(count.stream, true)^;
+        let current = {*:mode.state,input:body.stream};
+        if (count.error != null) fail(current,count.error)
+        else if (body.error != null) fail(current,body.error)
+        else {
+            let value = latex_counter_value(current, count.tokens, budget)^;
+            let valid = value.value >= 0 and value.value <= 9;
+            let nargs = if (valid) value.value else 0;
+            let noted = if (valid) value.state else record_diagnostic(value.state, "latex-bad-arg-count",
+                "Illegal number of arguments " ++ string(value.value))^;
+            let initial = body_params(body.tokens, nargs)^;
+            let parsed = if (initial.issue != null) body_params(body.tokens, nargs, 0, [], "latex")^ else initial;
+            let recovered = if (initial.issue != null) parameter_diagnostics(noted, parsed.errors, "latex")^ else noted;
+            if (recovered.issue != null) recovered
+            else if (parsed.issue != null) fail(recovered, parsed.issue)
+            else {
+                let flags = latex_definition_prefixes(recovered)^;
+                let bracketed = mode.value == 2 and nargs > 0;
+                let macro = {kind:"macro", count:nargs, prefix:if (bracketed) text_tokens("[")^ else [],
+                    delimiters:if (nargs == 0) [] else [for (i in 1 to nargs)
+                        if (i == 1 and bracketed) text_tokens("]")^ else []],
+                    brace_delim:false, long_ok:contains(flags,"long"), protected_flag:contains(flags,"protected"),
+                    body:parsed.tokens};
+                assign_meaning(recovered, key(target.token), macro, false)
+            }
         }
     }
 }
@@ -5879,6 +5927,7 @@ fn step(st: State, budget) State^ {
     else if (st.latex and contains(["@ifnextchar", "kernel@ifnextchar", "@ifstar"], cmd))
         latex_ifnextchar(current, cmd == "@ifstar")
     else if (st.latex and contains(["@for", "@tfor"], cmd)) latex_for(current, cmd == "@tfor")
+    else if (st.latex and cmd == "@yargdef") latex_yargdef(current, budget)
     else if (st.latex and cmd == "NeedsTeXFormat") latex_needs_format(current)
     else if (st.latex and contains(["documentclass", "LoadClass", "LoadClassWithOptions"], cmd))
         latex_documentclass(current, t, budget, cmd)
