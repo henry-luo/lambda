@@ -7210,9 +7210,17 @@ Item fn_parse2(Item str_item, Item type) {
     InputParseOptions parse_options = {};
     const InputScriptParser parser = lambda_input_script_parser(context ? context->runtime : nullptr);
     parse_options.script_parser = parser.context ? &parser : nullptr;
-    ArrayList* adapter_names = arraylist_new(8);
-    ArrayList* raw_names = arraylist_new(8);
-    ArrayList* chaptered_names = arraylist_new(8);
+    // Symbol/string formats, including byte-to-text conversion, need no TeX option storage.
+    struct TexNameLists {
+        ArrayList* adapters;
+        ArrayList* raw;
+        ArrayList* chaptered;
+        ~TexNameLists() {
+            if (adapters) arraylist_free(adapters);
+            if (raw) arraylist_free(raw);
+            if (chaptered) arraylist_free(chaptered);
+        }
+    } names = {};
     bool has_tex_options = false;
     bool highlight_spans = false;   // sourcepos: 'spans'
     Item window_item = ItemNull;
@@ -7280,15 +7288,17 @@ Item fn_parse2(Item str_item, Item type) {
         Item whitespace = _map_get((TypeMap*)options_map->type, options_map->data, "preserve_whitespace", &is_found);
         if (is_found && get_type_id(whitespace) != LMD_TYPE_NULL) {
             if (get_type_id(whitespace) != LMD_TYPE_BOOL) {
-                arraylist_free(adapter_names);
-                arraylist_free(raw_names);
-                arraylist_free(chaptered_names);
                 return runtime_error_itemf(ERR_TYPE_MISMATCH, "parse: preserve_whitespace option must be a bool");
             }
             parse_options.xml_preserve_whitespace = it2b(whitespace);
         }
-        has_tex_options = parse_tex_options(options_map, &parse_options, adapter_names, raw_names,
-            chaptered_names);
+        names.adapters = arraylist_new(8);
+        names.raw = arraylist_new(8);
+        names.chaptered = arraylist_new(8);
+        if (!names.adapters || !names.raw || !names.chaptered)
+            return runtime_error_itemf(ERR_OUT_OF_MEMORY, "parse: could not allocate format options");
+        has_tex_options = parse_tex_options(options_map, &parse_options, names.adapters, names.raw,
+            names.chaptered);
     }
     else {
         return runtime_error_itemf(ERR_TYPE_MISMATCH,
@@ -7298,9 +7308,6 @@ Item fn_parse2(Item str_item, Item type) {
 
     // Registry names are C strings; reject an option that would select a prefix.
     if (format_option_has_nul(type_str) || format_option_has_nul(flavor_str)) {
-        arraylist_free(adapter_names);
-        arraylist_free(raw_names);
-        arraylist_free(chaptered_names);
         return runtime_error_item(ERR_INVALID_OPERATION, "parse: format options cannot contain NUL", NULL);
     }
 
@@ -7321,9 +7328,6 @@ Item fn_parse2(Item str_item, Item type) {
 #ifndef LAMBDA_IME_RESOURCE_IO
     if (fs_node_is(str_item)) {
         Item result = fs_node_input(str_item, type_str, flavor_str, parse_options.script_parser);
-        arraylist_free(adapter_names);
-        arraylist_free(raw_names);
-        arraylist_free(chaptered_names);
         return result;
     }
 #endif
@@ -7343,9 +7347,6 @@ Item fn_parse2(Item str_item, Item type) {
     if (type_str && strcmp(type_str->chars, "text") == 0) {
         RootFrame roots(1);
         Rooted<Item> source(roots, str_item);
-        arraylist_free(adapter_names);
-        arraylist_free(raw_names);
-        arraylist_free(chaptered_names);
         String* text = heap_strcpy(str ? str->chars : (const char*)binary_data(binary),
             str ? str->len : binary_length(binary));
         return text ? (Item){.item = s2it(text)} : ItemError;
@@ -7358,9 +7359,6 @@ Item fn_parse2(Item str_item, Item type) {
         bool parsed = owner.input && input_parse_value_n(owner.input,
             str ? str->chars : (const char*)binary_data(binary),
             str ? str->len : binary_length(binary), type_str->chars, &parse_options);
-        arraylist_free(adapter_names);
-        arraylist_free(raw_names);
-        arraylist_free(chaptered_names);
         if (!parsed) return runtime_error_itemf(ERR_OUT_OF_MEMORY, "parse: could not create value parser");
         // Copy diagnostics and every escaping value before the temporary Input is released.
         if (owner.input->parse_failed || get_type_id(owner.input->root) == LMD_TYPE_ERROR)
@@ -7386,9 +7384,6 @@ Item fn_parse2(Item str_item, Item type) {
         (source_positions || has_tex_options || parse_options.xml_preserve_whitespace || parse_options.io ||
             parse_options.script_parser)
             ? &parse_options : NULL);
-    arraylist_free(adapter_names);
-    arraylist_free(raw_names);
-    arraylist_free(chaptered_names);
     if (!input) {
         return runtime_error_itemf(ERR_OUT_OF_MEMORY,
             "parse: failed to initialize parser for format '%s'",

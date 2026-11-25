@@ -10,7 +10,7 @@ pub fn source(bytes: binary?) Source => {
     continuation: [for (i,b in bytes where b >= 128 and b < 192) i]
 }
 
-pub fn byte(s: Source, pos: int) int^ => if (pos < 0 or pos >= s.length) -1 else (s.bytes[pos] or -1)
+pub fn byte(s: Source, pos: int) int^ => if (pos >= s.length) -1 else (s.bytes[pos] or -1)
 
 pub fn text(s: Source, first: int, stop: int) string^ =>
     if (first >= stop) "" else lambda.sys.parse(slice(s.bytes, first, stop), 'text')^
@@ -23,24 +23,31 @@ pub fn digit(b: int) bool => b >= 48 and b <= 57
 pub fn space(b: int) bool => b == 32 or b == 9 or b == 10 or b == 13
 
 pub fn line_end(s: Source, start: int) int^ {
+    let bytes = s.bytes
+    let limit = s.length
     var pos = start
-    while (pos < s.length and byte(s, pos)^ != 10) { pos = pos + 1 }
+    while (pos < limit and bytes[pos] != 10) { pos = pos + 1 }
     return pos
 }
 
-pub fn trivia(s: Source, start: int, line_comments: binary[], block_comments: bool = false,
+// null selects hash comments and, with block_comments enabled, slash comments.
+pub fn trivia(s: Source, start: int, line_comments: binary[]?, block_comments: bool = false,
               newlines: bool = true) int^ {
+    let bytes = s.bytes
+    let limit = s.length
+    let standard_comments = line_comments == null
     var pos = start
-    while (pos < s.length) {
-        let b = byte(s, pos)^
-        if (space(b) and (newlines or (b != 10 and b != 13))) { pos = pos + 1 }
-        else if (block_comments and b == 47 and byte(s, pos + 1)^ == 42) {
+    while (pos < limit) {
+        let b = bytes[pos]
+        if (b == 32 or b == 9 or (newlines and (b == 10 or b == 13))) { pos = pos + 1 }
+        else if (block_comments and b == 47 and bytes[pos + 1] == 42) {
             pos = pos + 2
-            while (pos < s.length and (byte(s, pos)^ != 42 or byte(s, pos + 1)^ != 47)) {
+            while (pos < limit and (bytes[pos] != 42 or bytes[pos + 1] != 47)) {
                 pos = pos + 1
             }
-            if (pos < s.length) { pos = pos + 2 }
-        } else if (any([for (marker in line_comments) starts(s, pos, marker)^])) {
+            if (pos < limit) { pos = pos + 2 }
+        } else if (if (standard_comments) b == 35 or (block_comments and b == 47 and bytes[pos + 1] == 47)
+                else any([for (marker in line_comments) starts(s, pos, marker)^])) {
             pos = line_end(s, pos)^
         } else { break }
     }
@@ -82,8 +89,10 @@ pub fn quoted(s: Source, start: int, escape) map^ {
     var pieces = null
     var first = start + 1
     var pos = first
-    while (pos < s.length) {
-        let current = byte(s, pos)^
+    let bytes = s.bytes
+    let limit = s.length
+    while (pos < limit) {
+        let current = bytes[pos]
         if (current == 34) {
             let tail = text(s, first, pos)^
             let value = if (pieces == null) tail else join([*finish(pieces)^, tail], "")
@@ -162,9 +171,11 @@ pub fn c_string(value: string) string {
 }
 
 pub fn inline_space(s: Source, start: int, cr: bool = true) int^ {
+    let bytes = s.bytes
+    let limit = s.length
     var pos = start
-    while (true) {
-        let b = byte(s, pos)^
+    while (pos < limit) {
+        let b = bytes[pos]
         if (b == 32 or b == 9 or (cr and b == 13)) { pos = pos + 1 } else { break }
     }
     return pos

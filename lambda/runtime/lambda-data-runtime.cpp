@@ -3522,13 +3522,8 @@ Item item_at(Item data, int64_t index) {
         String *ch_str = heap_strcpy((char*)(chars + byte_offset), ch_len);
         return {.item = s2it(ch_str)};
     }
-    case LMD_TYPE_BINARY: {
-        Binary* bin = data.get_safe_binary();
-        if (!bin || index < 0 || (uint64_t)index >= binary_length(bin)) return ItemNull;
-        // Binary indexing mirrors an ELEM_UINT8 view: return a sized u8 scalar,
-        // not a narrowed plain int or a one-byte binary container.
-        return {.item = u8_to_item(binary_data(bin)[index])};
-    }
+    case LMD_TYPE_BINARY:
+        return binary_byte_at(data.get_binary(), index);
     case LMD_TYPE_PATH: {
         // Lazy evaluation: resolve path content and delegate to it
         Item resolved = resolve_path_content(data.path);

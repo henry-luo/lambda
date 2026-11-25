@@ -753,6 +753,8 @@ struct LambdaAstCallNode : AstCallNode {
     bool can_raise;
     bool is_proc_method;
     bool interp_self_tail_call; // Lambda T0 reuses the frame for a planned self-tail call
+    bool interp_has_var_arguments;
+    bool interp_capture_call_result;
     AstNode* pipe_receiver; // virtual first argument (S10.1.2v4)
     Type* interp_array_destination; // stable destination metadata; certificates are context-owned
     // S11.4.3 (LR12-25, LR12-36): a system call that rejects an error operand
@@ -889,6 +891,7 @@ struct LambdaAstBinaryNode : AstBinaryNode {
     struct AstFuncNode* shell_stage; // deferred RHS for live process or value streams
     uint32_t pipe_effect_guard; // for arbitrary whole-value pipe callables
     bool interp_int_arithmetic; // predicted operands; runtime tags still guard the kernel
+    bool interp_int_comparison;
 };
 
 typedef LambdaAstBinaryNode AstPipeNode;

@@ -1,6 +1,5 @@
 import scan: lambda.io.source_scan
 
-let comment = binary("%%")
 let init_open = binary("%%{")
 let init_close = binary("}%%")
 let front_marker = binary("---")
@@ -8,11 +7,13 @@ let front_marker = binary("---")
 pub fn ascii_space(b: int) bool => scan.space(b) or b == 11 or b == 12
 
 pub fn skip(s, start: int) int^ {
+    let bytes = s.bytes
     var pos = start
     while (true) {
-        let b = scan.byte(s, pos)^
-        if (ascii_space(b) or b == 59) { pos = pos + 1 }
-        else if (b == 37 and scan.starts(s, pos, comment)^ and not scan.starts(s, pos, init_open)^) {
+        let b = bytes[pos]
+        if (b == 32 or (b >= 9 and b <= 13) or b == 59) { pos = pos + 1 }
+        // %%{ begins an initialization directive.
+        else if (b == 37 and bytes[pos + 1] == 37 and bytes[pos + 2] != 123) {
             pos = scan.line_end(s, pos)^
         } else { break }
     }
@@ -22,12 +23,21 @@ pub fn skip(s, start: int) int^ {
 fn word_byte(b: int) bool => scan.ascii_alpha(b) or scan.digit(b) or b == 95
 
 pub fn keyword(s, pos: int, word: string) bool^ {
+    if (not scan.starts(s, pos, binary(word)^)^) { return false }
     let next_byte = scan.byte(s, pos + len(word))^
-    return not (word_byte(next_byte) or next_byte == 45) and scan.starts(s, pos, binary(word)^)^
+    return not (word_byte(next_byte) or next_byte == 45)
 }
 
-pub fn keyword_at(s, pos: int, words: string[]) string?^ =>
-    [for (word in words where keyword(s, pos, word)^) word][0]
+pub fn keyword_at(s, pos: int, words: string[]) string?^ {
+    var i = 0
+    let count = len(words)
+    while (i < count) {
+        let word = words[i]
+        if (keyword(s, pos, word)^) { return word }
+        i = i + 1
+    }
+    return null
+}
 
 pub fn trim_text(s, start: int, stop: int) string^ {
     var left = start

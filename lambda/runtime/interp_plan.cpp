@@ -909,10 +909,15 @@ static void plan_link_capture_identifier(PlanCtx* pc, LambdaAstIdentNode* ident)
 static void plan_link_call_shape(Pool* pool, LambdaAstCallNode* call) {
     // An oversized list retains the existing walker-side scan and runtime
     // diagnostic instead of narrowing its source count into the shared plan.
-    (void)ast_plan_call_shape(call);
+    if (!ast_plan_call_shape(call)) return;
     AstFuncNode* target = ast_direct_call_function(call);
-    if (!target || !call->interp_call_shape_planned || call->interp_has_spread_args ||
-            call->interp_source_argc > LAMBDA_MAX_FUNCTION_ARGS) return;
+    // These depend on the resolved declaration and escape analysis, so
+    // calls can use the same facts without rescanning formals each time.
+    call->interp_capture_call_result = ast_call_result_needs_capture(call);
+    call->interp_has_var_arguments = target && target->type &&
+        target->type->type_id == LMD_TYPE_FUNC &&
+        ast_type_func_has_var_parameter((TypeFunc*)target->type);
+    if (!target || call->interp_has_spread_args || call->interp_source_argc > LAMBDA_MAX_FUNCTION_ARGS) return;
     AstNode* resolved[LAMBDA_MAX_FUNCTION_ARGS] = {};
     ast_resolve_call_arguments(call, target, call->interp_source_argc, resolved);
     int index = 0;
@@ -1756,6 +1761,20 @@ static void plan_walk(AstNode* node, void* ctx) {
     }
     case AST_NODE_BINARY: {
         LambdaAstBinaryNode* binary = (LambdaAstBinaryNode*)node;
+        // An int or u8 operand predicts a compact comparison, even when
+        // the other operand's type also admits absence or an error.
+        switch (binary->op) {
+        case OPERATOR_EQ: case OPERATOR_NE:
+        case OPERATOR_LT: case OPERATOR_LE: case OPERATOR_GT: case OPERATOR_GE: {
+            LambdaNumericKind left = lambda_numeric_kind_from_type(binary->left ? binary->left->type : NULL);
+            LambdaNumericKind right = lambda_numeric_kind_from_type(binary->right ? binary->right->type : NULL);
+            binary->interp_int_comparison = left == LAMBDA_NUM_INT || left == LAMBDA_NUM_U8 ||
+                right == LAMBDA_NUM_INT || right == LAMBDA_NUM_U8;
+            break;
+        }
+        default:
+            break;
+        }
         binary->interp_int_arithmetic =
             (binary->op == OPERATOR_ADD || binary->op == OPERATOR_SUB ||
              binary->op == OPERATOR_MUL) &&

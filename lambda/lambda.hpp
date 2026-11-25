@@ -1864,4 +1864,10 @@ extern "C" {
 #ifdef __cplusplus
 #include "lambda/core/value.hpp"
 #include "runtime/lambda-root-frame.hpp"
+
+// S2.5.8 / S7.2.1: indexing selects one byte or absence. Keep the u8 carrier.
+static inline Item binary_byte_at(Binary* binary, int64_t index) {
+    if (!binary || index < 0 || (uint64_t)index >= binary_length(binary)) return ItemNull;
+    return {.item = u8_to_item(binary_data(binary)[index])};
+}
 #endif

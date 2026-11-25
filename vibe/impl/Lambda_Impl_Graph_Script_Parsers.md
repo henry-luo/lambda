@@ -6,6 +6,58 @@
 
 **Design:** [Graph package §11.1 and §11.8](../Lambda_Pkg_Graph.md#111-parser-principles), GP1–GP4.
 
+## Interpreter and script tuning
+
+The performance follow-up starts from `0244714efc` in the main checkout.
+It tunes the Lambda readers and AST interpreter under S12.1.2v3 and D8.3.1v3.
+An optimized baseline executable is preserved in `temp/graph-parser-tuning/`.
+Independent LaTeX work shares this checkout.
+
+The shared scanner reads trivia directly from bytes while retaining custom
+comment markers. DOT passes offsets alongside diagnostics and counters.
+Mermaid stops at the first matching directive and retains its family table
+at module scope. The interpreter predicts compact numeric comparisons and
+reuses resolved call facts under D7.4.1 and D8.2.4. The package bridge still
+validates source identity under D8.5.1 and skips the import-initialization walk
+for an initialized module instance. Byte reads preserve u8 and absence
+(S2.5.8, S7.2.1).
+
+The optimized build matches the 92 serialized Mark results, 247 DOT recovery
+probes, and 43 upstream SVG checks in each tier. The source-contract and
+byte comparison goldens pass with forced and poisoned GC (D6.3.3).
+Replacing a loaded parser's source within the same process selects the
+new generation (D8.5.1).
+The interpreter walker and frame-plan suites pass 51 of 52 cases.
+The remaining checked-store fixture already rejects its unchecked procedure
+call with E228 on the baseline executable. The full Lambda baseline passes
+6,110 of 6,131 cases, with the same 21 failing test names as the upstream
+render follow-up baseline. The cache, scalar comparison, security runtime,
+and MIR forced-GC suites passed.
+
+### Tuning measurements
+
+The replay uses the `release_profile` host on macOS arm64, the same 92-file
+manifest, three randomized process rounds, and nine three-pass samples
+after seven warm passes in each process. Values are medians of process
+medians in milliseconds. The isolated interpreter row runs the original
+package sources on the tuned host. Each round includes all four variants
+under the two recorded tier selections (D8.3.1v3).
+
+| Change | Interpreter, 92 files | Auto, 92 files | Interpreter, 21 DOT files | Auto, 21 DOT files |
+|---|---:|---:|---:|---:|
+| Baseline | 143.32 | 68.59 | 51.20 | 23.42 |
+| Scripts | 114.11 | 60.43 | 31.29 | 14.64 |
+| Runtime | 130.31 | 70.97 | 50.07 | 21.37 |
+| Combined | 97.18 | 55.22 | 26.30 | 12.32 |
+
+The combined changes reduce whole-corpus warm time by 32% in the interpreter
+and 19% in auto. The runtime-only auto results vary by process and show no
+consistent improvement across all formats. A headless `view` spot check
+with one file per format and five runs per file took 495 ms before and
+485 ms after, summed per-file medians. This compares the complete loading,
+layout and rendering path (D9.5.6v2). Raw samples and qualification logs
+are under `temp/graph-parser-tuning/`.
+
 ## Completion record
 
 - The migration covers the five source parsers. Layout, normalization and rendering continue to consume their existing Mark contracts (D9.5.6v2). The worktree is `master` at `8880b89318` and `lambda-input` at `91d88f1`, with implementation edits in both and independent LaTeX work in the main checkout.

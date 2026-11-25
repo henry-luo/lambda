@@ -1,11 +1,10 @@
 import scan: lambda.io.source_scan
 
-let comments = [binary("//"), binary("#")]
 let max_depth = 256
 let max_statements = 100000
 let max_token = 1024 * 1024
 
-fn skip(s, pos) int^ => scan.trivia(s, pos, comments, true)^
+fn skip(s, pos) int^ => scan.trivia(s, pos, null, true)^
 
 fn bare_ident(b: int) bool => scan.ascii_alpha(b) or b == 95
 

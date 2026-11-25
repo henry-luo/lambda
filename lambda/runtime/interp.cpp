@@ -1720,6 +1720,31 @@ static Item eval_unary(InterpFrame* f, AstUnaryNode* node) {
 static bool interp_fast_int_apply(Operator op, int64_t left, int64_t right,
         int64_t* result);
 
+static inline bool interp_int_compare(Operator op, int64_t left, int64_t right, bool* result) {
+    switch (op) {
+    case OPERATOR_EQ: *result = left == right; return true;
+    case OPERATOR_NE: *result = left != right; return true;
+    case OPERATOR_LT: *result = left < right; return true;
+    case OPERATOR_LE: *result = left <= right; return true;
+    case OPERATOR_GT: *result = left > right; return true;
+    case OPERATOR_GE: *result = left >= right; return true;
+    default: return false;
+    }
+}
+
+static inline bool interp_comparison_int(Item item, int64_t* value) {
+    // Only finite packed integers and u8 values enter the exact lane.
+    if (LAMBDA_ITEM_IS_PACKED_INT(item.item)) {
+        *value = lambda_int_item_to_i64(item);
+        return true;
+    }
+    if (get_type_id(item) == LMD_TYPE_NUM_SIZED && item.get_num_type() == NUM_UINT8) {
+        *value = item.get_u8();
+        return true;
+    }
+    return false;
+}
+
 static Item eval_binary(InterpFrame* f, LambdaAstBinaryNode* node) {
     // `and`/`or` short-circuit before the right operand is evaluated (S10.2.3);
     // truthiness is by tag through the shipped helper (S3.1/S3.2).
@@ -1768,6 +1793,14 @@ static Item eval_binary(InterpFrame* f, LambdaAstBinaryNode* node) {
     rhs.set(right_value);
     Item left = lhs.get();
     Item right = rhs.get();
+    if (node->interp_int_comparison) {
+        int64_t a, b;
+        bool result;
+        if (interp_comparison_int(left, &a) && interp_comparison_int(right, &b) &&
+                interp_int_compare(node->op, a, b, &result)) {
+            return {.item = b2it(result ? BOOL_TRUE : BOOL_FALSE)};
+        }
+    }
     if (node->interp_int_arithmetic && get_type_id(left) == LMD_TYPE_INT &&
             get_type_id(right) == LMD_TYPE_INT) {
         // the shared kernel rejects results outside int53; generic arithmetic owns poison
@@ -2702,7 +2735,10 @@ static Item eval_call(InterpFrame* f, LambdaAstCallNode* node, const Item* injec
     uint64_t* words = arg_roots.words();
     NameEntry* borrowed[LAMBDA_MAX_FUNCTION_ARGS];
     AstNode* borrow_args[LAMBDA_MAX_FUNCTION_ARGS];
-    bool has_borrows = ast_type_func_has_var_parameter(direct_signature);
+    bool has_borrows = node->interp_call_shape_planned
+        ? node->interp_has_var_arguments : ast_type_func_has_var_parameter(direct_signature);
+    bool capture_result = node->interp_call_shape_planned
+        ? node->interp_capture_call_result : ast_call_result_needs_capture(node);
     if (has_borrows) {
         // Borrow publication inspects the full bounded array, including unused formals.
         memset(borrowed, 0, sizeof(borrowed));
@@ -2871,14 +2907,14 @@ static Item eval_call(InterpFrame* f, LambdaAstCallNode* node, const Item* injec
             for (int index = 0; index < dispatch_argc; index++) {
                 transport->mir_var_homes[index] = NULL;
             }
-            if (ast_call_result_needs_capture((AstNode*)node)) cow_mark_shared(result);
+            if (capture_result) cow_mark_shared(result);
             return interp_check_contract_return(f, node, publish_places(result), fn_slot);
         }
         Item result = interp_call_with_borrowed(fn, (const Item*)(void*)words,
             dispatch_argc, f, borrowed, borrow_homes);
         // LR12-11 (S9.1.2): the result may be (part of) an argument the caller
         // still holds; both observers must detach before a write
-        if (ast_call_result_needs_capture((AstNode*)node)) cow_mark_shared(result);
+        if (capture_result) cow_mark_shared(result);
         return interp_check_contract_return(f, node, publish_places(result), fn_slot);
     }
     // Every callee — interpreted or native — reaches its body through the
@@ -2899,7 +2935,7 @@ static Item eval_call(InterpFrame* f, LambdaAstCallNode* node, const Item* injec
     Item result = interp_call_function_result(fn, dispatch_argc ? &args : NULL,
         false, has_named_args ? NULL : direct_fn);
     // LR12-11: same call-site mark as the borrowed path above
-    if (ast_call_result_needs_capture((AstNode*)node)) cow_mark_shared(result);
+    if (capture_result) cow_mark_shared(result);
     return interp_check_contract_return(f, node, result, fn_slot);
 }
 
@@ -5279,13 +5315,13 @@ static bool interp_fast_int_eval(InterpFrame* frame, AstNode* node,
                     &out->value)) return false;
             out->boolean = false;
             return true;
-        case OPERATOR_EQ: out->value = left.value == right.value; out->boolean = true; return true;
-        case OPERATOR_NE: out->value = left.value != right.value; out->boolean = true; return true;
-        case OPERATOR_LT: out->value = left.value < right.value; out->boolean = true; return true;
-        case OPERATOR_LE: out->value = left.value <= right.value; out->boolean = true; return true;
-        case OPERATOR_GT: out->value = left.value > right.value; out->boolean = true; return true;
-        case OPERATOR_GE: out->value = left.value >= right.value; out->boolean = true; return true;
-        default: return false;
+        default: {
+            bool result;
+            if (!interp_int_compare(binary->op, left.value, right.value, &result)) return false;
+            out->value = result;
+            out->boolean = true;
+            return true;
+        }
         }
     }
     case AST_NODE_CALL_EXPR: {
@@ -6293,11 +6329,15 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
             return interp_eval_index_nd(f, obj.home(), field->field);
         }
         Item index_value = eval_expr(f, field->field);
+        TypeId object_type = get_type_id(obj.get());
+        // The roots already protect the receiver and this byte read cannot allocate.
+        if (object_type == LMD_TYPE_BINARY && LAMBDA_ITEM_IS_PACKED_INT(index_value.item)) {
+            return binary_byte_at(obj.get().get_binary(), lambda_int_item_to_i64(index_value));
+        }
         Scratch index_slot(f);
         index_slot.set(index_value);
         int64_t plain_index = 0;
         if (lambda_item_to_int64_exact(index_slot.get(), &plain_index)) {
-            TypeId object_type = get_type_id(obj.get());
             if (field->interp_field && field->interp_field->numeric_index &&
                     object_type == LMD_TYPE_ARRAY_NUM) {
                 ArrayNum* array = obj.get().array_num;
@@ -6309,6 +6349,7 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
                 }
             }
             if (object_type == LMD_TYPE_ARRAY) return interp_item_at(obj.get(), plain_index);
+            if (object_type == LMD_TYPE_BINARY) return binary_byte_at(obj.get().get_binary(), plain_index);
         }
         return fn_index(obj.get(), index_slot.get());
     }
@@ -9116,18 +9157,22 @@ Item interp_call_package_export(Runtime* runtime, const char* package_name,
     runner.context = owner;
     runner.script = package;
     owner->run_main = false;
-    ArrayList* cone = interp_repl_import_cone(package);
-    if (!cone) return ItemError;
-    for (int i = 0; i < cone->length; i++) {
-        Script* module = (Script*)cone->data[i];
-        if (!module || (module->module_initialized && interp_module_state(module))) continue;
-        Item initialized = interp_run_module_init(&runner, state_guard.get(), module);
-        if (item_is_error(initialized)) {
-            arraylist_free(cone);
-            return initialized;
+    // A live initialized package has already run its dependency cone.
+    // load_script still validates the source generation before this check.
+    if (!package->module_initialized || !interp_module_state(package)) {
+        ArrayList* cone = interp_repl_import_cone(package);
+        if (!cone) return ItemError;
+        for (int i = 0; i < cone->length; i++) {
+            Script* module = (Script*)cone->data[i];
+            if (!module || (module->module_initialized && interp_module_state(module))) continue;
+            Item initialized = interp_run_module_init(&runner, state_guard.get(), module);
+            if (item_is_error(initialized)) {
+                arraylist_free(cone);
+                return initialized;
+            }
         }
+        arraylist_free(cone);
     }
-    arraylist_free(cone);
     return interp_call_module_export(runtime, package, export_name, arguments.items(), argc);
 }
 

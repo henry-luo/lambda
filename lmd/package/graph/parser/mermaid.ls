@@ -11,6 +11,7 @@ let families = {
     sequenceDiagram:"sequence", erDiagram:"er", 'stateDiagram-v2':"state", stateDiagram:"state", gantt:"gantt", pie:"pie", 'sankey-beta':"sankey",
     timeline:"timeline", 'xychart-beta':"xychart", xychart:"xychart"
 }
+let family_names = [for (word, kind in families) string(word)]
 
 pub fn read(bytes: binary?) map^ {
     let s = scan.source(bytes)^
@@ -20,7 +21,7 @@ pub fn read(bytes: binary?) map^ {
     let init_start = shared.skip(s, front.next)^
     let init = shared.initialization(s, init_start)^
     let head = shared.skip(s, init.next)^
-    let family = shared.keyword_at(s, head, [for (word,kind in families) string(word)])^
+    let family = shared.keyword_at(s, head, family_names)^
     let kind = families[family] or "flowchart"
     let after = head + len(family)
     let direction = if (family != null and kind == "flowchart") shared.direction(s, after)^

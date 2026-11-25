@@ -1,9 +1,8 @@
 import scan: lambda.io.source_scan
 
-let comments = [binary("#")]
 
 fn trivia(s, pos: int, newlines: bool = true) int^ =>
-    scan.trivia(s, pos, comments, false, newlines)^
+    scan.trivia(s, pos, null, false, newlines)^
 
 fn connector(s, pos: int) map?^ {
     let first = scan.byte(s, pos)^
