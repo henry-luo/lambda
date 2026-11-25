@@ -34,6 +34,8 @@ let DEMOS = [
      blurb: "The 1993 classic, all nine maps, rebuilt in Lambda."},
     {name: "midtown", title: "Midtown", cat: "games", sub: "Open-city driving",
      blurb: "Cruise a living city, jump the ramps and race parcels across town."},
+    {name: "fishing", title: "Fishing", cat: "games", sub: "Cozy lagoon angling",
+     blurb: "Row round a clear cove, cast, wait for a bite and strike."},
     {name: "sentence-game", title: "Build Sentence", cat: "games", sub: "Learning game",
      blurb: "Build sentences from word cards, read aloud."},
     {name: "photo-album", title: "Photo Album", cat: "photography", sub: "Photo library",
@@ -84,7 +86,7 @@ let DEMOS = [
 
 // the store's sidebar, in order; each key is also its glyph in mod_demo_art
 let CATEGORIES = [
-    {key: "games", title: "Games", blurb: "Arcade classics, brass puzzle machines, a word game and a city to drive, all native."},
+    {key: "games", title: "Games", blurb: "Arcade classics, brass puzzle machines, a word game, a city to drive and a cove to fish, all native."},
     {key: "productivity", title: "Productivity", blurb: "Write, plan and present in full editors."},
     {key: "photography", title: "Photography", blurb: "Browse a library, grade a photo, stack layers."},
     {key: "design", title: "Design", blurb: "Illustrations, paintings, diagrams, greeting cards and homes, ready to share or walk through."},

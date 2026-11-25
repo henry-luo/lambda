@@ -1,0 +1,65 @@
+"cove"
+{
+  rocks: 47,
+  emergent: 19,
+  pads: 83,
+  flowers: 11,
+  grass: 40,
+  tubes: 16,
+  stars: 16,
+  urchins: 11,
+  reeds: 40,
+  centre_depth: 2.15,
+  start_shore: 0.65,
+  start_navigable: true,
+  bank_navigable: false
+}
+"fish"
+{
+  count: 24,
+  lengths: [0.11, 0.77],
+  vertices: 235,
+  triangles: 420,
+  weights_sum: 1,
+  tracks: 5
+}
+"angler"
+{
+  ready_tip: [-0.54, 1.73, 1.23],
+  floating: [-0.8, 0.01, 4.4],
+  blades_at_catch: [[-1.74, -0.04, 0.56], [1.74, -0.04, 0.56]],
+  hook_at_show: [-0.78, 0.95, 0.55],
+  released: [-1.95, -0.12, 0.9],
+  clips: [["idle", 15, 2.99], ["row", 15, 1.15], ["ready", 15, 2.99], ["to-fish", 15, 1.8], ["to-row", 15, 1.8], ["cast", 15, 2.25], ["wait", 15, 3], ["nibble", 15, 1.7], ["bite", 15, 2.35], ["reel", 15, 1.9], ["strike", 15, 5.6]]
+}
+"row"
+{
+  mode: "row",
+  moved: 3.18,
+  speed: 1.52,
+  kinds: [5, 3, 4, 4, 8]
+}
+"cast"
+{
+  glided: ["idle", 0.12],
+  mode: "wait",
+  bobber: [1, 0.02, 0.94],
+  hint: "Wait for a bite… Space reels in"
+}
+"reel"
+{
+  mode: "ready",
+  target: null
+}
+"catch"
+{
+  staged: ["stage", "fish-2"],
+  mode: "ready",
+  catches: 1,
+  best: {
+    koi: 77
+  },
+  toast: "Koi · 77 cm",
+  fish_mode: "wander",
+  target: null
+}

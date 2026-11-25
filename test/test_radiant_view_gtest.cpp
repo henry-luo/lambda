@@ -580,6 +580,7 @@ TEST(RadiantViewTest, DemoCommandLaunchesCatalogAndPreservesViewerOptions) {
     const DemoCase cases[] = {
         // Start the larger authored documents first so they overlap the short launches.
         {"midtown", "#midtown #city"},
+        {"fishing", "#fishing #cove"},
         {"doom", "#doom[data-mode=ready]"},
         {"paint", "#paint #canvas"},
         {"slides", "#slides-editor #stage"},

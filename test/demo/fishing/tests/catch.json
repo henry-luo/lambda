@@ -1,0 +1,23 @@
+{
+  "name": "FishingAssistedCatchCountsAndReleases",
+  "viewport": {"width": 1280, "height": 800},
+  "events": [
+    {"type": "wait", "ms": 900},
+    {"type": "key_down", "key": "t"},
+    {"type": "key_up", "key": "t"},
+    {"type": "assert_text", "target": {"selector": "#toast-text"}, "equals": "Strike assist on"},
+    {"type": "key_down", "key": "ArrowUp"},
+    {"type": "wait", "ms": 1500},
+    {"type": "key_up", "key": "ArrowUp"},
+    {"type": "wait", "ms": 2400},
+    {"type": "key_down", "key": " "},
+    {"type": "key_up", "key": " "},
+    {"type": "wait", "ms": 2600},
+    {"type": "assert_attribute", "target": {"selector": "#fishing"}, "attribute": "data-mode", "equals": "wait"},
+    {"type": "wait", "ms": 22000},
+    {"type": "assert_attribute", "target": {"selector": "#fishing"}, "attribute": "data-catches", "equals": "1"},
+    {"type": "assert_text", "target": {"selector": "#catch-count"}, "equals": "1"},
+    {"type": "assert_render_stats", "source": "scene3d", "target": "#cove", "fields": {"runtime_faulted": 0}},
+    {"type": "capture_surface", "source": "page", "file": "temp/fishing-catch.png"}
+  ]
+}
