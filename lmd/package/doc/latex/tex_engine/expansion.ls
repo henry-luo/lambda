@@ -636,6 +636,8 @@ fn expand_one(st: State, t, budget) State^ {
         expl3_seq_expand(st, primitive(st, t), budget)
     else if (st.script_expl3 and expl3.string_compare(primitive(st, t)))
         expl3_str_compare(st, primitive(st, t), budget)
+    else if (st.script_expl3 and expl3.token_expandable(primitive(st, t)))
+        expl3_token_expandable(st, primitive(st, t), budget)
     else if (st.script_expl3 and expl3.text_case(primitive(st, t)))
         expl3_text_case(st, primitive(st, t), budget)
     else if (st.latex and contains(["IfBooleanTF","IfBooleanT","IfBooleanF", "IfNoValueTF","IfNoValueT",
@@ -3056,21 +3058,14 @@ fn expl3_tl_equal(st: State, name, budget) State^ {
         let named = contains(["tl_if_eq:NNTF", "tl_if_eq:NNT", "tl_if_eq:NNF"], name);
         let first = if (named) nonspace(st.input)^ else stream.argument(st.input, true)^;
         let second = if (named) nonspace(first.stream)^ else stream.argument(first.stream, true)^;
-        let yes = if (name == "tl_if_eq:NNF" or name == "tl_if_eq:nnF")
-            {stream: second.stream, tokens: [], error: null} else stream.argument(second.stream, true)^;
-        let no = if (name == "tl_if_eq:NNT" or name == "tl_if_eq:nnT")
-            {stream: yes.stream, tokens: [], error: null} else stream.argument(yes.stream, true)^;
-        let current = {*:st, input: if (named) stream.note_foreign_expansion(no.stream)^ else no.stream,
-            expansions: st.expansions + 1};
+        let current = {*:st, input: second.stream, expansions: st.expansions + 1};
         if (not named and first.error != null) fail(current, first.error)
         else if (not named and second.error != null) fail(current, second.error)
-        else if (yes.error != null) fail(current, yes.error)
-        else if (no.error != null) fail(current, no.error)
         else if (named and (first.token == null or second.token == null)) fail(current, "tex-runaway")
         else {
             let equal = if (named) meanings_equal(meaning(current, first.token), meaning(current, second.token))^
                 else tokens_equal(first.tokens, second.tokens)^;
-            {*:current, input: stream.push(current.input, if (equal) yes.tokens else no.tokens)}
+            expl3_branch(current, name, equal, named)
         }
     }
 }
@@ -3223,29 +3218,52 @@ fn expl3_seq_expand(st: State, name, budget) State^ {
 fn expl3_compare_text(st, tokens) any^ => join([for (t in tokens)
     if (charcat(t, 6)) t.value else write_token(st, t)], "")
 
+// The expl3 conditional suffix selects zero, one, or two raw branches.
+fn expl3_branch(st: State, name, matched, foreign = false) State^ {
+    if (contains(name, "_p:"))
+        {*:st, input: stream.push(st.input, text_tokens(if (matched) "1" else "0")^)}
+    else {
+        let first = stream.argument(st.input, true)^;
+        let second = if (ends_with(name, "TF")) stream.argument(first.stream, true)^
+            else {stream:first.stream, tokens:[], error:null};
+        let current = {*:st, input:if (foreign) stream.note_foreign_expansion(second.stream)^ else second.stream};
+        if (first.error != null) fail(current, first.error)
+        else if (second.error != null) fail(current, second.error)
+        else {
+            let take = if (ends_with(name, "F") and not ends_with(name, "TF")) not matched else matched;
+            {*:current, input:stream.push(current.input, if (take) first.tokens else second.tokens)}
+        }
+    }
+}
+
+fn expl3_token_expandable(st: State, name, budget) State^ {
+    if (st.expansions >= budget) fail(st, "tex-budget")
+    else {
+        let target = nonspace(st.input)^;
+        let current = {*:st, input:target.stream, expansions:st.expansions + 1};
+        if (target.token == null) fail(current, "tex-runaway")
+        else expl3_branch(current, name, expandable(current, target.token)^)
+    }
+}
+
 fn expl3_str_compare(st: State, name, budget) State^ {
     if (st.expansions >= budget) fail(st, "tex-budget")
     else {
         let left = stream.argument(st.input, true)^;
-        let relation = nonspace(left.stream)^;
+        let equality = starts_with(name, "str_if_eq");
+        let relation = if (equality) {stream:left.stream, token:null} else nonspace(left.stream)^;
         let right = stream.argument(relation.stream, true)^;
-        let yes = if (name == "str_compare:nNnF") {stream: right.stream, tokens: [], error: null}
-            else stream.argument(right.stream, true)^;
-        let no = if (name == "str_compare:nNnT") {stream: yes.stream, tokens: [], error: null}
-            else stream.argument(yes.stream, true)^;
-        let current = {*:st, input: no.stream, expansions: st.expansions + 1};
+        let current = {*:st, input: right.stream, expansions: st.expansions + 1};
         if (left.error != null) fail(current, left.error)
         else if (right.error != null) fail(current, right.error)
-        else if (yes.error != null) fail(current, yes.error)
-        else if (no.error != null) fail(current, no.error)
-        else if (not (other(relation.token, "<") or other(relation.token, "=") or other(relation.token, ">")))
+        else if (not equality and not (other(relation.token, "<") or other(relation.token, "=") or other(relation.token, ">")))
             fail(current, "tex-missing-relation")
         else {
             let a = expl3_compare_text(current, left.tokens)^;
             let b = expl3_compare_text(current, right.tokens)^;
-            let matched = if (relation.token.value == "<") a < b
+            let matched = if (equality) a == b else if (relation.token.value == "<") a < b
                 else if (relation.token.value == ">") a > b else a == b;
-            {*:current, input: stream.push(current.input, if (matched) yes.tokens else no.tokens)}
+            expl3_branch(current, name, matched)
         }
     }
 }
@@ -3371,9 +3389,9 @@ fn expl3_case_scan(st, budget, uppercase, mode = null, output = []) any^ {
     }
     else if (is_control(t)) {
         let resolved = meaning(current, t);
-        if (resolved.kind == "undefined") {state: unsupported(current, "text case control " ++ t.value), tokens: output}
-        else if (resolved.kind == "char" or resolved.kind == "chardef" or resolved.kind == "mathchardef")
+        if (resolved.kind == "char" or resolved.kind == "chardef" or resolved.kind == "mathchardef")
             {state: unsupported(current, "text case character meaning"), tokens: output}
+        // Undefined controls stay intact while their surrounding text is converted.
         else expl3_case_scan(current, budget, uppercase, null, [*output, t])
     }
     else if (t.kind == "char" and ord(t.value) >= 128)

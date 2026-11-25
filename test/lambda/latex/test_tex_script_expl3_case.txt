@@ -77,10 +77,10 @@
 }
 "unknown control:"
 {
-  text: "",
-  issue: "tex-unsupported-primitive",
-  unsupported: "text case control unknown",
-  matches_native: null
+  text: "A\\unknown{B}",
+  issue: null,
+  unsupported: null,
+  matches_native: true
 }
 "unicode pending:"
 {
