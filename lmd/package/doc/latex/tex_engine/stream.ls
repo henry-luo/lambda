@@ -183,6 +183,12 @@ fn finish(stream: Stream, tokens: map[], code: string? = null, cause: string? = 
 pub fn same_token(a, b) bool => a != null and b != null and a.kind == b.kind and a.value == b.value and
     (a.kind != "char" or a.cat == b.cat)
 
+pub fn same_tokens(a, b, index = 0) bool^ {
+    if (len(a) != len(b)) false
+    else if (index == len(a)) true
+    else same_token(a[index], b[index]) and same_tokens(a, b, index + 1)
+}
+
 fn read_group(stream: Stream, depth: int, tokens: map[], long_ok: bool) Argument^ {
     let result = next(stream)^;
     let t = result.token;

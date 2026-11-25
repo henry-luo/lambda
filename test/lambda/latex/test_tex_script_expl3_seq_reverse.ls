@@ -1,13 +1,10 @@
 import profile: lambda.doc.latex.tex_engine.profile
 import reconstruct: lambda.doc.latex.tex_engine.reconstruct
 import digest: lambda.doc.latex.tex_engine.digest
-let kernel=input(sys.lambda.home ++ "/package/doc/latex/tex_engine/kernel.tex","text")^;
-let baseline=parse("",{type:"tex"})^.messages;
-fn check(source) any^ {
- let r=profile.expand_with_kernel(source,kernel,{script_expl3:true,echo_definitions:true,adapters:[],resources:{local:{},bundled:{}}},100000)^;
- let n=parse(source,{type:"tex"})^;let b=reconstruct.reconstruct(r)^;
- {issue:r.issue,reconstruct_issue:b.issue,text_match:b.text==n.text,messages_match:r.messages==slice(n.messages,len(baseline),len(n.messages))^,diagnostics_match:r.diagnostic_records==n.diagnostics}
-}
+import compare: ._tex_expl3_seq_compare
+let kernel=compare.kernel;
+let baseline=compare.baseline;
+fn check(source) any^ => compare.check(source);
 [for (source in [
   "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_reverse:N\\l_s_seq[\\seq_use:Nn\\l_s_seq{|}]\\ExplSyntaxOff",
   "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_set_from_clist:Nn\\l_s_seq{a,b,c}\\seq_reverse:N\\l_s_seq\\seq_use:Nn\\l_s_seq{,}\\ExplSyntaxOff",
@@ -46,7 +43,7 @@ fn check(source) any^ {
 ]) check(source)^]
 
 fn safe_digestion(source) any^ {
- let r=profile.expand_with_kernel(source,kernel,{script_expl3:true,echo_definitions:true,adapters:[],resources:{local:{},bundled:{}}},100000)^;
+ let r=compare.expand(source)^;
  let d=digest.digest(r)^;
  if(d.ast!=null) d.ast==(parse(source,{type:"latex"})^) else d.issue=="latex-digest-unsupported"
 }

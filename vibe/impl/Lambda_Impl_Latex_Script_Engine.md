@@ -34,6 +34,18 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Expl3 sequence splitting, 2026-11-26:** Script now implements local and
+  global `seq_set_split` and `seq_set_split_keep_spaces` with top-level token
+  delimiters, empty fields and empty-delimiter token mapping (D10.2.2v2).
+  Ten exact cases match TeX Live, including grouping, control and space
+  delimiters and scope; the new test also passes interpreter and JIT with
+  forced GC and poisoning. The shared token-list comparison and comma-list
+  splitter are reused. Four existing sequence matrices now share an immutable
+  kernel through a test helper; the three initially timed-out matrices pass
+  their unchanged goldens in 13–16 seconds, and the reverse matrix passes too.
+  Group tokens in a delimiter remain explicitly unsupported, and generic
+  `cs_generate_variant:Nn` and the csvsimple fixture are still open.
+
 - **Math definition echoes, 2026-11-26:** Math digestion now reads the
   reconstructed bytes of definition source spans and permits verified comment
   gaps (D10.2.2v2). Exact trees for a definition with a comment and one with

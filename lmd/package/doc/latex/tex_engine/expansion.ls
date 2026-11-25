@@ -3068,7 +3068,7 @@ fn expl3_tl_equal(st: State, name, budget) State^ {
         else if (named and (first.token == null or second.token == null)) fail(current, "tex-runaway")
         else {
             let equal = if (named) meanings_equal(meaning(current, first.token), meaning(current, second.token))^
-                else tokens_equal(first.tokens, second.tokens)^;
+                else stream.same_tokens(first.tokens, second.tokens)^;
             expl3_branch(current, name, equal, named)
         }
     }
@@ -3116,23 +3116,30 @@ fn expl3_seq_assign(st: State, name) State^ {
     else if (expl3.fresh(name) and not latex_definable(meaning(st, target.token)))
         fail(current, "expl3-already-defined")
     else {
+        let splitting = expl3.sequence_split(name);
         let arg = if (expl3.sequence_empty_assignment(name) or expl3.sequence_reverse(name)) {stream: target.stream, tokens: [], error: null}
             else stream.argument(target.stream, true)^;
-        let advanced = {*:current, input: arg.stream};
+        let content = if (splitting and arg.error == null) stream.argument(arg.stream, true)^
+            else {stream:arg.stream, tokens:[], error:null};
+        let advanced = {*:current, input: content.stream};
         let old = meaning(advanced, target.token);
         let prior = expl3_seq_items(old)^;
-        let uses_prior = not expl3.sequence_empty_assignment(name) and not expl3.sequence_from_clist(name);
+        let uses_prior = not splitting and not expl3.sequence_empty_assignment(name) and not expl3.sequence_from_clist(name);
         let marked = if (uses_prior and prior is array and not (old.seq_items is array))
             {*:advanced, expl3_seq_body_seen: true} else advanced;
         if (arg.error != null) fail(marked, arg.error)
+        else if (content.error != null) fail(marked, content.error)
+        else if (splitting and any([for (token in arg.tokens) charcat(token,1) or charcat(token,2)]))
+            unsupported(marked, "expl3 split delimiter group")
         else if (uses_prior and not (prior is array)) fail(marked, "expl3-invalid-sequence")
         // mutation of protected sequence macros needs native expansion semantics.
         else if (uses_prior and old.protected_flag == true and not (old.seq_items is array))
             unsupported(marked, "expl3 protected sequence assignment")
         else {
-            // reverse stored items without expanding their TeX tokens.
+            // Sequence assignments retain the original, unexpanded TeX tokens.
             let items = if (expl3.sequence_empty_assignment(name)) []
                 else if (expl3.sequence_from_clist(name)) expl3.from_clist(arg.tokens)^
+                else if (splitting) expl3.from_split(content.tokens, arg.tokens, not contains(name,"keep_spaces"))^
                 else if (expl3.sequence_reverse(name)) reverse(prior)^
                 else if (expl3.sequence_put_left(name)) [arg.tokens, *prior]
                 else [*prior, arg.tokens];
@@ -3853,16 +3860,10 @@ fn box_conditional(st: State, name, budget, negate) State^ {
     }
 }
 
-fn tokens_equal(a, b, index = 0) any^ {
-    if (len(a) != len(b)) false
-    else if (index == len(a)) true
-    else stream.same_token(a[index], b[index]) and tokens_equal(a, b, index + 1)
-}
-
 fn delimiters_equal(a, b, index = 0) any^ {
     if (len(a) != len(b)) false
     else if (index == len(a)) true
-    else tokens_equal(a[index], b[index]) and delimiters_equal(a, b, index + 1)
+    else stream.same_tokens(a[index], b[index]) and delimiters_equal(a, b, index + 1)
 }
 
 // an unexpanded control token compares as relax for this read only.
@@ -3880,8 +3881,8 @@ fn meanings_equal(a, b) any^ {
     else if (a.kind == "chardef" or a.kind == "mathchardef") a.value == b.value
     else if (a.kind == "macro") a.count == b.count and a.long_ok == b.long_ok and a.protected_flag == b.protected_flag and
         a.brace_delim == b.brace_delim and (a.optional == true) == (b.optional == true) and
-        (a.optional != true or tokens_equal(a.optional_default, b.optional_default)) and tokens_equal(a.prefix, b.prefix) and
-        delimiters_equal(a.delimiters, b.delimiters) and tokens_equal(a.body, b.body)
+        (a.optional != true or stream.same_tokens(a.optional_default, b.optional_default)) and stream.same_tokens(a.prefix, b.prefix) and
+        delimiters_equal(a.delimiters, b.delimiters) and stream.same_tokens(a.body, b.body)
     else false
 }
 

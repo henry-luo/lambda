@@ -21,6 +21,7 @@ let TL_BLANK = ["tl_if_blank:nTF", "tl_if_blank:nT", "tl_if_blank:nF",
 let SEQ_EMPTY = ["seq_if_empty:NTF", "seq_if_empty:NT", "seq_if_empty:NF"]
 let SEQ_NEW = ["seq_new:N"]
 let SEQ_SET = ["seq_set_from_clist:Nn", "seq_gset_from_clist:Nn", "seq_clear:N", "seq_gclear:N",
+    "seq_set_split:Nnn", "seq_gset_split:Nnn", "seq_set_split_keep_spaces:Nnn", "seq_gset_split_keep_spaces:Nnn",
     "seq_reverse:N", "seq_greverse:N",
     "seq_put_left:Nn", "seq_put_right:Nn", "seq_gput_left:Nn", "seq_gput_right:Nn"]
 let SEQ_EXPAND = ["seq_use:Nn", "seq_count:N", "seq_item:Nn"]
@@ -50,7 +51,7 @@ pub fn fresh(name) bool => contains(CS_NEW, name) or contains(TL_NEW, name) or c
 pub fn global(name) bool => contains(CS_NEW, name) or contains(CS_GLOBAL, name) or contains(TL_NEW, name) or
     contains(SEQ_NEW, name) or contains(["tl_gset:Nn", "tl_gset:Nx", "tl_gclear:N", "tl_gput_left:Nn", "tl_gput_right:Nn",
         "tl_gput_left:Nx", "tl_gput_right:Nx",
-        "seq_gset_from_clist:Nn", "seq_gclear:N", "seq_gput_left:Nn", "seq_gput_right:Nn", "seq_gsort:Nn", "seq_greverse:N"], name)
+        "seq_gset_from_clist:Nn", "seq_gset_split:Nnn", "seq_gset_split_keep_spaces:Nnn", "seq_gclear:N", "seq_gput_left:Nn", "seq_gput_right:Nn", "seq_gsort:Nn", "seq_greverse:N"], name)
 pub fn protected(name) bool => contains(["cs_new_protected:Npn", "cs_set_protected:Npn", "cs_gset_protected:Npn"], name)
 pub fn token_assignment(name) bool => contains(TL_NEW, name) or contains(TL_SET, name) or contains(TL_PUT, name)
 pub fn token_put(name) bool => contains(TL_PUT, name)
@@ -74,6 +75,8 @@ pub fn sequence_assignment(name) bool => contains(SEQ_NEW, name) or contains(SEQ
 pub fn sequence_reverse(name) bool => contains(["seq_reverse:N", "seq_greverse:N"], name)
 pub fn sequence_empty_assignment(name) bool => contains(["seq_new:N", "seq_clear:N", "seq_gclear:N"], name)
 pub fn sequence_from_clist(name) bool => contains(["seq_set_from_clist:Nn", "seq_gset_from_clist:Nn"], name)
+pub fn sequence_split(name) bool => contains(["seq_set_split:Nnn", "seq_gset_split:Nnn",
+    "seq_set_split_keep_spaces:Nnn", "seq_gset_split_keep_spaces:Nnn"], name)
 pub fn sequence_put_left(name) bool => contains(["seq_put_left:Nn", "seq_gput_left:Nn"], name)
 pub fn no_argument(name) bool => contains(["tl_new:N", "tl_clear:N", "tl_gclear:N"], name)
 let TL_EXPANDED = ["tl_set:Nx", "tl_gset:Nx", "tl_put_left:Nx", "tl_put_right:Nx",
@@ -94,31 +97,51 @@ fn space_token(token) => token.kind == "char" and token.cat == 10
 fn trim_first(tokens: map[], at: int) int => if (at < len(tokens) and space_token(tokens[at])) trim_first(tokens, at + 1) else at
 fn trim_last(tokens: map[], at: int, first: int) int => if (at > first and space_token(tokens[at - 1])) trim_last(tokens, at - 1, first) else at
 
-// Comma-list grouping removes outer braces only after trimming top-level spaces.
-fn clist_item(tokens: map[]) map[] | null | error {
-    let first = trim_first(tokens, 0);
-    let limit = trim_last(tokens, len(tokens), first);
-    if (first == limit) null
+// Both comma lists and split sequences remove one complete outer group.
+fn split_item(tokens: map[], trim_spaces: bool, empty: bool) map[] | null | error {
+    let first = if (trim_spaces) trim_first(tokens, 0) else 0;
+    let limit = if (trim_spaces) trim_last(tokens, len(tokens), first) else len(tokens);
+    if (first == limit and not empty) null
     else stream.strip_outer(slice(tokens, first, limit))^
 }
 
-fn clist_split(tokens: map[], index: int = 0, depth: int = 0, current: map[] = [], items: array = []) array^ {
+fn split_tokens(tokens: map[], delimiter: map[], trim_spaces: bool, empty: bool,
+        index: int = 0, depth: int = 0, current: map[] = [], items: array = []) array^ {
     if (index >= len(tokens)) {
-        let item = clist_item(current)^;
+        let item = split_item(current, trim_spaces, empty)^;
         if (item == null) items else [*items, item]
     }
     else {
         let token = tokens[index];
-        if (token.kind == "char" and token.cat == 12 and token.value == "," and depth == 0) {
-            let item = clist_item(current)^;
-            clist_split(tokens, index + 1, depth, [], if (item == null) items else [*items, item])
+        let matched = depth == 0 and index + len(delimiter) <= len(tokens) and
+            stream.same_tokens(slice(tokens, index, index + len(delimiter)), delimiter)^;
+        if (matched) {
+            let item = split_item(current, trim_spaces, empty)^;
+            split_tokens(tokens, delimiter, trim_spaces, empty, index + len(delimiter), depth, [],
+                if (item == null) items else [*items, item])
         }
         else {
             let next = depth + if (token.kind == "char" and token.cat == 1) 1
                 else if (token.kind == "char" and token.cat == 2) -1 else 0;
-            clist_split(tokens, index + 1, next, [*current, token], items)
+            split_tokens(tokens, delimiter, trim_spaces, empty, index + 1, next, [*current, token], items)
         }
     }
 }
 
-pub fn from_clist(tokens: map[]) array^ => clist_split(tokens)
+// An empty delimiter maps each top-level token or group, skipping spaces.
+fn split_individual(input, items = []) array^ {
+    let next = stream.next(input)^;
+    if (next.token == null) items
+    else if (space_token(next.token)) split_individual(next.stream, items)
+    else {
+        let argument = stream.argument(stream.push(next.stream, [next.token]), true)^;
+        if (argument.error != null) raise error(argument.error)
+        else split_individual(argument.stream, [*items, argument.tokens])
+    }
+}
+
+pub fn from_clist(tokens: map[]) array^ =>
+    split_tokens(tokens, [{kind:"char", value:",", cat:12}], true, false)
+pub fn from_split(tokens: map[], delimiter: map[], trim_spaces: bool) array^ =>
+    if (len(delimiter) == 0) split_individual(stream.push(stream.from_reader(reader.reader("")), tokens))
+    else split_tokens(tokens, delimiter, trim_spaces, true)

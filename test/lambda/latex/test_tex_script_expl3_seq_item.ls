@@ -1,13 +1,10 @@
 import profile: lambda.doc.latex.tex_engine.profile
 import reconstruct: lambda.doc.latex.tex_engine.reconstruct
 import digest: lambda.doc.latex.tex_engine.digest
-let kernel=input(sys.lambda.home ++ "/package/doc/latex/tex_engine/kernel.tex","text")^;
-let baseline=parse("",{type:"tex"})^.messages;
-fn check(source) any^ {
- let r=profile.expand_with_kernel(source,kernel,{script_expl3:true,echo_definitions:true,adapters:[],resources:{local:{},bundled:{}}},100000)^;
- let n=parse(source,{type:"tex"})^;let b=reconstruct.reconstruct(r)^;
- {issue:r.issue,reconstruct_issue:b.issue,text_match:b.text==n.text,messages_match:r.messages==slice(n.messages,len(baseline),len(n.messages))^,diagnostics_match:r.diagnostic_records==n.diagnostics}
-}
+import compare: ._tex_expl3_seq_compare
+let kernel=compare.kernel;
+let baseline=compare.baseline;
+fn check(source) any^ => compare.check(source);
 [for (source in [
   "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_set_from_clist:Nn\\l_s_seq{a,b,c}\\seq_item:Nn\\l_s_seq{1}\\ExplSyntaxOff",
   "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_set_from_clist:Nn\\l_s_seq{a,b,c}\\seq_item:Nn\\l_s_seq{2}\\ExplSyntaxOff",
@@ -54,7 +51,7 @@ fn check(source) any^ {
 ]) check(source)^]
 
 fn safe_expansion(source) any^ {
- let r=profile.expand_with_kernel(source,kernel,{script_expl3:true,echo_definitions:true,adapters:[],resources:{local:{},bundled:{}}},100000)^;
+ let r=compare.expand(source)^;
  if(r.issue!=null) r.issue=="tex-unsupported-primitive" else {
   let b=reconstruct.reconstruct(r)^;let n=parse(source,{type:"tex"})^;
   b.issue==null and b.text==n.text and r.diagnostic_records==n.diagnostics
@@ -62,7 +59,7 @@ fn safe_expansion(source) any^ {
 }
 [for(source in ["\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_set_from_clist:Nn\\l_s_seq{10,20,30}\\seq_item:Nn\\l_s_seq{2\\relax+1}X\\ExplSyntaxOff","\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_set_from_clist:Nn\\l_s_seq{10,20,30}\\def\\stop{\\relax}\\seq_item:Nn\\l_s_seq{2\\stop+1}X\\ExplSyntaxOff"]) safe_expansion(source)^]
 fn safe_digestion(source) any^ {
- let r=profile.expand_with_kernel(source,kernel,{script_expl3:true,echo_definitions:true,adapters:[],resources:{local:{},bundled:{}}},100000)^;
+ let r=compare.expand(source)^;
  let d=digest.digest(r)^;
  if(d.ast!=null) d.ast==(parse(source,{type:"latex"})^) else d.issue=="latex-digest-unsupported"
 }

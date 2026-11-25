@@ -1,0 +1,31 @@
+[{
+    text: "4/a||b,c|d",
+    issue: null
+  }, {
+    text: "1/",
+    issue: null
+  }, {
+    text: "4/a|b|c d|e",
+    issue: null
+  }, {
+    text: "4/a|b|:c|",
+    issue: null
+  }, {
+    text: "3/ {d} | |x ",
+    issue: null
+  }, {
+    text: "3/a{b}|ab|",
+    issue: null
+  }, {
+    text: "2/A|B",
+    issue: null
+  }, {
+    text: "3/a| b |c",
+    issue: null
+  }, {
+    text: "1/A",
+    issue: null
+  }, {
+    text: "2/B|C",
+    issue: null
+  }]
