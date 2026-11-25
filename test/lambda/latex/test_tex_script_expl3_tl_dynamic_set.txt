@@ -1,0 +1,13 @@
+{
+  issue: null,
+  unsupported: null,
+  text: "[A\\foo ][BEXPANDED][LOCAL][BEXPANDED][G\\foo ][HEXPANDED]",
+  diagnostics: []
+}
+{
+  issue: null,
+  unsupported: null,
+  text: "[VALUE]",
+  diagnostics: []
+}
+true

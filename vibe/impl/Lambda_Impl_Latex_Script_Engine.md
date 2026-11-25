@@ -34,12 +34,21 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Expl3 dynamic token-list assignment, 2026-11-26:** Script preloads the
+  standard local/global `:cn` and `:cx` setters (D10.2.2v2). TeX Live
+  comparisons cover expanded names, unexpanded and expanded values, aliases
+  and scope. Constructor argument handling and dynamic-assignment source
+  mapping remain unsupported. Csvsimple now reports `tex-missing-endcsname`;
+  an isolated probe reproduces this when an unported `int_to_roman:n` occurs
+  inside a dynamic control-sequence name.
+
 - **Expl3 sequence mapping, 2026-11-26:** Script preloads the native inline,
   indexed-inline and expandable indexed-function sequence maps, including
   their scoped item definitions and break cleanup (D10.2.2v2). TeX Live
   comparisons cover nested maps, indices, grouped items, early breaks and
   counter restoration. Constructor argument handling and sequence-map source
-  mapping remain unsupported. Csvsimple now reaches `tl_set:cn`.
+  mapping remain unsupported. Csvsimple's later blocker is recorded in the
+  dynamic token-list checkpoint above.
 
 - **Expl3 string cases, 2026-11-26:** Script preloads the native expandable
   `str_case:nn` conditional family and its delimiter-scanned helpers

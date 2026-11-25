@@ -6781,6 +6781,9 @@ pub fn enable_script_expl3(st: State) State^ {
         source:"\\int_" ++ scope ++ op ++ (if (op == "set") ":cn" else ":c") ++
             "{\\exp_args:Nc\\int_" ++ scope ++ op ++ (if (op == "set") ":Nn" else ":N") ++ "}",
         protected_flag:true}];
+    let token_dynamic = [for (scope in ["", "g"], form in ["n", "x"]) {
+        source:"\\tl_" ++ scope ++ "set:c" ++ form ++ "{\\exp_args:Nc\\tl_" ++ scope ++ "set:N" ++ form ++ "}",
+        protected_flag:true, source_mapping_guard:"dynamic_assignment", argument_unqualified:true}];
     // The four native insertion shapes share value expansion and assignment order.
     let value_puts = [for (scope in ["", "g"], side in ["left", "right"], form in ["V", "v"]) {
         let value = "\\exp_not:" ++ form ++ (if (form == "V") "#2" else "{#2}");
@@ -6809,7 +6812,7 @@ pub fn enable_script_expl3(st: State) State^ {
         source:"\\" ++ loop.name ++ ":nn#1#2{" ++ (if (loop.first) "#2" else "") ++
             "\\bool_if:n" ++ loop.test ++ "{#1}{" ++ (if (loop.first) "" else "#2") ++
             "\\" ++ loop.name ++ ":nn{#1}{#2}}}", protected_flag:false}];
-    let macros = enable_expl_macro_sources(msg_support, [*variants,*pop_base,*pop_conditionals,*pop_variants,*prop_get_conditionals,*prop_get_variants,*prop_exp_helpers,*prop_pop_bases,*prop_remove_bases,*prop_pop_conditionals,*prop_pop_variants,*prop_remove_variants,*integer_ops,*integer_dynamic,*value_puts,*token_removals,*bool_returns,*bool_gates,*bool_selectors,*bool_loops,
+    let macros = enable_expl_macro_sources(msg_support, [*variants,*pop_base,*pop_conditionals,*pop_variants,*prop_get_conditionals,*prop_get_variants,*prop_exp_helpers,*prop_pop_bases,*prop_remove_bases,*prop_pop_conditionals,*prop_pop_variants,*prop_remove_variants,*integer_ops,*integer_dynamic,*token_dynamic,*value_puts,*token_removals,*bool_returns,*bool_gates,*bool_selectors,*bool_loops,
         {source:"\\ior_new:N#1{\\cs_new_eq:NN#1\\c__ior_term_ior}",protected_flag:true},
         {source:"\\ior_new:c{\\exp_args:Nc\\ior_new:N}",protected_flag:true},
         {source:"\\ior_open:cn{\\exp_args:Nc\\ior_open:Nn}",protected_flag:true},
