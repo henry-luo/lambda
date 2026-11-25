@@ -84,6 +84,8 @@ Path* path_longest_existing_prefix(Path* path) {
     if (!path_provider_is_local(path)) return NULL;
 #ifndef LAMBDA_NO_FILE_IO
     for (Path* probe = path; probe && !path_is_root(probe); probe = probe->parent) {
+        // NUL keys cannot name OS files but may select members within a document.
+        if (path_has_nul_name(probe)) continue;
         // A wildcard segment is a query, not a location; it can only be the
         // whole reference, never a prefix the trailing steps navigate into.
         if (path_ends_with_wildcard(probe)) return probe == path ? probe : NULL;

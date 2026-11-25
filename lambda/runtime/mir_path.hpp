@@ -248,10 +248,13 @@ static inline MIR_reg_t em_literal_path(MirEmitter* em, AstPathNode* node) {
             part->type == LPATH_SEG_ROOT ? "path_select_root" : NULL;
         if (unary) path = em_call_2(em, unary, MIR_T_P, MIR_T_P, MIR_new_reg_op(em->ctx, pool),
             MIR_T_P, MIR_new_reg_op(em->ctx, path), true);
-        else path = em_call_3(em, part->type == LPATH_SEG_INT ? "path_extend_int" : "path_extend", MIR_T_P,
+        else if (part->type == LPATH_SEG_INT) path = em_call_3(em, "path_extend_int", MIR_T_P,
             MIR_T_P, MIR_new_reg_op(em->ctx, pool), MIR_T_P, MIR_new_reg_op(em->ctx, path),
-            part->type == LPATH_SEG_INT ? MIR_T_I64 : MIR_T_P,
-            MIR_new_int_op(em->ctx, part->type == LPATH_SEG_INT ? part->int_value : (intptr_t)(part->name ? part->name->chars : "")), true);
+            MIR_T_I64, MIR_new_int_op(em->ctx, part->int_value), true);
+        else path = em_call_4(em, "path_extend_len", MIR_T_P,
+            MIR_T_P, MIR_new_reg_op(em->ctx, pool), MIR_T_P, MIR_new_reg_op(em->ctx, path),
+            MIR_T_P, MIR_new_int_op(em->ctx, (intptr_t)(part->name ? part->name->chars : "")),
+            MIR_T_I64, MIR_new_int_op(em->ctx, part->name ? part->name->len : 0), true);
     }
     if (missing) {
         em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
@@ -274,10 +277,11 @@ static inline MIR_reg_t em_computed_path(MirEmitter* em, AstPathIndexNode* node)
         MIR_T_I64, MIR_new_reg_op(em->ctx, key.reg), true);
     for (int i = 0; i < node->segment_count; i++) {
         AstPathSegment* step = &node->segments[i];
-        path = em_call_4(em, "fn_path_step", MIR_T_I64,
+        path = em_call_5(em, "fn_path_step", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(em->ctx, path),
             MIR_T_I64, MIR_new_int_op(em->ctx, step->type),
             MIR_T_P, MIR_new_int_op(em->ctx, (intptr_t)(step->name ? step->name->chars : NULL)),
+            MIR_T_I64, MIR_new_int_op(em->ctx, step->name ? step->name->len : 0),
             MIR_T_I64, MIR_new_int_op(em->ctx, step->int_value), true);
     }
     return path;

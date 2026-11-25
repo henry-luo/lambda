@@ -9,6 +9,7 @@ import subprocess
 import sys
 import threading
 import unittest
+from urllib.parse import quote
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "test"))
@@ -55,18 +56,24 @@ class TexHttpHandoffTest(unittest.TestCase):
         self.assertEqual(result.stdout, expected)
 
     def test_detected_and_explicit_paths_use_script(self):
-        for fixture in ("script_http_basic.tex", "script_auto_unsupported.tex"):
+        for fixture in ("script_http_basic.tex", "script_auto_unsupported.tex", "script_http_escaped #?.tex"):
             with self.subTest(fixture=fixture):
-                url = "http://127.0.0.1:%d/%s" % (self.server.server_address[1], fixture)
+                port = self.server.server_address[1]
+                url = "http://127.0.0.1:%d/%s" % (port, quote(fixture, safe=""))
                 self.run_script(fixture,
                     'let url="%s";\n' % url +
+                    'let path=\\.http["127.0.0.1:%d"]["%s"];\n' % (port, fixture) +
                     'let source=input(url,"text")^;\n'
                     'let automatic=input(url) ^ { null };\n'
                     'let latex=input(url,"latex") ^ { null };\n'
                     'let latex_direct=parse(source,"latex") ^ { null };\n'
                     'let tex=input(url,"tex") ^ { null };\n'
                     'let tex_direct=parse(source,"tex") ^ { null };\n'
-                    '{matches:automatic==latex_direct and latex==latex_direct and tex==tex_direct}\n')
+                    'let path_auto=input(path) ^ { null };\n'
+                    'let path_latex=input(path,"latex") ^ { null };\n'
+                    'let path_tex=input(path,"tex") ^ { null };\n'
+                    '{matches:automatic==latex_direct and latex==latex_direct and tex==tex_direct '
+                    'and path_auto==latex_direct and path_latex==latex_direct and path_tex==tex_direct}\n')
 
     def test_remote_document_does_not_fetch_local_input(self):
         QuietHandler.requests.clear()
@@ -76,6 +83,17 @@ class TexHttpHandoffTest(unittest.TestCase):
             '{matches:len(result.diagnostics)>0 and not contains(result.text,"Hello")^}\n')
         self.assertIn("/script_http_include.tex", QuietHandler.requests)
         self.assertNotIn("/script_public_input.tex", QuietHandler.requests)
+
+    def test_nul_path_keys_do_not_fetch_a_truncated_resource(self):
+        QuietHandler.requests.clear()
+        port = self.server.server_address[1]
+        self.run_script("nul-path",
+            'let host="127.0.0.1:%d";\n' % port +
+            'let bad_host=\\.http[host ++ "\\u0000.attacker"]["script_http_basic.tex"];\n'
+            'let bad_key=\\.http[host]["script_http_basic.tex\\u0000other"];\n'
+            '{matches:(input(bad_host,"latex") ^ { null }) == null and '
+            '(input(bad_key,"latex") ^ { null }) == null}\n')
+        self.assertEqual(QuietHandler.requests, [])
 
 
 if __name__ == "__main__":

@@ -899,7 +899,7 @@ static void interp_apply_path_steps(Scratch& acc, const AstPathSegment* steps,
     for (int i = 0; i < count; i++) {
         const AstPathSegment* step = &steps[i];
         acc.set(fn_path_step(acc.get(), (int64_t)step->type,
-            step->name ? step->name->chars : NULL, step->int_value));
+            step->name ? step->name->chars : NULL, step->name ? step->name->len : 0, step->int_value));
     }
 }
 

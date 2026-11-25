@@ -6,6 +6,25 @@ remain in the [active issue ledger](Lib_Input_Issue_Ledger.md).
 
 ## Fixed issues
 
+<a id="li-120"></a>
+
+### LI-120 — HTTP Path targets were formatted as Lambda syntax instead of URLs
+
+**Fixed 2026-11-25.** HTTP Path input sent the Lambda Path spelling to the
+HTTP loader, so a reachable URL string worked while its Path equivalent did
+not. The shared target boundary now renders the authority and each NameKey as
+URL components, and Input uses that renderer (S2.4.2v6, S2.4.3v4,
+D9.1.3v2). It rejects ambiguous authorities, dot-navigation keys, IntKeys,
+and NUL bytes rather than silently addressing a different resource (D11.1.2).
+
+Path nodes now retain NameKey byte lengths through construction, printing,
+cloning and runtime navigation, including empty and NUL-containing names
+(S8.2.1v5). OS and HTTP resource boundaries reject NUL names. All 28 native
+Path tests pass, as do interpreter and JIT name-key checks and three loopback
+TeX/LaTeX handoff tests, including escaped filenames and a no-request NUL
+check. See `temp/latex-retirement/path-length-native-test.log` and
+`test/latex/test_http_handoff.py`.
+
 <a id="li-114"></a>
 
 ### LI-114 — Native JSX and LaTeX writers silently omitted large strings

@@ -1065,13 +1065,13 @@ Item fn_join(Item left, Item right) {
         if (right_type == LMD_TYPE_STRING) {
             // path ++ string: add string as new segment
             String* right_str = right.get_safe_string();
-            Path* result = path_extend(pool, left_path, right_str->chars);
+            Path* result = path_extend_len(pool, left_path, right_str->chars, right_str->len);
             return {.path = result};
         }
         else if (right_type == LMD_TYPE_SYMBOL) {
             // path ++ symbol: add symbol name as new segment
             Symbol* right_sym = right.get_safe_symbol();
-            Path* result = path_extend(pool, left_path, right_sym->chars);
+            Path* result = path_extend_len(pool, left_path, right_sym->chars, right_sym->len);
             return {.path = result};
         }
         else if (right_type == LMD_TYPE_PATH) {
@@ -6162,7 +6162,24 @@ static Item input_resource(Item target_item, Item type, bool template_url_only) 
         String* copy = heap_strcpy(raw.get_chars(), raw.get_len());
         if (!copy) { target_free(target); return ItemError; }
         source.set((Item){.item = s2it(copy)});
-        Item parsed = parse_tex_script(source.get(), input_options_root.get(), deferred_tex_type, target->original);
+        StrBuf* rendered_base = nullptr;
+        const char* base = target->original;
+        if (!base && target->type == TARGET_TYPE_PATH) {
+            if (target_is_remote(target)) {
+                rendered_base = strbuf_new();
+                if (rendered_base && !target_to_url_string(target, rendered_base)) {
+                    strbuf_free(rendered_base); rendered_base = nullptr;
+                }
+            } else rendered_base = (StrBuf*)target_to_local_path(target, cwd);
+            if (!rendered_base || !rendered_base->str) {
+                if (rendered_base) strbuf_free(rendered_base);
+                target_free(target);
+                return runtime_error_itemf(ERR_INVALID_STATE, "input: failed to resolve TeX document base");
+            }
+            base = rendered_base->str;
+        }
+        Item parsed = parse_tex_script(source.get(), input_options_root.get(), deferred_tex_type, base);
+        if (rendered_base) strbuf_free(rendered_base);
         target_free(target);
         if (schema_type && get_type_id(parsed) != LMD_TYPE_ERROR)
             return lambda_type_check(parsed, schema_type, "input schema");
@@ -6225,7 +6242,7 @@ static Item force_apply_step(Item value, Path* step) {
         return fn_index(value, (Item){.item = i2it(step->int_value)});
     case LPATH_SEG_NORMAL: {
         if (!step->name) return ItemNull;
-        String* name = heap_strcpy(step->name, strlen(step->name));
+        String* name = heap_strcpy(step->name, step->name_length);
         return fn_member(value, (Item){.item = s2it(name)});
     }
     // S8.2.5/PTH82: once a step has entered a document, the wildcards
@@ -6500,7 +6517,7 @@ static Path* temp_path_for(String* name) {
     Pool* pool = context ? context->pool : NULL;
     Path* root = path_get_root(PATH_SCHEME_TEMP);
     if (!pool || !root || !name) return NULL;
-    return path_extend(pool, root, name->chars);
+    return path_extend_len(pool, root, name->chars, name->len);
 }
 
 static Item temp_document(Item name_item, Item content, bool has_content) {
@@ -8283,7 +8300,7 @@ extern "C" Item path_property_get(Path* path, const char* k) {
     // structural properties (always available)
     if (strcmp(k, "name") == 0) {
         // return the leaf segment name (e.g. "file.txt")
-        if (path->name) return {.item = s2it(heap_create_name(path->name))};
+        if (path->name) return {.item = s2it(heap_create_name(path->name, path->name_length))};
         return ItemNull;
     }
     if (strcmp(k, "path") == 0) {
@@ -8297,9 +8314,9 @@ extern "C" Item path_property_get(Path* path, const char* k) {
     if (strcmp(k, "extension") == 0) {
         // return file extension (e.g. "txt" from "file.txt")
         if (path->name) {
-            const char* ext = str_file_ext(path->name, strlen(path->name), NULL);
+            const char* ext = str_file_ext(path->name, path->name_length, NULL);
             if (ext) {
-                return {.item = s2it(heap_create_name(ext + 1))};
+                return {.item = s2it(heap_create_name(ext + 1, path->name_length - (ext + 1 - path->name)))};
             }
         }
         return ItemNull;
@@ -8369,13 +8386,13 @@ Item fn_path_key(Item path_item, Item key) {
         return path_step_item(path_extend_int(pool, path_item.path, int_key));
     }
     if (is_text_type_id(key._type_id) && key.get_chars()) {
-        return path_step_item(path_extend(pool, path_item.path, key.get_chars()));
+        return path_step_item(path_extend_len(pool, path_item.path, key.get_chars(), key.get_len()));
     }
     return ItemNull;
 }
 
 Item fn_path_step(Item path_item, int64_t step_type, const char* name,
-        int64_t int_value) {
+        int64_t name_length, int64_t int_value) {
     if (get_type_id(path_item) != LMD_TYPE_PATH || !path_item.path) return ItemNull;
     Pool* pool = context ? context->pool : NULL;
     Path* path = path_item.path;
@@ -8386,7 +8403,7 @@ Item fn_path_step(Item path_item, int64_t step_type, const char* name,
     case LPATH_SEG_PARENT: next = path_select_parent(pool, path); break;
     case LPATH_SEG_ROOT: next = path_select_root(pool, path); break;
     case LPATH_SEG_INT: next = path_extend_int(pool, path, int_value); break;
-    default: next = path_extend(pool, path, name ? name : ""); break;
+    default: next = path_extend_len(pool, path, name ? name : "", name_length); break;
     }
     return path_step_item(next);
 }

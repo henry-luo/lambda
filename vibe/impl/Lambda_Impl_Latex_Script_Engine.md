@@ -34,6 +34,18 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **HTTP Path and document base, 2026-11-25:** HTTP Path input now shares the
+  URL renderer used by other target consumers, encoding each NameKey and
+  rejecting ambiguous or unrepresentable resource names. The underlying Path
+  preserves exact name lengths through both execution tiers, while OS and HTTP
+  targets reject embedded NUL bytes (S2.4.2v6, S8.2.1v5, D11.1.2). Local Path
+  TeX inputs now retain their resolved base for relative includes (D10.2.2v2).
+  Native Path tests pass 28/28; NameKey and local include regressions pass in
+  interpreter and JIT, and three HTTP loopback tests pass. HTTP IntKeys and
+  literal dot-navigation keys are refused at the URL boundary. Standalone HTTP
+  and native document/math clients still require migration; the native engines
+  remain in the build. See [LI-120](<../Lib_Input_Issue_Ledger (fixed).md#li-120>).
+
 - **HTTP handoff, 2026-11-25:** The downloader now passes the existing deferred
   source handoff through URL and HTTP Path targets, preserving the original
   standalone HTTP entry point and its format detection. Runtime `input()` sends
@@ -43,9 +55,9 @@ The existing native engine design and historical Phase IV work are in
   new route agrees. The Input HTTP test covers fresh and cached bytes; a runtime
   loopback test covers both routes and confirms a remote document does not fetch
   a relative TeX input (D11.1.2). The full loopback test runs as part of
-  `make test-lambda-full`. HTTP Path targets cannot reach that handoff until
-  [LI-120](../Lib_Input_Issue_Ledger.md#li-120) fixes their URL serialization;
-  standalone HTTP callers still use the native path (S2.4.2v6, S2.4.3v4).
+  `make test-lambda-full`. At that checkpoint HTTP Path targets could not reach
+  the handoff until LI-120 fixed their URL serialization; standalone HTTP
+  callers still use the native path (S2.4.2v6, S2.4.3v4).
 
 - **Captured archive members, 2026-11-25:** Explicit `input(member, 'tex' | 'latex')`
   and `parse(member, ...)` now hand the captured source to the Script engine.

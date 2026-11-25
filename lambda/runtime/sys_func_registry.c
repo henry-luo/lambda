@@ -2568,6 +2568,7 @@ JitImport jit_runtime_imports[] = {
     {"lambda_context_path", FPTR(lambda_context_path)},
     {"path_new_authority", FPTR(path_new_authority)},
     {"path_extend", FPTR(path_extend)},
+    {"path_extend_len", FPTR(path_extend_len)},
     {"path_extend_int", FPTR(path_extend_int)},
     {"path_select_parent", FPTR(path_select_parent)},
     {"path_select_root", FPTR(path_select_root)},

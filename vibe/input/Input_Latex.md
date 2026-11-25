@@ -14,9 +14,10 @@ to hand detected TeX or LaTeX source back to the runtime for Script parsing.
 The handoff retains the acquired bytes and security context, and Input does not
 call or import the runtime (S1.8, D9.1.3v2, D10.2.2v2). Explicit archive member
 parses use the same handoff without external resource grants (S12.4.1v2,
-D11.1.2). HTTP URL input also uses the deferred handoff; HTTP Path targets are
-blocked by [LI-120](../Lib_Input_Issue_Ledger.md#li-120), and standalone and
-lazy member-content entry points still need migration (S2.4.2v6, S2.4.3v4).
+D11.1.2). HTTP URL and representable HTTP Path inputs also use the deferred
+handoff after [LI-120](<../Lib_Input_Issue_Ledger (fixed).md#li-120>);
+standalone and lazy member-content entry points still need migration
+(S2.4.2v6, S2.4.3v4).
 
 The Lambda-owned [script TeX engine implementation plan](../impl/Lambda_Impl_Latex_Script_Engine.md) tracks package-specific progress and issues. General Lambda language and runtime issues remain in the Lambda issue ledger.
 
