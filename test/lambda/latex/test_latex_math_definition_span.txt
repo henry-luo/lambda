@@ -1,0 +1,26 @@
+<latex_document
+  <document source_offset: 0,
+    <paragraph
+      <display_math source_offset: 18, source: "\\def\\foo#1{#1}%\n\\inference{a}{b}", ast: <math
+          <command name: "def">
+          <command name: "foo">
+          <raw_math_text value: "#1">
+          <group
+            <raw_math_text value: "#1">>
+          <command name: "inference",
+            <group
+              "a">
+            <group
+              "b">>>>>>>
+<latex_document
+  <document source_offset: 0,
+    <paragraph
+      <display_math source_offset: 18, source: "\\def\\foo#1{$#1$} X", ast: <math
+          <command name: "def">
+          <command name: "foo">
+          <raw_math_text value: "#1">
+          <group
+            <punctuation value: "$">
+            <raw_math_text value: "#1">
+            <punctuation value: "$">>
+          "X">>>>>

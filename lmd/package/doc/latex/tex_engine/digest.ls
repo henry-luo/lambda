@@ -828,6 +828,10 @@ fn math_generic_arguments(tokens, index, items = []) any^ {
     else {issue: null, index: at, items: items}
 }
 
+// Math digestion follows the native parser's standard lexical categories.
+fn math_source_reader(raw) => {*:tex_reader.reader(raw),
+    catcodes:{'{':1,'}':2,'$':3,'&':4,'#':6,'^':7,'_':8,'\t':10,'~':13}}
+
 // Raw TeX commands occupy one expansion token, but math digestion sees their emitted groups.
 fn math_raw_command(tokens, index) any^ {
     let token = tokens[index];
@@ -835,7 +839,7 @@ fn math_raw_command(tokens, index) any^ {
         unsupported(index, "math raw command source mapping")
     else {
         let raw = utf8.decode(slice(binary(token.output_text)^,token.output_start,token.output_end))^;
-        let reader = {*:tex_reader.reader(raw), catcodes:{'{':1,'}':2,'$':3,'&':4,'#':6,'^':7,'_':8,'\t':10,'~':13}};
+        let reader = math_source_reader(raw);
         let read = span_tokens(reader,0,len(binary(raw)^))^;
         let positioned = [for (part in read) {*:part,output_text:raw,output_start:part.start,output_end:part.end}];
         if (len(positioned) == 0 or not control(positioned[0],token.value))
@@ -1690,6 +1694,18 @@ fn math_list(tokens) any^ {
     }
 }
 
+// Definition echoes are one expansion token but the native math parser reads their bytes.
+fn math_span_tokens(token) any^ {
+    if (token.kind != "source-span") [token]
+    else {
+        let reader = math_source_reader(token.value);
+        let parts = span_tokens(reader, 0, len(binary(token.value)^))^;
+        [for (part in parts) {*:part, output_text:token.output_text,
+            output_start:token.output_start + part.start, output_end:token.output_start + part.end,
+            output_segments:token.output_segments}]
+    }
+}
+
 fn math_element(tokens, sources, index) any^ {
     let named = control(tokens[index], "(") or control(tokens[index], "[");
     let display = if (named) control(tokens[index], "[") else index + 1 < len(tokens) and dollar(tokens[index + 1]);
@@ -1709,12 +1725,15 @@ fn math_element(tokens, sources, index) any^ {
                 tokens[i].file == tokens[i - 1].file and tokens[i].seq != tokens[i - 1].seq + 1]));
         // mapped math must agree with native lexical categories as well as bytes.
         let reconstructed = mapped and all([for (i in (index to close.end - 1)^)
-            tokens[i].output_start != null and tokens[i].output_end != null and reconstructed_token(tokens[i])^ and
+            tokens[i].output_start != null and tokens[i].output_end != null and
+            (if (tokens[i].kind == "source-span")
+                utf8.decode(slice(binary(tokens[i].output_text)^,tokens[i].output_start,tokens[i].output_end))^ == tokens[i].value
+             else reconstructed_token(tokens[i])^) and
             (tokens[i].kind != "char" or (math_reconstructed_literal(tokens[i])^ and
                 ((tokens[i].value == "^") == (tokens[i].cat == 7)) and
                 ((tokens[i].value == "_") == (tokens[i].cat == 8)))) and
             (i == index or (tokens[i - 1].output_end != null and tokens[i].output_start >= tokens[i - 1].output_end and
-                (trim(output_between(tokens[i - 1],tokens[i])^) ^ { null }) == ""))]);
+                output_gap_text(output_between(tokens[i - 1],tokens[i])^)^ != null))]);
         if ((not direct and not mapped) or (mapped and not reconstructed)) unsupported(index, "math source mapping")
         else {
             let source = if (mapped) output_between(start,finish)^ else
@@ -1723,7 +1742,8 @@ fn math_element(tokens, sources, index) any^ {
             // Text arguments need serialized positions even when the enclosing
             // formula otherwise uses direct source spans.
             let math_output = rebuild.reconstruct({output:body, sources:sources, main_file:start.file}, true)^;
-            let math_tokens = if (math_output.issue == null) mark_output_tokens(body, math_output, false)^ else body;
+            let marked = if (math_output.issue == null) mark_output_tokens(body, math_output, false)^ else body;
+            let math_tokens = [for (token in marked, part in math_span_tokens(token)^) part];
             let atoms = math_list(math_tokens)^;
             if (source == null) unsupported(index, "math source mapping")
             else if (atoms.issue != null) atoms
