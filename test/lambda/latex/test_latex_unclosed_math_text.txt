@@ -1,0 +1,38 @@
+<latex_document
+  <document source_offset: 0,
+    <prooftree source_offset: 16,
+      <paragraph
+        <def source_offset: 33, argument_groups: [{
+              kind: "required",
+              raw: "\\fCenter",
+              start: 37,
+              end: 45
+            }, {
+              kind: "required",
+              raw: "\\mbox{\\ $\\Rightarrow$\\ }",
+              start: 45,
+              end: 71
+            }],
+          "\\fCenter"
+          <curly_group
+            <mbox source_offset: 46, argument_groups: [{
+                  kind: "required",
+                  raw: "\\ $\\Rightarrow$\\ ",
+                  start: 51,
+                  end: 70
+                }],
+              " "
+              <inline_math source_offset: 55, source: "\\Rightarrow", ast: <math
+                  <command name: "Rightarrow">>>
+              " ">>>
+        <BinaryInf source_offset: 71, argument_groups: []>
+        <inline_math source_offset: 82, source: "\\Gamma,\\mbox{\\ ", ast: <math
+            <symbol_command name: "Gamma">
+            <punctuation value: ",">
+            <text_command cmd: "\\mbox", content: "\\ ", body: <text_group
+                " ">>>>
+        <Rightarrow source_offset: 89, argument_groups: []>
+        <inline_math source_offset: 89, source: "\\ }\\Delta", ast: <math
+            " "
+            <punctuation value: "}">
+            <symbol_command name: "Delta">>>>>>>

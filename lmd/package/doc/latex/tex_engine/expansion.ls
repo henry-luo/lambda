@@ -5620,6 +5620,17 @@ fn latex_constructor(st: State) State^ {
     else assign_meaning(current, key(target.token), {kind: "constructor", name: target.token.value}, true)
 }
 
+// The host's adapter registry identifies constructors whose arguments remain raw.
+pub fn enable_raw_constructors(st: State, names, index = 0) State^ {
+    if (not (names is array) or index >= len(names)) st
+    else {
+        let name = names[index];
+        let next = if (name is string) assign_meaning(st, "control:" ++ name,
+            {kind:"constructor", name:name, raw:true}, true)^ else st;
+        enable_raw_constructors(next, names, index + 1)
+    }
+}
+
 fn finish_definition_echo(st: State, after, tracing, emit) State^ {
     if (not tracing) after
     else {
@@ -5777,18 +5788,39 @@ fn constructor_argument(st: State, budget, bracket, depth) State^ {
         else constructor_argument(next, budget, bracket, level)
     }
 }
-fn constructor_arguments(st: State, budget, first = true) State^ {
+// Raw adapter arguments are copied without expanding macros or executing assignments.
+fn constructor_raw_span(st: State, mode, depth) State^ {
+    let read = stream.next(st.input)^;
+    let token = emission_token(st, read.stream, read.token)^;
+    let current = {*:st,input:read.stream};
+    if (token == null) current
+    else {
+        let emitted = {*:current,output:[*current.output,token]};
+        let level = depth + if (charcat(token,1)) 1 else if (charcat(token,2)) -1 else 0;
+        if ((mode == "math" and charcat(token,3)) or (mode == "group" and level == 0) or
+            (mode == "bracket" and depth == 0 and other(token,"]")) or (mode != "math" and level < 0)) emitted
+        else constructor_raw_span(emitted,mode,level)
+    }
+}
+
+fn constructor_arguments(st: State, budget, first = true, raw = false) State^ {
     let read = stream.next(st.input)^;
     let token = emission_token(st, read.stream, read.token)^;
     let current = {*:st, input: read.stream};
     if (token == null) current
     else if (first and other(token, "*"))
-        constructor_arguments({*:current, output: [*current.output, token]}, budget, false)
+        constructor_arguments({*:current, output: [*current.output, token]}, budget, false, raw)
     else if (charcat(token, 1) or other(token, "[")) {
         let bracket = other(token, "[");
         let entered = {*:current, output: [*current.output, token]};
-        let after = constructor_argument(entered, budget, bracket, if (bracket) 0 else 1)^;
-        if (after.issue != null) after else constructor_arguments(after, budget, false)
+        let after = if (raw) constructor_raw_span(entered, if (bracket) "bracket" else "group", if (bracket) 0 else 1)^
+            else constructor_argument(entered, budget, bracket, if (bracket) 0 else 1)^;
+        if (after.issue != null) after else constructor_arguments(after, budget, false, raw)
+    }
+    else if (raw and charcat(token,3)) {
+        let entered = {*:current,output:[*current.output,token]};
+        let after = constructor_raw_span(entered,"math",0)^;
+        if (after.issue != null) after else constructor_arguments(after,budget,false,raw)
     }
     else put_back(current, token)
 }
@@ -6026,9 +6058,11 @@ fn step(st: State, budget) State^ {
     else if (cmd == "endgroup") end_group(current, null, true, false, false, true)
     else if (cmd == "global" or cmd == "long" or cmd == "protected") echo_prefixed(current, t, cmd, budget)
     else if (resolved.kind == "constructor") {
-        let emitted = {*:current, output: [*st.output, t]};
-        if (current.constructor_argument_mode and current.latex and current.math_mode != true)
-            constructor_arguments(emitted, budget) else emitted
+        // A constructor alias emits the target name, as TeX's copied meaning does.
+        let constructor = if (t.value == resolved.name) t else {*:t,value:resolved.name};
+        let emitted = {*:current, output: [*st.output, constructor]};
+        if (resolved.raw == true or (current.constructor_argument_mode and current.latex and current.math_mode != true))
+            constructor_arguments(emitted, budget, true, resolved.raw == true) else emitted
     }
     else if (resolved.kind == "relax" or cmd == "relax") current
     else if (resolved.kind == "char") {*:current, input: stream.push(current.input,

@@ -1,0 +1,176 @@
+<latex_document
+  <document source_offset: 0,
+    <prooftree source_offset: 16,
+      <paragraph
+        <def source_offset: 33, argument_groups: [{
+              kind: "required",
+              raw: "\\fCenter",
+              start: 37,
+              end: 45
+            }, {
+              kind: "required",
+              raw: "\\mbox{\\ $\\Rightarrow$\\ }",
+              start: 45,
+              end: 71
+            }],
+          "\\fCenter"
+          <curly_group
+            <mbox source_offset: 46, argument_groups: [{
+                  kind: "required",
+                  raw: "\\ $\\Rightarrow$\\ ",
+                  start: 51,
+                  end: 70
+                }],
+              " "
+              <inline_math source_offset: 55, source: "\\Rightarrow", ast: <math
+                  <command name: "Rightarrow">>>
+              " ">>>
+        <BinaryInf source_offset: 71, argument_groups: []>
+        <inline_math source_offset: 82, source: "\\Gamma,\\fCenter\\Delta", ast: <math
+            <symbol_command name: "Gamma">
+            <punctuation value: ",">
+            <command name: "fCenter">
+            <symbol_command name: "Delta">>>>>>>
+<latex_document
+  <paragraph
+    <def source_offset: 0, argument_groups: [{
+          kind: "required",
+          raw: "\\x",
+          start: 4,
+          end: 6
+        }, {
+          kind: "required",
+          raw: "EXP",
+          start: 6,
+          end: 11
+        }],
+      "\\x"
+      <curly_group
+        "EXP">>>
+  <document source_offset: 11,
+    <paragraph
+      <rawbox source_offset: 27, starred: true, argument_groups: [{
+            kind: "required",
+            raw: "\\x",
+            start: 35,
+            end: 39
+          }, {
+            kind: "optional",
+            raw: "\\x",
+            start: 39,
+            end: 43
+          }],
+        <x source_offset: 36, argument_groups: []>
+        <brack_group
+          <x source_offset: 40, argument_groups: []>>>
+      <inline_math source_offset: 44, source: "\\x", ast: <math
+          <command name: "x">>>
+      " EXP">>>
+<latex_document
+  <paragraph
+    <def source_offset: 0, argument_groups: [{
+          kind: "required",
+          raw: "\\x",
+          start: 4,
+          end: 6
+        }, {
+          kind: "required",
+          raw: "OLD",
+          start: 6,
+          end: 28
+        }],
+      "\\x"
+      <curly_group
+        "OLD">>>
+  <document source_offset: 28,
+    <paragraph
+      <rawbox source_offset: 44, argument_groups: [{
+            kind: "required",
+            raw: "\\x",
+            start: 51,
+            end: 55
+          }],
+        <x source_offset: 52, argument_groups: []>>
+      " OLD"
+      <rawbox source_offset: 59, argument_groups: [{
+            kind: "required",
+            raw: "\\x",
+            start: 65,
+            end: 69
+          }],
+        <x source_offset: 66, argument_groups: []>>
+      " OLD">>>
+<latex_document
+  <paragraph
+    <def source_offset: 0, argument_groups: [{
+          kind: "required",
+          raw: "\\x",
+          start: 4,
+          end: 6
+        }, {
+          kind: "required",
+          raw: "EXP",
+          start: 6,
+          end: 11
+        }],
+      "\\x"
+      <curly_group
+        "EXP">>>
+  <document source_offset: 11,
+    <paragraph
+      <rawbox source_offset: 27, starred: true, argument_groups: [{
+            kind: "required",
+            raw: "EXP",
+            start: 35,
+            end: 39
+          }, {
+            kind: "optional",
+            raw: "EXP",
+            start: 39,
+            end: 43
+          }],
+        "EXP"
+        <brack_group
+          "EXP">>
+      <inline_math source_offset: 44, source: "EXP", ast: <math
+          ["E", "X", "P"]>>
+      " EXP">>>
+<latex_document
+  <paragraph
+    <def source_offset: 0, argument_groups: [{
+          kind: "required",
+          raw: "\\x",
+          start: 4,
+          end: 6
+        }, {
+          kind: "required",
+          raw: "OLD",
+          start: 6,
+          end: 28
+        }],
+      "\\x"
+      <curly_group
+        "OLD">>>
+  <document source_offset: 28,
+    <paragraph
+      <rawbox source_offset: 44, argument_groups: [{
+            kind: "required",
+            raw: "\\x",
+            start: 51,
+            end: 55
+          }],
+        <x source_offset: 52, argument_groups: []>>
+      " OLD"
+      <rawbox source_offset: 59, argument_groups: [{
+            kind: "required",
+            raw: "\\x",
+            start: 65,
+            end: 69
+          }],
+        <x source_offset: 66, argument_groups: []>>
+      " OLD">>>
+<latex_document
+  <document source_offset: 17,
+    <paragraph
+      <textbf source_offset: 33,
+        "Hello">>>>

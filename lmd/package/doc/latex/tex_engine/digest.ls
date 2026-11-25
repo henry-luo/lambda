@@ -1050,7 +1050,21 @@ fn math_text_argument(tokens, index) any^ {
     if (at >= len(tokens)) unsupported(at, "math text argument")
     else if (opening(tokens[at])) {
         let group = read_group(tokens, at)^;
-        if (group.issue != null) group
+        if (group.issue == "latex-digest-unclosed-group") {
+            // Native math preserves the remaining text of an unfinished argument.
+            let first = tokens[at];
+            let final_token = tokens[len(tokens) - 1];
+            let inner = slice(tokens, at + 1, len(tokens));
+            let source = if (first.output_text == null or first.output_end == null or final_token.output_end == null)
+                null else utf8.decode(slice(binary(first.output_text)^,first.output_end,final_token.output_end))^;
+            let body = math_text_items(inner)^;
+            if (body.issue != null) body
+            else if (source == null) unsupported(at, "math text source mapping")
+            else {issue:null, index:len(tokens), source:source, items:body.items,
+                content:math_text_content(binary(source)^,inner,first.output_end)^,
+                value:<text_group source:source, *body.items>}
+        }
+        else if (group.issue != null) group
         else {
             let source = output_between(tokens[at], tokens[group.end - 1])^;
             let body = math_text_items(group.tokens)^;

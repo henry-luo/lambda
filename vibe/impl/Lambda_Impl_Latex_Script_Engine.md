@@ -34,6 +34,21 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Raw adapter arguments, 2026-11-26:** The Script engine now installs the
+  host's raw-constructor registry after kernel preload and copies balanced
+  arguments and math spans without expanding them. Constructor aliases emit
+  the copied meaning's name. Unfinished math text groups retain their emitted
+  source, matching the retired parser (S1.8, D10.2.2v2). Captured native trees
+  cover raw and ordinary aliases, argument forms, math and cache isolation;
+  the sequent sample now matches all six expected corpus fields. The two new
+  fixtures pass focused GTest and forced-GC interpreter and JIT runs. The
+  `adapter_state` and `constructor_mode` comparison fixtures still fail:
+  they compare separate profiles to the production Script `parse` path, which
+  now loads resources and reports an expl3 unsupported error respectively.
+  Their historical native comparisons require independent requalification.
+  The semantic-inference and scientific-writing corpus records and aggregate
+  timeout remain open.
+
 - **Lua source in definitions, 2026-11-26:** The 31-document corpus completed
   in an isolated release run with four records different from the golden; it
   still exceeds the GTest timeout. Script now captures `\directlua` and

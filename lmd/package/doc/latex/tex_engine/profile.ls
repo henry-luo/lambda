@@ -55,7 +55,8 @@ pub fn expand_with_kernel(source: string, kernel: string, options: any ! error =
         let enabled = if (given.script_expl3 == true and preload.expl3_bootstrap_ready != true)
             expansion.enable_script_expl3(preload)^ else preload;
         let ready = if (given.script_expl3 == true) preload_format(enabled,given,budget)^ else enabled;
-        let document = expansion.resume({*:ready, echo_definitions: given.echo_definitions == true},
+        let constructors = expansion.enable_raw_constructors(ready, given.raw)^;
+        let document = expansion.resume({*:constructors, echo_definitions: given.echo_definitions == true},
             source, if (given.source_name == null) "<input>" else given.source_name, budget)^;
         // the native expl3 format omits preload output; an ordinary kernel run retains it.
         if (document.expl3_format_requested == true) document
