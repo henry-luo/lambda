@@ -9,6 +9,12 @@ does not import the runtime (D9.1.3v2). The migration remains incomplete:
 standalone Input dispatch, embedded math, resource acquisition, and the native
 engine build and tests still require migration.
 
+Local runtime `input()` and `parse()` now use Input's existing format detection
+to hand detected TeX or LaTeX source back to the runtime for Script parsing.
+The handoff retains the acquired bytes and security context, and Input does not
+call or import the runtime (S1.8, D9.1.3v2, D10.2.2v2). Native standalone,
+captured archive and HTTP entry points still need migration.
+
 The Lambda-owned [script TeX engine implementation plan](../impl/Lambda_Impl_Latex_Script_Engine.md) tracks package-specific progress and issues. General Lambda language and runtime issues remain in the Lambda issue ledger.
 
 The requested direction supersedes the partial expl3 port below: move the TeX
@@ -16,8 +22,8 @@ engine and LaTeX document processing to Lambda Script, with no C++ TeX/LaTeX
 implementation on the migrated path. The reason is to keep execution and
 transformation in one language and avoid a native-to-script call boundary.
 
-The existing `parse(..., {type: "latex"})` and `parse(..., {type: "tex"})`
-entry points run the input-owned C++ engine directly. The LaTeX entry also uses
+At the original request, `parse(..., {type: "latex"})` and `parse(..., {type: "tex"})`
+ran the input-owned C++ engine directly. The LaTeX entry also used
 the C++ `DirectLatexParser` to build the Mark AST. A package-only replacement
 would leave these public entry points and native input clients on the old path.
 The migration must specify their replacement or migration, AST and source-map

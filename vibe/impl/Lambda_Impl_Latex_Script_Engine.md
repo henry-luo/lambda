@@ -1,12 +1,13 @@
 # Lambda Script TeX and LaTeX engine implementation plan
 
-**Status:** In progress; the experimental script engine is not the production
-LaTeX input path. The records below include historical observations and test
-results as of their dates; they do not imply full TeX compatibility.
+**Status:** In progress; the Script engine serves explicit TeX and LaTeX
+runtime input, while native parsing remains in other entry points. The records
+below include historical observations and test results as of their dates; they
+do not imply full TeX compatibility.
 
 **Scope and authority:** Port TeX expansion, LaTeX digestion and the selected
 expl3 APIs to `lambda.doc.latex` in Lambda Script. TeX source remains data
-(**S1.8**); the existing input boundary is governed by **D10.2.2** and the
+(**S1.8**); the input boundary is governed by **D10.2.2v2** and the
 input layer must not depend on the Lambda runtime (**D9.1.3v2**). The requested
 production migration requires the coordinated formal and native-client work
 described in [the input migration record](../input/Input_Latex.md).
@@ -33,6 +34,19 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Automatic detection handoff, 2026-11-25:** Local `input()` and `parse()`
+  can ask Input to return the acquired TeX/LaTeX source and detected format to
+  the runtime. Input keeps its format detection and never imports or calls the
+  runtime; the runtime copies the source into its heap and invokes Script
+  (D9.1.3v2, D10.2.2v2, S1.8). The original native target-loader signature
+  and `InputParseOptions` layout remain available. A regression that failed on
+  the prior mixed auto/native route now passes, along with a native-backed
+  automatic document comparison. The final build and eight focused script
+  tests pass; both auto tests pass in both tiers under forced GC, and scoped
+  include and denied-symlink tests pass in both tiers under forced GC. Captured
+  archive members, HTTP acquisition, standalone Input clients, and math still
+  need migration before C retirement.
+
 - **Resource requests, 2026-11-25:** The Script expander requests missing local
   or bundled resources by scope and name; the runtime captures authorized bytes
   through `SecurityIOClient`, preserves a document base and restarts expansion.
@@ -52,7 +66,7 @@ The existing native engine design and historical Phase IV work are in
   directed retirement first and repair of failing Script tests afterwards.
   Runtime `parse` for explicit `tex`, `latex` and `latex-ts` and `input` with
   an explicit type now invoke the Script facade after authorized acquisition.
-  The archived native cases match through `parse`. Automatic type detection, captured
+  At this earlier checkpoint the archived native cases matched through `parse`, but automatic type detection, captured
   archive members, native Input clients, math and embedded math still use the
   native provider, so it has not yet been removed. Existing tests that compare
   `parse` against Script now compare the same implementation; preserve their
@@ -70,7 +84,7 @@ The existing native engine design and historical Phase IV work are in
   unsupported outcomes and caller-provided resources, then migrate every
   production and native-client entry point and qualify the full corpus before
   removing the native provider. TeX remains data (S1.8); resource acquisition
-  and capabilities remain governed by D9.1.2v2 and D11.1.2. This migration is
+  and capabilities remain governed by D9.1.2v2 and D11.1.2. This migration
   was in progress and neither production dispatch nor the native engine was retired.
   A new Script-owned facade returns TeX output or LaTeX trees with explicit
   unsupported results and accepts captured resources. Initial text, tree,

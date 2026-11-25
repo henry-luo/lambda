@@ -669,6 +669,10 @@ TEST_P(SecurityRuntimeTest, TexLocalIncludesUseTheSameDataGrant) {
     seed("entry.ls", "contains(input(\"@ROOT@/docs/doc.tex\", 'tex')^.text, \"SAFE\")^\n");
     Input* result = load_file(); ASSERT_NE(result, nullptr);
     ASSERT_EQ(get_type_id(result->root), LMD_TYPE_BOOL); EXPECT_TRUE(result->root.bool_val);
+    seed("docs/auto-doc.tex", "\\begin{document}\\input{part}\\end{document}");
+    seed("auto.ls", "input(\"@ROOT@/docs/auto-doc.tex\")^ == input(\"@ROOT@/docs/auto-doc.tex\", 'latex')^\n");
+    result = load_file("auto.ls"); ASSERT_NE(result, nullptr);
+    ASSERT_EQ(get_type_id(result->root), LMD_TYPE_BOOL); EXPECT_TRUE(result->root.bool_val);
     EXPECT_GE(atomic_load32(&capture.data_reads), 2);
     seed("outside.tex", "FORBIDDEN", true);
     char* outside = file_path_join(fixture_directory, "outside.tex");
@@ -677,6 +681,9 @@ TEST_P(SecurityRuntimeTest, TexLocalIncludesUseTheSameDataGrant) {
     seed("docs/linked-doc.tex", "\\input{linked}\\end");
     seed("denied.ls", "contains(input(\"@ROOT@/docs/linked-doc.tex\", 'tex')^.text, \"FORBIDDEN\")^\n");
     result = load_file("denied.ls"); ASSERT_NE(result, nullptr);
+    expect_failed(result);
+    seed("auto-denied.ls", "input(\"@ROOT@/docs/linked-doc.tex\")^\n");
+    result = load_file("auto-denied.ls"); ASSERT_NE(result, nullptr);
     expect_failed(result);
     EXPECT_GE(atomic_load32(&capture.denied_reads), 1);
 }

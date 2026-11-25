@@ -6088,34 +6088,6 @@ static Item input_resource(Item target_item, Item type, bool template_url_only) 
         return failure;
     }
 
-    if (!fs_target && type_str && (!strcmp(type_str->chars, "tex") ||
-            !strcmp(type_str->chars, "latex") || !strcmp(type_str->chars, "latex-ts"))) {
-        // Acquire bytes through the normal security client before invoking the Script engine.
-        RootFrame roots(2);
-        Rooted<String*> text_type(roots, heap_strcpy("text", 4));
-        Rooted<Item> source(roots, ItemNull);
-        Input* text_input = text_type.get() ? input_from_target_with_io(target, text_type.get(), nullptr,
-            nullptr, eval_context_security_io(context), nullptr) : nullptr;
-        if (!text_input) { target_free(target); return runtime_error_itemf(ERR_IO_ERROR, "input: failed to load TeX source"); }
-        if (text_input->parse_failed) {
-            Item error = input_parse_error_item("input", text_input, type_str);
-            target_free(target); return error;
-        }
-        Item raw = text_input->root;
-        if (get_type_id(raw) != LMD_TYPE_STRING) {
-            target_free(target);
-            return runtime_error_itemf(ERR_PARSE_ERROR, "input: TeX source is not text");
-        }
-        String* copy = heap_strcpy(raw.get_chars(), raw.get_len());
-        if (!copy) { target_free(target); return ItemError; }
-        source.set((Item){.item = s2it(copy)});
-        Item parsed = parse_tex_script(source.get(), input_options_root.get(), type_str->chars, target->original);
-        target_free(target);
-        if (schema_type && get_type_id(parsed) != LMD_TYPE_ERROR)
-            return lambda_type_check(parsed, schema_type, "input schema");
-        return parsed;
-    }
-
     const InputScriptParser parser = lambda_input_script_parser(context->runtime);
 #ifndef LAMBDA_IME_RESOURCE_IO
     if (fs_target) {
@@ -6143,9 +6115,10 @@ static Item input_resource(Item target_item, Item type, bool template_url_only) 
 
     // A schema-backed input inherits the schema/runtime pool; a schemaless
     // input keeps the existing id-less Input seam required by D5.6.2.
-    Input *input = input_from_target_with_io(target, type_str, flavor_str,
+    const char* deferred_tex_type = nullptr;
+    Input *input = input_from_target_with_io_deferred(target, type_str, flavor_str,
         schema_type ? context->name_pool : nullptr, eval_context_security_io(context),
-        parser.context ? &parser : nullptr);
+        parser.context ? &parser : nullptr, &deferred_tex_type);
     if (!input) {
         // input() is a can-raise effect: a loader failure must not become a
         // successful null, or callers cannot distinguish failed execution from
@@ -6158,6 +6131,24 @@ static Item input_resource(Item target_item, Item type, bool template_url_only) 
         Item failure = input_parse_error_item("input", input, type_str);
         target_free(target);
         return failure;
+    }
+    if (deferred_tex_type) {
+        // Input owns the acquired source; Script values must live in the runtime heap.
+        RootFrame roots(1);
+        Rooted<Item> source(roots, ItemNull);
+        Item raw = input->root;
+        if (get_type_id(raw) != LMD_TYPE_STRING) {
+            target_free(target);
+            return runtime_error_itemf(ERR_PARSE_ERROR, "input: TeX source is not text");
+        }
+        String* copy = heap_strcpy(raw.get_chars(), raw.get_len());
+        if (!copy) { target_free(target); return ItemError; }
+        source.set((Item){.item = s2it(copy)});
+        Item parsed = parse_tex_script(source.get(), input_options_root.get(), deferred_tex_type, target->original);
+        target_free(target);
+        if (schema_type && get_type_id(parsed) != LMD_TYPE_ERROR)
+            return lambda_type_check(parsed, schema_type, "input schema");
+        return parsed;
     }
     target_free(target);
 
@@ -7554,13 +7545,14 @@ Item fn_parse2(Item str_item, Item type) {
 
     parse_options.source_positions = source_positions;
     parse_options.io = context ? eval_context_security_io(context) : nullptr;
+    const char* deferred_tex_type = nullptr;
     // preserve the Item's byte count so document XML cannot accept a NUL-truncated prefix.
-    Input* input = input_from_source_n_with_name_parent(str ? str->chars : (const char*)binary_data(binary),
+    Input* input = input_from_source_n_with_deferred_tex(str ? str->chars : (const char*)binary_data(binary),
         str ? str->len : binary_length(binary), dummy_url,
         type_str, flavor_str, NULL,
         (source_positions || has_tex_options || parse_options.xml_preserve_whitespace || parse_options.io ||
             parse_options.script_parser)
-            ? &parse_options : NULL);
+            ? &parse_options : NULL, &deferred_tex_type);
     if (!input) {
         return runtime_error_itemf(ERR_OUT_OF_MEMORY,
             "parse: failed to initialize parser for format '%s'",
@@ -7571,6 +7563,9 @@ Item fn_parse2(Item str_item, Item type) {
     if (input->parse_failed || get_type_id(input->root) == LMD_TYPE_ERROR) {
         return input_parse_error_item("parse", input, type_str);
     }
+    if (deferred_tex_type)
+        return parse_tex_script(parse_source_root.get(), parse_options_root.get(), deferred_tex_type,
+            parse_options.tex_base);
     return input->root;
 }
 
