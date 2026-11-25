@@ -1,0 +1,20 @@
+[{
+    issue: null,
+    match: true
+  }, {
+    issue: null,
+    match: true
+  }, {
+    issue: null,
+    match: true
+  }, {
+    issue: null,
+    match: true
+  }, {
+    issue: null,
+    match: true
+  }]
+{
+  issue: "latex-digest-unsupported",
+  unsupported: "table columns source mapping"
+}

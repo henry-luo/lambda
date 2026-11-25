@@ -2230,6 +2230,8 @@ fn needs_output_mapping(tokens, sources, main_file, constructor_mode, index = 0,
                     not inline_format_command(token.value)) or native_name_needs_reparse(token.value)^ or
                     (token.value == "@" and index + 1 < len(tokens) and native_name_letter(tokens[index + 1])^))) true
         else if (paren and generated and not checked_paren and paren_command_scan(tokens,main_file)^) true
+        // Generated environment headers need byte adjacency, not source offsets.
+        else if (control(token,"begin") and (token.direct != true or token.file != main_file)) true
         else if (control(token,"begin") and list_option_needs_mapping(tokens,main_file,index)^) true
         else needs_output_mapping(tokens,sources,main_file,constructor_mode,index + 1,paren,generated,checked_paren or (paren and generated))
     }
@@ -3573,9 +3575,37 @@ fn subfigure_header(tokens, sources, arg) any^ {
 fn table_columns_environment(name) bool => contains(["tabular", "array", "longtable", "tabularx", "xltabular"], name)
 
 // Table width and column groups are consumed only when adjacent to the preceding group.
-fn table_header_group(tokens, sources, index, previous_end, file) any^ {
+fn table_header_group(tokens, sources, index, previous_end, file, previous) any^ {
     let next = if (index < len(tokens)) tokens[index] else null;
     if (not opening(next)) {issue:null, index:index, end:previous_end, raw:null}
+    else if (next.direct != true or previous.direct != true or next.file != previous.file) {
+        // Only admit a generated group when every emitted byte is verified and adjacent.
+        let mapped = previous.output_text != null and previous.output_end != null and next.output_start != null and
+            next.output_text == previous.output_text;
+        if (not mapped) unsupported(index, "table header source mapping")
+        else if (next.output_start != previous.output_end) {issue:null, index:index, end:previous_end, raw:null}
+        else {
+            let group = read_group(tokens, index)^;
+            if (group.issue != null) group
+            else {
+                let final_token = tokens[group.end - 1];
+                let bytes = mapped_bytes(next)^;
+                let valid = next.value == "{" and final_token.value == "}" and
+                    all([for (i in (index to group.end - 1)^) {
+                        let part = tokens[i];
+                        let prior = if (i == index) previous else tokens[i - 1];
+                        part.kind == "char" and part.output_text == next.output_text and
+                            not contains(["\\", "%", "\n", "\r", chr(0)], part.value) and
+                            (part.value != "{" or part.cat == 1) and (part.value != "}" or part.cat == 2) and
+                            part.output_start != null and part.output_end != null and prior.output_end == part.output_start and
+                            slice(bytes, part.output_start, part.output_end)^ == binary(part.value)^
+                    }]);
+                if (not valid) unsupported(index, "table columns source mapping")
+                else {issue:null, index:group.end, end:group.end_offset,
+                    raw:utf8.decode(slice(bytes, next.output_start + 1, final_token.output_end - 1)^)^}
+            }
+        }
+    }
     else if (next.direct != true or next.file != file) unsupported(index, "table header source mapping")
     else if (next.start != previous_end) {issue:null, index:index, end:previous_end, raw:null}
     else {
@@ -3615,11 +3645,11 @@ fn table_header(name, tokens, sources, arg) any^ {
     }
     else if (table_columns_environment(name)) {
         let width = if (contains(["tabularx", "xltabular"], name))
-            table_header_group(tokens, sources, at, arg.end_offset, arg.file)^ else
+            table_header_group(tokens, sources, at, arg.end_offset, arg.file, tokens[arg.end - 1])^ else
             {issue:null, index:at, end:arg.end_offset, raw:null};
         if (width.issue != null) width
         else {
-            let columns = table_header_group(tokens, sources, width.index, width.end, arg.file)^;
+            let columns = table_header_group(tokens, sources, width.index, width.end, arg.file, tokens[width.index - 1])^;
             if (columns.issue != null) columns
             else {issue:null, index:columns.index, attrs:{*:if (width.raw != null) {width:width.raw} else {},
                 *:if (columns.raw != null) {columns:columns.raw} else {}}}

@@ -34,6 +34,15 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Generated table headers, 2026-11-26:** The digester now accepts generated
+  character-only table width and column groups when each reconstructed byte
+  and adjacency is verified (D10.2.2v2). Five complete trees, including
+  generated `tabularx` width and a nonadjacent group, match the retired native
+  engines exactly. Generated headers containing control sequences remain
+  unsupported. In a diagnostic probe only, bypassing existing operation
+  guards now yields a CSV table tree; the guards have not been removed or
+  qualified for general production use.
+
 - **Expl3 replication, 2026-11-26:** Script preloads native expandable
   `prg_replicate:nn` and its decimal helpers (D10.2.2v2). TeX Live
   comparisons cover zero, multi-digit counts, arithmetic, nested replication
@@ -41,7 +50,8 @@ The existing native engine design and historical Phase IV work are in
   mapping remain explicitly unsupported. Csvsimple's simple expansion now
   reconstructs a concrete `|l|l|` table with all three data rows. A diagnostic
   probe that bypasses only the existing guards still finds generated table
-  header source mapping unsupported; no guard was removed.
+  header source mapping unsupported. The bounded header fix and remaining
+  operation guards are recorded in the current checkpoint above.
 
 - **Expl3 token-list mapping, 2026-11-26:** Script preloads the native
   inline and expandable function maps with their eight-item scanner, break

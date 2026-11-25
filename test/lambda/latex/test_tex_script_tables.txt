@@ -161,9 +161,9 @@
     native: null
   }, {
     body: "\\def\\col{{cc}}\\begin{tabular}\\col A&B\\end{tabular}",
-    issue: "latex-digest-unsupported",
-    unsupported: "table header source mapping",
-    matches: null,
+    issue: null,
+    unsupported: null,
+    matches: true,
     actual: null,
     native: null
   }, {
