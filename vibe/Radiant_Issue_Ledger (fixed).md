@@ -14,6 +14,38 @@ are unchanged. Full evidence is under `../../lambda/temp/kianhup-style/`.
 
 ## Fixed issues
 
+<a id="ri-239"></a>
+
+### RI-239 — Layout redirects leak state created by the source document
+
+**Fixed, 2026-11-25.** A page that reads a bounding rectangle and then
+navigates leaves two render allocations (152 bytes) live at shutdown. The
+redirect path destroyed the input DOM directly and skipped the owner-side
+teardown of the view and retained display list. The layout CLI now uses its
+normal document teardown for redirects and layout initialization failures
+(**D5.5.1**, **D9.1.3v2**).
+
+The debug memory tracker reports zero errors for redirects to a valid page
+and to a missing page. The missing destination still reports a layout load
+failure. The regression control is in
+[`test_input_layout_runner.py`](../test/wpt/test_input_layout_runner.py).
+
+<a id="ri-238"></a>
+
+### RI-238 — Layout format detection reads the URL query and fragment
+
+**Fixed, 2026-11-25.** A layout invocation for an HTML page with a query
+ending in `.md` routed the page through the Markdown loader. Format selection
+now reads the parsed pathname (**D9.1.3v2**).
+
+The WPT runner now passes each variant as part of the document URL. Its former
+assignment to the global `location` invoked the navigation setter and made
+11 layout children try to load `[object Object]` (**D8.4.4**). Regression
+controls cover extension-like suffixes and shell metacharacters. The
+`wpt-input-events` category has 20 passes and 12 skips. The full layout
+baseline has 5,630 passes, 294 partial results, 12 skips and zero failures.
+Evidence is in [the layout report](../temp/wpt-input-events-fix/final-layout-report.json).
+
 <a id="ri-237"></a>
 
 ### RI-237 — Native Canvas pixel readback is missing

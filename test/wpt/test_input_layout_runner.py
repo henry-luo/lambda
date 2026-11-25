@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify that the input-events layout runner rejects failed child processes."""
+"""Verify document variants and child exit reporting in the input-events layout runner."""
 
 import os
 from pathlib import Path
@@ -28,11 +28,15 @@ class InputLayoutRunnerTest(unittest.TestCase):
         child = self.workspace / "lambda.exe"
         child.write_text('#!/bin/sh\necho "WPT_RESULT: 1/1 passed"\n' + ending + '\n')
         child.chmod(0o755)
+        return self.run_wpt("*textarea_insertfrompaste_type_inputevent_data_html")
+
+    def run_wpt(self, case_filter):
         return subprocess.run(
             [str(ROOT / "test/test_wpt_input_events_gtest.exe"),
-             "--gtest_filter=*textarea_insertfrompaste_type_inputevent_data_html"],
+             f"--gtest_filter={case_filter}"],
             cwd=self.workspace, text=True, stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT, timeout=20, check=False,
+            env={**os.environ, "LAMBDA_HOME": str(ROOT / "lmd")},
         )
 
     def test_successful_child_is_reported(self):
@@ -49,6 +53,46 @@ class InputLayoutRunnerTest(unittest.TestCase):
         result = self.run_child("kill -TERM $$")
         self.assertNotEqual(result.returncode, 0, result.stdout)
         self.assertIn("Layout child failed", result.stdout)
+
+    def test_variants_reach_the_real_document_url(self):
+        (self.workspace / "ref").unlink()
+        fixtures = self.workspace / "ref/wpt/input-events"
+        fixtures.mkdir(parents=True)
+        (self.workspace / "lambda.exe").symlink_to(ROOT / "lambda.exe")
+        (fixtures / "variant-location.html").write_text("""<!doctype html>
+<meta name="variant" content="?file=$LAMBDA_WPT_QUERY.md">
+<meta name="variant" content="?file=example.html#example.svg">
+<script>
+test(() => {
+  const suffix = location.search + location.hash;
+  assert_in_array(suffix, ["?file=$LAMBDA_WPT_QUERY.md", "?file=example.html#example.svg"]);
+  assert_true(document.URL.endsWith(suffix));
+  assert_equals(location, document.location);
+}, "The variant initializes Location");
+</script>
+""")
+        result = self.run_wpt("*variant_location*")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("[  PASSED  ] 2 tests.", result.stdout)
+
+    def test_redirect_releases_layout_created_during_script_load(self):
+        (self.workspace / "source.html").write_text("""<!doctype html>
+<div id="box">Text</div>
+<script>
+document.getElementById("box").getBoundingClientRect();
+location = "missing.html";
+</script>
+""")
+        result = subprocess.run(
+            [str(ROOT / "lambda.exe"), "layout", "source.html", "--auto-close",
+             "--no-log", "--view-output", "temp/source.json"],
+            cwd=self.workspace, text=True, stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, timeout=20, check=False,
+            env={**os.environ, "MEMTRACK_MODE": "DEBUG", "LAMBDA_HOME": str(ROOT / "lmd")},
+        )
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("Completed layout command: 0 success, 1 failed", result.stdout)
+        self.assertNotIn("memtrack-console: ERR!", result.stdout)
 
     def test_concurrent_suites_use_distinct_documents(self):
         child = self.workspace / "lambda.exe"

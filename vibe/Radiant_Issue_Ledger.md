@@ -20,6 +20,14 @@ observations still require re-verification. Add new Radiant issues here.
 
 ## Open issues
 
+<a id="ri-239"></a>
+
+- [RI-239 — Layout redirects leak state created by the source document](<Radiant_Issue_Ledger (fixed).md#ri-239>).
+
+<a id="ri-238"></a>
+
+- [RI-238 — Layout format detection reads the URL query and fragment](<Radiant_Issue_Ledger (fixed).md#ri-238>).
+
 <a id="ri-237"></a>
 
 - [RI-237 — Native Canvas pixel readback is missing](<Radiant_Issue_Ledger (fixed).md#ri-237>).
