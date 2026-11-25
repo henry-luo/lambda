@@ -2188,7 +2188,7 @@ fn request_resource(st, scope, name) State =>
     {*:st, issue:"tex-resource-needed", resource_request:{scope:scope, name:name}}
 
 // The caller supplies captured, authorized bytes; this module does not open paths.
-fn captured_resource(st, name, requested_scope = null) any^ {
+pub fn captured_resource(st, name, requested_scope = null) any^ {
     let cleaned = replace(name, "\"", "")^;
     let active = stream.active_reader(st.input)^;
     let scope = if (requested_scope != null) requested_scope else if (active.origin == "bundled") "bundled" else "local";
@@ -2232,7 +2232,7 @@ fn captured_resource(st, name, requested_scope = null) any^ {
 type SourceText = {valid: bool, text: string}
 
 // Decode once at the resource boundary; scanners receive text plus explicit status.
-fn decode_source(data: string | binary) SourceText^ {
+pub fn decode_source(data: string | binary) SourceText^ {
     let decoded = utf8.decode(binary(data)^) ^ { null };
     {valid: decoded != null, text: decoded or ""}
 }
@@ -6513,12 +6513,14 @@ fn enable_expl_primitives(st: State, names, index = 0) State^ {
 }
 
 // Continue from a completed preload while retaining its definitions and scoped values.
-pub fn resume(st: State, source: string, name: string = "<input>", budget: int = 20000000) State^ {
+pub fn resume(st: State, source: string, name: string = "<input>", budget: int = 20000000,
+        origin: string = "local") State^ {
     if (st.issue != null) st
     else if (len(st.groups) != 0 or len(st.conditions) != 0) fail(st, "tex-incomplete-preload")
     else {
         let id = next_source_id(st)^;
-        let next_reader = {*:reader.reader(source, id), origin: "local",
+        // Nested inputs inherit the authority of the resumed source.
+        let next_reader = {*:reader.reader(source, id), origin: origin,
             catcodes: st.input.reader.catcodes, endline: parameter_value(st, "endlinechar")};
         let next_input = {*:stream.from_reader(next_reader), everyeof: st.input.everyeof};
         let resumed = {*:st, input: next_input, finished: false, output: [], messages: [], terminal_line: "", expansions: 0,
@@ -6526,7 +6528,7 @@ pub fn resume(st: State, source: string, name: string = "<input>", budget: int =
             generated_text_mapping_seen: false, mathchardef_emission_seen: false,
             expl3_tl_head_seen: false, expl3_tl_tail_seen: false,
             expl3_exp_args_once_seen: false, expl3_exp_args_value_seen: false, expl3_exp_args_f_seen: false,
-            sources: [*st.sources, {id: id, name: name, origin: "local", data: source}]};
+            sources: [*st.sources, {id: id, name: name, origin: origin, data: source}]};
         run(resumed, budget)
     }
 }

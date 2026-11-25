@@ -10,15 +10,17 @@ fn failure(issue, unsupported = null, request = null) =>
     {root:null, issue:issue, unsupported:unsupported, request:request}
 
 // Both public results retain source definitions in the expanded stream.
-fn expand_once(source, configured, budget) any^ {
+fn expand_once(source, configured, budget, preload = null) any^ {
     if (configured.ini == true)
         expansion.expand(stream.from_reader(reader.reader(source)), budget, configured)
+    else if (preload is map and configured.kernel_source is string)
+        profile.expand_with_kernel(source, configured.kernel_source, configured, budget, preload)
     else profile.expand(source, configured, budget)
 }
 
-fn expand(source, options, budget, echo_definitions = true) any^ {
+fn expand(source, options, budget, echo_definitions = true, preload = null) any^ {
     let configured = {*:expansion.options_map(options), echo_definitions:echo_definitions, auto_expl3:true};
-    let first = expand_once(source, configured, budget)^;
+    let first = expand_once(source, configured, budget, preload)^;
     if (first.issue == "tex-expl3-restart")
         expand_once(source, {*:configured, script_expl3:true}, budget)
     else first
@@ -43,6 +45,16 @@ pub fn host_capture(options: map, scope: string, name: string, data, no_base = f
     let entry = if (no_base) {no_base:true} else if (data == null) {missing:true} else {data:data};
     let captured = {*:options.resources[scope], *:map([name, entry])};
     {*:options, resources:{*:options.resources, *:map([scope, captured])}}
+}
+
+// Only resource-free preloads can be reused without retaining a file grant.
+pub fn host_math_preload(options: map) any^ {
+    if (options.ini == true or not (options.kernel_source is string)) null
+    else {
+        let configured = {*:options, math_mode:true, echo_definitions:false, auto_expl3:true};
+        let loaded = profile.preload_kernel(options.kernel_source, configured)^;
+        if (loaded.issue != null or len(loaded.resources_seen) != 0) null else loaded
+    }
 }
 
 // Native TeX returns diagnostics and local package names alongside expanded text.
@@ -73,11 +85,11 @@ pub fn latex(source: string, options = null, budget: int = 20000000) any^ {
 }
 
 // Standalone math uses the same expanded token stream and atom digester as documents.
-pub fn math(source: string, options = null, budget: int = 20000000) any^ {
+fn math_using(source: string, options, budget, preload) any^ {
     if (len(source) == 0) {root:null, issue:null, unsupported:null}
     else {
         let configured = {*:expansion.options_map(options), math_mode:true};
-        let expanded = expand(source, configured, budget, false)^;
+        let expanded = expand(source, configured, budget, false, preload)^;
         if (expanded.issue != null) failure(expanded.issue, expanded.unsupported, expanded.resource_request)
         else if (not complete_diagnostics(expanded)^) failure("tex-diagnostic-unsupported")
         else {
@@ -86,3 +98,10 @@ pub fn math(source: string, options = null, budget: int = 20000000) any^ {
         }
     }
 }
+
+pub fn math(source: string, options = null, budget: int = 20000000) any^ =>
+    math_using(source, options, budget, null)
+
+// The host supplies a preload only after matching its complete configuration.
+pub fn host_math(source: string, options: map, preload) any^ =>
+    math_using(source, options, 20000000, preload)

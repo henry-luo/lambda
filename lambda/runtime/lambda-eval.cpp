@@ -20,6 +20,7 @@
 #include "side_stack.h"
 #include "output_demand.hpp"
 #include "doc_context.hpp"
+#include "context_capsule.h"
 #include "security_context.h"
 #include "image_raster.hpp"
 #include <limits.h>
@@ -7334,6 +7335,56 @@ static bool tex_capture_file(const SecurityIOClient* io, const char* base, const
     mem_free(root); *missing = absent; return absent;
 }
 
+// A resource-free kernel snapshot belongs to one evaluator heap (D6.4.2).
+struct TexKernelCache {
+    EvalContext* owner;
+    Item options;
+    Item preload;
+    bool rooted;
+};
+static const uint32_t tex_kernel_cache_owner = 0x5445584B; // TEXK
+
+static void tex_kernel_cache_clear(void* data) {
+    TexKernelCache* cache = (TexKernelCache*)data;
+    if (cache->rooted) {
+        heap_unregister_gc_root_for(cache->owner, &cache->options.item);
+        heap_unregister_gc_root_for(cache->owner, &cache->preload.item);
+        cache->rooted = false;
+    }
+    cache->options = ItemNull; cache->preload = ItemNull;
+}
+
+static void tex_kernel_cache_destroy(void* data) {
+    tex_kernel_cache_clear(data); mem_free(data);
+}
+
+static TexKernelCache* tex_kernel_cache() {
+    if (!context) return nullptr;
+    TexKernelCache* cache = (TexKernelCache*)context_capsule_extension(context, tex_kernel_cache_owner, 1);
+    if (!cache) {
+        cache = (TexKernelCache*)mem_calloc(1, sizeof(*cache), MEM_CAT_EVAL);
+        if (!cache) return nullptr;
+        cache->owner = context; cache->options = ItemNull; cache->preload = ItemNull;
+        static const ContextCapsuleOps ops = {"tex-kernel-cache", CONTEXT_CAPSULE_LIFETIME_REALM,
+            0, nullptr, tex_kernel_cache_clear, tex_kernel_cache_destroy};
+        if (!context_capsule_extension_install(context, tex_kernel_cache_owner, 1, cache, &ops)) {
+            mem_free(cache); return nullptr;
+        }
+    }
+    return cache;
+}
+
+static void tex_kernel_cache_store(TexKernelCache* cache, Item options, Item preload) {
+    if (!cache) return;
+    tex_kernel_cache_clear(cache);
+    cache->options = options; cache->preload = preload;
+    if (!heap_register_gc_root_for(cache->owner, &cache->options.item)) return;
+    if (!heap_register_gc_root_for(cache->owner, &cache->preload.item)) {
+        heap_unregister_gc_root_for(cache->owner, &cache->options.item); return;
+    }
+    cache->rooted = true;
+}
+
 static Item parse_tex_script(Item source, Item options, const char* format, const char* base, bool captured_member) {
     // The caller's converted option may not survive allocations during a restart.
     struct BasePath {
@@ -7343,7 +7394,7 @@ static Item parse_tex_script(Item source, Item options, const char* format, cons
     } base_path(base);
     if (base && !base_path.value) return ItemError;
     // The kernel and all restart state must stay visible to the precise GC.
-    RootFrame roots(8);
+    RootFrame roots(9);
     Rooted<Item> text(roots, source);
     Rooted<Item> settings(roots, get_type_id(options) == LMD_TYPE_MAP ? options : ItemNull);
     Rooted<Item> result(roots, ItemNull);
@@ -7352,6 +7403,7 @@ static Item parse_tex_script(Item source, Item options, const char* format, cons
     Rooted<Item> data(roots, ItemNull);
     Rooted<Item> base_item(roots, ItemNull);
     Rooted<Item> kernel_item(roots, ItemNull);
+    Rooted<Item> preload(roots, ItemNull);
     if (get_type_id(source) == LMD_TYPE_BINARY) {
         Binary* bytes = source.get_safe_binary();
         String* converted = heap_strcpy((const char*)binary_data(bytes), binary_length(bytes));
@@ -7390,9 +7442,21 @@ static Item parse_tex_script(Item source, Item options, const char* format, cons
     const uint64_t resource_bytes = INPUT_TEX_RESOURCE_BYTE_LIMIT;
     uint64_t captured = 0; int local_files = 0; int requests = 0;
     for (;;) {
-        Item args[] = {text.get(), settings.get()};
-        const char* entry = !strcmp(format, "tex") ? "tex" : !strcmp(format, "math") ? "math" : "latex";
-        result.set(interp_call_package_export(runtime, package, entry, args, 2));
+        bool math = !strcmp(format, "math");
+        TexKernelCache* cache = math ? tex_kernel_cache() : nullptr;
+        if (cache && cache->rooted && item_deep_equal(cache->options, settings.get())) {
+            preload.set(cache->preload);
+        } else if (cache) {
+            Item args[] = {settings.get()};
+            preload.set(interp_call_package_export(runtime, package, "host_math_preload", args, 1));
+            if (get_type_id(preload.get()) == LMD_TYPE_MAP)
+                tex_kernel_cache_store(cache, settings.get(), preload.get());
+            else preload.set(ItemNull);
+        }
+        Item args[] = {text.get(), settings.get(), preload.get()};
+        const char* entry = !strcmp(format, "tex") ? "tex" : math && get_type_id(preload.get()) == LMD_TYPE_MAP
+            ? "host_math" : math ? "math" : "latex";
+        result.set(interp_call_package_export(runtime, package, entry, args, !strcmp(entry, "host_math") ? 3 : 2));
         if (get_type_id(result.get()) != LMD_TYPE_MAP)
             return runtime_error_itemf(ERR_PARSE_ERROR, "parse: Script %s engine failed", format);
         MapReader reply(result.get().map);

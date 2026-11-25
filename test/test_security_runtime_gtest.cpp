@@ -734,7 +734,8 @@ TEST_P(SecurityRuntimeTest, StructurizrIncludesRetainTheirNarrowerDocumentRoot) 
 
 TEST_P(SecurityRuntimeTest, TexKernelCannotBypassRevokedReadAuthority) {
     ASSERT_NE(admit_shipped_packages(), 0U);
-    seed("entry.ls", "contains(parse(\"\\\\ExplSyntaxOn\\\\int_eval:n{2+3}\\\\ExplSyntaxOff\", 'tex')^.text, \"5\")^\n");
+    seed("entry.ls", "let math = parse(\"x\", 'math')^; "
+        "math is <math> and contains(parse(\"\\\\ExplSyntaxOn\\\\int_eval:n{2+3}\\\\ExplSyntaxOff\", 'tex')^.text, \"5\")^\n");
     Input* trusted = load_file(); ASSERT_NE(trusted, nullptr);
     ASSERT_EQ(get_type_id(trusted->root), LMD_TYPE_BOOL); ASSERT_TRUE(trusted->root.bool_val);
     // Reusing the initialized Script package must not reuse an earlier data grant.

@@ -53,9 +53,11 @@ The existing native engine design and historical Phase IV work are in
   which passes in auto and interpreter. A hot typed error handler exposed
   [LR09-37](<../Lambda_Issue_Ledger (fixed).md#lr09-37>), fixed by applying
   the existing constrained-predicate satellite admission rule (S11.4.11,
-  D8.3.1). The migrated custom-format test
-  `test_tex_retired_engine_format.ls` currently returns `[true, false]`: the
-  automatic restart works but Script does not load the supplied `expl3.ltx`.
+  D8.3.1). The migrated custom-format test now exercises automatic restart,
+  caller-captured text and binary `expl3.ltx` files, missing files, isolation,
+  and bundled authority for nested inputs. Automatic host capture of the
+  native format remains open; the Script facade currently loads the format
+  only when its authorized snapshot is supplied (D10.2.2v2, D11.1.2).
   Full corpus parity and native-client qualification remain open.
   The resource broker grants shipped metadata and reads without enumeration;
   the resource root now uses metadata, while every resource read still requires
@@ -77,8 +79,21 @@ The existing native engine design and historical Phase IV work are in
   arguments retain their raw contents during standalone math expansion, so an
   unmatched dollar no longer corrupts the surrounding group. The HTML document
   now parses after preserving normalized whitespace in source-map validation;
-  its full rendering matches the captured snapshot in a direct run, but exceeds
-  the 60-second test limit. The metrics and HTML timeouts remain open (S1.8,
+  its full rendering matched the captured snapshot in a direct run but exceeded
+  the 60-second test limit. A resource-free kernel preload is now retained in
+  the evaluator's precisely rooted realm capsule and reused only for equal
+  options; each parse still authorizes and reads the kernel. The metrics and
+  HTML tests now pass within the existing limit, and the complete 56-case math
+  suite passes. Definition isolation and changing captured resources pass in
+  both tiers and under forced GC with freed-memory poisoning. The eight scoped
+  authorization regressions pass, including a cached math parse before kernel
+  read authority is revoked (S1.8, D10.2.2v2, D6.4.2, D11.1.2).
+
+- **TeX error recovery, 2026-11-25:** `test_tex_script_kernel_messages` now
+  exposes a migrated public API failure: incomplete `\\ProvidesExplPackage`
+  causes `parse(..., 'tex')` to raise `tex-runaway-argument`, while the native
+  engine returned a partial result. Diagnose the declaration argument path and
+  recover its native diagnostics rather than suppressing the failure (S1.8,
   D10.2.2v2).
 
 - **Earlier HTTP Path checkpoint:** The baseline did not finish:
