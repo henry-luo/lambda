@@ -21,12 +21,13 @@ fn unsupported(index, name) => {index: index, issue: "latex-digest-unsupported",
 
 // These commands have native syntax or output shapes beyond generic arguments.
 fn special_command(name: string) bool => tex_reader.definition_command(name) or contains(["verb", "lstinline", "Verb", "mint", "mintinline",
-    "directlua", "luaexec", "setlength", "underline", "quad", "qquad",
-    "pretitle", "posttitle", "preauthor", "postauthor", "predate", "postdate"], name) or
+    "directlua", "luaexec", "setlength", "underline", "quad", "qquad"], name) or
     (len(name) == 1 and contains(["\\", "$", "%", "#", "&", "_", "{", "}",
         "'", "`", "^", "\"", "~", "=", ".", "u", "v", "H", "c", "d", "b", "t", "k", ",", ";", ":", "!"], name))
 
 fn inline_format_command(name) => contains(["textbf", "textit", "emph", "texttt", "textsf", "textrm", "underline"], name)
+// These arguments are stored code, so unmatched environment boundaries are literal.
+fn code_fragment_command(name) => contains(["pretitle", "posttitle", "preauthor", "postauthor", "predate", "postdate"], name)
 
 fn group_end(tokens: map[], index: int, depth: int) GroupScan^ {
     // Group failures can propagate through inline parsing, which requires an index.
@@ -163,10 +164,24 @@ fn inline_delimiter_end(bytes, at, delimiter) any^ {
     else inline_delimiter_end(bytes,at + 1,delimiter)
 }
 
+// A percent inside a raw command is safe when its comment cannot hide an environment boundary.
+fn raw_comment_tail_safe(token) any^ {
+    if (token.output_text == null or token.output_end == null) false
+    else {
+        let bytes = binary(token.output_text)^;
+        let tail = utf8.decode(slice(bytes, token.output_end, len(bytes)))^;
+        let newline = index_of(tail, "\n");
+        let carriage = index_of(tail, "\r");
+        let end = min(if (newline == null) len(tail) else newline, if (carriage == null) len(tail) else carriage);
+        let comment = slice(tail, 0, end)^;
+        not contains(comment, "\\begin{") and not contains(comment, "\\end{")
+    }
+}
+
 // the enclosing native environment scan also sees these raw command bytes.
-fn raw_command_safe(bytes, raw, nested) any^ {
+fn raw_command_safe(bytes, raw, nested, token) any^ {
     let env_scan = scan_group_bytes(bytes,0,1,false,false,-1,-1)^;
-    raw != null and inline_group_safe(bytes,nested)^ and not env_scan.comment and
+    raw != null and inline_group_safe(bytes,nested)^ and (not env_scan.comment or raw_comment_tail_safe(token)^) and
         not env_scan.escaped and not contains(raw,"\\begin{") and not contains(raw,"\\end{") and
         not contains(raw,"\\verb")
 }
@@ -189,7 +204,7 @@ fn raw_group_element(token, index, nested) any^ {
             (next == len(output_bytes) or output_bytes[next] != 123);
         if (raw == null or not starts_with(raw,prefix) or
                 (not no_group and (group == null or group.end != len(bytes) or group.raw == null)) or
-                not raw_command_safe(bytes,raw,nested)^)
+                not raw_command_safe(bytes,raw,nested,token)^)
             unsupported(index,"raw group source mapping")
         else {
             let offset = rebuild.map_offset(token.output_segments,token.output_start)^;
@@ -222,7 +237,7 @@ fn raw_inline_element(token, index, nested) any^ {
             else inline_delimiter_end(bytes,after_language + 1,delimiter)^;
         let body_begin = after_language + 1;
         let body = if(end==null)null else utf8.decode(slice(bytes,body_begin,end - 1)) ^ {null};
-        let safe = raw_command_safe(bytes,raw,nested)^;
+        let safe = raw_command_safe(bytes,raw,nested,token)^;
         if(raw==null or not starts_with(raw,prefix) or end==null or end!=len(bytes) or body==null or not safe or
                 (option!=null and option.raw==null) or (language!=null and language.raw==null))
             unsupported(index,"raw inline source mapping")
@@ -3333,7 +3348,7 @@ fn inline(tokens, sources, index = 0, text = "", items = [], stop_blocks = true,
             else if (at < len(tokens) and (opening(tokens[at]) or
                     (tokens[at].kind == "char" and (tokens[at].value == "[" or tokens[at].value == "(")))) {
                 let args = generic_arguments(tokens, sources, at, anchor.end, token.file, [], [], true, false, false,
-                    anchor.output_end, mapped_command)^;
+                    anchor.output_end, mapped_command, if (code_fragment_command(token.value)) "raw" else "")^;
                 if (args.issue != null) args
                 else {
                     let following = if (args.index < len(tokens)) tokens[args.index] else null;

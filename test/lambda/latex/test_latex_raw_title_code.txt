@@ -1,0 +1,21 @@
+<latex_document
+  <paragraph
+    <pretitle source_offset: 0, argument_groups: [{
+          kind: "required",
+          raw: "\\begin{center}\\LARGE",
+          start: 9,
+          end: 31
+        }],
+      <curly_group
+        "\\begin{center}\\LARGE">>
+    <posttitle source_offset: 31, argument_groups: [{
+          kind: "required",
+          raw: "\\par\\end{center}\\vskip 0.5em",
+          start: 41,
+          end: 71
+        }],
+      <curly_group
+        "\\par\\end{center}\\vskip 0.5em">>>
+  <document source_offset: 71,
+    <paragraph
+      "Body">>>

@@ -34,6 +34,19 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Raw title and inline code, 2026-11-26:** Script now preserves the six
+  titling hook arguments as raw code, including environment boundaries that
+  close in a later hook. Inline raw commands containing `%` are accepted when
+  the rest of that source line cannot conceal an environment boundary; the
+  unsafe case remains guarded (D10.2.2v2). The supported trees in both new
+  fixtures match the isolated retired document parser, and the fixtures pass interpreter
+  and JIT with forced GC and poisoning. The formerly failing phase-five front
+  and text-package goldens now pass. A neighboring seven-case raw suite passed
+  five: the raw-environment matrix timed out at the existing 60-second limit,
+  and the raw-inline matrix still expects native parsing in five guarded
+  cases now routed through Script. Neither failure is waived or counted as a
+  pass; see `temp/latex-retirement/gtest-raw-arguments.log`.
+
 - **Filename parsing and indirect expansion, 2026-11-26:** Script now executes
   `\filename@parse` as scoped TeX definitions, preserving the active letter and
   space categories. Nine text and diagnostic cases match the isolated retired

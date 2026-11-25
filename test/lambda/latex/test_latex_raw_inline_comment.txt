@@ -1,0 +1,7 @@
+[<latex_document
+    <document source_offset: 0,
+      <paragraph
+        "Inline "
+        <Verb source_offset: 23, raw_source: "\\Verb|a_b%c|",
+          "a_b%c">
+        ".\nNext">>>, "parse: Script latex engine: latex-digest-unsupported: raw inline source mapping"]
