@@ -49,6 +49,47 @@ Use `sh.git("log", "--oneline")` as the short form of `sh.cmd("git", ["log", "--
 
 Named wrappers translate documented Lambda arguments to individual executable arguments. For example, `count: true` supplies `-c` to `uniq`, and `lines: 10` supplies `-n` and `10` to `head`. A generic command takes an ordered argument array for other programs, repeated flags and operands. Each argument retains its boundary, including spaces. The host must provide a compatible executable. Importing the package selects neither a command interpreter nor a particular vendor's utilities.
 
+### Open: distinguishing piped input from command arguments
+
+The shorthand needs to distinguish a pipeline input from executable arguments
+without guessing from their types:
+
+```lambda
+sh.grep("error", "app.log")       // arguments: "error", "app.log"
+sh.stdin() |> sh.grep("error")   // input: stdin; argument: "error"
+```
+
+Today the compiler sees the pipe, but **S10.1.2v7** defines whole-value
+application as inserting the piped value before the written arguments. The
+called procedure receives the resulting argument values without their origin.
+Consequently, the shorthand currently treats a first text value as a command
+argument and a first path, list, array, binary value, or live process output as
+stdin. Binary exposes the ambiguity: it can be either stdin or a valid
+executable argument. Today `sh.cmd` with an argument array can pass a binary
+first argument. Type dispatch alone cannot tell how the caller supplied it.
+
+One proposed direction is to expose two distinct views at the call boundary:
+
+- The **Lambda Script argument list** contains the arguments explicitly written
+  in the call, in their source order, without a pipe-injected input.
+- The **runtime C argument list** contains the effective arguments passed to
+  the callee, including the input inserted by the pipe. The runtime also needs
+  to identify whether an input was actually inserted; a C ABI list by itself
+  does not describe argument origin.
+
+For the second example, the written arguments are `["error"]`, while the
+effective arguments are `[sh.stdin(), "error"]`. A direct call written as
+`sh.grep(sh.stdin(), "error")` has the same effective arguments, but both are
+explicitly written. These are conceptual views, not names for existing APIs or
+a decision to expose native pointers to Lambda code.
+
+**Open design:** decide how a procedure can inspect these views or equivalent
+origin metadata, including bare callable pipes, indirect calls, named and
+variadic arguments, forwarding, and both interpreter and JIT execution. A
+script-visible distinction may make piped and direct calls observably different,
+so it must be reconciled with **S10.1.2v7** before adoption. No language or C
+ABI change is adopted by this note.
+
 ### Routing one command's stderr
 
 Use a named `stderr` argument on the command that produces the diagnostics. Put positional arguments first. The process launcher consumes the option before it starts the executable. For example, this writes Git diagnostics to `errors.log` and sends only stdout to `head`.

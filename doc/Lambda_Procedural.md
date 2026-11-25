@@ -536,12 +536,14 @@ pn main() {
 }
 ```
 
-This sends Git's stdout to `head` and prints up to ten lines. Direct wrappers for `grep`, `cut`, `tr`, `sed`, `awk`, `tee`, `wc`, `tail`, `paste`, `xargs`, `printf`, `find`, `yes` and `sleep` take pipeline input first, followed by executable arguments. A pipe fills that first position under **S10.1.2v7**. To start one of these commands with inherited stdin, pass `null` in that position:
+This sends Git's stdout to `head` and prints up to ten lines. Direct wrappers for `grep`, `cut`, `tr`, `sed`, `awk`, `tee`, `wc`, `tail`, `paste`, `xargs` and `find` accept ordinary text arguments directly. A whole-value pipe supplies its source first under **S10.1.2v7**:
 
 ```lambda
-sh.grep(null, "^ERROR,", "input.csv") |> sh.cut("-d,", "-f2")
+sh.grep("^ERROR,", "input.csv") |> sh.cut("-d,", "-f2")
 ["pear", "apple"] |> sh.grep("p") |> sh.tr("a-z", "A-Z")
 ```
+
+The wrappers recognize a first text value as an executable argument. Paths, lists, arrays, binary values and live process output in the first position supply stdin. Because binary values can also be executable arguments, use `sh.cmd` with an argument array when the first executable argument is binary. `sh.printf("%s", "hello")`, `sh.yes("test")`, and `sh.sleep("30")` are source commands and take executable arguments directly, like `sh.git`.
 
 Arguments are passed separately to the executable. Use `sh.cmd` when arguments are already in an array, or when a direct wrapper does not expose `stderr:` or `timeout_ms:`. `sh.cat`, `sh.sort`, `sh.uniq`, and `sh.head` provide dedicated filter options.
 

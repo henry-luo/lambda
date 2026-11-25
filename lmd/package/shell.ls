@@ -30,7 +30,15 @@ pub pn head(input = null, lines: int = 10, stderr = null, timeout_ms = null) any
 }
 
 // Whole-value pipes pass their source as the first argument (S10.1.2v7).
-pn direct(source, program, arguments) any^ { io.shell_start(source, program, arguments, null, null) }
+// Text cannot be shell input; binary can be input or an argv byte string.
+// Treat binary as input and use cmd for a binary first argument.
+pn direct(source, program, arguments) any^ {
+    if (source is string or source is symbol) {
+        io.shell_start(null, program, [source, *arguments], null, null)
+    } else {
+        io.shell_start(source, program, arguments, null, null)
+    }
+}
 pub pn grep(source = null, ...) any^ { direct(source, "grep", varg()) }
 pub pn cut(source = null, ...) any^ { direct(source, "cut", varg()) }
 pub pn tr(source = null, ...) any^ { direct(source, "tr", varg()) }
@@ -41,7 +49,7 @@ pub pn wc(source = null, ...) any^ { direct(source, "wc", varg()) }
 pub pn tail(source = null, ...) any^ { direct(source, "tail", varg()) }
 pub pn paste(source = null, ...) any^ { direct(source, "paste", varg()) }
 pub pn xargs(source = null, ...) any^ { direct(source, "xargs", varg()) }
-pub pn printf(source = null, ...) any^ { direct(source, "printf", varg()) }
+pub pn printf(...) any^ { direct(null, "printf", varg()) }
 pub pn find(source = null, ...) any^ { direct(source, "find", varg()) }
-pub pn yes(source = null, ...) any^ { direct(source, "yes", varg()) }
-pub pn sleep(source = null, ...) any^ { direct(source, "sleep", varg()) }
+pub pn yes(...) any^ { direct(null, "yes", varg()) }
+pub pn sleep(...) any^ { direct(null, "sleep", varg()) }

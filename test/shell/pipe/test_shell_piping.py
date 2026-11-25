@@ -41,6 +41,7 @@ def check_commands(run, work, env):
     )
     run("git_oneline", cwd=repository)
     run("git_transform", cwd=repository)
+    run("sleep_zero")
     run("argument_boundaries")
     run("direct_arguments")
 
@@ -56,6 +57,7 @@ def check_commands(run, work, env):
 def check_files(run, work):
     payload = bytes(range(256)) * 4096
     run("binary_transfer", stdin=payload)
+    run("binary_source")
     (work / "source.dat").write_bytes(payload)
     target = work / "target.dat"
     run("file_copy")

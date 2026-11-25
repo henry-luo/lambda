@@ -1,7 +1,7 @@
 import sh: lambda.shell
 
 pn child() any^ {
-    sh.sleep(null, "30") |> \.'cancelled.dat'
+    sh.sleep("30") |> \.'cancelled.dat'
 }
 pn main() {
     let child_task = start(child)

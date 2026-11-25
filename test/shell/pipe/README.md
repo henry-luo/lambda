@@ -4,7 +4,7 @@
 
 `make test-shell-piping` runs the standalone Lambda scripts in `cases/`
 through interpreter, JIT, and auto and reports elapsed CLI time for each
-backend. The latest run passed 45 executions per backend, including with
+backend. The latest run passed 47 executions per backend, including with
 forced GC. Each script has a `.txt` stdout golden. A `sha256:` golden compares
 the digest of large or binary output. The Python runner prepares fixture
 data in `temp/` and checks exit status, stderr, and file effects
@@ -12,8 +12,8 @@ data in `temp/` and checks exit status, stderr, and file effects
 
 ## Results from 2026-11-25
 
-The latest benchmark ran the current standalone workloads, including the
-direct command wrappers, on an Apple M4 with macOS 26.3, Bash 3.2.57,
+The latest timed benchmark ran the standalone workloads with the earlier
+explicit-input direct command wrappers, on an Apple M4 with macOS 26.3, Bash 3.2.57,
 Nushell 0.117.0, and an optimized Lambda build from `cb10b30bab` with the
 shell pipeline and ordering fixes. It verified byte-identical output for each
 pipeline before timing fresh processes against cached input with stdout sent
