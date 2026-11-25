@@ -1,0 +1,19 @@
+{
+  issue: null,
+  unsupported: null,
+  text: "T/F/T/T/F",
+  diagnostics: []
+}
+{
+  issue: null,
+  unsupported: null,
+  text: "3/3/1/1",
+  diagnostics: []
+}
+{
+  issue: null,
+  unsupported: null,
+  text: "[alpha][beta][]",
+  diagnostics: []
+}
+true

@@ -34,12 +34,20 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Expl3 boolean expressions and loops, 2026-11-26:** Script preloads the
+  native expandable boolean parser, alignment-safe helpers and four expression
+  loop forms (D10.2.2v2). The macro-source reader now preserves TeX's category
+  for `&`; otherwise native `&&` helpers reject their delimiter. TeX Live
+  comparisons cover precedence, negation, grouping, loop entry conditions and
+  an input stream through EOF. Boolean-expression source mapping remains
+  explicitly unsupported. Csvsimple now reaches `tl_remove_all:Nn`.
+
 - **Expl3 value insertion, 2026-11-26:** Script preloads the native
   `exp_not:V`/`:v` and local/global left/right value-insertion macro bodies
   (D10.2.2v2). TeX Live comparisons cover unexpanded token values, dynamic
   names, aliases, group scope and integer-register values. Constructor argument
   handling and value-source mapping remain explicitly unsupported. Csvsimple
-  now reaches `bool_until_do:nn`.
+  reaches the later blocker recorded in the boolean-expression checkpoint.
 
 - **Expl3 inline comma-list mapping, 2026-11-26:** Script implements literal
   and variable inline maps with normalized list storage, scoped protected

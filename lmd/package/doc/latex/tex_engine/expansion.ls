@@ -589,6 +589,7 @@ fn expand_one(st: State, t, budget) State^ {
                 else if (macro.source_mapping_guard == "exp_args_value") {*:st, expl3_exp_args_value_seen: true}
                 else if (macro.source_mapping_guard == "exp_args_value_once")
                     {*:st, expl3_exp_args_value_seen:true, expl3_exp_args_once_seen:true}
+                else if (macro.source_mapping_guard == "bool_expr") {*:st, expl3_bool_expr_seen:true}
                 else if (macro.source_mapping_guard == "int_math") {*:st, expl3_int_math_seen: true} else st;
             let traced = if (st.prefix_scan == true) {*:marked, prefixed_macro_seen: true} else marked;
             expand_macro(traced, macro, budget, t)
@@ -6656,6 +6657,7 @@ pub fn enable_script_expl3(st: State) State^ {
         {name: "if_cs_exist:w", kind: "primitive", value: "ifcsname"},
         {name: "if_true:", kind: "primitive", value: "iftrue"},
         {name: "if_bool:N", kind: "primitive", value: "ifodd"},
+        {name: "if_predicate:w", kind: "primitive", value: "ifodd"},
         {name: "if_int_compare:w", kind: "primitive", value: "ifnum"},
         {name: "if_int_odd:w", kind: "primitive", value: "ifodd"},
         {name: "int_value:w", kind: "primitive", value: "number"},
@@ -6781,7 +6783,24 @@ pub fn enable_script_expl3(st: State) State^ {
             scope ++ "set:Nx#1{" ++ (if (side == "left") value ++ prior else prior ++ value) ++ "}}",
             protected_flag:true, source_mapping_guard:"exp_args_value", argument_unqualified:true}
     }];
-    let macros = enable_expl_macro_sources(msg_support, [*variants,*pop_base,*pop_conditionals,*pop_variants,*prop_get_conditionals,*prop_get_variants,*prop_exp_helpers,*prop_pop_bases,*prop_remove_bases,*prop_pop_conditionals,*prop_pop_variants,*prop_remove_variants,*integer_ops,*integer_dynamic,*value_puts,
+    // The boolean parser's operator control sequences are named through csname.
+    let bool_returns = [for (i in [0,1,2]) {source:"\\__lambda_bool_return:{\\c_" ++
+        (if (i == 0) "false" else "true") ++ "_bool}", install_as:"__bool_)_" ++ string(i) ++ ":", protected_flag:false}];
+    let bool_gates = [for (gate in [
+        {op:"&", state:0, select:"iv"}, {op:"&", state:1, select:"i"}, {op:"&", state:2, select:"iii"},
+        {op:"|", state:0, select:"i"}, {op:"|", state:1, select:"iii"}, {op:"|", state:2, select:"iii"}]) {
+        source:"\\__lambda_bool_gate:" ++ gate.op ++ "{\\__bool_get_next:NN\\use_" ++ gate.select ++ ":nnnn}",
+        install_as:"__bool_" ++ gate.op ++ "_" ++ string(gate.state) ++ ":", protected_flag:false}];
+    let bool_selectors = [for (selector in ["ii", "iii", "iv"]) {
+        source:"\\use_" ++ selector ++ ":nnnn#1#2#3#4{#" ++
+            (if (selector == "ii") "2" else if (selector == "iii") "3" else "4") ++ "}", protected_flag:false}];
+    let bool_loops = [for (loop in [
+        {name:"bool_while_do", test:"T", first:false}, {name:"bool_until_do", test:"F", first:false},
+        {name:"bool_do_while", test:"T", first:true}, {name:"bool_do_until", test:"F", first:true}]) {
+        source:"\\" ++ loop.name ++ ":nn#1#2{" ++ (if (loop.first) "#2" else "") ++
+            "\\bool_if:n" ++ loop.test ++ "{#1}{" ++ (if (loop.first) "" else "#2") ++
+            "\\" ++ loop.name ++ ":nn{#1}{#2}}}", protected_flag:false}];
+    let macros = enable_expl_macro_sources(msg_support, [*variants,*pop_base,*pop_conditionals,*pop_variants,*prop_get_conditionals,*prop_get_variants,*prop_exp_helpers,*prop_pop_bases,*prop_remove_bases,*prop_pop_conditionals,*prop_pop_variants,*prop_remove_variants,*integer_ops,*integer_dynamic,*value_puts,*bool_returns,*bool_gates,*bool_selectors,*bool_loops,
         {source:"\\ior_new:N#1{\\cs_new_eq:NN#1\\c__ior_term_ior}",protected_flag:true},
         {source:"\\ior_new:c{\\exp_args:Nc\\ior_new:N}",protected_flag:true},
         {source:"\\ior_open:cn{\\exp_args:Nc\\ior_open:Nn}",protected_flag:true},
@@ -6928,6 +6947,19 @@ pub fn enable_script_expl3(st: State) State^ {
         {source: "\\bool_if:NT#1{\\if_bool:N#1\\__prg_T_true:w\\fi:\\use_none:n}", protected_flag: false},
         {source: "\\bool_if:NF#1{\\if_bool:N#1\\__prg_F_true:w\\fi:\\use:n}", protected_flag: false},
         {source: "\\bool_if_p:N#1{\\if_bool:N#1\\__prg_p_true:w\\fi:\\c_false_bool}", protected_flag: false},
+        {source: "\\bool_if:nTF#1{\\if_predicate:w\\bool_if_p:n{#1}\\__prg_TF_true:w\\fi:\\use_ii:nn}", protected_flag:false, source_mapping_guard:"bool_expr"},
+        {source: "\\bool_if:nT#1{\\if_predicate:w\\bool_if_p:n{#1}\\__prg_T_true:w\\fi:\\use_none:n}", protected_flag:false, source_mapping_guard:"bool_expr"},
+        {source: "\\bool_if:nF#1{\\if_predicate:w\\bool_if_p:n{#1}\\__prg_F_true:w\\fi:\\use:n}", protected_flag:false, source_mapping_guard:"bool_expr"},
+        {source: "\\bool_if_p:n{\\exp_args:Nf\\__bool_if_p:n}", protected_flag:false, source_mapping_guard:"bool_expr"},
+        {source: "\\__bool_if_p:n#1{\\tl_if_empty:oT{\\use_none:nn#1.}{\\__bool_if_p_aux:w}\\group_align_safe_begin:\\exp_after:wN\\group_align_safe_end:\\exp:w\\exp_end_continue_f:w\\__bool_get_next:NN\\use_i:nnnn#1)}", protected_flag:false},
+        {source: "\\__bool_if_p_aux:w#1\\use_i:nnnn#2#3{\\bool_if:NTF#2\\c_true_bool\\c_false_bool}", protected_flag:false},
+        {source: "\\__bool_get_next:NN#1#2{\\use:c{__bool_\\if_meaning:w!#2!\\else:\\if_meaning:w(#2(\\else: p\\fi:\\fi: :Nw}#1#2}", protected_flag:false},
+        {source: "\\__lambda_bool_bang:Nw#1#2{\\exp_after:wN\\__bool_get_next:NN#1\\use_ii:nnnn\\use_i:nnnn\\use_iii:nnnn\\use_iv:nnnn}", install_as:"__bool_!:Nw", protected_flag:false},
+        {source: "\\__lambda_bool_open:Nw#1#2{\\exp_after:wN\\__bool_choose:NNN\\exp_after:wN#1\\int_value:w\\__bool_get_next:NN\\use_i:nnnn}", install_as:"__bool_(:Nw", protected_flag:false},
+        {source: "\\__bool_p:Nw#1{\\exp_after:wN\\__bool_choose:NNN\\exp_after:wN#1\\int_value:w}", protected_flag:false},
+        {source: "\\__bool_choose:NNN#1#2#3{\\use:c{__bool_\\token_to_str:N#3_#1#2{\\if_meaning:w0#21\\else:0\\fi:}20:}}", protected_flag:false},
+        {source: "\\use:c#1{\\cs:w#1\\cs_end:}", protected_flag:false},
+        {source: "\\tl_if_empty:oT{\\exp_args:No\\tl_if_empty:nT}", protected_flag:false},
         {source: "\\bool_to_str:c{\\exp_args:Nc\\bool_to_str:N}", protected_flag: false},
         {source: "\\bool_if:cTF{\\exp_args:Nc\\bool_if:NTF}", protected_flag: false},
         {source: "\\bool_if:cT{\\exp_args:Nc\\bool_if:NT}", protected_flag: false},
@@ -7071,7 +7103,19 @@ pub fn enable_script_expl3(st: State) State^ {
     let with_pop_aliases=enable_expl_values(with_sequence_aliases,pop_aliases)^;
     let boolean_eq_aliases = [for (scope in ["set", "gset"], pattern in ["NN", "cN", "Nc", "cc"])
         {name: "bool_" ++ scope ++ "_eq:" ++ pattern, kind: "alias", value: "tl_" ++ scope ++ "_eq:" ++ pattern}];
-    enable_expl_values(with_pop_aliases, boolean_eq_aliases)
+    let ready = enable_expl_values(with_pop_aliases, boolean_eq_aliases)^;
+    // Expl3 uses opposite-category NUL tokens to balance alignment-safe expansion.
+    let nul_end = {kind:"char", value:chr(0), cat:2, start:-1, end:-1};
+    let nul_begin = {*:nul_end, cat:1};
+    let backtick = {kind:"char", value:"`", cat:12, start:-1, end:-1};
+    let begin = latex_macro(0, false, false, false, [], [control_token("exp:w"), control_token("if_false:"),
+        brace_token(true), control_token("fi:"), backtick, nul_end, control_token("exp_stop_f:")])^;
+    let ending = latex_macro(0, false, false, false, [], [control_token("exp:w"), backtick, nul_begin,
+        control_token("if_false:"), brace_token(false), control_token("fi:"), control_token("exp_stop_f:")])^;
+    let with_begin = if (ready.definitions["control:group_align_safe_begin:"] != null) ready else
+        assign_meaning(ready, "control:group_align_safe_begin:", begin, true)^;
+    if (with_begin.definitions["control:group_align_safe_end:"] != null) with_begin else
+        assign_meaning(with_begin, "control:group_align_safe_end:", ending, true)
 }
 
 // tokenize trusted bundled TeX definitions under expl3 category codes.
@@ -7155,8 +7199,11 @@ fn enable_expl_macro_sources(st: State, definitions, index = 0) State^ {
     else {
         let definition = definitions[index];
         let source_reader = {*:reader.reader(definition.source, -1), endline: -1,
-            catcodes: expl3.syntax_codes({'{': 1, '}': 2, '#': 6, [chr(0)]: 13, '?': if (definition.question_letters == true) 11 else 12})};
-        let tokens = expl3_definition_tokens(source_reader)^;
+            catcodes: expl3.syntax_codes({'{': 1, '}': 2, '&': 4, '#': 6, [chr(0)]: 13, '?': if (definition.question_letters == true) 11 else 12})};
+        let scanned = expl3_definition_tokens(source_reader)^;
+        // Some expl3 names contain operator characters and are normally made with csname.
+        let tokens = if (definition.install_as is string)
+            [{*:scanned[0], value:definition.install_as}, *slice(scanned, 1, len(scanned))^] else scanned;
         let name = key(tokens[0]);
         let created = if (st.definitions[name] != null) st else
             define({*:st, input: stream.push(st.input, tokens)}, true, definition.long_ok != false,
@@ -7262,7 +7309,7 @@ pub fn resume(st: State, source: string, name: string = "<input>", budget: int =
             main_file: id, echo_incomplete: false, prefixed_macro_seen: false, prefix_scan: false,
             mathchardef_emission_seen: false,
             expl3_tl_head_seen: false, expl3_tl_tail_seen: false, expl3_keyval_seen: false, expl3_keys_seen:false,
-            expl3_clist_map_seen:false,
+            expl3_clist_map_seen:false, expl3_bool_expr_seen:false,
             expl3_exp_args_once_seen: false, expl3_exp_args_value_seen: false, expl3_exp_args_f_seen: false,
             sources: [*st.sources, {id: id, name: name, origin: origin, data: source}]};
         run(resumed, budget)
