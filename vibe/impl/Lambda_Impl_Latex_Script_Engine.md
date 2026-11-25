@@ -70,11 +70,16 @@ The existing native engine design and historical Phase IV work are in
   fractions, sized delimiters, arrows, colors, images and unknown generic
   commands; matrix rows retain their optional gaps and each cell owns its math
   list. Focused fraction, arrow, AMS primitive and rich-text regressions pass
-  (D10.2.2v2). `test_math_text_escapes` remains failing: an unmatched dollar
-  after a row break inside `\\text` causes the expander to report an extra
-  closing group, although the text digester recovers the literal dollar. The
-  broader math sweep is running against the settled parser; an earlier sweep
-  overlapped edits and its aggregate failures are not qualification evidence.
+  (D10.2.2v2). A settled math sweep passed 48/54: the failures were feature
+  commands, HTML snapshot, phase-five packages, text escapes, MathML export,
+  and a 60-second metrics timeout. Follow-up fixes now pass the feature,
+  phase-five, text-escape and MathML export goldens. Text and chemistry
+  arguments retain their raw contents during standalone math expansion, so an
+  unmatched dollar no longer corrupts the surrounding group. The HTML document
+  now parses after preserving normalized whitespace in source-map validation;
+  its full rendering matches the captured snapshot in a direct run, but exceeds
+  the 60-second test limit. The metrics and HTML timeouts remain open (S1.8,
+  D10.2.2v2).
 
 - **Earlier HTTP Path checkpoint:** The baseline did not finish:
   `ValueRepresentationTest.UnsupportedDirectTransitionFailsClosed` timed out

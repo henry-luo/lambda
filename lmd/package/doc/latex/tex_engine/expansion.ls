@@ -5431,6 +5431,16 @@ fn latex_verb(st: State, token) State^ {
     }
 }
 
+// Standalone math text and chemistry are raw arguments; their dollar signs do
+// not alter the surrounding expansion groups before math digestion.
+fn latex_math_raw_group(st: State, token) State^ {
+    let arg = stream.raw_argument(st.input)^;
+    if (arg.error != null or len(arg.raw) == 0 or not charcat(arg.raw[0],1))
+        {*:st, output:[*st.output,token]}
+    else {*:st, input:stream.push(arg.stream,[for (part in arg.raw) {*:part,noexpand:true}]),
+        output:[*st.output,token]}
+}
+
 fn raw_inline_command(name) => contains(["lstinline", "Verb", "mint", "mintinline"],name)
 
 // raw command bodies bypass token expansion while a source reader is available.
@@ -5684,6 +5694,8 @@ fn step(st: State, budget) State^ {
     }
     else if (t.noexpand == true) {*:current, output: [*st.output, {*:t, noexpand: false}]}
     else if (redefined_document_command(current, t)^) echo_redefined_command(current, t)
+    else if (st.math_mode and t.kind == "control" and reader.math_raw_group_command(t.value) and resolved.kind != "macro")
+        latex_math_raw_group(current, t)
     else if (expandable(current, t)) expand_one(current, t, budget)
     // these native TeX commands remain tokens for the document adapters.
     else if (contains([" ", "underline", "overline", "indent", "noindent", "hfil", "hfill", "hss", "hfilneg",

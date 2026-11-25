@@ -14,6 +14,9 @@ pub type Token = {
 pub type ReadStep = {reader: Reader, token: Token}
 pub type SourceSpan = {reader: Reader, end: int}
 pub type RawEnvironmentSpan = {reader: Reader, end: int, closed: bool}
+pub fn math_text_command(name) bool => contains(["text", "mbox", "hbox", "textrm", "textit", "textbf",
+    "texttt", "textsf", "textsc", "emph"], name)
+pub fn math_raw_group_command(name) bool => math_text_command(name) or name == "ce" or name == "pu"
 let VERB_DELIMITER_ERROR = "verb delimiter"
 let VERB_UNTERMINATED_ERROR = "verb unterminated"
 let RAW_INLINE_DELIMITER_ERROR = "raw inline delimiter"

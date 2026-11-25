@@ -618,6 +618,13 @@ fn math_content(items, index = 0, out = [], run = []) any^ {
 fn math_nonspace(tokens, index) any^ => if (index < len(tokens) and tokens[index].kind == "char" and tokens[index].cat == 10)
     math_nonspace(tokens, index + 1) else index
 
+// Math options contain math lists, including controls and nested groups.
+fn math_optional(tokens, index) any^ {
+    if (index >= len(tokens) or tokens[index].kind != "char" or tokens[index].value != "[")
+        {issue:null,present:false,end:index}
+    else {*:read_generic_delimited(tokens,index,"[","]","latex-digest-unclosed-optional")^,present:true}
+}
+
 // match delimiter pairs only at the current brace and left/right nesting level.
 fn math_delimiter_boundary(tokens, index, nested = 0, braces = 0) any^ {
     if (index >= len(tokens)) {index: index, kind: "end"}
@@ -788,26 +795,79 @@ fn math_matrix_boundary(tokens, index, braces = 0, environments = 0) any^ {
             braces + if (opening(token)) 1 else if (closing(token)) -1 else 0,environments)
     }
 }
-fn math_matrix_items(tokens, index = 0, items = []) any^ {
+fn math_matrix_items(tokens, index = 0, items = [], column = 0, text_columns = false) any^ {
     let boundary = math_matrix_boundary(tokens,index)^;
     if (boundary.issue != null) boundary
     else {
-        let cell = math_list(slice(tokens,index,boundary.index))^;
+        let parts = slice(tokens,index,boundary.index);
+        let cell = if (text_columns and column > 0) math_text_cell(parts)^ else math_list(parts)^;
         if (cell.issue != null) cell
         else if (boundary.kind == "end") {issue:null,items:[*items,*cell.items]}
         else if (boundary.kind == "column")
-            math_matrix_items(tokens,boundary.index + 1,[*items,*cell.items,'col_sep'])
+            math_matrix_items(tokens,boundary.index + 1,[*items,*cell.items,'col_sep'],column + 1,text_columns)
         else {
             let at = math_nonspace(tokens,boundary.index + 1)^;
-            let opt = read_optional(tokens,at)^;
+            let opt = math_optional(tokens,at)^;
             if (opt.issue == "latex-digest-unclosed-optional")
-                math_matrix_items(tokens,at,[*items,*cell.items,'row_sep'])
+                math_matrix_items(tokens,at,[*items,*cell.items,'row_sep'],0,text_columns)
             else if (opt.issue != null) opt
             else {
                 let separator = if (opt.present) <row_sep gap:group_text(opt)> else 'row_sep';
-                math_matrix_items(tokens,opt.end,[*items,*cell.items,separator])
+                math_matrix_items(tokens,opt.end,[*items,*cell.items,separator],0,text_columns)
             }
         }
+    }
+}
+
+fn math_cd_boundary(tokens, index, depth = 0, direction = null) any^ {
+    if (index >= len(tokens)) index
+    else {
+        let token = tokens[index];
+        let matches = depth == 0 and token.kind == "char" and
+            (if (direction == null) token.value == "@" and index + 1 < len(tokens) else token.value == direction);
+        let row = direction == null and depth == 0 and control(token,"\\");
+        if (matches or row) index
+        else math_cd_boundary(tokens,index + 1,depth + if (opening(token)) 1 else if (closing(token)) -1 else 0,direction)
+    }
+}
+fn math_cd_label(tokens,index,direction) any^ {
+    let end = math_cd_boundary(tokens,index,0,direction)^;
+    let body = math_list(slice(tokens,index,end))^;
+    if (body.issue != null) body
+    else {issue:null,index:if (end < len(tokens)) end + 1 else end,
+        value:<group *math_content(body.items)^>}
+}
+fn math_cd_items(tokens,index = 0,items = [],vertical_cell = false) any^ {
+    let at = math_nonspace(tokens,index)^;
+    if (at >= len(tokens)) {issue:null,items:items}
+    else if (control(tokens[at],"\\")) math_cd_items(tokens,at + 1,[*items,'row_sep'],false)
+    else if (tokens[at].kind == "char" and tokens[at].value == "@" and at + 1 < len(tokens)) {
+        let direction = tokens[at + 1].value;
+        let vertical = contains(["A", "V", "|"],direction);
+        let labeled = contains(["<", ">", "A", "V"],direction);
+        let upper = if (labeled) math_cd_label(tokens,at + 2,direction)^ else {issue:null,index:at + 2};
+        let lower = if (upper.issue != null) upper else if (labeled) math_cd_label(tokens,upper.index,direction)^
+            else {issue:null,index:upper.index};
+        if (lower.issue != null) lower
+        else {
+            let final_token = tokens[lower.index - 1];
+            let first = tokens[at];
+            let raw = if (first.output_text == null or first.output_start == null or final_token.output_end == null) null
+                else utf8.decode(slice(binary(first.output_text)^,first.output_start,final_token.output_end))^;
+            if (raw == null) unsupported(at,"CD arrow source mapping")
+            else {
+                let arrow = <cd_arrow direction:direction, *:if (labeled) {upper:upper.value,lower:lower.value} else {}, source:raw>;
+                let before = if (not vertical or vertical_cell) ['col_sep'] else [];
+                let second = if (vertical and vertical_cell) ['col_sep'] else [];
+                let after = if (vertical) [] else ['col_sep'];
+                math_cd_items(tokens,lower.index,[*items,*before,*second,arrow,*after],vertical)
+            }
+        }
+    }
+    else {
+        let end = math_cd_boundary(tokens,at)^;
+        let cell = math_list(slice(tokens,at,end))^;
+        if (cell.issue != null) cell else math_cd_items(tokens,end,[*items,*cell.items],vertical_cell)
     }
 }
 
@@ -871,6 +931,36 @@ fn math_text_content(bytes, tokens, base, index = 0, cursor = 0, text = "") any^
         if (literal) math_text_content(bytes,tokens,base,index + 1,end,
             text ++ utf8.decode(slice(bytes,cursor,start))^ ++ token.value)
         else math_text_content(bytes,tokens,base,index + 1,cursor,text)
+    }
+}
+
+fn math_text_node(name, source, content, items) any^ {
+    let nested = any([for (marker in ["\\", "$", "{", "~"]) contains(source, marker)]);
+    <text_command cmd:"\\" ++ name, content:content,
+        *:if (content != source) {content_raw:source} else {},
+        *:if (nested) {body:<text_group *items>} else {}>
+}
+fn math_text_cell_end(tokens, end) any^ =>
+    if (end > 0 and tokens[end - 1].kind == "char" and tokens[end - 1].cat == 10)
+        math_text_cell_end(tokens,end - 1) else end
+fn math_text_cell(tokens) any^ {
+    let start = math_nonspace(tokens,0)^;
+    let end = math_text_cell_end(tokens,len(tokens))^;
+    if (start >= end) {issue:null,items:[]}
+    else {
+        let first = tokens[start]; let final_token = tokens[end - 1];
+        if (first.output_text == null or first.output_start == null or final_token.output_end == null)
+            unsupported(start,"math text cell source mapping")
+        else {
+            let source = utf8.decode(slice(binary(first.output_text)^,first.output_start,final_token.output_end))^;
+            let parts = slice(tokens,start,end);
+            let body = math_text_items(parts)^;
+            if (body.issue != null) body
+            else {
+                let content = math_text_content(binary(source)^,parts,first.output_start)^;
+                {issue:null,items:[math_text_node("text",source,content,body.items)^]}
+            }
+        }
     }
 }
 
@@ -938,7 +1028,7 @@ fn math_environment(tokens, index) any^ {
                 let aligned = (ends_with(env, "*") or false) and (contains(env, "matrix") or false);
                 let arg = if ((pairs or columns) and header_at < len(tokens) and opening(tokens[header_at]))
                     read_group(tokens, header_at)^ else null;
-                let opt = if (aligned and arg == null) read_optional(tokens, header_at)^ else null;
+                let opt = if (aligned and arg == null) math_optional(tokens, header_at)^ else null;
                 if ((arg != null and arg.issue != null) or (opt != null and opt.issue != null))
                     unsupported(header_at, "math environment header")
                 else {
@@ -946,7 +1036,10 @@ fn math_environment(tokens, index) any^ {
                     let finish = math_environment_end(tokens, begin, env, 0, false)^;
                     if (finish.issue != null) finish
                     else {
-                        let body = math_matrix_items(slice(tokens, begin, finish.index))^;
+                        let text_columns = len(env) > 6 and ends_with(env,"cases*");
+                        let body_tokens = slice(tokens, begin, finish.index);
+                        let body = if (env == "CD") math_cd_items(body_tokens)^
+                            else math_matrix_items(body_tokens,0,[],0,text_columns)^;
                         if (body.issue != null) body
                         else {
                             let attrs = if (arg != null and pairs) {pairs:group_text(arg)}
@@ -964,10 +1057,8 @@ fn math_environment(tokens, index) any^ {
 }
 
 // These native special forms must not be mistaken for generic commands.
-fn math_unported_special(name) => contains(["Braket", "Set", "above", "allowbreak", "angl", "anglk", "angln", "anglr",
-    "atop", "bcancel", "brace", "brack", "cancel", "cancelto", "ce", "choose", "class", "cssId", "hdashline", "hline",
-    "hskip", "hspace", "htmlData", "kern", "mathreflectbox", "middle", "mkern", "newline", "nicefrac", "nobreak",
-    "nonumber", "notag", "over", "phase", "pmb", "pu", "right", "sfrac", "sout", "substack", "vskip", "vspace", "xcancel"], name)
+fn math_unported_special(name) => contains(["above", "angl", "anglk", "angln", "anglr",
+    "atop", "brace", "brack", "choose", "class", "cssId", "htmlData", "middle", "over", "right", "substack"], name)
 
 fn math_command(tokens, index) any^ {
     let name = tokens[index].value;
@@ -984,10 +1075,26 @@ fn math_command(tokens, index) any^ {
         {issue: null, index: index + 1, value: 'row_sep'}
     else if (contains([",", ":", ";", "!", "quad", "qquad"], name))
         {issue: null, index: index + 1, value: <space_command value:"\\" ++ name>}
+    else if (contains(["hspace", "vspace", "hskip", "vskip", "kern", "mkern"], name)) {
+        let dimension = math_dimension_argument(tokens,index + 1)^;
+        if (dimension.issue != null) dimension
+        else {issue:null,index:dimension.index,value:<space_command cmd:"\\" ++ name,value:dimension.value>}
+    }
     else if (name == "limits" or name == "nolimits")
         {issue: null, index: index + 1, value: symbol(name)}
     else if (name == "begin") math_environment(tokens, index)
     else if (name == "end") {issue:null, index:index + 1, value:<malformed_end>}
+    else if (contains(["nonumber", "notag", "nobreak", "allowbreak", "newline"], name))
+        {issue:null,index:index + 1,value:<layout_control cmd:"\\" ++ name>}
+    else if (name == "hline" or name == "hdashline")
+        {issue:null,index:index + 1,value:<array_rule cmd:"\\" ++ name>}
+    else if (name == "Set" or name == "Braket") {
+        let body = math_script_arg(tokens,index + 1)^;
+        if (body.issue != null) body
+        else {issue:null,index:body.index,value:<delimiter_group
+            left:if (name == "Set") "\\{" else "\\langle",
+            right:if (name == "Set") "\\}" else "\\rangle", body:body.value>}
+    }
     else if (name == "verb") {
         let parsed = verb_element(tokens[index], index, false)^;
         if (parsed.issue != null) parsed
@@ -1007,16 +1114,17 @@ fn math_command(tokens, index) any^ {
         if (arg.issue != null) arg
         else {issue:null, index:arg.index, value:<equation_tag starred:star, body:arg.value>}
     }
-    else if (contains(["text", "mbox", "hbox", "textrm", "textit", "textbf", "texttt", "textsf", "textsc", "emph"], name)) {
+    else if (name == "ce" or name == "pu") {
+        let source = math_dimension_argument(tokens,index + 1)^;
+        if (source.issue != null) source
+        else {issue:null,index:source.index,value:<chemistry cmd:"\\" ++ name,source:source.value>}
+    }
+    else if (tex_reader.math_text_command(name)) {
         let arg = math_text_argument(tokens, index + 1)^;
         if (arg.issue != null) arg
         else if (arg.source == null) unsupported(index, "math text command argument")
         else {
-            let nested = any([for (marker in ["\\", "$", "{", "~"]) contains(arg.source, marker)]);
-            let body = if (nested) <text_group *arg.items> else null;
-            {issue:null, index:arg.index, value:<text_command cmd:"\\" ++ name, content:arg.content,
-                *:if (arg.content != arg.source) {content_raw:arg.source} else {},
-                *:if (body != null) {body:body} else {}>}
+            {issue:null, index:arg.index, value:math_text_node(name,arg.source,arg.content,arg.items)^}
         }
     }
     else if (contains(["rm", "it", "bf", "sf", "tt", "cal"], name))
@@ -1027,10 +1135,10 @@ fn math_command(tokens, index) any^ {
         if (offset.issue != null) offset
         else if (name == "raisebox" and offset.source == null) unsupported(index, "raisebox dimension")
         else {
-            let first = if (name == "raisebox") read_optional(tokens, math_nonspace(tokens, offset.index)^)^
+            let first = if (name == "raisebox") math_optional(tokens, math_nonspace(tokens, offset.index)^)^
                 else {issue:null, present:false, end:offset.index};
             let second = if (first.issue == null and first.present)
-                read_optional(tokens, math_nonspace(tokens, first.end)^)^ else {issue:null, present:false, end:offset.index};
+                math_optional(tokens, math_nonspace(tokens, first.end)^)^ else {issue:null, present:false, end:offset.index};
             let body = if (first.issue != null) first else if (second.issue != null) second
                 else math_text_argument(tokens, second.end)^;
             if (body.issue != null) body
@@ -1040,9 +1148,17 @@ fn math_command(tokens, index) any^ {
                 *:if (second.present) {depth:group_text(second)} else {}, body:body.value>}
         }
     }
+    else if (contains(["mathreflectbox", "cancel", "bcancel", "xcancel", "cancelto", "sout", "pmb", "phase"], name)) {
+        let label = if (name == "cancelto") math_script_arg(tokens,index + 1)^
+            else {issue:null,index:index + 1};
+        let body = if (label.issue != null) label else math_script_arg(tokens,label.index)^;
+        if (body.issue != null) body
+        else {issue:null,index:body.index,value:<box_transform cmd:"\\" ++ name,
+            *:if (name == "cancelto") {value:label.value} else {},body:body.value>}
+    }
     else if (contains(["phantom", "hphantom", "vphantom", "smash"], name)) {
         let at = math_nonspace(tokens, index + 1)^;
-        let opt = if (name == "smash") read_optional(tokens, at)^ else {issue:null, present:false, end:at};
+        let opt = if (name == "smash") math_optional(tokens, at)^ else {issue:null, present:false, end:at};
         if (opt.issue != null) opt
         else {
             let arg = math_script_arg(tokens, opt.end)^;
@@ -1053,7 +1169,7 @@ fn math_command(tokens, index) any^ {
     }
     else if (contains(["bbox", "boxed", "fbox", "llap", "rlap", "clap", "mathllap", "mathrlap", "mathclap"], name)) {
         let at = math_nonspace(tokens,index + 1)^;
-        let opt = if (name == "bbox") read_optional(tokens,at)^ else {issue:null,present:false,end:at};
+        let opt = if (name == "bbox") math_optional(tokens,at)^ else {issue:null,present:false,end:at};
         let content = if (opt.issue != null) opt else math_script_arg(tokens,opt.end)^;
         if (content.issue != null) content
         else {issue:null,index:content.index,value:<box_command cmd:"\\" ++ name,
@@ -1061,7 +1177,7 @@ fn math_command(tokens, index) any^ {
             content:content.value>}
     }
     else if (contains(["color", "textcolor", "colorbox"], name)) {
-        let opt = read_optional(tokens,math_nonspace(tokens,index + 1)^)^;
+        let opt = math_optional(tokens,math_nonspace(tokens,index + 1)^)^;
         let at = if (opt.issue == null) math_nonspace(tokens,opt.end)^ else index;
         let raw = if (opt.issue != null) opt else if (at < len(tokens) and opening(tokens[at]))
             math_dimension_argument(tokens,at)^ else {issue:null,value:null};
@@ -1096,7 +1212,7 @@ fn math_command(tokens, index) any^ {
     }
     else if (contains(["frac", "dfrac", "tfrac", "cfrac", "binom", "dbinom", "tbinom"], name)) {
         let at = math_nonspace(tokens,index + 1)^;
-        let opt = if (name == "cfrac") read_optional(tokens,at)^ else {issue:null, present:false, end:at};
+        let opt = if (name == "cfrac") math_optional(tokens,at)^ else {issue:null, present:false, end:at};
         let args = if (opt.issue != null) opt else math_arguments(tokens, opt.end, 2)^;
         if (args.issue != null) args
         else {
@@ -1107,6 +1223,16 @@ fn math_command(tokens, index) any^ {
                     numer:args.items[0], denom:args.items[1]>;
             {issue:null, index:args.index, value:value}
         }
+    }
+    else if (name == "nicefrac" or name == "sfrac") {
+        let options = math_optional(tokens,math_nonspace(tokens,index + 1)^)^;
+        let numer = if (options.issue != null) options else math_script_arg(tokens,options.end)^;
+        let separator = if (numer.issue != null) numer else math_optional(tokens,math_nonspace(tokens,numer.index)^)^;
+        let sep = if (separator.issue != null or not separator.present) separator else math_atoms(separator.tokens)^;
+        let denom = if (sep.issue != null) sep else math_script_arg(tokens,separator.end)^;
+        if (denom.issue != null) denom
+        else {issue:null,index:denom.index,value:<fraction cmd:"\\" ++ name,numer:numer.value,denom:denom.value,
+            *:if (separator.present) {separator:<brack_group *math_content(sep.items)^>} else {}>}
     }
     else if (name == "genfrac") {
         let left = math_delimiter_token(tokens, index + 1, false, true)^;
@@ -1138,7 +1264,7 @@ fn math_command(tokens, index) any^ {
     else if (contains(["xrightarrow", "xleftarrow", "xleftrightarrow", "xRightarrow", "xLeftarrow",
         "xLeftrightarrow", "xhookrightarrow", "xhookleftarrow", "xtwoheadrightarrow", "xtwoheadleftarrow",
         "xmapsto", "xrightleftharpoons", "xleftrightharpoons", "xrightleftarrows", "xrightequilibrium", "xleftequilibrium"], name)) {
-        let opt = read_optional(tokens, math_nonspace(tokens,index + 1)^)^;
+        let opt = math_optional(tokens, math_nonspace(tokens,index + 1)^)^;
         let lower = if (opt.issue != null or not opt.present) opt else math_atoms(opt.tokens)^;
         let upper = if (lower.issue != null) lower else math_script_arg(tokens, opt.end)^;
         if (upper.issue != null) upper
@@ -1239,7 +1365,7 @@ fn math_command(tokens, index) any^ {
     }
     else if (name == "sqrt") {
         let at = math_nonspace(tokens, index + 1)^;
-        let opt = read_optional(tokens, at)^;
+        let opt = math_optional(tokens, at)^;
         if (opt.issue != null) opt
         else {
             let degree = if (opt.present) math_atoms(opt.tokens)^ else {issue: null, items: []};
@@ -1437,6 +1563,16 @@ fn math_infix_index(tokens, index = 0, depth = 0) any^ {
         else math_infix_index(tokens,index + 1,depth + if (opening(token)) 1 else if (closing(token)) -1 else 0)
     }
 }
+
+// The lexer normalizes source whitespace to one space token; retain the
+// original line endings when validating reconstructed math bytes.
+fn math_reconstructed_literal(token) any^ {
+    if (token.cat != 10) reconstructed_literal(token)
+    else {
+        let raw = utf8.decode(slice(binary(token.output_text)^,token.output_start,token.output_end))^;
+        len(raw) > 0 and all([for (c in split(raw, "")^) contains([" ","\t","\r","\n",chr(11),chr(12)],c)])
+    }
+}
 fn math_list(tokens) any^ {
     let at = math_infix_index(tokens)^;
     if (at == null) math_atoms(tokens)
@@ -1474,7 +1610,7 @@ fn math_element(tokens, sources, index) any^ {
         // mapped math must agree with native lexical categories as well as bytes.
         let reconstructed = mapped and all([for (i in (index to close.end - 1)^)
             tokens[i].output_start != null and tokens[i].output_end != null and reconstructed_token(tokens[i])^ and
-            (tokens[i].kind != "char" or (reconstructed_literal(tokens[i])^ and
+            (tokens[i].kind != "char" or (math_reconstructed_literal(tokens[i])^ and
                 ((tokens[i].value == "^") == (tokens[i].cat == 7)) and
                 ((tokens[i].value == "_") == (tokens[i].cat == 8)))) and
             (i == index or (tokens[i - 1].output_end != null and tokens[i].output_start >= tokens[i - 1].output_end and
@@ -3447,10 +3583,11 @@ fn parse_environment(tokens, sources, index, environment) any^ {
     let arg = read_group(tokens, index + 1)^;
     if (arg.issue != null) arg
     else if (not plain_group(arg) or token.direct != true or arg.direct != true or
-        special_environment(group_text(arg))^ or
         (group_text(arg) == "document" and environment != null)) unsupported(index, "environment")
-    else if (contains(["equation", "equation*", "align", "align*"], group_text(arg)))
+    else if (contains(["equation", "equation*", "align", "align*", "alignat", "alignat*",
+        "gather", "gather*", "multline", "multline*", "eqnarray", "eqnarray*", "IEEEeqnarray", "IEEEeqnarray*"], group_text(arg)))
         parse_math_environment(tokens, sources, index, arg)
+    else if (special_environment(group_text(arg))^) unsupported(index, "environment")
     else {
         let name = group_text(arg);
         let header = if (list_environment(name)) list_header(tokens, sources, arg)^
