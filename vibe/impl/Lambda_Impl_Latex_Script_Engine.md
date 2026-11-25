@@ -34,6 +34,15 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Raw-environment matrix, 2026-11-26:** The timed-out matrix repeatedly
+  initialized the same kernel for each input. It now constructs one immutable
+  preload for each of its two exact configurations and retains every source,
+  comparison and expected result. The unchanged golden passes the original
+  GTest limit and passes interpreter and JIT with forced GC and poisoning
+  (D6.4.2, D10.2.2v2). As with other migrated tests, comparisons through
+  `parse` now exercise Script on both sides; they are not independent native
+  parity evidence.
+
 - **Raw title and inline code, 2026-11-26:** Script now preserves the six
   titling hook arguments as raw code, including environment boundaries that
   close in a later hook. Inline raw commands containing `%` are accepted when

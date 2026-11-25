@@ -2,14 +2,17 @@ import profile: lambda.doc.latex.tex_engine.profile
 import digest: lambda.doc.latex.tex_engine.digest
 import reconstruct: lambda.doc.latex.tex_engine.reconstruct
 let kernel=input(sys.lambda.home ++ "/package/doc/latex/tex_engine/kernel.tex","text")^;
+fn options(mode) => {echo_definitions:true,constructor_argument_mode:mode,
+    adapters:[],resources:{local:{},bundled:{}}}
+// The matrix shares an immutable kernel for each exact configuration.
+let preloads=[for(mode in [false,true])profile.preload_kernel(kernel,options(mode),100000)^];
 let names=["tikzpicture","verbatim","lstlisting","minted","alltt","Verbatim","BVerbatim","LVerbatim",
     "SaveVerbatim","VerbatimOut","fancyvrb","comment","filecontents","filecontents*","luacode","luacode*"];
 fn check(name,body,mode) any^ {
  let header=if(name=="tikzpicture") " [scale=2]" else if(name=="lstlisting") "[language=X]"
     else if(name=="filecontents" or name=="filecontents*") "{out.tex}" else "";
  let source="\\begin{document}A\\begin{" ++ name ++ "}" ++ header ++ body ++ "\\end{" ++ name ++ "}B\\end{document}";
- let r=profile.expand_with_kernel(source,kernel,{echo_definitions:true,constructor_argument_mode:mode,
-    adapters:[],resources:{local:{},bundled:{}}},100000)^;
+ let r=profile.expand_with_kernel(source,kernel,options(mode),100000,preloads[if(mode)1 else 0])^;
  let d=digest.digest(r)^;let n=parse(source,{type:"latex"})^;let t=parse(source,{type:"tex"})^;
  {issue:d.issue,tree:d.ast==n,text:reconstruct.reconstruct(r)^.text==t.text,diagnostics:r.diagnostic_records==t.diagnostics}
 }
@@ -21,8 +24,7 @@ let unsafe=["\\begin{document}\\begin{tikzpicture}X% \\end{tikzpicture}\nY\\end{
  "\\def\\name{tikzpicture}\\begin{document}\\begin{\\name}X\\end{tikzpicture}Z\\end{document}",
  "\\let\\go\\begin\\begin{document}\\go{verbatim}X\\end{verbatim}Z\\end{document}"];
 fn guarded(source,mode) any^ {
- let r=profile.expand_with_kernel(source,kernel,{echo_definitions:true,constructor_argument_mode:mode,
-    adapters:[],resources:{local:{},bundled:{}}},100000)^;
+ let r=profile.expand_with_kernel(source,kernel,options(mode),100000,preloads[if(mode)1 else 0])^;
  let d=digest.digest(r)^;let n=parse(source,{type:"tex"})^;
  {guard:d.issue=="latex-digest-unsupported",text:reconstruct.reconstruct(r)^.text==n.text,
     diagnostics:r.diagnostic_records==n.diagnostics}
