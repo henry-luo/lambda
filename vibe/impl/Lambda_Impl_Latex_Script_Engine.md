@@ -34,6 +34,16 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Nested math alignment, 2026-11-26:** The amsmath adapter now tracks nested
+  environments when it splits rows and cells and when it extracts outer-row
+  annotations (D10.2.2v2). An aligned or split environment is therefore passed
+  intact to the existing math parser and typesetter. The scientific-writing
+  sample now matches all six corpus fields; the new fixture checks nested
+  separators, annotation ownership, numbering and rendered cells. It passes
+  focused GTest and forced-GC interpreter/JIT runs; the existing amsmath and
+  phase-five math tests also pass. Semantic-inference and the corpus timeout
+  remain open.
+
 - **Raw adapter arguments, 2026-11-26:** The Script engine now installs the
   host's raw-constructor registry after kernel preload and copies balanced
   arguments and math spans without expanding them. Constructor aliases emit

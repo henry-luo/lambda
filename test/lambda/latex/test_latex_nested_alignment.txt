@@ -1,0 +1,16 @@
+"unsupported:"
+[]
+"numbered rows:"
+2
+"equation numbers:"
+1
+"nested cells:"
+8
+"row boundaries:"
+[{
+    math: "a&=\\begin{aligned}b\\tag{N}&=c\\\\d&=e\\end{aligned}",
+    tag: "X"
+  }, {
+    math: "f&=g",
+    tag: null
+  }]
