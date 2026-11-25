@@ -49,7 +49,13 @@ The existing native engine design and historical Phase IV work are in
   direct parser; `digest.ls` already owns the corresponding Script math atom
   parser. Expose and qualify that parser for a runtime math entry point before
   migrating embedded markup math and removing the native engines (D10.2.2v2,
-  D9.1.3v2).
+  D9.1.3v2). A scratch probe using the shared reader and atom parser matched
+  the native AST for nine of eleven simple formulas, including scripts,
+  fractions, radicals, Unicode, and delimiters. It reported unsupported for
+  spacing `\\,` and `\\text{...}`. This is evidence for reuse, not an admission
+  policy or production fallback; definitions, recovery, source mapping and
+  the full math fixtures remain to qualify. See
+  `temp/latex-retirement/math-probe/out.txt` (S1.8).
 
 - **HTTP Path and document base, 2026-11-25:** HTTP Path input now shares the
   URL renderer used by other target consumers, encoding each NameKey and
