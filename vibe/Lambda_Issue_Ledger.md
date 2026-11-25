@@ -52,6 +52,106 @@ Focused sources and tier outputs are under `temp/formal_semantics_audit_20261124
 
 Fixed in the working tree and archived. See the
 [resolution and verification](<Lambda_Issue_Ledger (fixed).md#lr12-72>).
+## Online wrapping-flex alignment and current Clay qualification — 2026-11-25
+
+Radiant's [RI-236](<Radiant_Issue_Ledger (fixed).md#ri-236>) removes a wrapping-only
+cross-width override that misplaced non-stretched nested flex children
+(**D9.1.3v2**). Fourteen native checks, fourteen Chromium controls and layout
+integer-cast lint pass. Gladia's action container centers again; its large
+Canvas background and action text/filter rendering remain high-severity work.
+
+A current matched Clay capture shows the complete pricing page and clears its
+major review. Its authored 4000ms anti-flicker gate is covered by the generic
+elapsed-load policy (**D10.1.7**, [JS13-L73](jube/JS_Issue_Ledger.md#js13-l73)).
+Focused frozen/elapsed controls reproduce hidden/visible outcomes without
+changing the 1000ms post-load window. Both reported null-selector startup errors
+also occur in Chromium; no guest-code change is assigned to them. Inventory
+becomes **82 high, zero critical, 985 low**. Remote's deadline failure is not
+promoted. No broad baseline is repeated for this focused change after the
+preceding dynamic milestone. [Evidence](../test/online/comparison/repairs.html#round-187).
+
+## Online indexed frame publication — fixed 2026-11-25
+
+Gladia's fingerprinting SDK selected `self[index]` after inserting an iframe.
+Missing numeric Window properties and stale frame metadata made it fall back
+to the main window, where its media-query probes replaced the page body.
+The existing publisher now exposes child indices and refreshes affected frame
+collections after structural edits (**D8.4.4 / D9.5.6v2**). Full WindowProxy and
+cross-origin realm behavior remain outside this bounded repair.
+
+Four regressions fail before repair. All four native checks, four Chromium
+controls and four existing document-stream checks pass. One accumulated dynamic
+baseline passes **630/630**. The normal capture restores the heading, copy,
+navigation and announcement; error against the same reference falls from
+77.55% to 10.78%. The large Canvas background and primary-action placement
+remain major, so Gladia stays high. Inventory remains 83 high; no page clearance
+is claimed. [JS13-L76](jube/JS_Issue_Ledger.md#js13-l76) owns the detailed record.
+[Evidence](../test/online/comparison/repairs.html#round-186).
+
+## Online capture load clock and document stream identity — fixed 2026-11-25
+
+Explicit-window online captures now let JavaScript time advance during loading,
+then retain the selected virtual frame for settlement/export (**D10.1.7**).
+Timer migration preserves deadlines, order, cancellation and references. A
+separate document-open defect returned the main document after opening a foreign
+document, causing chained writes to escape into the parent; the existing
+canonical wrapper helper now returns the receiver (**D8.4.4 / D9.5.6v2**).
+
+The clock reduction fails on the preceding renderer; 49 focused capture checks,
+two timer unit checks, four document-stream checks and four Chromium stream
+controls pass. No additional broad baseline follows the recent 630/630 dynamic
+milestone. The online inventory remains under review; no major clearance is
+claimed. Ownership and limitations are recorded in
+[JS13-L73](jube/JS_Issue_Ledger.md#js13-l73),
+[JS13-L74](jube/JS_Issue_Ledger.md#js13-l74) and the cross-origin storage-frame
+gap [JS13-L75](jube/JS_Issue_Ledger.md#js13-l75).
+[Evidence](../test/online/comparison/repairs.html#round-185).
+
+## Online generator module context — fixed 2026-11-25
+
+[JS05-L9](jube/JS_Issue_Ledger.md) restores a lazy generator's defining
+module before its first resume. Imported async helpers previously made the
+body read their own module slots, turning Maple's private-brand WeakSet into
+an unrelated function. The existing activation mechanism preserves the
+correct selector across later parks (**D8.4.4 / D6.1.1v3**).
+Twelve new AST/MIR cases, six Chromium controls, six existing generator/module
+checks and the 630/630 dynamic milestone pass. Maple's initialization errors
+disappear; its consent overlay and Anam's headline remain unresolved. The
+large-difference inventory stays at83 high; no page clearance is claimed.
+[Evidence](../test/online/comparison/repairs.html#round-184).
+
+## Online comparison HTTP profile mismatch — fixed 2026-11-25
+
+The online harness let Chromium send its default `HeadlessChrome` HTTP user
+agent while Lambda used the shared browser-compatible input HTTP profile
+(**D9.1.1v4 / D9.1.3v2**). Fable serves the former a Prerender.io document
+with empty Emotion style elements and no executable application scripts.
+The latter receives the working application. The large comparison difference
+therefore compared different server documents, rather than two renders of
+the same application.
+
+`capture_snapshots.cjs` now reads `RADIANT_HTTP_CLIENT_USER_AGENT` from the
+selected input owner and applies it to Chromium request headers. Chromium's
+navigator identity remains its own. The actual HTTP profile is recorded in
+the browser log, capture CSV and comparison metadata; older rows remain
+unqualified for that field. No domain branch or copied user-agent literal
+is added. URLs and the 1000ms post-load window remain unchanged (**D10.1.7**).
+
+The local wire-header test fails with only that override removed. All sixteen
+capture-harness tests pass after repair, including unchanged navigator identity,
+input-root selection, redirects, rejected responses, frame timing and retries.
+Fable's fresh matching-profile pair has no major omission and clears high.
+Its previous browser reference is retained in comparison history; other browser
+references remain intact. Evidence: `temp/online-visual-round208/`, especially
+`capture-ua-before.log`, `capture-tests-after.log`, `fable-styles/`,
+`ua-aligned/browser/saas_landing_294/` and the round183 comparison report.
+
+The optional `LAMBDA_JS_ERROR_SOURCE_TRACE` diagnostic also records retained
+AST spans for otherwise generic host errors, without evaluating guest properties.
+Four focused checks cover disabled settings, bounded output and preserved
+exception behavior (**D8.4.4**). It does not change guest error objects or
+qualify missing Intl/ListFormat and font-loading APIs.
+
 ## Shadow-positioned ancestry and recovered startup frames — 2026-11-24
 
 Native [RI-227](<Radiant_Issue_Ledger (fixed).md#ri-227>) repairs initial

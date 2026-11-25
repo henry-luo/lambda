@@ -7,7 +7,8 @@ const puppeteer = require('puppeteer');
 const {pngLibrary} = require('./compare_snapshots.cjs');
 const {parseCsv, serializeCsv} = require('../../utils/online_pages.cjs');
 const {defaultRenderTimeoutMs, selectWork, readLambdaDiagnostics,
-    captureBrowser, runLambdaRender, parseOptions, hasPng, promoteSnapshot} = require('./capture_snapshots.cjs');
+    captureBrowser, runLambdaRender, parseOptions, hasPng, promoteSnapshot,
+    nativeHttpUserAgent, updateRow} = require('./capture_snapshots.cjs');
 
 const root = path.resolve(__dirname, '../..');
 fs.mkdirSync(path.join(root, 'temp'), {recursive: true});
@@ -21,7 +22,11 @@ let origin;
 
 before(async () => {
     server = http.createServer((request, response) => {
-        if (request.url === '/denied') {
+        if (request.url === '/identity') {
+            response.writeHead(200, {'Content-Type': 'text/html'}).end(
+                '<script>document.title=JSON.stringify({http:' + JSON.stringify(request.headers['user-agent']) +
+                ',navigator:navigator.userAgent})</script><body>profile</body>');
+        } else if (request.url === '/denied') {
             response.writeHead(403, {'Set-Cookie': 'private=value', 'Server': 'local-origin'}).end('denied');
         } else if (request.url === '/http-redirect') {
             response.writeHead(302, {'Location': '/denied'}).end();
@@ -73,6 +78,32 @@ test('loaded pages with recurring network traffic still produce a browser PNG', 
     assert.equal(result.status, 200);
     assert.equal(result.timeoutMs, 2500);
     assert.equal(hasPng(output), true);
+});
+
+test('browser requests share the native HTTP user-agent without changing navigator', async () => {
+    const diagnosticPath = path.join(scratch, 'identity.json');
+    const result = await captureBrowser(browser, {url: `${origin}/identity`},
+        path.join(scratch, 'identity.png'), {navigationTimeoutMs: 2500}, diagnosticPath);
+    assert.equal(result.ok, true, result.error);
+    const diagnostic = JSON.parse(fs.readFileSync(diagnosticPath));
+    const identity = JSON.parse(diagnostic.document.title);
+    assert.equal(identity.http, nativeHttpUserAgent(root));
+    assert.equal(identity.navigator, await browser.userAgent());
+    assert.equal(result.httpUserAgent, identity.http);
+    assert.equal(diagnostic.httpUserAgent, identity.http);
+    const row = {};
+    updateRow(row, 'browser', result);
+    assert.equal(row.browser_http_user_agent, identity.http);
+});
+
+test('native HTTP profile follows the selected input owner', () => {
+    const inputRoot = path.join(scratch, 'selected-input');
+    fs.mkdirSync(path.join(inputRoot, 'lambda/network'), {recursive: true});
+    const header = path.join(inputRoot, 'lambda/network/http_client.h');
+    fs.writeFileSync(header, '#define RADIANT_HTTP_CLIENT_USER_AGENT \\\n    "fixture/1.0 " \\\n    "profile"\n');
+    assert.equal(nativeHttpUserAgent(root, {LAMBDA_INPUT_ROOT: inputRoot}), 'fixture/1.0 profile');
+    fs.writeFileSync(header, '#define RADIANT_HTTP_CLIENT_USER_AGENT unsupported\n');
+    assert.throws(() => nativeHttpUserAgent(root, {LAMBDA_INPUT_ROOT: inputRoot}), /HTTP user-agent/);
 });
 
 test('an HTTP rejection cannot become a successful page snapshot', async () => {
@@ -178,6 +209,9 @@ test('a failed-only retry refreshes a counterpart only when its capture window c
     assert.equal(work[0].lambda, true, 'legacy animation origin also requires recapture');
     row.lambda_animation_origin = 'post-load';
     work = selectWork(pages, previous, options, scratch);
+    assert.equal(work[0].lambda, true, 'legacy script load clock also requires recapture');
+    row.lambda_script_load_clock = 'elapsed';
+    work = selectWork(pages, previous, options, scratch);
     assert.equal(work[0].lambda, false, 'matching successful side stays reusable');
     assert.equal(work[0].browser, true);
     row.lambda_settle_ms = '';
@@ -223,4 +257,14 @@ test('parent deadline follows the engine watchdog and online launcher grace cons
         '#define ONLINE_VIEW_CLEANUP_GRACE_SECONDS 3\n');
     assert.equal(defaultRenderTimeoutMs(configRoot, {}), 12000);
     assert.equal(defaultRenderTimeoutMs(configRoot, {LAMBDA_JS_EXEC_TIMEOUT_SECONDS: '99'}), 22000);
+});
+
+test('load clock policy is recorded and rejects unknown modes', () => {
+    const options = parseOptions(['--settle-ms=1000'],root,{});
+    assert.equal(options.loadClock,'elapsed');
+    assert.equal(parseOptions([],root,{LAMBDA_CAPTURE_LOAD_CLOCK:'frozen'}).loadClock,'frozen');
+    assert.throws(()=>parseOptions([],root,{LAMBDA_CAPTURE_LOAD_CLOCK:'bad'}), /load clock/);
+    const row={};
+    updateRow(row,'lambda',{elapsedMs:1,scriptLoadClock:'elapsed'});
+    assert.equal(row.lambda_script_load_clock,'elapsed');
 });

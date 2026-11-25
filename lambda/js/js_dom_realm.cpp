@@ -937,6 +937,32 @@ static Item _window_document_getter(Item, Item receiver, Item*, int, uint64_t*) 
     return js_get_document_object_value();
 }
 
+static Item _window_location_getter(Item, Item receiver, Item*, int, uint64_t*) {
+    if (!_window_receiver(receiver))
+        return js_throw_type_error("Illegal Window.location receiver");
+    return dom_location_for_document(js_get_document_object_value());
+}
+
+static Item _window_location_setter(Item, Item receiver, Item* args, int argc, uint64_t*) {
+    if (!_window_receiver(receiver))
+        return js_throw_type_error("Illegal Window.location receiver");
+    JS_ROOTS(roots, value, argc ? args[0] : make_js_undefined(),
+        location, dom_location_for_document(js_get_document_object_value()));
+    JS_RETURN_IF_ERROR(location.get());
+    // the PutForwards setter writes href without replacing the Window's Location object.
+    return js_set_key_cstr(location.get(), "href", value.get());
+}
+
+extern "C" void dom_install_window_location_global(Item global) {
+    JS_ROOTS(roots, target, global,
+        getter, js_new_native_payload_function(_window_location_getter, 0, 0),
+        setter, js_new_native_payload_function(_window_location_setter, 0, 1));
+    js_set_function_name(getter.get(), js_name_item("get location"));
+    js_set_function_name(setter.get(), js_name_item("set location"));
+    js_install_native_accessor(target.get(), js_name_item("location"),
+        getter.get(), setter.get(), JSPD_NON_CONFIGURABLE);
+}
+
 static void* _media_receiver(Item receiver) {
     void* element = _element_receiver(receiver) ? dom_unwrap_element(receiver) : nullptr;
     const char* name = element ? dom_html_interface_name(element) : nullptr;
@@ -1658,6 +1684,10 @@ extern "C" void dom_install_collection_globals(void) {
     dom_install_html_button_properties(_iface_proto(global, "HTMLButtonElement"));
     dom_install_html_template_properties(_iface_proto(global, "HTMLTemplateElement"));
     js_dom_install_interface(global, "CanvasRenderingContext2D");
+    dom_publish_value_constructor(global, "ImageData",
+        js_new_native_body_constructor(dom_image_data_call, dom_image_data_construct, 2), true);
+    dom_canvas_install_readback_interface(js_get_key_cstr(global, "ImageData"),
+        _iface_proto(global, "ImageData"), _iface_proto(global, "CanvasRenderingContext2D"));
     dom_canvas_install_html_interface(_iface_proto(global, "HTMLCanvasElement"));
     _install_document_fragment_iface(global);
     _link_iface_proto(global, "DocumentFragment", "Node");
@@ -1909,16 +1939,27 @@ extern "C" void dom_install_window_dialog_globals(void) {
 
 extern "C" void dom_install_window_frames_global(void) {
     // The core answered "which frames"; this decides where a realm sees them.
-    RootFrame roots(1);
+    RootFrame roots(3);
     if (!roots.valid()) return;
     // publication can allocate property storage before frames becomes reachable.
     Rooted<Item> frames(roots, dom_collect_frame_windows_array());
-    Item length_item = (Item){.item = i2it(js_array_length(frames.get()))};
-    Item global = js_get_global_this();
-    js_set_key_cstr(global, "frames", frames.get());
-    js_set_key_cstr(global, "length", length_item);
+    Rooted<Item> global(roots, js_get_global_this()), key(roots, ItemNull);
+    int64_t count = js_array_length(frames.get());
+    int64_t previous = dom_update_window_frame_count(count);
+    Item length_item = (Item){.item = i2it(count)};
+    js_set_key_cstr(global.get(), "frames", frames.get());
+    js_set_key_cstr(global.get(), "length", length_item);
+    // frame indices follow tree order; retired slots must not select a detached browsing context.
+    for (int64_t index = 0; index < (count > previous ? count : previous); index++) {
+        key.set(js_to_property_key(js_property_index_key(index)));
+        if (index >= count) js_delete_property(global.get(), key.get());
+        else {
+            js_define_own_key_storage(global.get(), key.get(), frames.get().array->items[index]);
+            js_attr_set_writable(global.get(), key.get().get_chars(), key.get().get_len(), false);
+        }
+    }
 
-    Item window = js_get_key_cstr(global, "window");
+    Item window = js_get_key_cstr(global.get(), "window");
     if (get_type_id(window) == LMD_TYPE_MAP) {
         js_set_key_cstr(window, "frames", frames.get());
         js_set_key_cstr(window, "length", length_item);

@@ -3855,3 +3855,258 @@ frames refresh with their exact capture-release pins; browser references,
 URLs, history and 1061 other rows stay intact. Frame timing and source/deadline
 policies remain unchanged (**D9.1.1v4 / D9.1.3v2 / D10.1.7**).
 [Evidence and images](comparison/repairs.html#round-179). Goal remains active.
+
+
+Round180 repairs **JS13-L70**: `location.href`, `document.location`, bare
+`location` and `window.location` assignments use the existing navigation path;
+Window forwards through its stable Location object. All **35 focused native
+checks**, **19 Chromium controls** and a single **630/630 dynamic baseline**
+pass (**D6.3.3 / D8.4.4 / D9.5.6v2**). Studio follows its redirect but still
+exceeds 150 seconds during observer-driven layout; its failed frame is not
+promoted. The exact performance cause remains under investigation.
+
+Clay and Dimension clear their major reviews. Limitless, Prismic and Supabase
+retain large omissions or overlays; Prismic's stale missing-card review now
+describes its consent overlay, preserving history. Supabase's browser trace
+confirms the existing automatic Web Animations playback gap. Inventory is
+**86 high, zero critical, 981 low** (57 automatic and 29 manual-only).
+Five native frames refresh with exact release pins; browser references, URLs
+and 1062 other rows stay intact. No full static/runtime sweep or capture-policy
+change (**D10.1.7**). [Evidence and images](comparison/repairs.html#round-180).
+Goal remains active.
+
+
+Round181 fixes **JS13-L71**: XML/foreign `tagName` and `nodeName` preserve
+their qualified case; only HTML-namespace elements in an HTML document use
+uppercase. The native member adapter reuses the same operation. This restores
+AWS Docs' featured-content and getting-started sections, whose renderer
+dispatches on lowercase XML card names. **13 focused native checks** and
+**nine Chromium controls** pass; eight new cases failed before repair
+(**D8.4.4 / D9.5.4 / D9.5.6v2**).
+
+AWS clears, giving **85 high, zero critical, 982 low**. Only its successful
+native frame refreshes; references, URLs, annotations and 1066 other rows stay
+intact. Library of Congress currently returns403 in both engines; Testlio's
+native request profile encounters server self redirects, also reproduced in
+curl. Failed captures are not promoted. The preceding630/630 dynamic milestone
+is not repeated. Capture policy stays unchanged (**D10.1.7**).
+[Evidence and images](comparison/repairs.html#round-181). Goal remains active.
+
+
+Round182 fixes **JS13-L72**: MVP now publishes the existing native
+`console.trace`, which both Nolla and Monarch bind during startup. The rooted
+argument adapter preserves trace data without counter/timer label coercion.
+**Eight AST/MIR checks** and **four Chromium controls** pass; six cases failed
+before repair. No new stub or site condition (**D6.3.3 / D8.4.4**).
+
+Nolla's main page returns and clears. Monarch's interface/consent return, but
+its retained-reference video gap stays high. Cleanup remains blocked by the
+existing IndexedDB gap; deleting only IDBIndex in Chromium reproduces its
+fallback. Inventory is **84 high, zero critical, 983 low**. Three native frames
+refresh with exact pins; browser references, URLs, history and 1064 other rows
+stay intact. No additional baseline or capture-policy change (**D10.1.7**).
+[Evidence and images](comparison/repairs.html#round-182). Goal remains active.
+
+
+Round183 repairs a general **HTTP user-agent mismatch in the capture harness**.
+Fable sent Chromium's HeadlessChrome profile a broken prerendered document,
+while Lambda received the working app. New Chromium captures read the native
+HTTP profile from the selected input owner, preserve Chromium's navigator
+identity, and record the profile in logs/metadata (**D9.1.1v4 / D9.1.3v2**).
+The local wire test fails before repair; **16 capture tests**, **seven comparison
+checks** and **four optional source-diagnostic checks** pass afterward.
+
+Fable's matched pair clears: **1.90% mean error, 4.79% changed area**. Its browser
+reference refresh is explicit and the previous image is retained. Sierra's
+current error boundary is confirmed as missing **Intl.ListFormat (JS10-L3)**;
+its review stays high. Claude's title gate uses the recorded font-load lifecycle
+gap (**JS13-L33**). Inventory: **83 high, zero critical, 984 low**. Two native
+frames refresh with exact pins; only Fable's browser reference changes. URLs,
+1065 other report rows, review history, deadlines and the 1000ms capture window
+stay intact (**D10.1.7**). No baseline repeat for this focused harness repair.
+[Evidence and images](comparison/repairs.html#round-183). Goal remains active.
+
+
+Round184 fixes **JS05-L9**: a generator first resumed by an imported helper
+read the helper's module slots. The generator entry now activates its defining
+module using the existing helper; parked activations retain that selector
+(**D8.4.4 / D6.1.1v3**). Ten new checks fail before repair; **12 AST/MIR checks**,
+**six Chromium controls** and **six existing generator/module checks** pass
+afterward. One accumulated dynamic milestone passes **630/630**.
+
+Maple's reveal initialization errors disappear. Its direct before/after PNGs
+remain identical, and its missing large consent panel stays high. Anam's
+related pair is unchanged. Inventory remains **83 high, zero critical, 984 low**;
+no major page clearance is claimed. One final native frame refreshes, with
+browser references, URLs, history, 1066 other rows and capture policy preserved
+(**D10.1.7**). [Evidence](comparison/repairs.html#round-184). Goal remains active.
+
+
+Round185 fixes **JS13-L73**: explicit-window captures now let JavaScript time
+advance during loading, then freeze pending timers before the existing 1000ms
+settling interval. CSS excludes load time; authored pauses remain intact.
+Deadlines, order, cancellation and timer references survive migration, and
+Date/performance remain continuous (**D10.1.7 / D8.4.4**). New metadata records
+the script load clock without relabeling historical captures. The maintained
+reduction fails before repair; **49 focused capture checks** and **two timer
+unit checks** pass. No broad baseline repeats after the recent 630/630 milestone.
+
+**JS13-L74** repairs `other.open().write(...)` returning and writing into the
+main document. The existing wrapper helper now returns the receiving detached
+or iframe document (**D8.4.4 / D9.5.6v2**). Both chained regressions fail before
+repair; **four native checks** and **four Chromium controls** pass afterward.
+
+No major page clearance is claimed. Gladia's current blank viewport is identical
+under both clocks and unchanged by the document-open repair. Static and
+first-party-only reductions retain its heading; later initialization removes
+the content and remains under investigation. Its matched pair refreshes with
+both previous images retained. Cookiebot's cross-origin storage-frame gap is
+recorded as **JS13-L75**; both Lattice attempts time out and are not promoted.
+Inventory: **83 high, zero critical, 984 low**, severity sorted. Every URL,
+1066 other rows, history and deadlines stay intact.
+[Evidence](comparison/repairs.html#round-185). Goal remains active.
+
+
+Round186 fixes **JS13-L76**: missing `window[index]` frame properties made
+Gladia's fingerprinting SDK fall back to the main document and replace its
+body. The existing publisher now exposes frame indices, refreshes affected
+structural edits and retires stale slots, retaining existing wrapper ownership
+(**D8.4.4 / D9.5.6v2**). No tracker, application source or URL is special-cased.
+All four regressions fail before repair; **four native checks**, **four Chromium
+controls** and **four existing stream checks** pass. One accumulated dynamic
+baseline passes **630/630**, with no errors or skips.
+
+Gladia's navigation, headline, supporting copy and announcement return. Error
+against the same reference falls **77.55% → 10.78%**; the fresh experiment-variant
+reference gives **11.78%**. Its large Canvas background and primary-action
+placement remain major, so it stays high. Inventory remains **83 high, zero
+critical, 984 low**. One matched pair refreshes with both prior images retained;
+URLs, 1066 other rows, history and deadlines remain intact. The existing
+Window.frames array and full WindowProxy/origin semantics remain incomplete.
+[Evidence and images](comparison/repairs.html#round-186). Goal remains active.
+
+
+Round187 fixes **RI-236**: cross-axis alignment stretched wrapping row-flex
+children to the full parent width despite non-stretch alignment. Removing the
+override reuses the shared fit-content sizing rule (**D9.1.3v2**). Seven cases
+fail before repair; **14 native checks**, **14 Chromium controls** and layout
+integer-cast lint pass afterward. Gladia's action container centers again;
+its Canvas background and action text/filter rendering remain high-severity
+work. No broad baseline repeats after the preceding 630/630 dynamic milestone.
+
+**Clay clears high in the current pair:** complete navigation, heading, logos,
+billing controls and four pricing cards, at **10.30% mean error / 24.93% changed
+area**. Its authored 4000ms anti-flicker gate is covered by the elapsed-load
+policy (**JS13-L73 / D10.1.7**); **five focused timing checks** pass, including
+frozen/elapsed negative/positive controls and Chromium. Both null-selector
+errors also occur in Chromium. The current pair is qualified; the old live
+capture is not replayed as a unique-cause test. Remote times out and is not
+promoted. Inventory: **82 high, zero critical, 985 low**, severity sorted.
+Two pairs refresh with prior images retained; URLs and 1065 other rows remain
+intact. [Evidence](comparison/repairs.html#round-187). Goal remains active.
+
+
+Round188 repairs **JS13-L78**: document.fonts now uses the existing EventTarget
+factory, shared prototype and listener registry (**D8.4.4 / D6.3.3**). Three
+maintained regressions fail before and pass in native AST, MIR and Chromium;
+the actual SplitText bundle also passes a local split/callback/revert check
+after failing before. Primer's listener exception disappears, but its main
+navigation, heading, copy and textured artwork remain absent; it stays high.
+Full FontFaceSet identity, readiness and resource-generated events remain
+incomplete (JS13-L33). No ABI, vendor, capture budget or site-specific change.
+
+**Cape and Metronome clear high under accumulated repairs.** Cape's complete
+hero matches Chromium at **0.44% mean error / 0.86% changed area**. Metronome's
+blur overlay is gone under the elapsed-load policy (**JS13-L55 / JS13-L73 /
+D10.1.7**), restoring the hero, action, chart and consent bar at **6.56% /
+15.78%**. Historical Cape omissions are not uniquely assigned to this new
+listener repair. Ebury's main content now renders, but its large Iubenda panel
+is missing because **getImageData/ImageData are absent (JS13-L77)**. Removing
+only getImageData in Chromium reproduces the consent omission. Keep it high
+despite the lower score; adoptedStyleSheets remains a separate feature gap.
+
+Inventory: **80 high, zero critical, 987 low**, severity sorted. Four current
+matched pairs refresh with prior captures and review history retained; all
+URLs and 1063 other rows are preserved. Ease Health's automatic Web Animations
+and DecompressionStream dependencies and Draftbit's existing composite-mask
+gap remain outside this repair. Overpass's Chromium timeout is not promoted.
+Focused checks pass; no broad baseline repeats after the recent **630/630**
+dynamic milestone. See [round188](comparison/repairs.html#round-188).
+
+
+Round189 repairs **JS13-L77 / RI-237**: Canvas 2D `getImageData` now copies
+real native bitmap pixels into owned RGBA8/sRGB `ImageData`, with straight
+alpha and transparent out-of-bounds padding. ImageData's constructors,
+readonly branded getters, subclassing and precise intrinsic ownership reuse
+existing runtime mechanisms (**D9.5.1 / D9.5.6v2 / D6.3.3 / D9.1.3v2**).
+Existing pixel limits are shared without raising them. No new class ID,
+public RuntimeState layout, encoded-image round trip or vendor/site change.
+
+**Ebury clears high:** the main page and complete Iubenda consent panel now
+render in the ordinary matched pair, at **1.10% mean error /1.92% changed
+area**. The earlier Chromium delete-getImageData control reproduced the
+missing panel. Timing, user agent, admission and deadline policies are
+unchanged; the separate stylesheet-adoption exception remains. This does
+not qualify wide-gamut/float16 readback, createImageData/putImageData, real
+offscreen bitmaps, full origin taint tracking or other missing Canvas APIs.
+
+Ten initial groups fail before repair. **11 native AST**, **11 MIR** and
+**11 Chromium** readback groups pass, as do **14 existing native Canvas**
+transform/path groups and integer-cast lint. One accumulated dynamic layout
+baseline passes **630/630**, zero errors/skips. Four Node DSOs and metadata
+remain unchanged. No broad static or Lambda-language baseline repeats.
+Inventory: **79 high, zero critical, 988 low**, severity sorted. One matched
+pair refreshes with previous images and resolved review history preserved;
+all URLs and 1066 other rows are retained. See
+[round189](comparison/repairs.html#round-189).
+
+
+Round190 fixes **JS10-L4** and **JS13-L79**. Azure's main bundle rejected
+compact/percent options in the existing English NumberFormat implementation;
+CLDR patterns and decimal-position scaling now extend that formatter. Its
+subsequent browser check exposed existing FormData methods installed on
+instances instead of their prototype. Shared method publication and precise
+intrinsic registration now cover constructed and native-event FormData
+(**D8.4.4 / D6.3.3 / D7.2.2**). No site branch, guest feature override, new
+class ID or public RuntimeState layout change.
+
+**Azure, Banky and Aircall clear high**, with ordinary current mean error /
+changed area of **2.45% /7.85%**, **2.39% /4.65%** and **4.10% /13.63%**.
+Azure's two navigation rows return without the incorrect warning. Banky and
+Aircall's earlier blank frames predate accumulated repairs, so their resolution
+does not establish a unique cause. Localized card/text/spacing and rotating
+headline differences remain. **Cequence stays high**: missing Intl.PluralRules
+causes its application error, reproduced by removing only that API in Chromium
+(JS10-L2). Currency, broader locale data and Intl constructors remain gaps.
+
+**15 AST +15 MIR +15 Chromium** focused groups pass; the existing submission
+test passes unchanged. Existing Intl coverage passes **42 assertions per
+backend** on the formatter candidate. Four Node DSOs/metadata remain unchanged.
+Full baselines are not repeated after round189's 630/630 dynamic pass. Capture
+timing, user agent, admission and deadlines are unchanged. Inventory:
+**76 high, zero critical, 991 low**, severity sorted. Four pairs refresh;
+previous images/reviews, all URLs and 1063 other rows are preserved. See
+[round190](comparison/repairs.html#round-190).
+
+
+Round191 qualifies **Greenlist** after accumulated shared DOM and elapsed-clock
+repairs: heading, large illustrations, supporting copy and connect action now
+render in the ordinary pair (**2.94% mean error /10.28% changed area**). This
+does not establish a unique repair attribution (**D8.4.4 / D10.1.7**).
+
+**Dia remains high**: its wordmark, heading and action require automatic Web
+Animations, confirmed by its exact module and a separate Chromium call trace
+(JS13-L66/L44). **Pelago remains high**: consent now renders, but Worker is
+absent and the main application errors. Deleting only Worker in Chromium
+reproduces the screen (JS13-L69). **Pitch remains high** with missing main
+hero/navigation; its initialization cause is unresolved. No site scripts,
+forced visibility, hidden APIs or delayed captures are used for clearance.
+
+Four ordinary matched pairs refresh under the unchanged round190 release;
+the Worker-removal and animation-recording diagnostics are not promoted.
+Timing, user agent, admission and deadline policies are unchanged. This pass
+changes evidence/annotations only; its release retains round190's **15 AST,
+15 MIR and15 Chromium** focused checks and submission regression. Unit/full
+baselines are not repeated. Inventory: **75 high, zero critical, 992 low**,
+severity sorted; prior frames/reviews, all URLs and 1063 other rows remain.
+See [round191](comparison/repairs.html#round-191).

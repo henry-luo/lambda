@@ -1,5 +1,6 @@
 const locationNavigationCases = [
-    'href', 'document-location', 'window-location', 'inserted-script',
+    'href', 'document-location', 'window-location', 'bare-location', 'strict-window-location',
+    'window-location-hash', 'window-location-descriptor', 'inserted-script',
     'timer-script', 'fetch-script', 'relative-href', 'coercion',
     'current-url-reload', 'empty-url-reload', 'hash-only', 'history-state',
     'throwing-coercion', 'assign-method', 'replace-method',
@@ -14,6 +15,16 @@ function locationNavigationHtml(name, origin) {
     let action = assignment;
     if (name === 'document-location') action = 'document.location=' + destination + ';';
     else if (name === 'window-location') action = 'window.location=' + destination + ';';
+    else if (name === 'bare-location') action = 'location=' + destination + ';';
+    else if (name === 'strict-window-location') action = '"use strict";window.location=' + destination + ';';
+    else if (name === 'window-location-hash') action = `var original=location;
+        window.location='#ready';if(window.location===original&&location.hash==='#ready')
+            document.body.style.background='lime';`;
+    else if (name === 'window-location-descriptor') action = `var d=Object.getOwnPropertyDescriptor(window,'location'),illegal=0;
+        try{d.get.call({})}catch(e){if(e instanceof TypeError)illegal++}
+        try{d.set.call({},'/destination')}catch(e){if(e instanceof TypeError)illegal++}
+        if(d.enumerable&&!d.configurable&&d.get.length===0&&d.set.length===1&&
+            d.get.call(window)===document.location&&illegal===2)document.body.style.background='lime';`;
     else if (name === 'inserted-script') action = insertion;
     else if (name === 'timer-script') action = 'setTimeout(function(){' + insertion + '},0);';
     else if (name === 'fetch-script') action = `fetch('/ready').then(function(r){return r.text()}).then(function(){${insertion}});`;
@@ -60,7 +71,8 @@ function locationNavigationResources(counts) {
 
 function locationNavigationExpected(name) {
     if (name.endsWith('-reload')) return {source:2,destination:0};
-    if (['hash-only','history-state','throwing-coercion'].includes(name)) return {source:1,destination:0};
+    if (['hash-only','history-state','throwing-coercion','window-location-hash',
+        'window-location-descriptor'].includes(name)) return {source:1,destination:0};
     return {source:1,destination:1};
 }
 

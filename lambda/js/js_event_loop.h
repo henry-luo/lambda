@@ -44,6 +44,8 @@ int js_event_loop_wait_until(int (*predicate)(void*), void* user, int watchdog_m
 // Deterministic clock used by headless browser fixtures. Advancing it fires
 // due timers and a bounded number of animation frames without sleeping.
 void js_event_loop_set_virtual_clock(bool enabled, double monotonic_ms);
+// preserve elapsed load time and pending timers before selecting a fixed export frame.
+void js_event_loop_freeze_load_clock(void);
 bool js_event_loop_virtual_clock_enabled(void);
 double js_event_loop_virtual_clock_now_ms(void);
 int js_event_loop_advance_virtual_time(double delta_ms, int frame_steps);

@@ -3022,8 +3022,13 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     // A virtual clock is semantic state of this document's event-loop capsule.
     // Configure it only after that capsule is bound, before the first script
     // can create a timer.
-    js_event_loop_set_virtual_clock(dom_doc->js.virtual_clock_enabled,
+    const char* load_clock = getenv("LAMBDA_CAPTURE_LOAD_CLOCK");
+    bool elapsed_load_clock = dom_doc->js.auto_close_event_loop && dom_doc->js.virtual_clock_enabled &&
+        load_clock && strcmp(load_clock, "elapsed") == 0;
+    // browser capture pauses CSS timelines while JavaScript timers continue during load.
+    js_event_loop_set_virtual_clock(dom_doc->js.virtual_clock_enabled && !elapsed_load_clock,
                                     dom_doc->js.virtual_clock_ms);
+    if (elapsed_load_clock) (void)js_performance_time_origin_ms();
 
     DocState* script_state = (DocState*)dom_doc->state;
     bool script_state_batch = script_state != nullptr;
@@ -3147,6 +3152,7 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     } else {
         log_info("execute_document_scripts: JS execution completed successfully");
         // Capture settlement starts only after window.load has queued its tasks.
+        if (elapsed_load_clock) js_event_loop_freeze_load_clock();
         js_event_loop_set_auto_close_after_load(true);
         // finish the current task before deciding which document owns the next turn.
         js_microtask_flush();

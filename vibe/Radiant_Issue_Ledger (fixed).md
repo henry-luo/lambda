@@ -14,6 +14,63 @@ are unchanged. Full evidence is under `../../lambda/temp/kianhup-style/`.
 
 ## Fixed issues
 
+<a id="ri-237"></a>
+
+### RI-237 — Native Canvas pixel readback is missing
+
+**Fixed, 2026-11-25, for bounded RGBA8/sRGB readback.** Ebury's consent SDK
+draws two colors then reads their actual pixels; the missing operation aborts
+its banner. Root's JS13-L77 records the API failure and Chromium control.
+Native already owns the bitmap, so the repair adds a synchronous copy through
+the existing graphics waist (**D9.1.3v2 / D9.5.1 / D9.5.6v2**).
+
+The copy borrows the surface inside ImageSurfaceReadScope, reverses alpha
+premultiplication through the shared image helper, and pads samples outside
+the bitmap with transparent black. Drawing transform, clip and global alpha
+do not affect reads. JS owns the destination storage; no GC pixel pointer or
+renderer pointer is retained across the boundary (**D5.5.2 / D6.3.3**).
+Existing bitmap limits move to the shared canvas contract without changing
+their values. No vendor or layout algorithm is modified.
+
+Eleven native AST/MIR and eleven Chromium readback groups pass, plus fourteen
+existing native Canvas transform/path groups. They exercise real painted
+samples, negative/outside rectangles, alpha, state independence, copies,
+resize, construction, receiver brands and coercion ownership. Integer-cast
+lint and one accumulated dynamic baseline (**630/630**, zero errors/skips)
+pass. Ebury's ordinary capture restores its consent panel at 1.10%
+mean error /1.92% changed area against Chromium. Full image-origin taint
+tracking, wide-gamut/float16 readback and other missing pixel APIs remain
+unqualified. Evidence: Lambda `temp/online-visual-round214/`.
+
+<a id="ri-236"></a>
+
+### RI-236 — Wrapping flex children lose fitted cross sizes
+
+**Fixed 2026-11-25.** A non-stretched row-flex child with `flex-wrap:wrap`
+inside a column flex container received the parent's full cross width during
+alignment. `flex_apply_intrinsic_cross_size` overwrote its hypothetical fitted
+width merely because its contents could wrap. A centered 80px item in a 600px
+parent consequently became 600px wide with its button at the left edge.
+
+The wrapping-only override and its parameter are removed. The existing shared
+fit-content calculation now supplies the cross width, retaining the later
+min/max clamp and genuine stretch handling. This follows
+[CSS Flexbox §9.4](https://www.w3.org/TR/css-flexbox-1/#algo-cross-item);
+Radiant owns the layout repair under **D9.1.3v2**. No selector, site or authored
+dimension receives special treatment.
+
+Seven of fourteen focused cases fail before repair; all fourteen native cases
+and fourteen Chromium controls pass afterward. Cases include wrap-reverse,
+multiple items/gaps, constrained available width, min/max sizes, decorations,
+start/end alignment, explicit widths, stretch, auto margins and a row-parent
+control. The layout integer-cast lint passes. One ordinary Gladia capture
+confirms that its action container moves to the center; its action text/filter
+rendering and large Canvas background remain incorrect, so the page stays high.
+No broad baseline repeats immediately after the preceding 630/630 dynamic
+milestone. Evidence: `temp/online-visual-round212/{flex-wrap-before.log,
+flex-wrap-after.log,browser-flex-wrap.json,int-cast-lint.log}` and
+`test/online/render_flex_wrap_cross.test.cjs`.
+
 <a id="ri-235"></a>
 
 ### RI-235 — Late positioning stretches intrinsic popovers

@@ -2,6 +2,13 @@ const assert = require('node:assert/strict');
 const {test} = require('node:test');
 const {compareImages, captureTimingError} = require('./compare_snapshots.cjs');
 
+test('script load clocks must match without relabeling historical unrecorded pairs', () => {
+    assert.equal(captureTimingError({}), '');
+    assert.equal(captureTimingError({lambda_script_load_clock:'elapsed',browser_script_load_clock:'elapsed'}), '');
+    for (const [left,right] of [['elapsed',''],['','elapsed'],['frozen','elapsed'],['bad','bad']])
+        assert.match(captureTimingError({lambda_script_load_clock:left,browser_script_load_clock:right}), /recapture both renderers/);
+});
+
 test('animation origins must match without invalidating historical unrecorded pairs', () => {
     assert.equal(captureTimingError({}), '');
     assert.equal(captureTimingError({lambda_animation_origin: 'post-load', browser_animation_origin: 'post-load'}), '');

@@ -442,6 +442,7 @@ void js_set_function_home_class(Item fn_item, Item home_class);
 void js_mark_derived_constructor_func(Item fn_item);
 Item js_get_constructor(Item name_item);
 Item js_get_intrinsic_prototype_for_class(int class_id);
+Item js_set_intrinsic_prototype_for_class(int class_id, Item prototype);
 Item js_get_typed_array_per_type_proto(int element_type);
 // O5: the one RangeError message for the call-depth guard, shared by the
 // kernel and the JIT's inline source-invocation guard (same counter/limit).

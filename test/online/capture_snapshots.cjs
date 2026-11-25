@@ -20,6 +20,8 @@ const resultColumns = [
     'lambda_timeout_ms', 'browser_timeout_ms', 'browser_log',
     'lambda_settle_ms', 'browser_settle_ms',
     'lambda_animation_origin', 'browser_animation_origin',
+    'lambda_script_load_clock', 'browser_script_load_clock',
+    'browser_http_user_agent',
 ];
 
 function integerOption(value, name, minimum = 1) {
@@ -50,10 +52,23 @@ function defaultRenderTimeoutMs(root, env) {
         'ONLINE_VIEW_CLEANUP_GRACE_SECONDS')) * 1000;
 }
 
+function nativeHttpUserAgent(root = path.resolve(__dirname, '../..'), env = process.env) {
+    const inputRoot = path.resolve(root, env.LAMBDA_INPUT_ROOT || 'lambda-input');
+    const source = fs.readFileSync(path.join(inputRoot, 'lambda/network/http_client.h'), 'utf8')
+        .replace(/\\\r?\n/g, '');
+    const definition = source.match(/^#define RADIANT_HTTP_CLIENT_USER_AGENT[ \t]+(.+)$/m)?.[1];
+    const literals = definition?.match(/"(?:[^"\\]|\\.)*"/g);
+    if (!literals?.length || definition.replace(/"(?:[^"\\]|\\.)*"/g, '').trim()) {
+        throw new Error('cannot read native HTTP user-agent profile');
+    }
+    return literals.map(literal => JSON.parse(literal)).join('');
+}
+
 function parseOptions(args, root, env = process.env, defaultSettleMs) {
     const settle = env.RADIANT_ONLINE_SETTLE_MS ?? env.LAMBDA_POST_LOAD_SETTLE_MS ?? defaultSettleMs;
     const options = {
         root, env, failedOnly: false, renderer: 'both', labels: null,
+        loadClock: env.LAMBDA_CAPTURE_LOAD_CLOCK ?? 'elapsed',
         settleMs: settle === undefined ? undefined : integerOption(settle, 'capture settle window', 0),
         jobs: integerOption(env.RADIANT_ONLINE_CAPTURE_JOBS || 4, 'RADIANT_ONLINE_CAPTURE_JOBS'),
         navigationTimeoutMs: integerOption(env.RADIANT_ONLINE_CAPTURE_TIMEOUT_MS || 20000,
@@ -69,10 +84,15 @@ function parseOptions(args, root, env = process.env, defaultSettleMs) {
         else throw new Error(`unknown option: ${arg}`);
     }
     if (!['both', 'lambda', 'browser'].includes(options.renderer)) throw new Error('invalid --renderer');
+    if (!['elapsed', 'frozen'].includes(options.loadClock)) throw new Error('invalid capture load clock');
     if (options.settleMs !== undefined && options.settleMs > options.navigationTimeoutMs) {
         throw new Error('capture settle window must not exceed the navigation deadline');
     }
     return options;
+}
+
+function scriptLoadClock(options, tool) {
+    return options.settleMs === undefined ? '' : tool === 'browser' ? 'elapsed' : options.loadClock ?? 'elapsed';
 }
 
 function hasPng(file) {
@@ -112,7 +132,8 @@ function selectWork(pages, previous, options, snapshotsDir) {
             // a retry at a new window also refreshes its successful counterpart to keep a comparable pair.
             for (const tool of ['lambda', 'browser']) {
                 if (String(reusable[`${tool}_settle_ms`] ?? '') !== String(options.settleMs) ||
-                    reusable[`${tool}_animation_origin`] !== CAPTURE_ANIMATION_ORIGIN) work[tool] = true;
+                    reusable[`${tool}_animation_origin`] !== CAPTURE_ANIMATION_ORIGIN ||
+                    reusable[`${tool}_script_load_clock`] !== scriptLoadClock(options, tool)) work[tool] = true;
             }
         }
         return work;
@@ -164,7 +185,10 @@ async function runLambdaRender(page, outputPath, options, snapshotsDir) {
             ], {
                 cwd: options.root, detached: process.platform !== 'win32', stdio: ['ignore', fd, fd],
                 env: {...options.env,
-                    ...(options.settleMs === undefined ? {} : {LAMBDA_POST_LOAD_SETTLE_MS: String(options.settleMs)}),
+                    ...(options.settleMs === undefined ? {} : {
+                        LAMBDA_POST_LOAD_SETTLE_MS: String(options.settleMs),
+                        LAMBDA_CAPTURE_LOAD_CLOCK: scriptLoadClock(options, 'lambda'),
+                    }),
                     LAMBDA_LOG_FILE: engineLog, LAMBDA_LOG_LEVEL: 'INFO',
                     VIEW_MEM_STAGES: '1', VIEW_MEM_STATS: '1',
                     RADIANT_VIEW_TIMING_PATH: path.join(snapshotsDir, `${page.label}-timing.tsv`)},
@@ -198,6 +222,7 @@ async function runLambdaRender(page, outputPath, options, snapshotsDir) {
     return {ok: !error, error, exitCode: exitCode ?? -1, signal: signal || '',
         elapsedMs: elapsedMs(start), timeoutMs: options.lambdaTimeoutMs, settleMs: options.settleMs ?? '',
         animationOrigin: options.settleMs === undefined ? '' : CAPTURE_ANIMATION_ORIGIN,
+        scriptLoadClock: scriptLoadClock(options, 'lambda'),
         loadOk: diagnostic.loadComplete,
         outputLog: path.basename(outputLog), log: path.basename(engineLog)};
 }
@@ -215,8 +240,13 @@ async function captureBrowser(browser, pageCase, outputPath, options, diagnostic
     const failedRequests = [];
     const lifecycle = [];
     let result;
+    let httpUserAgent = '';
     try {
         tab = await browser.newPage();
+        httpUserAgent = nativeHttpUserAgent(options.root, options.env);
+        // headless product tokens can select a different server-rendered document.
+        // match the native wire profile while preserving Chromium's navigator identity.
+        await tab.setExtraHTTPHeaders({'User-Agent': httpUserAgent});
         tab.on('request', (request) => pending.add(request));
         tab.on('requestfinished', (request) => pending.delete(request));
         tab.on('requestfailed', (request) => {
@@ -333,7 +363,8 @@ async function captureBrowser(browser, pageCase, outputPath, options, diagnostic
                 fs.writeFileSync(diagnosticPath, JSON.stringify({label: pageCase.label, url: pageCase.url,
                     attemptedUtc: new Date().toISOString(), ...result,
                     animationOrigin: options.settleMs === undefined ? '' : CAPTURE_ANIMATION_ORIGIN,
-                    responses, lifecycle, document: documentState,
+                    scriptLoadClock: scriptLoadClock(options, 'browser'),
+                    httpUserAgent, responses, lifecycle, document: documentState,
                     failedRequests, pendingRequests: [...pending].slice(0, 64)
                         .map((request) => ({url: request.url(), type: request.resourceType()})),
                 }, null, 2) + '\n');
@@ -343,7 +374,8 @@ async function captureBrowser(browser, pageCase, outputPath, options, diagnostic
             if (tab) await tab.close().catch(() => {});
         }
     }
-    return {...result, settleMs: options.settleMs ?? '',
+    return {...result, httpUserAgent, settleMs: options.settleMs ?? '',
+        scriptLoadClock: scriptLoadClock(options, 'browser'),
         animationOrigin: options.settleMs === undefined ? '' : CAPTURE_ANIMATION_ORIGIN,
         log: diagnosticPath ? path.basename(diagnosticPath) : ''};
 }
@@ -356,6 +388,7 @@ function updateRow(row, tool, result) {
     row[`${tool}_timeout_ms`] = result.timeoutMs ?? '';
     row[`${tool}_settle_ms`] = result.settleMs ?? '';
     row[`${tool}_animation_origin`] = result.animationOrigin ?? '';
+    row[`${tool}_script_load_clock`] = result.scriptLoadClock ?? '';
     if (tool === 'lambda') {
         row.lambda_exit_code = result.exitCode;
         row.lambda_signal = result.signal;
@@ -363,6 +396,7 @@ function updateRow(row, tool, result) {
         row.lambda_log = result.log;
         row.lambda_output_log = result.outputLog;
     } else {
+        row.browser_http_user_agent = result.httpUserAgent ?? '';
         row.browser_http_status = result.status;
         row.browser_final_url = result.finalUrl;
         row.browser_retry_after = result.retryAfter;
@@ -457,5 +491,5 @@ if (require.main === module) main().catch((error) => {
     process.exitCode = 1;
 });
 
-module.exports = {DEFAULT_CAPTURE_SETTLE_MS, parseOptions, selectWork, defaultRenderTimeoutMs, readLambdaDiagnostics,
+module.exports = {DEFAULT_CAPTURE_SETTLE_MS, parseOptions, selectWork, defaultRenderTimeoutMs, nativeHttpUserAgent, readLambdaDiagnostics,
     runLambdaRender, captureBrowser, hasPng, updateRow, promoteSnapshot};

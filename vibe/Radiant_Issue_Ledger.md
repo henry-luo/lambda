@@ -20,6 +20,14 @@ observations still require re-verification. Add new Radiant issues here.
 
 ## Open issues
 
+<a id="ri-237"></a>
+
+- [RI-237 — Native Canvas pixel readback is missing](<Radiant_Issue_Ledger (fixed).md#ri-237>).
+
+<a id="ri-236"></a>
+
+- [RI-236 — Wrapping flex children lose fitted cross sizes](<Radiant_Issue_Ledger (fixed).md#ri-236>).
+
 <a id="ri-235"></a>
 
 - [RI-235 — Late positioning stretches intrinsic popovers](<Radiant_Issue_Ledger (fixed).md#ri-235>).

@@ -53,7 +53,8 @@ using DomCanvasStateSnapshot = RadiantCanvasStateSnapshot;
     OP(bool, stroke_rect, (void* canvas_element, float x, float y, float width, float height)) \
     OP(bool, clear_rect, (void* canvas_element, float x, float y, float width, float height)) \
     OP(bool, draw_image, (void* canvas_element, void* source_element, const float* coordinates, size_t coordinate_count)) \
-    OP(bool, fill_text, (void* canvas_element, void* font_handle, const char* text, int text_len, float x, float y, float max_width))
+    OP(bool, fill_text, (void* canvas_element, void* font_handle, const char* text, int text_len, float x, float y, float max_width)) \
+    OP(bool, read_pixels, (void* canvas_element, int64_t x, int64_t y, uint32_t width, uint32_t height, uint8_t* rgba, size_t bytes))
 
 struct DomCanvasEngineOps {
 #define DOM_GRAPHICS_FIELD(result, name, parameters) result (*name) parameters;
