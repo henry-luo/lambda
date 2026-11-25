@@ -11,10 +11,11 @@ fn failure(issue, unsupported = null, request = null) =>
 
 // Both public results retain source definitions in the expanded stream.
 fn expand_once(source, configured, budget, preload = null) any^ {
+    let cached = if (preload is map) if (configured.script_expl3 == true) preload.expl3 else preload.ordinary else null;
     if (configured.ini == true)
         expansion.expand(stream.from_reader(reader.reader(source)), budget, configured)
-    else if (preload is map and configured.kernel_source is string)
-        profile.expand_with_kernel(source, configured.kernel_source, configured, budget, preload)
+    else if (cached is map and configured.kernel_source is string)
+        profile.expand_with_kernel(source, configured.kernel_source, configured, budget, cached)
     else profile.expand(source, configured, budget)
 }
 
@@ -22,15 +23,22 @@ fn expand(source, options, budget, echo_definitions = true, preload = null) any^
     let configured = {*:expansion.options_map(options), echo_definitions:echo_definitions, auto_expl3:true};
     let first = expand_once(source, configured, budget, preload)^;
     if (first.issue == "tex-expl3-restart")
-        expand_once(source, {*:configured, script_expl3:true}, budget)
+        expand_once(source, {*:configured, script_expl3:true}, budget, preload)
     else first
 }
 
 fn complete_diagnostics(expanded) bool^ => len(expanded.diagnostics) == len(expanded.diagnostic_records)
 
-// Host captures are explicit values; the engine itself never opens a path.
-pub fn host_options(options, base = null, kernel = null, captured = false) map {
+// Native document constructors scan their arguments without executing assignments.
+fn document_options(options) map {
     let given = expansion.options_map(options);
+    {*:given, constructor_argument_mode:
+        if (given.constructor_argument_mode == null) true else given.constructor_argument_mode}
+}
+
+// Host captures are explicit values; the engine itself never opens a path.
+pub fn host_options(options, base = null, kernel = null, captured = false, document = false) map {
+    let given = if (document) document_options(options) else expansion.options_map(options);
     // An archive member is an already captured value and carries no external file grants.
     let resources = if (captured) {} else if (given.resources is map) given.resources else {};
     {*:given, kernel_source:kernel, host_no_base:base == null,
@@ -48,19 +56,26 @@ pub fn host_capture(options: map, scope: string, name: string, data, no_base = f
 }
 
 // Only resource-free preloads can be reused without retaining a file grant.
+fn reusable_preload(loaded) bool^ => loaded is map and loaded.issue == null and len(loaded.resources_seen) == 0
+
 pub fn host_kernel_preload(options: map, math: bool) any^ {
-    if (options.ini == true or options.script_expl3 == true or not (options.kernel_source is string)) null
+    if (options.ini == true or not (options.kernel_source is string)) null
     else {
         let configured = {*:options, *:if (math) {math_mode:true} else {},
             echo_definitions:not math, auto_expl3:true};
-        let loaded = profile.preload_kernel(options.kernel_source, configured)^;
-        if (loaded.issue != null or len(loaded.resources_seen) != 0) null else loaded
+        let ordinary = profile.preload_kernel(options.kernel_source, configured)^;
+        if (not reusable_preload(ordinary)^) null
+        else {
+            // A restart uses a separately expanded kernel with expl3 enabled.
+            let expl3 = profile.preload_expl3_kernel(options.kernel_source, configured) ^ { null };
+            {ordinary:ordinary,expl3:if (reusable_preload(expl3)^) expl3 else null}
+        }
     }
 }
 
 // Native TeX returns diagnostics and local package names alongside expanded text.
 pub fn tex(source: string, options = null, budget: int = 20000000, preload = null) any^ {
-    let expanded = expand(source, options, budget, true, preload)^;
+    let expanded = expand(source, document_options(options), budget, true, preload)^;
     if (expanded.issue != null) failure(expanded.issue, expanded.unsupported, expanded.resource_request)
     else if (not complete_diagnostics(expanded)^)
         failure("tex-diagnostic-unsupported")
@@ -76,7 +91,7 @@ pub fn tex(source: string, options = null, budget: int = 20000000, preload = nul
 
 // Definition spans are required by the source-aware LaTeX digester.
 pub fn latex(source: string, options = null, budget: int = 20000000, preload = null) any^ {
-    let expanded = expand(source, options, budget, true, preload)^;
+    let expanded = expand(source, document_options(options), budget, true, preload)^;
     if (expanded.issue != null) failure(expanded.issue, expanded.unsupported, expanded.resource_request)
     else if (not complete_diagnostics(expanded)^) failure("tex-diagnostic-unsupported")
     else {

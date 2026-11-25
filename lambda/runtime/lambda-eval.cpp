@@ -7336,23 +7336,30 @@ static bool tex_capture_file(const SecurityIOClient* io, const char* base, const
 }
 
 // A resource-free kernel snapshot belongs to one evaluator heap (D6.4.2).
-struct TexKernelCache {
-    EvalContext* owner;
+struct TexKernelCacheEntry {
     Item options;
     Item preload;
     bool rooted;
-    bool math;
+};
+enum TexKernelProfile { TEX_KERNEL_TEX, TEX_KERNEL_LATEX, TEX_KERNEL_MATH, TEX_KERNEL_PROFILE_COUNT };
+struct TexKernelCache {
+    EvalContext* owner;
+    TexKernelCacheEntry entries[TEX_KERNEL_PROFILE_COUNT];
 };
 static const uint32_t tex_kernel_cache_owner = 0x5445584B; // TEXK
 
+static void tex_kernel_cache_clear_entry(TexKernelCache* cache, TexKernelCacheEntry* entry) {
+    if (entry->rooted) {
+        heap_unregister_gc_root_for(cache->owner, &entry->options.item);
+        heap_unregister_gc_root_for(cache->owner, &entry->preload.item);
+        entry->rooted = false;
+    }
+    entry->options = ItemNull; entry->preload = ItemNull;
+}
+
 static void tex_kernel_cache_clear(void* data) {
     TexKernelCache* cache = (TexKernelCache*)data;
-    if (cache->rooted) {
-        heap_unregister_gc_root_for(cache->owner, &cache->options.item);
-        heap_unregister_gc_root_for(cache->owner, &cache->preload.item);
-        cache->rooted = false;
-    }
-    cache->options = ItemNull; cache->preload = ItemNull;
+    for (int i = 0; i < TEX_KERNEL_PROFILE_COUNT; i++) tex_kernel_cache_clear_entry(cache, &cache->entries[i]);
 }
 
 static void tex_kernel_cache_destroy(void* data) {
@@ -7365,7 +7372,7 @@ static TexKernelCache* tex_kernel_cache() {
     if (!cache) {
         cache = (TexKernelCache*)mem_calloc(1, sizeof(*cache), MEM_CAT_EVAL);
         if (!cache) return nullptr;
-        cache->owner = context; cache->options = ItemNull; cache->preload = ItemNull;
+        cache->owner = context;
         static const ContextCapsuleOps ops = {"tex-kernel-cache", CONTEXT_CAPSULE_LIFETIME_REALM,
             0, nullptr, tex_kernel_cache_clear, tex_kernel_cache_destroy};
         if (!context_capsule_extension_install(context, tex_kernel_cache_owner, 1, cache, &ops)) {
@@ -7375,15 +7382,14 @@ static TexKernelCache* tex_kernel_cache() {
     return cache;
 }
 
-static void tex_kernel_cache_store(TexKernelCache* cache, Item options, Item preload, bool math) {
-    if (!cache) return;
-    tex_kernel_cache_clear(cache);
-    cache->options = options; cache->preload = preload; cache->math = math;
-    if (!heap_register_gc_root_for(cache->owner, &cache->options.item)) return;
-    if (!heap_register_gc_root_for(cache->owner, &cache->preload.item)) {
-        heap_unregister_gc_root_for(cache->owner, &cache->options.item); return;
+static void tex_kernel_cache_store(TexKernelCache* cache, TexKernelCacheEntry* entry, Item options, Item preload) {
+    tex_kernel_cache_clear_entry(cache, entry);
+    entry->options = options; entry->preload = preload;
+    if (!heap_register_gc_root_for(cache->owner, &entry->options.item)) return;
+    if (!heap_register_gc_root_for(cache->owner, &entry->preload.item)) {
+        heap_unregister_gc_root_for(cache->owner, &entry->options.item); return;
     }
-    cache->rooted = true;
+    entry->rooted = true;
 }
 
 static Item parse_tex_script(Item source, Item options, const char* format, const char* base, bool captured_member) {
@@ -7437,21 +7443,24 @@ static Item parse_tex_script(Item source, Item options, const char* format, cons
         if (!kernel) return ItemError;
         kernel_item.set((Item){.item = s2it(kernel)});
     }
-    Item initial[] = {settings.get(), base_item.get(), kernel_item.get(), (Item){.item = b2it(captured_member)}};
-    settings.set(interp_call_package_export(runtime, package, "host_options", initial, 4));
+    Item initial[] = {settings.get(), base_item.get(), kernel_item.get(), (Item){.item = b2it(captured_member)},
+        (Item){.item = b2it(strcmp(format, "math") != 0)}};
+    settings.set(interp_call_package_export(runtime, package, "host_options", initial, 5));
     if (get_type_id(settings.get()) != LMD_TYPE_MAP) return ItemError;
     const uint64_t resource_bytes = INPUT_TEX_RESOURCE_BYTE_LIMIT;
     uint64_t captured = 0; int local_files = 0; int requests = 0;
     for (;;) {
         bool math = !strcmp(format, "math");
         TexKernelCache* cache = tex_kernel_cache();
-        if (cache && cache->rooted && cache->math == math && item_deep_equal(cache->options, settings.get())) {
-            preload.set(cache->preload);
+        TexKernelProfile profile = math ? TEX_KERNEL_MATH : !strcmp(format, "tex") ? TEX_KERNEL_TEX : TEX_KERNEL_LATEX;
+        TexKernelCacheEntry* cache_entry = cache ? &cache->entries[profile] : nullptr;
+        if (cache_entry && cache_entry->rooted && item_deep_equal(cache_entry->options, settings.get())) {
+            preload.set(cache_entry->preload);
         } else if (cache) {
             Item args[] = {settings.get(), (Item){.item = b2it(math)}};
             preload.set(interp_call_package_export(runtime, package, "host_kernel_preload", args, 2));
             if (get_type_id(preload.get()) == LMD_TYPE_MAP)
-                tex_kernel_cache_store(cache, settings.get(), preload.get(), math);
+                tex_kernel_cache_store(cache, cache_entry, settings.get(), preload.get());
             else preload.set(ItemNull);
         }
         bool reused = get_type_id(preload.get()) == LMD_TYPE_MAP;

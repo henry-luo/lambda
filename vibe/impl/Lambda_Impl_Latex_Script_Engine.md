@@ -98,9 +98,18 @@ The existing native engine design and historical Phase IV work are in
   pass. An interrupted 420-case LaTeX sweep exposed constructor-mode failures,
   an environment-option mapping failure, and a phase-five math timeout; it is
   not a passing suite. Extending the resource-free kernel cache to TeX and
-  LaTeX makes the phase-five fixture pass its existing timeout. Document
-  definition/resource isolation passes in both tiers and under forced GC
-  with freed-memory poisoning (S1.8, D10.2.2v2, D6.4.2, D11.1.2).
+  LaTeX made the phase-five fixture pass in isolation, but it timed out again
+  during a concurrent document sweep. Document definition/resource isolation
+  passes in both tiers; the earlier cache passed forced GC with freed-memory
+  poisoning, while the final expl3-bootstrap GC run was interrupted. TeX and
+  LaTeX now default to constructor-aware
+  argument scanning, retaining the native behavior for assignments inside
+  formatting commands; an explicit false option retains legacy behavior.
+  Separate per-format and expl3 restart preloads prevent alternating inputs
+  from evicting one another. The 29-case expl3 constructor matrix and the
+  token-list and environment-option boundary goldens now pass. The 70-case
+  document subset was interrupted when the goal was cleared. The timeout and
+  broader qualification remain open (S1.8, D10.2.2v2, D6.4.2, D11.1.2).
 
 - **Earlier HTTP Path checkpoint:** The baseline did not finish:
   `ValueRepresentationTest.UnsupportedDirectTransitionFailsClosed` timed out

@@ -39,14 +39,21 @@ pub fn preload_kernel(kernel: string, options: any ! error = null, budget: int =
     expansion.expand(stream.from_reader(kernel_reader(kernel)), budget, configured)
 }
 
+// Definitions added by the expl3 bootstrap are immutable until the document resumes.
+pub fn preload_expl3_kernel(kernel: string, options: any ! error = null, budget: int = 20000000) State^ {
+    let loaded = preload_kernel(kernel, {*:expansion.options_map(options),script_expl3:true}, budget)^;
+    if (loaded.issue != null) loaded
+    else {*:expansion.enable_script_expl3(loaded)^,expl3_bootstrap_ready:true}
+}
+
 pub fn expand_with_kernel(source: string, kernel: string, options: any ! error = null,
         budget: int = 20000000, cached = null) State^ {
     let given = expansion.options_map(options);
-    let preload = if (cached is map and given.script_expl3 != true) cached
-        else preload_kernel(kernel, given, budget)^;
+    let preload = if (cached is map) cached else preload_kernel(kernel, given, budget)^;
     if (preload.issue != null) preload
     else {
-        let enabled = if (given.script_expl3 == true) expansion.enable_script_expl3(preload)^ else preload;
+        let enabled = if (given.script_expl3 == true and preload.expl3_bootstrap_ready != true)
+            expansion.enable_script_expl3(preload)^ else preload;
         let ready = if (given.script_expl3 == true) preload_format(enabled,given,budget)^ else enabled;
         let document = expansion.resume({*:ready, echo_definitions: given.echo_definitions == true},
             source, if (given.source_name == null) "<input>" else given.source_name, budget)^;

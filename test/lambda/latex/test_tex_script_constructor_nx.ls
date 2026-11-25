@@ -3,8 +3,10 @@ import digest: lambda.doc.latex.tex_engine.digest
 import reconstruct: lambda.doc.latex.tex_engine.reconstruct
 let kernel=input("lmd/package/doc/latex/tex_engine/kernel.tex","text")^;
 let options={script_expl3:true,constructor_argument_mode:true,echo_definitions:true,adapters:[],resources:{local:{},bundled:{}}};
+// Every matrix row starts from the same immutable kernel state.
+let preload=profile.preload_expl3_kernel(kernel,options,100000)^;
 fn check(source) any^ {
- let ex=profile.expand_with_kernel(source,kernel,options,100000)^;
+ let ex=profile.expand_with_kernel(source,kernel,options,100000,preload)^;
  let d=digest.digest(ex)^; let tex=parse(source,{type:"tex"})^; let native=parse(source,{type:"latex"})^;
  {supported:d.issue==null,text:reconstruct.reconstruct(ex)^.text==tex.text,
   messages:ex.messages==tex.messages,diagnostics:ex.diagnostic_records==tex.diagnostics,tree:d.ast==native}
@@ -34,7 +36,7 @@ let extra=[
 let results=[for(source in [*base,*extra]) check(source)^];
 let shows=[for(name in ["use:x","exp_args:NNx","cs_set_nopar:Npx","l__exp_internal_tl"]) {
  let source="\\ExplSyntaxOn\\show\\" ++ name ++ "\\ExplSyntaxOff";
- let ex=profile.expand_with_kernel(source,kernel,options,100000)^; let tex=parse(source,{type:"tex"})^;
+ let ex=profile.expand_with_kernel(source,kernel,options,100000,preload)^; let tex=parse(source,{type:"tex"})^;
  ex.issue==null and reconstruct.reconstruct(ex)^.text==tex.text and ex.messages==tex.messages and ex.diagnostic_records==tex.diagnostics
 }];
 {cases:len(results),supported:all([for(r in results) r.supported]),text:all([for(r in results) r.text]),

@@ -11,11 +11,13 @@ let isolated = facade.tex(source, {resources:{local:{}, bundled:{}}})^;
 let nested = facade.tex(source, {resources:{local:{'part.tex':{data:"\\def\\demo{9}"}},
     bundled:{'expl3.ltx':{data:"\\def\\ExplSyntaxOn{}\\def\\ExplSyntaxOff{}\\input{part}"},
         'part.tex':{data:"\\def\\demo{5}"}}}})^;
+let hosted = parse(source, {type:"tex",resources:{local:{},bundled:{'expl3.ltx':{data:format}}}})^;
 [
     initial.issue == "tex-expl3-restart",
     result.issue == null and result.root.messages == ["LT:5"],
     bytes.issue == null and bytes.root.messages == ["LT:5"],
     missing.issue == "tex-expl3-unavailable",
     isolated.issue == null and not contains(isolated.root.messages,"LT:5"),
-    nested.issue == null and nested.root.messages == ["LT:5"]
+    nested.issue == null and nested.root.messages == ["LT:5"],
+    hosted.messages == ["LT:5"]
 ]
