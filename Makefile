@@ -517,7 +517,7 @@ tree-sitter-libs: tree-sitter-jube-libs
 	    coverage-tools coverage-build-config coverage-build-config-native coverage-build-config-js coverage-build-all coverage-build-js test-coverage test-js-coverage \
 	test-ui-automation test-reactive-ui test-redex-baseline dom-ui dom-ui-run hit-test-ui view-ui native-gui-ui editable-unit editable-ui editable-editor-e2e test-editable test-wpt-contenteditable test-chromium-contenteditable audit-editable-ownership editable-package-disabled test-editable-ua-focused editable-form-regressions test-editable-ua drawing-editor-e2e test-drawing check-error-recovery \
 	    build-graph-mermaid-test test-graph-mermaid build-graph-graphviz-test test-graph-graphviz \
-	    build-graph-structurizr-test test-graph-structurizr \
+	    build-graph-structurizr-test test-graph-structurizr test-graph-upstream \
 	    node-baseline node-regression-gate node-full node-update-baseline node-official-report test-math-corpus test-mathcmp
 
 # Help target - shows available commands
@@ -623,6 +623,7 @@ help:
 	@echo "  test-graph-mermaid   - Run Mermaid graph corpus and Lambda integration fixtures"
 	@echo "  test-graph-graphviz  - Run DOT parser and Graphviz package integration fixtures"
 	@echo "  test-graph-structurizr - Run Structurizr parser and C4 package fixtures"
+	@echo "  test-graph-upstream  - Compare SVG renders with saved upstream observations"
 	@echo "  test-pdf-render - Run PDF render visual gtest suite"
 	@echo "  layout-snapshot       - Save page suite snapshot: make layout-snapshot suite=page"
 	@echo "  test-extended - Run EXTENDED test suites only (HTTP/HTTPS, ongoing features)"
@@ -2455,6 +2456,9 @@ test-graph-structurizr: build-graph-structurizr-test
 	@grep -q 'data-node-id="user"' temp/structurizr_convert.html
 	@! grep -q 'data-node-id="worker"' temp/structurizr_convert.html
 	@rm -f temp/structurizr_convert.html
+
+test-graph-upstream: build
+	@$(PYTHON) test/lambda/graph/upstream/compare.py
 
 test-validator: build
 	@echo "Running validator test suite..."

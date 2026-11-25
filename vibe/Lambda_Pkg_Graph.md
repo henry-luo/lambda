@@ -57,7 +57,7 @@ Static C4 diagrams are topology-oriented: their defining operations are model pr
 
 ```text
 Mermaid / DOT / GV / D2 / Structurizr / authored Mark
-  -> manual C/C+ format parser                     (syntax only)
+  -> direct Lambda Script format parser            (syntax only)
   -> source-stage Mark  (ir-stage: "source")       (source order, spans, raw values)
   -> pure Lambda semantic normalization            (per-language semantics)
   -> [Structurizr only] canonical C4 Workspace Mark -> selected view projection
@@ -636,7 +636,7 @@ Element and relationship styles lower to canonical style assignments and pass th
 
 ### 11.7 D2
 
-The D2 reader handles the supported identifiers and dotted paths, labels, node and style blocks, and directed `->` edges. D2 established the shared scanner, and the native source fixtures and routing golden pin its Mark and downstream geometry.
+The D2 reader handles bare identifiers including spaces, slashes and dotted keys, labels, node and style blocks, graph direction, and all four connection operators. A chain expands in source order and applies its trailing label to each link. A left-pointing link uses its logical source and destination for ranking. The shared scanner follows S12.1.1v5 and S12.1.2v3. The D2 routing golden and the pinned upstream render corpus cover source Mark and rendered behavior.
 
 ### 11.8 TikZ and PGFPlots
 
@@ -681,7 +681,7 @@ Each format keeps a manifest-driven corpus pinned to an exact upstream revision,
 - **Graphviz:** cases from the official language examples, test graphs, and focused Lambda regressions. `dot -Tdot_json` provides an unlaid semantic reference, `dot -Tjson` laid-out boxes, splines, and labels, and `xdot_json` paint only where JSON cannot recover it. A Lambda adapter converts Graphviz JSON to Graph Scene Mark, discarding object indices, draw order, and font-backend detail. Generator version, command, and binary hashes are pinned.
 - **Structurizr:** a pinned Structurizr CLI exports DSL workspaces to JSON; a Lambda adapter converts that JSON and Lambda's canonical workspace into one semantic comparison Mark covering element paths, kinds, parents, names, descriptions, technology, tags, explicit and implied relationships, deployment environments, nodes, and instances, view kind/scope/key and resolved/filtered membership, dynamic order and parallel groups, layout intent, resolved styles, and projected containment — discarding generated numeric ids and renderer detail. Reference provenance records source and artifact SHA-256 values.
 
-Reference tools are explicit, reviewed maintenance operations. Ordinary test runs use only checked-in source, canonical Mark, HTML semantics, and scene/semantic Mark; they never invoke Mermaid, Graphviz, Java, a browser, or the network, never compare images or raw SVG, and never rewrite references. One retained Lambda runtime renders all selected cases without per-case process startup.
+The retained package tests use checked-in references and render selected cases in one Lambda runtime. The separate CLI regression runs `lambda render` for each selected D2, DOT, Mermaid, Structurizr and TikZ diagram. It compares semantic observations extracted from upstream SVGs and tolerant TikZ geometry under D9.5.6v2. Ordinary runs replay the saved observations offline. The corpus and regeneration commands accompany the fixtures. [Upstream graph render corpus](../test/lambda/graph/upstream/README.md)
 
 ## 14. Acceptance criteria
 
@@ -702,9 +702,9 @@ Reference tools are explicit, reviewed maintenance operations. Ordinary test run
 
 **Open items.**
 
-- **Structurizr diagnostics.** Some codes in §11.6.7 are not yet emitted; corpus expansion beyond the three pinned references (basic, rich static/filtered, dynamic/deployment) is outstanding.
+- **Structurizr diagnostics.** Some codes in §11.6.7 are not yet emitted.
 - **Mermaid families.** ER relationship word aliases, exhaustive quoted/Unicode identifiers, Markdown-rich entity names, and multiple shorthand classes; composite states, nested transitions, concurrency regions, history states, richer state descriptions, and `hide empty description`; requirement, architecture, block, and mindmap adapters.
-- **D2** conformance corpus.
+- **D2.** Nested container declarations, edge arrowhead maps, and advanced layouts such as grids need dedicated coverage and implementation.
 
 **Deferred.**
 

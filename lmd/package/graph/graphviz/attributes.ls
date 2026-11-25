@@ -162,6 +162,19 @@ fn graph_attrs(properties) {
   ])
 }
 
+fn cluster_attrs(properties) {
+  let base = graph_attrs(properties);
+  let scheme = value(properties, "colorscheme");
+  let color = value(properties, "color");
+  let filled = contains(string(base.style or ""), "filled");
+  // With style=filled, fillcolor takes precedence over color and bgcolor.
+  let fill = if (filled) colors.resolve(
+    value(properties, "fillcolor") or color or value(properties, "bgcolor") or "black", scheme)
+    else base.fill;
+  {*:base, fill: fill, stroke: colors.resolve(value(properties, "pencolor") or color, scheme),
+    'stroke-width': number_value(properties, "penwidth", 96.0 / 72.0)}
+}
+
 fn node_attrs(properties) {
   let raw_shape = value(properties, "shape");
   let fixed = bool_value(properties, "fixedsize");
@@ -230,7 +243,8 @@ fn edge_attrs(properties) {
 }
 
 pub fn canonical(kind, properties) {
-  if (kind == "graph" or kind == "cluster") graph_attrs(properties)
+  if (kind == "graph") graph_attrs(properties)
+  else if (kind == "cluster") cluster_attrs(properties)
   else if (kind == "node") node_attrs(properties)
   else if (kind == "edge") edge_attrs(properties)
   else {}

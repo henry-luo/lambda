@@ -274,7 +274,7 @@ pub fn element_ids(elements, relationships, expression) any^ {
 
 // a reference list that is no sequence errors (S7.9.3): no match
 fn endpoint_matches(elements, endpoint, expression) any^ =>
-  expression == "*" or contains(reference_ids(elements, expression), string(endpoint)) or false
+  expression == "*" or contains(element_ids(elements, [], expression), string(endpoint)) or false
 
 fn relation_atomic_matches(elements, relation, expression) any^ {
   let value = trim(if (starts_with(expression, "relationship=="))
@@ -293,8 +293,9 @@ fn relation_atomic_matches(elements, relation, expression) any^ {
     property_matches(relation, value, "relationship.properties[")
   else {
     let endpoints = split(value, "->");
-    len(endpoints) == 2 and endpoint_matches(elements, relation.source, trim(endpoints[0])) and
+    if (len(endpoints) == 2) endpoint_matches(elements, relation.source, trim(endpoints[0])) and
       endpoint_matches(elements, relation.destination, trim(endpoints[1]))
+    else value == relation.id or value == relation["implied-from"]
   }
 }
 

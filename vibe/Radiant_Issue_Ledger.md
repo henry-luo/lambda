@@ -20,6 +20,22 @@ observations still require re-verification. Add new Radiant issues here.
 
 ## Open issues
 
+<a id="ri-236"></a>
+
+### RI-236 — Automatic SVG export clips diagrams to the initial viewport
+
+**Status:** Open, observed 2026-11-25. **Owner:** Radiant continuous export
+(D9.1.3v2, D9.5.6v2).
+
+Run `./lambda.exe render test/lambda/graph/upstream/d2/flow.d2 -o temp/graph-flow.svg`
+using Lambda `9d907361f3` with the upstream graph fixes. The output SVG viewBox is
+1250 × 850 CSS px and contains a clip at the initial 1200 × 800 viewport.
+The graph starts at y = 20 and its measured height is 940.8 px.
+The final nodes and their links fall past the clip. Automatic export should
+include the graph's visible extent. The reference test supplies explicit
+dimensions that fit its fixtures, so this issue does not block that test.
+The extent and root clip behavior in continuous export need owner-side tracing.
+
 <a id="ri-235"></a>
 
 - [RI-235 — Late positioning stretches intrinsic popovers](<Radiant_Issue_Ledger (fixed).md#ri-235>).

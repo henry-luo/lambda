@@ -119,6 +119,7 @@ fn subgraph_spec() => {
     attr("role", "text", false, ["cluster", "scope"]), attr("parent-scope", "text"),
     attr("direction", "text"), attr("rank", "text"), attr("class", "text"),
     attr("fill", "text"), attr("stroke", "text"), attr("stroke-width", "number"),
+    attr("stroke-dasharray", "text"),
     attr("padding", "number"), attr("label-gap", "number"),
     attr("radius", "number"), attr("z", "integerish"),
     attr("label-z", "integerish"), attr("gradient-angle", "number"),

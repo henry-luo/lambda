@@ -174,7 +174,14 @@ fn edge_operator(s, initial) map^ {
         let close = binary(if (thick) "==>" else if (dots > 0) ".->" else "-->")^
         let stop = inline_label_end(s, pos, close)^
         if (stop != null and stop > pos) {
-            label = mm.normalize_label(mm.trim_text(s, pos, stop)^)^
+            // Repeated connector strokes before the closing marker belong to the edge.
+            var label_stop = int(stop)^
+            let stroke = if (thick) 61 else 45
+            while (dots == 0 and label_stop > pos and scan.byte(s, label_stop - 1)^ == stroke) {
+                label_stop = label_stop - 1
+                strokes = strokes + 1
+            }
+            label = mm.normalize_label(mm.trim_text(s, pos, label_stop)^)^
             pos = stop + len(close)
             end_marker = "normal"
         }
@@ -266,10 +273,18 @@ fn subgraph(s, initial, start: int, after: int, depth: int) map^ {
     let pos = mm.skip(s, after)^
     let quoted = scan.byte(s, pos)^ == 34
     let id = if (quoted) mm.unescaped(s, pos + 1, 34, 10)^ else mm.identifier(s, pos)^
-    let name = id.value or ("subgraph_" ++ string(id.next))
+    let generated_name = "subgraph_" ++ string(id.next)
+    let name = id.value or generated_name
     let bracket = scan.inline_space(s, id.next, false)^
-    let label = if (scan.byte(s, bracket)^ == 91)
-        mm.unescaped(s, bracket + 1, 93)^ else {value:name, next:bracket}
+    let explicit = scan.byte(s, bracket)^ == 91
+    let label = if (explicit)
+        mm.unescaped(s, bracket + 1, 93)^
+        else if (quoted) {value:name, next:bracket}
+        else {
+            let line = mm.line_text(s, pos)^
+            let comment = index_of(line.value, "%%")
+            {value:if (comment == null) line.value else trim(slice(line.value, 0, comment)), next:line.next}
+        }
     let body_start = mm.next_line(s, label.next)^
     let root_ids = if (depth == 0) initial.ids else initial.root_ids
     let root_edges = if (depth == 0) initial.edge_ids else initial.root_edges
@@ -278,7 +293,8 @@ fn subgraph(s, initial, start: int, after: int, depth: int) map^ {
     let body = statements(s, {pos:body_start, direction:null, errors:initial.errors, meta:null, children:null,
         ids:{}, edge_ids:{}, root_ids:root_ids, root_edges:root_edges, spans:{}, syntax_code:initial.syntax_code}, depth + 1)^
     let contents = children(s, body)^
-    let value = <subgraph id:name, label:label.value, *:if (body.direction == null) {} else {direction:body.direction},
+    let identity = if (quoted or explicit or label.value == name) name else generated_name;
+    let value = <subgraph id:identity, label:label.value, *:if (body.direction == null) {} else {direction:body.direction},
         *:scan.span(s, start, body.pos)^, *contents>
     let st = mm.append(initial, value);
     {*:st, pos:body.pos, ids:{*:st.ids, *:body.ids}, edge_ids:{*:st.edge_ids, *:body.edge_ids}, errors:body.errors}

@@ -54,7 +54,7 @@ fn is_canonical_child(child) any^ {
     else if (child_tag == "edge") { has_canonical_label_content(child, false) }
     else if (child_tag == "subgraph") {
       has_canonical_label_content(child,
-        child.role != "scope" and child.id != null and child.id != "") and
+        child.role != "scope" and child.id != null and child.id != "" and child.label != "") and
         all([for (nested in noncanonical_children(child)) is_canonical_child(nested)])
     }
     else { true }
@@ -128,7 +128,9 @@ fn canonical_subgraph(subgraph) {
   let attrs = map(subgraph);
   let fallback = if (subgraph.role != "scope" and subgraph.id != null and subgraph.id != "")
     string(subgraph.id) else null;
-  let label = canonical_label(subgraph, fallback);
+  // An explicit empty cluster label suppresses the id fallback.
+  let label = if (subgraph.label == "" and model.label_element(subgraph) == null) null
+    else canonical_label(subgraph, fallback);
   let content = canonical_content(subgraph, label, false);
   <subgraph *:attrs,
     if (label != null) { label }
@@ -236,6 +238,51 @@ fn merge_source_redeclarations(graph) {
   <graph *:attrs,
     for (child in ((merged_source_children(groups, graph)) ^ { [] })) child
   >
+}
+
+fn mermaid_cluster_child(child, anchors) any^ {
+  let tag = model.tag(child);
+  if (tag == "node" and anchors[string(child.id)^] != null) null
+  else if (tag == "edge") {
+    let tail = anchors[string(child.from)];
+    let head = anchors[string(child.to)];
+    if (tail == null and head == null) child
+    else <edge *:map(child),
+      *:if (tail == null) {} else {from:tail.exit, 'tail-cluster':child.from},
+      *:if (head == null) {} else {to:head.entry, 'head-cluster':child.to},
+      *model.child_items(child)>
+  }
+  else if (tag == "subgraph") <subgraph *:map(child),
+    for (nested in model.child_items(child)) mermaid_cluster_child(nested, anchors)^>
+  else child
+}
+
+fn mermaid_cluster_anchors(group, members) {
+  let edges = model.edges(group);
+  let internal = [for (edge in edges
+    where ((contains(members, edge.from) and contains(members, edge.to)) ^ { false })) edge];
+  let sources = [for (edge in internal) edge.from];
+  let targets = [for (edge in internal) edge.to];
+  let entries = [for (member in members where ((not contains(targets, member)) ^ { false })) member];
+  let exits = [for (member in members where ((not contains(sources, member)) ^ { false })) member];
+  // Rank incoming links before an entrance and outgoing links after an exit.
+  {entry:entries[0] or members[0], exit:exits[len(exits) - 1] or members[len(members) - 1]}
+}
+
+fn mermaid_cluster_endpoints(graph) any^ {
+  let groups = model.subgraphs(graph);
+  let ids = [for (group in groups) string(group.id)];
+  let rows = [for (group in groups,
+    let members = [for (node in ((model.nodes(group)) ^ { [] })
+      where ((not contains(ids, string(node.id))^) ^ { false })) node.id]
+    where len(members) > 0) {id:string(group.id), anchor:mermaid_cluster_anchors(group, members)}];
+  let anchors = reduce([{}, *rows], (result, row) => {*:result, [row.id]:row.anchor});
+  let linked = any([for (edge in model.edges(graph))
+    anchors[string(edge.from)] != null or anchors[string(edge.to)] != null]);
+  // Compound routing uses a real member for rank and the cluster border for clipping.
+  if (not linked) graph
+  else <graph *:map(graph), compound:true,
+    for (child in model.child_items(graph)) mermaid_cluster_child(child, anchors)^>
 }
 
 fn item_id(value) any^ =>
@@ -436,6 +483,7 @@ pub fn normalize(graph) {
     if (merged.flavor == "mermaid" and merged["diagram-type"] == "class") mermaid_class.adapt(merged)
     else if (merged.flavor == "mermaid" and merged["diagram-type"] == "er") mermaid_er.adapt(merged)
     else if (merged.flavor == "mermaid" and merged["diagram-type"] == "state") mermaid_state.adapt(merged)
+    else if (merged.flavor == "mermaid" and merged["diagram-type"] == "flowchart") mermaid_cluster_endpoints(merged)
     else merged
   } else dot_result.graph;
   let canonical = if (resolved is element and string(name(resolved)) == "graph")

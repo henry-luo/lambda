@@ -157,6 +157,7 @@ fn normalize_cluster(cluster, index) => {
   fill: if (cluster.fill != null) string(cluster.fill) else "none",
   stroke: if (cluster.stroke != null) string(cluster.stroke) else "#8a949e",
   stroke_width: float(if (cluster.stroke_width != null) cluster.stroke_width else 1.0),
+  *:if (cluster.dash_array == null) {} else {dash_array:cluster.dash_array},
   radius: float(if (cluster.radius != null) cluster.radius else 6.0),
   z: if (cluster.z != null) int(cluster.z) else -2,
   index: index

@@ -477,6 +477,7 @@ fn html_cluster(entry, index, palette) {
       'data-cluster-fill': string(source_attr(group, "fill", "none")),
       'data-cluster-stroke': string(source_attr(group, "stroke", palette.node_border)),
       'data-cluster-stroke-width': string(source_attr(group, "stroke-width", 1)),
+      'data-dash-array': source_attr(group, "stroke-dasharray", null),
       'data-cluster-radius': string(source_attr(group, "radius", 6)),
       'data-z': string(source_attr(group, "z", -2)),
       style: "display:block;width:0;height:0;overflow:hidden;visibility:hidden;pointer-events:none;">
@@ -613,6 +614,7 @@ pub fn to_html(graph, opts = null) {
     else if (config.title != null) config.title else source_attr(graph, "title", null);
   let description = if (graph is element) model.description(graph)
     else source_attr(graph, "description", null);
+  let compound = source_attr(graph, "compound", null);
   let label_placement = edge_label_placement(graph, direction);
   let children = [
     *(if (graph is element) html_constraints(graph) else []),
@@ -657,7 +659,8 @@ pub fn to_html(graph, opts = null) {
       'data-route-mode': route_mode,
       'data-ordering': source_attr(graph, "ordering", null),
       'data-new-rank': source_attr(graph, "new-rank", null),
-      'data-compound': source_attr(graph, "compound", null),
+      // The in-memory DOM bridge reads custom attributes as text.
+      'data-compound': if (compound == null) null else bool_text(compound, false),
       'data-use-splines': if (route_mode == "curved") "true" else "false",
       style: "position:relative;background:" ++ graph_background ++ ";" ++
         font_css(graph, palette.node_text)

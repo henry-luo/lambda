@@ -1,0 +1,4 @@
+\begin{tikzpicture}
+  \draw[help lines] (0,0) grid (3,2);
+  \draw (0cm,2mm) -- (30:2cm);
+\end{tikzpicture}

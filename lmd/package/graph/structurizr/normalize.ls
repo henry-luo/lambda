@@ -5,6 +5,7 @@ import archetype: lambda.graph.structurizr.archetypes
 import diagnostic: lambda.graph.diagnostics
 import implied: lambda.graph.structurizr.implied
 import schema: lambda.graph.structurizr.schema
+import scan: lambda.io.source_scan
 
 fn resolved_include(value) any^ => graph_model.tag(value) == "statement" and
   string(graph_model.optional(value, "keyword")) == "!include"
@@ -225,6 +226,7 @@ fn append_relation(st, value, parent_identifier, definitions) {
   let effective = if (definition == null) explicit else archetype.merge(definition, explicit);
   let relation = {
     id: id, from: from, to: to,
+    order: len(st.elements) + len(st.relationships),
     archetype: if (definition == null) null else definition.name,
     implied: false, implied_from: null,
     description: effective.description, technology: effective.technology,
@@ -253,8 +255,8 @@ fn walk_values(values, index, parent, parent_identifier, parent_kind, group_name
       parent_kind == "deployment-node";
     let next = if (group_assignment) st
     else if (is_c4_declaration(value, definitions)) {
-      let entry = element_value(value, parent, parent_identifier, group_name,
-        inherited_groups, hierarchical, definitions);
+      let entry = {*:element_value(value, parent, parent_identifier, group_name,
+        inherited_groups, hierarchical, definitions), order: len(st.elements) + len(st.relationships)};
       let added = {*:st, elements: [*st.elements, entry]};
       if (entry.kind == "group")
         walk_values(children(value), 0, parent, parent_identifier, parent_kind,
@@ -324,9 +326,9 @@ fn layout_arg(value, index, fallback) any^ {
   if (len(layouts) > 0) arg(layouts[0], index, fallback) else fallback
 }
 
-fn relationship_ref(relations, source, destination) => first([
+fn relationship_between(relations, source, destination) => first([
   for (relation in relations
-    where relation.from == source and relation.to == destination) relation.id
+    where relation.from == source and relation.to == destination) relation
 ])
 
 fn interaction(value, elements, relationships, key, sequence, parallel_group) {
@@ -335,11 +337,12 @@ fn interaction(value, elements, relationships, key, sequence, parallel_group) {
   let authored_order = graph_model.optional(value, "order");
   let sequence_label = if (authored_order != null) string(authored_order)
     else string(sequence);
+  let relation = relationship_between(relationships, source, destination);
   {
     id: key ++ "@" ++ source_identity(value),
     source: source, destination: destination,
-    relationship_ref: relationship_ref(relationships, source, destination),
-    description: arg(value, 0), technology: arg(value, 1),
+    relationship_ref: relation.id,
+    description: arg(value, 0, relation.description), technology: arg(value, 1, relation.technology),
     order: sequence_label, sequence: sequence,
     parallel_group: parallel_group, source_mark: value
   }
@@ -407,12 +410,29 @@ fn dynamic_interactions(value, elements, relationships, key) any^ =>
   interaction_values_at(children(value), 0, elements, relationships, key,
     {items: [], next_order: 1}).items
 
-fn view_value(value, elements, relationships) {
-  let view_key = if (value.kind == "systemLandscape" or value.kind == "custom")
-    arg(value, 0, string(value.kind)) else if (value.kind == "filtered")
-    arg(value, 3, "filtered@" ++ source_identity(value))
-    else if (value.kind == "deployment")
-    arg(value, 2, string(value.kind)) else arg(value, 1, string(value.kind));
+fn authored_view_key(value) any^ =>
+  if (value.kind == "systemLandscape" or value.kind == "custom") arg(value, 0)
+  else if (value.kind == "filtered") arg(value, 3)
+  else if (value.kind == "deployment") arg(value, 2)
+  else arg(value, 1)
+
+fn numbered_key(prefix, ordinal) {
+  let digits = string(ordinal);
+  prefix ++ "-" ++ (if (ordinal < 10) "00" else if (ordinal < 100) "0" else "") ++ digits
+}
+
+fn generated_view_key(kind, used) string^ {
+  let prefix = upper(slice(kind, 0, 1)) ++ slice(kind, 1, len(kind))
+  var ordinal = 1
+  var key = numbered_key(prefix, ordinal)
+  while ((used[key] != null)^) {
+    ordinal = ordinal + 1
+    key = numbered_key(prefix, ordinal)
+  }
+  return key
+}
+
+fn view_value(value, elements, relationships, view_key, generated) {
   {
     kind: string(value.kind),
     scope: if (value.kind == "systemLandscape" or value.kind == "custom")
@@ -424,6 +444,8 @@ fn view_value(value, elements, relationships) {
       for (tag in ((split(arg(value, 2, ""), ",")) ^ { [] }) where trim(tag) != "") trim(tag)
     ] else [],
     key: view_key,
+    legacy_key: if (not generated) null else if (value.kind == "filtered")
+      "filtered@" ++ source_identity(value) else string(value.kind),
     includes: [for (include_rule in ((children(value, "include")) ^ { [] }))
       for (item in ((arguments(include_rule)) ^ { [] })) {expression: item, source: include_rule}],
     excludes: [for (exclude_rule in ((children(value, "exclude")) ^ { [] }))
@@ -437,10 +459,23 @@ fn view_value(value, elements, relationships) {
   }
 }
 
-fn view_values(source, elements, relationships) => [
-  for (block in ((children(source, "views")) ^ { [] }))
-    for (value in ((children(block, "view")) ^ { [] })) view_value(value, elements, relationships)
-]
+fn view_values(source, elements, relationships) array^ {
+  let values = [for (block in children(source, "views")^, value in children(block, "view")^) value]
+  var result = null
+  var used = {}
+  var index = 0
+  // The reference DSL allocates the first unused ordinal when it encounters a view.
+  while (index < len(values)) {
+    let value = values[index]
+    let authored = authored_view_key(value)^
+    let generated = authored == null or authored == ""
+    let key = if (generated) generated_view_key(string(value.kind), used)^ else authored
+    used = {*:used, [key]:true}
+    result = scan.add(result, view_value(value, elements, relationships, key, generated))
+    index = index + 1
+  }
+  return scan.finish(result)^
+}
 
 fn style_value(rule) => {
       target_kind: string(rule["target-kind"]), tag: arg(rule, 0, "Element"),
@@ -497,6 +532,7 @@ fn c4_element(value, terminology) =>
       else if (value.kind == "container-instance") "container" else value.kind),
     description: value.description, technology: value.technology,
     'model-ref': value.model_ref,
+    'source-order': value.order,
     'source-start': value.source["source-start"], 'source-end': value.source["source-end"],
     for (tag in value.tags) <tag name: tag>
     for (property in value.properties)
@@ -522,6 +558,7 @@ fn c4_relationship(value) =>
     archetype: value.archetype,
     implied: value.implied, 'implied-from': value.implied_from,
     description: value.description, technology: value.technology,
+    'source-order': value.order,
     'source-start': value.source["source-start"], 'source-end': value.source["source-end"],
     for (tag in value.tags) <tag name: tag>
     for (property in value.properties)
@@ -537,6 +574,7 @@ fn c4_relationship(value) =>
 
 fn c4_view(value, elements) =>
   <'c4-view' key: value.key, kind: value.kind,
+    *:if (value.legacy_key == null) {} else {'legacy-key':value.legacy_key},
     scope: resolve_ref(elements, value.scope),
     environment: resolve_ref(elements, value.environment),
     'base-key': value.base_key, 'filter-mode': value.filter_mode,

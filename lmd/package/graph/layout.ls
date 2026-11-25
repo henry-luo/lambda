@@ -214,6 +214,7 @@ fn semantic_clusters(children, labels) => [
     fill: string(attr_or(child, "data-cluster-fill", "none")),
     stroke: string(attr_or(child, "data-cluster-stroke", "#8a949e")),
     stroke_width: float(attr_or(child, "data-cluster-stroke-width", 1.0)),
+    dash_array: attr_or(child, "data-dash-array", null),
     radius: float(attr_or(child, "data-cluster-radius", 6.0)),
     z: child_z(child, -2),
     child_index: child_index(child, i)

@@ -20,6 +20,11 @@ fn drawing_nodes(picture) any^ => [for (child in picture
         (string(name(child)) == "path" or string(name(child)) == "node" or
          string(name(child)) == "coordinate")) ^ { false })) child]
 
+fn coordinate_basis(node, axis, inherited) any^ {
+    let dimension = opts.value(node, axis, null)
+    if (dimension == null) inherited else opts.dimension_px(dimension)^ * 2.54 / 96.0
+}
+
 fn shift_centimeters(value) any^ {
     let raw = trim(value)
     if (ends_with(raw, "cm"))
@@ -133,7 +138,8 @@ fn collect_drawing(container, dx, dy, stroke_width,
              program: pgfmath.with_tikzmath(program_data, child.source)^}
         else if (tag == "path" or tag == "node" or tag == "coordinate")
             {records: [*acc, {source: child, dx: dx, dy: dy,
-                basis_x: basis_x, basis_y: basis_y,
+                basis_x: if (tag == "path") coordinate_basis(child, "x", basis_x)^ else basis_x,
+                basis_y: if (tag == "path") coordinate_basis(child, "y", basis_y)^ else basis_y,
                 stroke_width: stroke_width, program: program_data}],
              program: program_data}
         else {records: acc, program: program_data}
@@ -182,17 +188,21 @@ fn coordinate_definitions(records, index = 0, acc = []) any^ {
     }
 }
 
-fn ellipse_extent(record, axis) any^ {
-    let path_offset = path_shift(record.source, record.basis_x, record.basis_y)^
-    let center = physical_point(children_named(record.source, "point")[0],
-        record.dx + path_offset[0], record.dy + path_offset[1],
-        record.basis_x, record.basis_y, record.program)^
-    let coordinate = if (axis == "x") center.x else center.y
-    let radius = if (axis == "x") float(record.source.rx) *
-        (if (record.source.rx_explicit == true) 1.0 else record.basis_x)
-        else float(record.source.ry) *
-        (if (record.source.ry_explicit == true) 1.0 else record.basis_y);
-    [coordinate - radius, coordinate + radius]
+fn path_ellipses(record, coordinates) any^ {
+    let path = record.source
+    let shapes = if (path.shape == "ellipse") [path]
+        else if (path.shape == "compound-ellipse") children_named(path, "ellipse_segment")^
+        else []
+    if (len(shapes) == 0) { return [] }
+    let offset = path_shift(path, record.basis_x, record.basis_y)^;
+    [for (shape in shapes) {
+        let point = children_named(shape, "point")[0]
+        let center = path_point(point, coordinates, record.dx + offset[0], record.dy + offset[1],
+            record.basis_x, record.basis_y, record.program)^;
+        {x:center.x, y:center.y,
+         rx:float(shape.rx) * (if (shape.rx_explicit == true) 1.0 else record.basis_x),
+         ry:float(shape.ry) * (if (shape.ry_explicit == true) 1.0 else record.basis_y)}
+    }]
 }
 
 fn path_shift(path, basis_x, basis_y) any^ {
@@ -378,9 +388,14 @@ fn arc_chain_points(source, basis_x, basis_y) any^ =>
 
 fn arc_chain_svg(mapped, flags) any^ {
     latex_util.str_join([for (at in 0 to (len(mapped) - 1))
-        if (flags[at]) svg.M(mapped[at][0], mapped[at][1])
+        // SVG starts with a moveto even if the first TikZ point has no move flag.
+        if (at == 0 or flags[at]) svg.M(mapped[at][0], mapped[at][1])
         else svg.L(mapped[at][0], mapped[at][1])], " ")
 }
+
+fn ellipse_subpath(cx, cy, rx, ry) any^ =>
+    svg.M(cx + rx, cy) ++ " " ++ svg.A(rx, ry, "0", "0", "0", cx - rx, cy) ++
+        " " ++ svg.A(rx, ry, "0", "0", "0", cx + rx, cy) ++ " Z"
 
 fn coil_spec(path) any^ {
     let source = opts.value(path, "decoration", null)
@@ -455,7 +470,7 @@ fn grid_step(raw, basis) any^ {
     else value
 }
 
-fn grid_paths(mapped, path, color, stroke_width, dash, px_per_cm,
+fn grid_paths(mapped, path, color, stroke_width, dash, dash_phase, px_per_cm,
               basis_x, basis_y, origin_x, origin_y) any^ {
     if (len(mapped) != 2) raise error("TikZ grid needs two corners")
     let x_min = min([mapped[0][0], mapped[1][0]])
@@ -478,12 +493,12 @@ fn grid_paths(mapped, path, color, stroke_width, dash, px_per_cm,
             <path d: svg.M(x_first + float(i) * xstep, y_min) ++ " " ++
                 svg.L(x_first + float(i) * xstep, y_max),
                 fill: "none", stroke: color, 'stroke-width': stroke_width,
-                'stroke-dasharray': dash>
+                'stroke-dasharray': dash, 'stroke-dashoffset': dash_phase>
         for (i in ((0 to (ny - 1)) ^ { [] }))
             <path d: svg.M(x_min, y_first + float(i) * ystep) ++ " " ++
                 svg.L(x_max, y_first + float(i) * ystep),
                 fill: "none", stroke: color, 'stroke-width': stroke_width,
-                'stroke-dasharray': dash>
+                'stroke-dasharray': dash, 'stroke-dashoffset': dash_phase>
     >
 }
 
@@ -517,20 +532,20 @@ fn gradient_definition(spec) =>
     >
 
 fn draw_path(record, coordinates, min_x, max_y, left, top,
-             px_per_cm, custom_colors, arrow_default) any^ {
+             px_per_cm, custom_colors, arrow_default, picture_dash) any^ {
     let path = record.source
-    if (path.action != "draw" and path.action != "fill" and
-        path.action != "filldraw")
+    if (not (path.action in ["path", "draw", "fill", "filldraw"]))
         raise error("unsupported TikZ path action")
     let checked = opts.check(path, ["black", "blue", "red", "green", "orange",
         "darkgreen", "purple", "gray", "color", "fill", "draw",
         "thick", "very thick", "ultra thick", "thin",
-        "line width", "pattern", "domain", "samples", ">",
-        "step", "xstep", "ystep", "dash pattern", "dashed", "dotted",
+        "line width", "pattern", "domain", "samples", ">", "x", "y", "help lines",
+        "step", "xstep", "ystep", "dash pattern", "dash phase", "dashed", "dotted",
         "decoration", "decorate", "shift", "rotate", "rounded corners",
         "left color", "right color", "middle color", "opacity",
-        "smooth", "variable", *arrows.option_keys(path)], custom_colors)^
-    let color = opts.color(path, "black", custom_colors)^
+        "smooth", "variable", "even odd rule", *arrows.option_keys(path)], custom_colors)^
+    let help_lines = opts.has(path, "help lines")
+    let color = opts.color(path, if (help_lines) "gray" else "black", custom_colors)^
     let points = path_data_points(path, coordinates, record.dx, record.dy,
         record.basis_x, record.basis_y, record.program)^
     let arc = arc_points(path)
@@ -541,12 +556,15 @@ fn draw_path(record, coordinates, min_x, max_y, left, top,
          top + (max_y - float(point.y)) * px_per_cm]];
     let mapped = decorated_points(path, mapped_raw)^
     let move_flags = [for (point in points) point.move == true]
-    let stroke_width = opts.stroke_width(path, record.stroke_width)^
+    let ellipses = path_ellipses(record, coordinates)^
+    let stroke_width = opts.stroke_width(path,
+        if (help_lines) opts.dimension_px("0.2pt")^ else record.stroke_width)^
     let pattern = opts.value(path, "pattern", null)
     if (pattern != null and pattern != "north east lines")
         raise error("unsupported TikZ pattern: " ++ pattern)
     let fill_source = opts.value(path, "fill", null)
     let fill_color = if (fill_source == null or fill_source == "") color
+        else if (fill_source == "none") "none"
         else opts.color_value(fill_source, custom_colors)^
     let gradient = gradient_spec(path)^
     if (gradient != null and (fill_source != null or pattern != null))
@@ -555,9 +573,13 @@ fn draw_path(record, coordinates, min_x, max_y, left, top,
         else if (gradient != null) "url(#" ++ gradient.id ++ ")"
         else if (path.action == "fill" or path.action == "filldraw" or
                  opts.has(path, "fill")) fill_color else "none"
-    let stroke = if (path.action == "fill" and not opts.has(path, "draw"))
-        "none" else color
-    let dash = opts.dash_array(path)^
+    let draw_source = opts.value(path, "draw", null)
+    let stroke = if (draw_source == "none" or
+            (draw_source == null and not (path.action in ["draw", "filldraw"]))) "none"
+        else if (draw_source == null or draw_source == "") color
+        else opts.color_value(draw_source, custom_colors)^
+    let dash = opts.dash_array(path)^ or picture_dash
+    let dash_phase = opts.dash_phase(path)^
     let opacity_source = opts.value(path, "opacity", null)
     let opacity = if (opacity_source == null) null
         else opts.numeric_value(opacity_source)^
@@ -566,7 +588,7 @@ fn draw_path(record, coordinates, min_x, max_y, left, top,
     // A path `>` key overrides the picture's default tip for `->` style keys.
     let local_default = opts.value(path, ">", null)
     let fallback = if (local_default != null) local_default else arrow_default
-    let tips = arrows.spec(path)
+    let tips = if (stroke == "none") {start:null, end:null} else arrows.spec(path)
     let start_tip = arrows.resolve(tips.start, stroke_width, fallback, custom_colors)^
     let end_tip = arrows.resolve(tips.end, stroke_width, fallback, custom_colors)^
     let rounded = opts.value(path, "rounded corners", null)
@@ -580,20 +602,17 @@ fn draw_path(record, coordinates, min_x, max_y, left, top,
         let height = abs(mapped[1][1] - mapped[0][1]);
         <rect x: x, y: y, width: width, height: height,
             fill: fill, stroke: stroke, 'stroke-width': stroke_width,
-            'stroke-dasharray': dash>
+            'stroke-dasharray': dash, 'stroke-dashoffset': dash_phase>
     } else if (path.shape == "grid") {
-        grid_paths(mapped, path, stroke, stroke_width, dash,
+        grid_paths(mapped, path, stroke, stroke_width, dash, dash_phase,
             px_per_cm, record.basis_x, record.basis_y,
             left - min_x * px_per_cm,
             top + max_y * px_per_cm)^
     } else if (path.shape == "ellipse")
         <ellipse cx: mapped[0][0], cy: mapped[0][1],
-            rx: float(path.rx) *
-                (if (path.rx_explicit == true) 1.0 else record.basis_x) * px_per_cm,
-            ry: float(path.ry) *
-                (if (path.ry_explicit == true) 1.0 else record.basis_y) * px_per_cm,
+            rx: ellipses[0].rx * px_per_cm, ry: ellipses[0].ry * px_per_cm,
             fill: fill, stroke: stroke, 'stroke-width': stroke_width,
-            'stroke-dasharray': dash>
+            'stroke-dasharray': dash, 'stroke-dashoffset': dash_phase>
     else {
         let final_index = len(mapped) - 1
         let valid_count = if ((start_tip != null or end_tip != null) and len(mapped) < 2)
@@ -613,13 +632,18 @@ fn draw_path(record, coordinates, min_x, max_y, left, top,
             else if (index == final_index and end_tip != null)
                 arrows.shortened(mapped[final_index - 1], point, end_tip.line_end)
             else point];
+        // Emit one path so winding and dash behavior operate on the original subpaths.
+        let lines = if (path.shape == "arc-chain" or len([for (flag in move_flags where flag) flag]) > 0)
+            arc_chain_svg(drawn, move_flags) else svg.line_path(drawn)
+        let data = if (len(ellipses) == 0) lines else join([lines,
+            for (ellipse in ellipses) ellipse_subpath(
+                left + (ellipse.x - min_x) * px_per_cm, top + (max_y - ellipse.y) * px_per_cm,
+                ellipse.rx * px_per_cm, ellipse.ry * px_per_cm)^], " ");
         <g opacity: opacity,
-            <path d: if (path.shape == "arc-chain" or
-                    len([for (flag in move_flags where flag) flag]) > 0)
-                    arc_chain_svg(drawn, move_flags)
-                    else svg.line_path(drawn),
+            <path d: data,
                 fill: fill, stroke: stroke,
-                'stroke-width': stroke_width, 'stroke-dasharray': dash,
+                *:if (opts.has(path, "even odd rule")) {'fill-rule':"evenodd"} else {},
+                'stroke-width': stroke_width, 'stroke-dasharray': dash, 'stroke-dashoffset': dash_phase,
                 'stroke-linejoin': if (rounded == null) null else "round",
                 'stroke-linecap': if (rounded == null) null else "round">
             if (start_tip != null) arrows.tip_svg(start_tip, mapped[1], mapped[0],
@@ -633,18 +657,18 @@ fn draw_path(record, coordinates, min_x, max_y, left, top,
 }
 
 fn draw_paths(records, coordinates, index, min_x, max_y, left, top,
-              px_per_cm, custom_colors, arrow_default, acc) any^ {
+              px_per_cm, custom_colors, arrow_default, picture_dash, acc) any^ {
     if (index >= len(records)) acc
     else {
         let record = records[index]
         let rendered = if (string(name(record.source)) == "path" and
             record.source.action != "clip")
             draw_path(record, coordinates, min_x, max_y, left, top,
-                px_per_cm, custom_colors, arrow_default)^
+                px_per_cm, custom_colors, arrow_default, picture_dash)^
         else null
         let next = if (rendered == null) acc else [*acc, rendered]
         draw_paths(records, coordinates, index + 1,
-            min_x, max_y, left, top, px_per_cm, custom_colors, arrow_default, next)^
+            min_x, max_y, left, top, px_per_cm, custom_colors, arrow_default, picture_dash, next)^
     }
 }
 
@@ -852,8 +876,8 @@ fn positioned_nodes(records, coordinates, index, min_x, max_y, left, top,
 
 fn render_drawing(picture, external_declarations = [],
                   custom_colors = [], clip_id = "tikz-clip-0") any^ {
-    let x_basis = opts.dimension_px(opts.value(picture, "x", "1cm"))^ * 2.54 / 96.0
-    let y_basis = opts.dimension_px(opts.value(picture, "y", "1cm"))^ * 2.54 / 96.0
+    let x_basis = coordinate_basis(picture, "x", 1.0)^
+    let y_basis = coordinate_basis(picture, "y", 1.0)^
     let initial_program = pgfmath.external_program(external_declarations)^
     let collected = collect_drawing(picture, 0.0, 0.0, 0.6,
         x_basis, y_basis, initial_program, 0, [])^
@@ -900,18 +924,17 @@ fn render_drawing(picture, external_declarations = [],
         else clip_raw
     if (len(clips) == 1 and len(clip_points) < 3)
         raise error("TikZ clip needs a closed area")
-    let ellipses = [for (record in records
-        where record.source.shape == "ellipse") record]
-    let ellipse_x = [for (record in ellipses) ellipse_extent(record, "x")^]
-    let ellipse_y = [for (record in ellipses) ellipse_extent(record, "y")^]
+    let ellipses = [for (record in records,
+        ellipse in ((if (string(name(record.source)) == "path")
+            path_ellipses(record, coordinates) else []) ^ { [] })) ellipse]
     let x_values = if (len(clips) == 1)
         [for (point in clip_points) float(point.x)]
         else [for (point in [*path_coordinates, *node_coordinates]) float(point.x),
-            for (bounds in ellipse_x, edge in bounds) float(edge)]
+            for (ellipse in ellipses, edge in [ellipse.x - ellipse.rx, ellipse.x + ellipse.rx]) edge]
     let y_values = if (len(clips) == 1)
         [for (point in clip_points) float(point.y)]
         else [for (point in [*path_coordinates, *node_coordinates]) float(point.y),
-            for (bounds in ellipse_y, edge in bounds) float(edge)]
+            for (ellipse in ellipses, edge in [ellipse.y - ellipse.ry, ellipse.y + ellipse.ry]) edge]
     if (len(x_values) == 0) raise error("TikZ picture has no drawable coordinates")
     let min_x = float(min(x_values))
     let max_x = float(max(x_values))
@@ -926,7 +949,7 @@ fn render_drawing(picture, external_declarations = [],
     let height = (max_y - min_y) * px_per_cm + top * 2.0
     let paths = draw_paths(records, coordinates, 0,
         min_x, max_y, left, top, px_per_cm, custom_colors,
-        opts.value(picture, ">", null), [])^
+        opts.value(picture, ">", null), opts.dash_array(picture)^, [])^
     let clip_mapped = [for (point in clip_points)
         [left + (float(point.x) - min_x) * px_per_cm,
          top + (max_y - float(point.y)) * px_per_cm]]
@@ -998,7 +1021,7 @@ fn render_picture(picture, options,
     let style_keys = opts.handler_keys(picture)^
     let picture_keys = [">", "scale", "show background rectangle", "background rectangle/.style",
         "help lines/.style", "color", "x", "y", "declare function", "node distance",
-        "on grid"] ++
+        "on grid", "dash pattern", "dashed", "dotted"] ++
         style_keys ++
         (if (people_active) ["pin distance", "every pin/.append style"] else [])
     let valid = if (tag == "tikzpicture") opts.check(picture,

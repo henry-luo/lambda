@@ -16,6 +16,54 @@
 - The source-contract golden covers malformed input, byte spans, archive-member dispatch, TikZ numeric underflow and nested diagnostics. It matched the oracle under `interp`, `jit`, `auto`, and collection on every allocation with freed memory poisoned. The restricted Structurizr include cases also passed under forced collection (D8.3.1v3, D6.3.3).
 - The full Lambda baseline recorded 6,107 passes of 6,130 before the shipped-source test fixture update. The two Structurizr failures passed in the final security suite. Other failures include denied loopback binds and a DOM media playback case. The standalone input baseline reported loopback-related HTTP failures and a Bootstrap CSS round-trip failure. The archive header and native ownership audits passed. The staged input isolation rebuild stopped on obsolete Premake targets ([LI-115](../Lib_Input_Issue_Ledger.md#li-115)). The supplementary LaTeX-wide replay was stopped after a TeX expansion timeout. The full Radiant baseline was skipped.
 
+## Follow-up upstream render comparison
+
+The 2026-11-25 follow-up starts from Lambda `9d907361f3` and `lambda-input`
+`a380230`. It adds 41 pinned upstream source fixtures and compares 43 SVG
+renders because two Structurizr workspaces contribute two views each. The
+corpus includes 8 D2, 9 DOT, 10 Mermaid, 7 Structurizr and 7 TikZ source files.
+The manifest records SHA-256, source revisions and license notices. Candidate
+files were checked against 407 existing sources for content duplicates after
+removing whitespace.
+[Fixture provenance and replay commands](../../test/lambda/graph/upstream/README.md)
+
+The reference tools are D2 0.7.1, Graphviz 15.0.0 through Viz.js, Mermaid
+11.16.0 through headless Chromium, Structurizr CLI 2025.11.09 libraries through
+their DOT exporter and Graphviz, and TeX Live 2025 with PGF 3.1.10 through
+pdfTeX and Poppler. Runtime comparisons honor the Lambda and Radiant
+layout connection (D9.5.6v2). They check rendered relationships, labels,
+markers, ports, selected paint, and geometry where the source gives an
+invariant. Offline replay uses observations captured from these tools.
+
+| Format | Corrections exercised by the upstream corpus |
+|---|---|
+| D2 | Emit every chained connection, preserve multiword and final isolated identifiers, retain unlabeled and parallel links, orient left arrows by their logical direction, and apply the declared graph direction. |
+| DOT | Apply cluster outline colors, widths, dashes and fill precedence. Suppress the label when the cluster has no authored label. |
+| Mermaid | Rank subgraph links using an entrance or exit member and route to the cluster border. Pass the compound option as text across the in-memory DOM bridge. Read full unquoted subgraph titles and separate an extended arrow operator from its inline label. |
+| Structurizr | Match the generated view-key numbering, preserve inherited dynamic descriptions, resolve group selection to members, evaluate endpoint predicates, and exclude implied copies by relationship identifier. Lift deployment links that exist when the later instance is declared. |
+| TikZ | Start emitted SVG paths with a move command. Honor draw and fill actions, path-local coordinate bases, help-line style, dash patterns and phase, and composite ellipse subpaths with even-odd fill. |
+
+All 43 selected renders match their saved checks under automatic, interpreter,
+and JIT execution (D8.3.1v3). A second reference generation reproduced
+`expected.json` byte for byte. The focused Lambda integration suite passed
+75 cases. The hosted parser, formatter, and Mermaid suites passed 23, 9,
+and 40 cases. Both focused Radiant tests passed. The Lambda baseline
+passed 6,109 of 6,130 cases. The 21 failures were outside graph and TikZ
+coverage and include network binds, editor and sync cases, and DOM media.
+The Radiant baseline was stopped after repeated idle timeouts in native window
+and Scene3D cases following macOS application-service errors. Before it stopped,
+the layout inventory reported 5,632 of 5,936 passes, and the page-load and
+snapshot suites passed. The focused retained graph and TikZ tests completed.
+Reference SVGs and Lambda renders are under
+`temp/graph-upstream/`. Reference regeneration and focused test logs are
+under `temp/graph-reference/`.
+
+The selected viewport encloses every fixture. Without explicit viewport
+dimensions, continuous export clips some large graphs
+([RI-236](../Radiant_Issue_Ledger.md#ri-236)). Exploratory samples also
+exposed remaining D2 gaps in nested containers and arrowhead maps and TikZ
+gaps in bounding-box commands and bracketed ellipse radii.
+
 ## Release loading benchmark
 
 On macOS 26.3 arm64, both release hosts used automatic tier selection (D8.3.1v3) and the same 92 fixtures totaling 36,620 bytes. The native executable was relinked from the pre-port release objects and archives. Serialized source Mark matched byte for byte on all 92 fixtures before timing.

@@ -31,8 +31,10 @@ fn marker(s, current, pos: int, stop: int, keyword: string) map^ {
         return failed(current, if (keyword == "circle") "circle requires a positive radius"
             else "ellipse requires positive x and y radii")^
     }
-    return {*:current, pos:end_pos + 1, attrs:{*:current.attrs, shape:"ellipse",
-        rx:x.value, ry:y.value, rx_explicit:x.explicit, ry_explicit:y.explicit}}
+    let radii = {rx:x.value, ry:y.value, rx_explicit:x.explicit, ry_explicit:y.explicit}
+    // Each ellipse starts its own subpath at the current TikZ coordinate.
+    let segment = <'ellipse_segment' *:radii, current.point.value>;
+    return {*:current, pos:end_pos + 1, ellipses:scan.add(current.ellipses, segment)}
 }
 
 fn control(s, pos: int, stop: int) map?^ {
@@ -130,7 +132,8 @@ fn step(s, current, pos: int, stop: int) map^ {
 
 fn geometry(s, cursor, begin: int, stop: int) map^ {
     let origin = {x:0.0,y:0.0}
-    let initial = {cursor:cursor, pos:begin, point:origin, reference:origin, cartesian:false, children:null, attrs:{}}
+    let initial = {cursor:cursor, pos:begin, point:origin, reference:origin, cartesian:false,
+        children:null, ellipses:null, attrs:{}}
     let uses_origin = lex.word(s, begin, stop, "circle")^ != null or lex.word(s, begin, stop, "ellipse")^ != null
     let vertex = if (uses_origin) {x:0.0, y:0.0, cartesian:true, advance:true, next:begin,
         value:coords.point(0.0, 0.0)^} else coords.vertex(s, begin, stop, origin)^
@@ -182,7 +185,13 @@ fn path_data(s, cursor, first: int, stop: int) map^ {
     }
     if (has_arc(s, first, stop)^) { return {cursor:cursor, attrs:{shape:"arc-chain"}, children:[]} }
     let path = geometry(s, cursor, first, stop)^
-    return {cursor:path.cursor, attrs:path.attrs, children:scan.finish(path.children)^}
+    let vertices = scan.finish(path.children)^
+    let ellipses = scan.finish(path.ellipses)^
+    if (len(ellipses) == 0) { return {cursor:path.cursor, attrs:path.attrs, children:vertices} }
+    if (len(ellipses) == 1 and len([for (child in vertices where ((name(child)^ == 'point') ^ { false })) child]) == 1) {
+        return {cursor:path.cursor, attrs:{*:path.attrs, shape:"ellipse", *:map(ellipses[0])}, children:vertices}
+    }
+    return {cursor:path.cursor, attrs:{*:path.attrs, shape:"compound-ellipse"}, children:[*vertices, *ellipses]}
 }
 
 pub fn read(s, cursor, action: string) map^ {

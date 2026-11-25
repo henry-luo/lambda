@@ -1,0 +1,4 @@
+\begin{tikzpicture}
+  \draw                  (0,0)   -- +(1,0);
+  \draw[x=2cm,color=red] (0,0.1) -- +(1,0);
+\end{tikzpicture}

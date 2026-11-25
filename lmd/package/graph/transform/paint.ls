@@ -195,6 +195,7 @@ fn cluster_svg(cluster, width, height) {
         rx: cluster.radius, ry: cluster.radius,
         fill: cluster.fill, stroke: cluster.stroke,
         'stroke-width': cluster.stroke_width,
+        'stroke-dasharray': if (cluster.dash_array == null) null else string(cluster.dash_array),
         'data-graph-role': "cluster", 'data-cluster-id': cluster.id,
         'data-parent-cluster-id': cluster.parent,
         'data-fill': cluster.fill, 'data-stroke': cluster.stroke,

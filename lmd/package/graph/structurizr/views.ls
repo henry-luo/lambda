@@ -23,9 +23,13 @@ pub fn view_keys(workspace) => [
 ]
 
 fn selected_view(workspace, key) {
-  let matches = [for (diagram in ((children(workspace_views(workspace), "c4-view")) ^ { [] })
+  let views = children(workspace_views(workspace), "c4-view");
+  let matches = [for (diagram in views
     where ((string(diagram.key) == string(key)) ^ { false })) diagram];
-  first(matches)
+  // Previously unkeyed DSL views could be selected using the view kind.
+  if (len(matches) > 0) first(matches)
+  else first([for (diagram in views
+    where ((diagram["legacy-key"] != null and string(diagram["legacy-key"]) == string(key)) ^ { false })) diagram])
 }
 
 fn connected_ids_at(relations, ids, index) any^ {
@@ -81,12 +85,27 @@ fn exclude_expressions(diagram) => [
   for (exclude_rule in children(diagram, "exclude")) string(exclude_rule.expression)
 ]
 
+fn in_selected_group(all, entry, group, separator) any^ {
+  let membership = graph_model.optional(entry, "group");
+  let prefix = graph_model.optional(group, "group");
+  let path = if (prefix == null) string(group.name) else string(prefix) ++ separator ++ string(group.name);
+  let owner = graph_model.optional(group, "parent");
+  membership != null and
+    (string(membership) == path or starts_with(string(membership), path ++ separator)) and
+    (owner == null or below(all, entry, owner))
+}
+
 fn expression_ids(workspace, expressions) {
   let all = elements(workspace);
-  [for (entry in all where ((contains([
+  let ids = [
     for (rule in expressions where ((not expression.relationship_expression(rule)) ^ { false }))
       for (id in ((expression.element_ids(all, relationships(workspace), rule)) ^ { [] })) id
-  ], string(entry.id))) ^ { false })) string(entry.id)]
+  ];
+  // Group identifiers select their members in a view. The group itself is a boundary.
+  let groups = [for (entry in all where ((entry.kind == "group" and contains(ids, string(entry.id))) ^ { false })) entry];
+  let separator = group_separator(workspace);
+  [for (entry in all where ((entry.kind != "group" and (contains(ids, string(entry.id)) or
+    any([for (group in groups) in_selected_group(all, entry, group, separator)]))) ^ { false })) string(entry.id)]
 }
 
 fn selected_ids(workspace, diagram) {
@@ -255,8 +274,7 @@ fn scope_seed_ids(workspace, diagram) any^ {
 
 fn relationship_excluded(workspace, diagram, relation) => len([
   for (rule in exclude_expressions(diagram)
-    where ((expression.relationship_expression(rule) and
-      expression.relationship_matches(elements(workspace), relation, rule)) ^ { false })) rule
+    where ((expression.relationship_matches(elements(workspace), relation, rule)) ^ { false })) rule
 ]) > 0
 
 fn selected_relationships(workspace, diagram, ids) {
@@ -410,7 +428,8 @@ fn model_in_scope(all, entry, scope) any^ {
 }
 
 fn expanded_deployment_ids(all, candidates, seeds) => [
-  for (entry in candidates where ((contains(seeds, string(entry.id)) or len([
+  for (entry in candidates where ((contains(seeds, string(entry.id)) or
+    contains(seeds, string(graph_model.optional(entry, "model-ref"))) or len([
     for (seed in seeds, let owner = parent_entry(all, seed)
       where ((owner != null and string(owner.kind) == "deployment-node" and
         below(all, entry, seed)) ^ { false })) seed
@@ -480,11 +499,20 @@ fn deployed_endpoints(entries, logical_id) => [
     string(graph_model.optional(entry, "model-ref")) == string(logical_id)) ^ { false })) entry
 ]
 
+fn existed_when_deployed(relation, source, destination) any^ {
+  let order = graph_model.optional(relation, "source-order");
+  let from = graph_model.optional(source, "source-order");
+  let to = graph_model.optional(destination, "source-order");
+  // Structurizr lifts a relationship when both instances have been declared.
+  order == null or from == null or to == null or order < max(from, to)
+}
+
 fn lifted_relationships(workspace, entries) => [
   for (relation in relationships(workspace))
     for (source in ((deployed_endpoints(entries, relation.source)) ^ { [] }))
       for (destination in ((deployed_endpoints(entries, relation.destination)) ^ { [] })
-        where ((groups_compatible(source, destination)) ^ { false }))
+        where ((groups_compatible(source, destination) and
+          existed_when_deployed(relation, source, destination)) ^ { false }))
         {id: string(relation.id) ++ "@" ++ string(source.id) ++ "@" ++
             string(destination.id), source: source.id, destination: destination.id,
           description: relation.description, technology: relation.technology,

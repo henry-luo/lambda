@@ -1,0 +1,6 @@
+\begin{tikzpicture}
+  \fill (0,0) -- (1,1) -- (2,1);
+  \fill (4,0) circle (.5cm)  (4.5,0) circle (.5cm);
+  \fill[even odd rule] (6,0) circle (.5cm)  (6.5,0) circle (.5cm);
+  \fill (8,0) -- (9,1) -- (10,0) circle (.5cm);
+\end{tikzpicture}

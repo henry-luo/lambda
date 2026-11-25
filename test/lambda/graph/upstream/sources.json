@@ -1,0 +1,299 @@
+{
+  "projects": {
+    "d2": {
+      "repo": "https://github.com/terrastruct/d2",
+      "rev": "6408af31df469e7f1d84d3349eeaa1281fb5d57e",
+      "license": "licenses/D2-MPL-2.0"
+    },
+    "d2-docs": {
+      "repo": "https://github.com/d2lang/d2-docs",
+      "rev": "8f1dbebb72c79a84bebccee27a9eed75dfac4000",
+      "license": "licenses/D2-docs-BSD-3-Clause"
+    },
+    "dot": {
+      "repo": "https://github.com/rossbar/graphviz",
+      "rev": "c50674b82582171aae78ea629f2d7c1891010101",
+      "license": "licenses/Graphviz-EPL-1.0"
+    },
+    "mermaid": {
+      "repo": "https://github.com/mermaid-js/mermaid",
+      "rev": "7c0cafcf42e76bfaf79d0cbbd12edb986612f014",
+      "license": "../mermaid/LICENSE.mermaid"
+    },
+    "structurizr": {
+      "repo": "https://github.com/structurizr/structurizr",
+      "rev": "ad34036c5a1227535fc9adea9a0f97de5962189d",
+      "license": "licenses/Structurizr-Apache-2.0"
+    },
+    "tikz": {
+      "repo": "https://github.com/pgf-tikz/pgf",
+      "rev": "839974a3f895bfb86f5a8bc155f0886c918f1bff",
+      "license": "licenses/PGF-LPPL-1.3c"
+    }
+  },
+  "fixtures": [
+    {
+      "file": "d2/flow.d2",
+      "source": "docs/flow.d2",
+      "sha256": "0c64bf15bbdfbf26d553f2037089197154968168ccb93970365af9c957919c43"
+    },
+    {
+      "file": "d2/connections-1.d2",
+      "source": "static/d2/connections-1.d2",
+      "sha256": "c2c10d2e71465cc97020b88ee6fdb53706f85b87b5fb6604e7fc47a08ad3718b",
+      "project": "d2-docs"
+    },
+    {
+      "file": "d2/connections-2.d2",
+      "source": "static/d2/connections-2.d2",
+      "sha256": "1409cbf203776f148ac40c9aba2f5a28df5a5e43fdc653860b3da0f4fa10003d",
+      "project": "d2-docs"
+    },
+    {
+      "file": "d2/connections-3.d2",
+      "source": "static/d2/connections-3.d2",
+      "sha256": "3c3c8c842b15a2973fa0b69044ecc31993c96cac30c302d072f582427bd90255",
+      "project": "d2-docs"
+    },
+    {
+      "file": "d2/connections-4.d2",
+      "source": "static/d2/connections-4.d2",
+      "sha256": "02cd1a28b92006bc3bea3531886ebeaf56acab9b4417ea6cebff666b0a9b47eb",
+      "project": "d2-docs"
+    },
+    {
+      "file": "d2/direction-right.d2",
+      "source": "static/d2/direction-right.d2",
+      "sha256": "90f728f3bc52212035eaa2577af7c5ae5290e34c5fe7110e8ccb49dd6817d8dc",
+      "project": "d2-docs"
+    },
+    {
+      "file": "d2/shapes-1.d2",
+      "source": "static/d2/shapes-1.d2",
+      "sha256": "8cecc9be9d535a25a65fc9c2830e234f1c259fe30e4c0c76b8fecf174a27e958",
+      "project": "d2-docs"
+    },
+    {
+      "file": "d2/shapes-2.d2",
+      "source": "static/d2/shapes-2.d2",
+      "sha256": "76f735944226b2249f55b87ef75b6c7163dadcae4b2858634c3d51a556073e7e",
+      "project": "d2-docs"
+    },
+    {
+      "file": "dot/clust.gv",
+      "source": "graphs/directed/clust.gv",
+      "sha256": "a6e135f819873d3e4273715ce94e8f3707f5d467e18f325d622833932a100cae"
+    },
+    {
+      "file": "dot/clust1.gv",
+      "source": "graphs/directed/clust1.gv",
+      "sha256": "e3c09a9d55228ee642a13fd9dab55df343a1e441e97de8e1ef5d5bc8c3bfaebb"
+    },
+    {
+      "file": "dot/dfa.gv",
+      "source": "graphs/directed/dfa.gv",
+      "sha256": "e9f351f0fab62092ca406e74c159068d8e4a641e0ac86bd29f76fec8993e668a"
+    },
+    {
+      "file": "dot/hashtable.gv",
+      "source": "graphs/directed/hashtable.gv",
+      "sha256": "0cb9b2c2bcf9a6a797b970a743964dc9f1219d2af5d680c1c58959f8afd0cc1a"
+    },
+    {
+      "file": "dot/record2.gv",
+      "source": "graphs/directed/record2.gv",
+      "sha256": "c37166e504a3ed903e84b3ed9e60497b169e0c94519cfbb6fc299c573755e5be"
+    },
+    {
+      "file": "dot/table.gv",
+      "source": "graphs/directed/table.gv",
+      "sha256": "ce329a738a43c7866fb8c0393bdbfe0693e86b0699905f0f436e2ba156d83797"
+    },
+    {
+      "file": "dot/unix.gv",
+      "source": "graphs/directed/unix.gv",
+      "sha256": "e2c0157140642c42f3165f81bc81125ae0516110f7916dc7464f26bbfb881b1a"
+    },
+    {
+      "file": "dot/fig6.gv",
+      "source": "graphs/directed/fig6.gv",
+      "sha256": "8ae99d3c85b3487d9c6fc1862a93c73170bc69d1ec8267d60834ac1f89d6d264"
+    },
+    {
+      "file": "dot/Heawood.gv",
+      "source": "graphs/undirected/Heawood.gv",
+      "sha256": "2c077ec5c647cff5ec58fcfcc7e578e29d08cd6cf0bb118508125a3255046a5d"
+    },
+    {
+      "file": "mermaid/class-diagram-2.mmd",
+      "source": "cypress/platform/dev-diagrams/layout-tests/class-diagram-2.mmd",
+      "sha256": "bc9958e0be33914091c2e91cd52f75a94b74a70698d28236bee4e79a2ad1e7d7"
+    },
+    {
+      "file": "mermaid/decision-flow.mmd",
+      "source": "cypress/platform/dev-diagrams/layout-tests/decision-flow.mmd",
+      "sha256": "f5c735ce35f96fc89164c11bc152facdeb85f298053263e2138a39b908874e12"
+    },
+    {
+      "file": "mermaid/deploy-pipeline-simplified.mmd",
+      "source": "cypress/platform/dev-diagrams/layout-tests/deploy-pipeline-simplified.mmd",
+      "sha256": "00ffb238833e3b2cd7bed3f2617db48165ca5adbc99fe77553a0031477b02943"
+    },
+    {
+      "file": "mermaid/edge-from-subgraph.mmd",
+      "source": "cypress/platform/dev-diagrams/layout-tests/edge-from-subgraph.mmd",
+      "sha256": "f31152a1ff64dd397960f47e61fb70c072d38458baf365f4bd4eef257c52afb1"
+    },
+    {
+      "file": "mermaid/edge-types.mmd",
+      "source": "cypress/platform/dev-diagrams/layout-tests/edge-types.mmd",
+      "sha256": "c24e556ffa7e8ac70465449c7206cf098c6c083a94e722d33e567eee53e7a2c6"
+    },
+    {
+      "file": "mermaid/identical-edges.mmd",
+      "source": "cypress/platform/dev-diagrams/layout-tests/identical-edges.mmd",
+      "sha256": "8e8ad6cc7fcb39495eaec47a2b1cb2a6f785effbda50cd3780068c7f7cb2138d"
+    },
+    {
+      "file": "mermaid/labels-long.mmd",
+      "source": "cypress/platform/dev-diagrams/layout-tests/labels-long.mmd",
+      "sha256": "3d4b14cfd66d0651947fc9a73b71b51b710226ddccde4c8296d3a6780da2cc64"
+    },
+    {
+      "file": "mermaid/self-loop.mmd",
+      "source": "cypress/platform/dev-diagrams/layout-tests/self-loop.mmd",
+      "sha256": "ab52068df7444ffd823731609f70e3333b7a33ebe37184d581531c28d3242b25"
+    },
+    {
+      "file": "mermaid/shapes-and-styling.mmd",
+      "source": "cypress/platform/dev-diagrams/layout-tests/shapes-and-styling.mmd",
+      "sha256": "e04d8d718ae513b22577961f0188974e3b7010c11d5d4213c68e5994ba48179b"
+    },
+    {
+      "file": "mermaid/state-diagram.mmd",
+      "source": "cypress/platform/dev-diagrams/layout-tests/state-diagram.mmd",
+      "sha256": "edaa7cec41be10423b1ce362878aa847fa32461bdb0d8fb313c562a6c539e4af"
+    },
+    {
+      "file": "structurizr/getting-started.dsl",
+      "source": "structurizr-dsl/src/test/resources/dsl/getting-started.dsl",
+      "sha256": "f51d5b4d40a95d9f8d7a9cb62c088f2a5a5015ddc96bd6573c3b085e0fdc9982",
+      "views": [
+        "SystemContext-001"
+      ]
+    },
+    {
+      "file": "structurizr/groups.dsl",
+      "source": "structurizr-dsl/src/test/resources/dsl/groups.dsl",
+      "sha256": "a73ebca5ee5f00738759744c1da20f3f5bb301da656c005a0956eaadc56e542f",
+      "views": [
+        "Container-001",
+        "Deployment-001"
+      ]
+    },
+    {
+      "file": "structurizr/dynamic.dsl",
+      "source": "structurizr-dsl/src/test/resources/dsl/dynamic.dsl",
+      "sha256": "86e2558ca549ce92478e1a89fa8ef1df759073e8277984f38b1f4ca15a474f21",
+      "views": [
+        "Dynamic-001",
+        "Dynamic-002"
+      ]
+    },
+    {
+      "file": "structurizr/dynamic-view-with-explicit-ordering.dsl",
+      "source": "structurizr-dsl/src/test/resources/dsl/dynamic-view-with-explicit-ordering.dsl",
+      "sha256": "e2f9bf321d6e6fac4c5bcee1a629d1ab8b7c3d3249eab3435cf97927325f2344",
+      "views": [
+        "Dynamic-001"
+      ]
+    },
+    {
+      "file": "structurizr/exclude-relationships.dsl",
+      "source": "structurizr-dsl/src/test/resources/dsl/exclude-relationships.dsl",
+      "sha256": "4bdb88877f94b47f663396086a880200abaa16864814c8d1100772d5fd0320dd",
+      "views": [
+        "SystemContext-001"
+      ]
+    },
+    {
+      "file": "structurizr/include-implied-relationship.dsl",
+      "source": "structurizr-dsl/src/test/resources/dsl/include-implied-relationship.dsl",
+      "sha256": "7d2165a90f5692dfe233c20257d4e3dc55e5fa227ec14cbcc1756fb191b2f967",
+      "views": [
+        "SystemLandscape-001"
+      ]
+    },
+    {
+      "file": "structurizr/exclude-implied-relationship.dsl",
+      "source": "structurizr-dsl/src/test/resources/dsl/exclude-implied-relationship.dsl",
+      "sha256": "9a61fe07507178aa4797c2b772584313847a60c50652f9cef99fa3590a3c7799",
+      "views": [
+        "SystemLandscape-001"
+      ]
+    },
+    {
+      "file": "tikz/explicit-draw.pgf",
+      "source": "doc/generic/pgf/pgfmanual-en-tikz-actions.tex",
+      "sha256": "467010c17fe02495a3a9d283b756bb30fe70b92c3ed263c3b5c7dea7d7b93afd",
+      "lines": [
+        185,
+        187
+      ]
+    },
+    {
+      "file": "tikz/multi-dash.pgf",
+      "source": "doc/generic/pgf/pgfmanual-en-tikz-actions.tex",
+      "sha256": "3f335fec07d1c992822a8dbd98c5c68e2cbe8b96474def1c01e6ed1e29cf2f79",
+      "lines": [
+        333,
+        335
+      ]
+    },
+    {
+      "file": "tikz/dash-phase.pgf",
+      "source": "doc/generic/pgf/pgfmanual-en-tikz-actions.tex",
+      "sha256": "e3da5054aba02dfe31f549243d98a91852dd1e115883455c293b243f18b0a6e0",
+      "lines": [
+        344,
+        347
+      ]
+    },
+    {
+      "file": "tikz/even-odd.pgf",
+      "source": "doc/generic/pgf/pgfmanual-en-tikz-actions.tex",
+      "sha256": "b2dcd87b615a2fe21cdcd0a7854a16f8eb527e289dc778f9298e61143ebe57d6",
+      "lines": [
+        663,
+        668
+      ]
+    },
+    {
+      "file": "tikz/polar-grid.pgf",
+      "source": "doc/generic/pgf/pgfmanual-en-tikz-coordinates.tex",
+      "sha256": "535937631d647606edaf1a8a46eb6cfb6041fb0109a78ffe6304ed7eb00b294d",
+      "lines": [
+        58,
+        61
+      ]
+    },
+    {
+      "file": "tikz/subpaths.pgf",
+      "source": "doc/generic/pgf/pgfmanual-en-tikz-paths.tex",
+      "sha256": "ba94ee06c7459c1ec918fefb1882e87c4b16ce85dec79ede51011505a6e530ae",
+      "lines": [
+        190,
+        192
+      ]
+    },
+    {
+      "file": "tikz/axis-scale.pgf",
+      "source": "doc/generic/pgf/pgfmanual-en-tikz-transformations.tex",
+      "sha256": "8c609ea160ecfd68ea58b96e3a4f2977c964a23170bf6b64dfbd7785c329184d",
+      "lines": [
+        84,
+        87
+      ]
+    }
+  ]
+}

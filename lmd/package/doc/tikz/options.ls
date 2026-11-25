@@ -94,18 +94,25 @@ pub fn stroke_width(node, fallback) float^ {
     else fallback
 }
 
-// SVG dash array from `dashed`, `dotted` or `dash pattern=on a off b`.
+// PGF dash lists alternate an arbitrary number of on/off lengths.
 pub fn dash_array(node) any^ {
     let custom = value(node, "dash pattern", null)
     if (custom != null) {
         let words = [for (part in ((split(trim(custom), " ")) ^ { [] }) where trim(part) != "")
             trim(part)]
-        if (len(words) != 4 or words[0] != "on" or words[2] != "off")
+        if (len(words) == 0 or len(words) % 4 != 0 or not all([
+            for (i, word in words where i % 2 == 0) word == (if (i % 4 == 0) "on" else "off")
+        ]))
             raise error("unsupported TikZ dash pattern: " ++ custom)
-        else string(dimension_px(words[1])^) ++ " " ++ string(dimension_px(words[3])^)
+        else join([for (i, word in words where i % 2 == 1) string(dimension_px(word)^)], " ")
     } else if (has(node, "dashed")) "4 4"
     else if (has(node, "dotted")) "1 2"
     else null
+}
+
+pub fn dash_phase(node) any^ {
+    let phase = value(node, "dash phase", null)
+    if (phase == null) null else dimension_px(phase, null, true)^
 }
 
 pub fn numeric_value(source) float^ {
@@ -124,7 +131,7 @@ pub fn numeric_value(source) float^ {
 }
 
 // CSS pixel conversion is explicit because TeX pt and CSS px differ.
-pub fn dimension_px(source, text_width_px = null) float^ {
+pub fn dimension_px(source, text_width_px = null, signed = false) float^ {
     let s = trim(source)
     let units = if (ends_with(s, "\\textwidth")) "textwidth"
         else if (ends_with(s, "cm")) "cm"
@@ -135,7 +142,7 @@ pub fn dimension_px(source, text_width_px = null) float^ {
         else raise error("unsupported TikZ dimension: " ++ source)
     let unit_length = if (units == "textwidth") len("\\textwidth") else len(units)
     let magnitude = numeric_value(slice(s, 0, len(s) - unit_length))^
-    if (magnitude <= 0.0) raise error("TikZ dimension must be positive")
+    if (not signed and magnitude <= 0.0) raise error("TikZ dimension must be positive")
     else if (units == "textwidth") {
         if (text_width_px == null) raise error("\\textwidth needs a document viewport")
         else magnitude * float(text_width_px)

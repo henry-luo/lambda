@@ -1,0 +1,3 @@
+\begin{tikzpicture}[dash pattern=on 2pt off 3pt on 4pt off 4pt]
+  \draw (0pt,0pt) -- (3.5cm,0pt);
+\end{tikzpicture}

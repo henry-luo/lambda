@@ -577,8 +577,10 @@ fn edge_annotations(entry, graph_id) {
 fn cluster_element(scope, st, graph_id) {
   let known = attributes.canonical("cluster", scope.properties);
   <subgraph id: scope.id, role: scope.role, 'parent-scope': scope.parent_scope,
-    label: labels.graph(known.label, graph_id), 'label-format': known["label-format"],
+    label: labels.graph(known.label, graph_id) or "", 'label-format': known["label-format"],
     direction: known.direction, fill: known.fill, style: known.style,
+    stroke: known.stroke, 'stroke-width': known["stroke-width"],
+    'stroke-dasharray': known["stroke-dasharray"],
     'gradient-angle': model.optional(known, "gradient-angle"),
     'font-name': model.optional(known, "font-name"),
     'font-size': model.optional(known, "font-size"),
