@@ -1,0 +1,48 @@
+{
+  issue: null,
+  unsupported: null,
+  text: "Y|N|[a,%{b}]|[gamma]:N|[]:Y|[\\q_no_value ]|Y",
+  diagnostics: []
+}
+{
+  issue: null,
+  unsupported: null,
+  text: "Y|1/0|[  gamma %ignored]",
+  diagnostics: []
+}
+{
+  issue: null,
+  unsupported: null,
+  text: "[a,%{b}]",
+  diagnostics: []
+}
+{
+  issue: null,
+  unsupported: null,
+  text: "[a,%{b}]",
+  diagnostics: []
+}
+{
+  issue: null,
+  unsupported: null,
+  text: "[a,%{b}]",
+  diagnostics: []
+}
+{
+  issue: null,
+  unsupported: null,
+  text: "[a,%{b}]",
+  diagnostics: []
+}
+{
+  issue: "tex-unsupported-primitive",
+  unsupported: "expl3 input stream globaldefs",
+  text: "",
+  diagnostics: []
+}
+{
+  issue: "tex-unsupported-primitive",
+  unsupported: "expl3 input file missing",
+  text: "",
+  diagnostics: []
+}

@@ -34,6 +34,17 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Expl3 input-stream lifecycle, 2026-11-26:** Script now opens, reads,
+  checks EOF and closes expl3 input streams through the existing captured
+  resource broker, reusing TeX stream slots (S1.8, D10.2.2v2, D11.1.2).
+  TeX Live comparisons cover raw/tokenized lines, EOF and no-value behavior,
+  slot reuse, reopening, dynamic names, filename spacing and scoped/global
+  reads. An authorized file and denied symlink pass the security runtime check
+  in interpreter and JIT. Missing-file diagnostics and negative `globaldefs`
+  pool scoping remain explicitly unsupported; the document digester still
+  rejects input-stream source mapping. Csvsimple remains blocked earlier at
+  `keys_define:nn`.
+
 - **Expl3 stream declarations and integer registers, 2026-11-26:** Script now
   creates closed input-stream variables with TeX's terminal-stream meaning and
   exposes integer creation, use, zeroing, setting, increment and decrement via

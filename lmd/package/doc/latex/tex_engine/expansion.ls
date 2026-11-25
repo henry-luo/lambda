@@ -624,6 +624,7 @@ fn expand_one(st: State, t, budget) State^ {
     else if (st.latex and contains(["arabic", "roman", "Roman", "alph", "Alph", "fnsymbol", "value"], primitive(st, t)))
         latex_counter_format(st, t, primitive(st, t), budget)
     else if (st.script_expl3 and primitive(st, t) == "tl_use:N") expl3_tl_use(st, budget)
+    else if (st.script_expl3 and expl3.ior_eof(primitive(st, t))) expl3_ior_eof(st, primitive(st, t))
     else if (st.script_expl3 and expl3.token_empty(primitive(st, t))) expl3_tl_empty(st, primitive(st, t), budget)
     else if (st.script_expl3 and expl3.token_equal(primitive(st, t))) expl3_tl_equal(st, primitive(st, t), budget)
     else if (st.script_expl3 and expl3.token_string(primitive(st, t))) expl3_tl_string(st, primitive(st, t), budget)
@@ -2255,6 +2256,12 @@ fn push_resource_reader(fetched) State^ {
 }
 
 // streams use the same caller-supplied resource set as input and packages.
+fn input_stream_resource(st: State, name) any^ {
+    let exact = captured_resource(st, name)^;
+    if (exact.available and not exact.found and exact.state.issue == null)
+        captured_resource(exact.state, name ++ ".tex") else exact
+}
+
 fn input_stream_command(st: State, budget, opening) State^ {
     let scanned = scan_number(st, budget)^;
     if (scanned.state.issue != null) scanned.state
@@ -2266,9 +2273,7 @@ fn input_stream_command(st: State, budget, opening) State^ {
             let name = scan_filename(optional_equals(scanned.state, budget), budget)^;
             if (name.state.issue != null) name.state
             else {
-                let exact = captured_resource(name.state, name.name)^;
-                let chosen = if (exact.available and not exact.found and exact.state.issue == null)
-                    captured_resource(exact.state, name.name ++ ".tex")^ else exact;
+                let chosen = input_stream_resource(name.state, name.name)^;
                 if (chosen.state.issue != null) chosen.state
                 else if (not chosen.available) unsupported(chosen.state, "openin resource provider")
                 else {*:chosen.state, input_stream_state_seen: true, input_streams: {*:chosen.state.input_streams,
@@ -2374,6 +2379,102 @@ fn read_stream_assignment(st: State, global, budget, readline) State^ {
                 }
             }
         }
+    }
+}
+
+fn ior_slot(st, token) any^ {
+    let value = if (is_control(token)) meaning(st, token) else null;
+    if (value.kind == "chardef" or value.kind == "mathchardef") value.value else null
+}
+
+// Closed ior slots are returned to the same reusable pool as expl3's stream allocator.
+fn ior_close_target(st: State, target) State^ {
+    let slot = ior_slot(st, target)^;
+    if (slot == null) unsupported(st, "expl3 input stream variable")
+    else if (slot < 0 or slot >= 16) st
+    // The stream pool is global; localizing its updates needs scoped pool state.
+    else if (parameter_value(st, "globaldefs") < 0) unsupported(st, "expl3 input stream globaldefs")
+    else {
+        let free = if (st.ior_free_slots is array) st.ior_free_slots else [];
+        let closed = {*:st, input_stream_state_seen:true,
+            input_streams:{*:st.input_streams, *:map([string(slot), {open:false}])},
+            ior_free_slots:if (contains(free, slot)) free else [slot, *free]};
+        assign_meaning(closed, key(target), {kind:"mathchardef", value:16}, true)
+    }
+}
+
+fn ior_open(st: State, target, budget) State^ {
+    let arg = stream.argument(st.input, true)^;
+    let current = {*:st, input:arg.stream};
+    if (arg.error != null) fail(current, arg.error)
+    else if (parameter_value(current, "globaldefs") < 0) unsupported(current, "expl3 input stream globaldefs")
+    else {
+        let filename = expand_argument_name(current, arg.tokens, budget)^;
+        if (filename.state.issue != null) filename.state
+        else {
+            let resource = input_stream_resource(filename.state, trim(filename.name)^)^;
+            if (resource.state.issue != null) resource.state
+            else if (not resource.available) unsupported(resource.state, "openin resource provider")
+            else if (not resource.found) unsupported(resource.state, "expl3 input file missing")
+            else {
+                let closed = ior_close_target(resource.state, target)^;
+                let free = if (closed.ior_free_slots is array) closed.ior_free_slots else [];
+                let slot = if (len(free) > 0) free[0] else count_value(closed, 16) + 1;
+                if (closed.issue != null) closed
+                else if (slot < 0 or slot >= 16) fail(closed, "tex-no-room")
+                else {
+                    let allocated = if (len(free) > 0) {*:closed, ior_free_slots:slice(free, 1, len(free))}
+                        else save_count(closed, 16, slot, true)^;
+                    let opened = {*:allocated, input_stream_state_seen:true,
+                        input_streams:{*:allocated.input_streams,
+                            *:map([string(slot), {open:true, data:resource.data, position:0, id:resource.id}])}};
+                    assign_meaning(opened, key(target), {kind:"chardef", value:slot}, true)
+                }
+            }
+        }
+    }
+}
+
+fn ior_get(st: State, target, raw) State^ {
+    let destination = nonspace(st.input)^;
+    let current = {*:st, input:destination.stream, input_stream_state_seen:true};
+    let slot = ior_slot(current, target)^;
+    let global = effective_global(current, false)^;
+    if (not is_control(destination.token)) fail(current, "tex-missing-cs")
+    else if (slot == null) unsupported(current, "expl3 input stream variable")
+    else if (slot < 0 or slot >= 16 or current.input_streams[string(slot)].open != true)
+        assign_meaning(current, key(destination.token), expl3.token_list([control_token("q_no_value")]), global)
+    else if (raw) {
+        let line = read_stream_line(current, slot)^;
+        if (line.state.issue != null) line.state
+        else assign_meaning(line.state, key(destination.token), expl3.token_list(text_tokens(line.text)^), global)
+    }
+    else {
+        let read = read_token_lines(current, slot)^;
+        if (read.state.issue != null) read.state
+        else assign_meaning(read.state, key(destination.token), expl3.token_list(read.tokens), global)
+    }
+}
+
+fn expl3_ior_action(st: State, name, budget) State^ {
+    let target = nonspace(st.input)^;
+    let current = {*:st, input:target.stream};
+    if (not is_control(target.token)) fail(current, "tex-missing-cs")
+    else if (name == "ior_open:Nn") ior_open(current, target.token, budget)
+    else if (name == "ior_close:N") ior_close_target(current, target.token)
+    else ior_get(current, target.token, name == "ior_str_get:NN")
+}
+
+fn expl3_ior_eof(st: State, name) State^ {
+    let target = nonspace(st.input)^;
+    let current = {*:st, input:target.stream, input_eof_seen:true};
+    let slot = ior_slot(current, target.token)^;
+    if (slot == null) unsupported(current, "expl3 input stream variable")
+    else {
+        let eof = slot < 0 or slot >= 16 or current.input_streams[string(slot)].open != true;
+        if (name == "ior_if_eof_p:N") {*:current, input:stream.push(current.input,
+            [control_token(if (eof) "c_true_bool" else "c_false_bool")])}
+        else expl3_branch(current, name, eof)
     }
 }
 
@@ -6025,6 +6126,8 @@ fn step(st: State, budget) State^ {
         after_assignment(current, expl3_cs_define(current, cmd, budget))
     else if (st.script_expl3 and expl3.cs_variant(cmd))
         after_assignment(current, expl3_cs_generate_variant(current))
+    else if (st.script_expl3 and expl3.ior_action(cmd))
+        after_assignment(current, expl3_ior_action(current, cmd, budget))
     else if (st.script_expl3 and expl3.token_assignment(cmd))
         after_assignment(current, expl3_tl_assign(current, cmd, budget))
     else if (st.script_expl3 and expl3.token_replacement(cmd))
@@ -6349,6 +6452,8 @@ pub fn enable_script_expl3(st: State) State^ {
     let macros = enable_expl_macro_sources(msg_support, [*variants,*pop_base,*pop_conditionals,*pop_variants,*prop_get_conditionals,*prop_get_variants,*prop_exp_helpers,*prop_pop_bases,*prop_remove_bases,*prop_pop_conditionals,*prop_pop_variants,*prop_remove_variants,*integer_ops,*integer_dynamic,
         {source:"\\ior_new:N#1{\\cs_new_eq:NN#1\\c__ior_term_ior}",protected_flag:true},
         {source:"\\ior_new:c{\\exp_args:Nc\\ior_new:N}",protected_flag:true},
+        {source:"\\ior_open:cn{\\exp_args:Nc\\ior_open:Nn}",protected_flag:true},
+        {source:"\\ior_close:c{\\exp_args:Nc\\ior_close:N}",protected_flag:true},
         {source:"\\int_new:N#1{\\__kernel_chk_if_free_cs:N#1\\cs:w newcount\\cs_end:#1}",protected_flag:true},
         {source:"\\int_new:c{\\exp_args:Nc\\int_new:N}",protected_flag:true},
         {source:"\\q_no_value{\\q_no_value}",protected_flag:false},

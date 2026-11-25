@@ -723,6 +723,11 @@ TEST_P(SecurityRuntimeTest, TexLocalIncludesUseTheSameDataGrant) {
     seed("auto.ls", "input(\"@ROOT@/docs/auto-doc.tex\")^ == input(\"@ROOT@/docs/auto-doc.tex\", 'latex')^\n");
     result = load_file("auto.ls"); ASSERT_NE(result, nullptr);
     ASSERT_EQ(get_type_id(result->root), LMD_TYPE_BOOL); EXPECT_TRUE(result->root.bool_val);
+    // Expl3 streams must use the same authorized local resource broker.
+    seed("ior.ls", "contains(parse(\"\\\\ExplSyntaxOn\\\\ior_new:N\\\\g_test_ior\\\\ior_open:Nn\\\\g_test_ior{part.tex}\\\\ior_str_get:NN\\\\g_test_ior\\\\l_tmpa_tl\\\\tl_use:N\\\\l_tmpa_tl\\\\end\", "
+        "{type:'tex', base:\"@ROOT@/docs/doc.tex\"})^.text, \"SAFE\")^\n");
+    result = load_file("ior.ls"); ASSERT_NE(result, nullptr);
+    ASSERT_EQ(get_type_id(result->root), LMD_TYPE_BOOL); EXPECT_TRUE(result->root.bool_val);
     EXPECT_GE(atomic_load32(&capture.data_reads), 2);
     seed("outside.tex", "FORBIDDEN", true);
     char* outside = file_path_join(fixture_directory, "outside.tex");
@@ -734,6 +739,10 @@ TEST_P(SecurityRuntimeTest, TexLocalIncludesUseTheSameDataGrant) {
     expect_failed(result);
     seed("auto-denied.ls", "input(\"@ROOT@/docs/linked-doc.tex\")^\n");
     result = load_file("auto-denied.ls"); ASSERT_NE(result, nullptr);
+    expect_failed(result);
+    seed("ior-denied.ls", "parse(\"\\\\ExplSyntaxOn\\\\ior_new:N\\\\g_test_ior\\\\ior_open:Nn\\\\g_test_ior{linked.tex}\\\\end\", "
+        "{type:'tex', base:\"@ROOT@/docs/doc.tex\"})^\n");
+    result = load_file("ior-denied.ls"); ASSERT_NE(result, nullptr);
     expect_failed(result);
     EXPECT_GE(atomic_load32(&capture.denied_reads), 1);
 }
