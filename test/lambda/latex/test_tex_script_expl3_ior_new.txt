@@ -1,0 +1,10 @@
+{
+  issue: null,
+  unsupported: null,
+  text: "\\mathchar\"10/16/\\mathchar\"10"
+}
+{
+  issue: "expl3-already-defined",
+  unsupported: null,
+  text: ""
+}

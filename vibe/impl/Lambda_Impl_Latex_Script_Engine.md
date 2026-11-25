@@ -34,6 +34,16 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Expl3 stream declarations and integer registers, 2026-11-26:** Script now
+  creates closed input-stream variables with TeX's terminal-stream meaning and
+  exposes integer creation, use, zeroing, setting, increment and decrement via
+  the existing TeX register operations, including global and dynamic-name
+  forms (D10.2.2v2). TeX Live comparisons cover values, arithmetic, scope,
+  dynamic names and duplicate stream declarations. Focused GTests and both
+  execution tiers with forced GC pass. This ports stream declaration only;
+  opening and reading expl3 streams remain open. Csvsimple now reaches the
+  unported `keys_define:nn` instead of stopping on stream or integer creation.
+
 - **Expl3 generated variants, 2026-11-26:** Script now builds ordinary TeX
   macros for `cs_generate_variant:Nn` over `N`/`n` base signatures with
   `N`, `n`, `c`, `V`, `v`, `o` and `e` argument forms (D10.2.2v2). The

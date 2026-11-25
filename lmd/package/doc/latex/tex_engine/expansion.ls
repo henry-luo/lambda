@@ -6223,6 +6223,7 @@ pub fn enable_script_expl3(st: State) State^ {
     let support = enable_expl_values(scratch, [
         {name: "tex_let:D", kind: "primitive", value: "let", source_mapping_guard: "tl_eq"},
         {name: "tex_global:D", kind: "primitive", value: "global"},
+        {name: "tex_advance:D", kind: "primitive", value: "advance"},
         {name: "group_begin:", kind: "primitive", value: "begingroup"},
         {name: "group_end:", kind: "primitive", value: "endgroup"},
         {name: "if_cs_exist:w", kind: "primitive", value: "ifcsname"},
@@ -6241,6 +6242,7 @@ pub fn enable_script_expl3(st: State) State^ {
         {name: "g_tmpb_bool", kind: "chardef", value: 0},
         {name: "tex_expanded:D", kind: "primitive", value: "expanded"},
         {name: "tex_the:D", kind: "primitive", value: "the"},
+        {name: "int_use:N", kind: "primitive", value: "the"},
         {name: "exp_not:N", kind: "primitive", value: "noexpand"},
         {name: "cs_set_nopar:Npx", kind: "primitive", value: "edef"},
         {name: "if:w", kind: "primitive", value: "if"},
@@ -6252,6 +6254,8 @@ pub fn enable_script_expl3(st: State) State^ {
         {name: "else:", kind: "primitive", value: "else"},
         {name: "c_true_bool", kind: "chardef", value: 1},
         {name: "c_false_bool", kind: "chardef", value: 0},
+        // TeX reserves stream 16 for terminal input.
+        {name: "c__ior_term_ior", kind: "mathchardef", value: 16},
         {name: "if_meaning:w", kind: "primitive", value: "ifx"},
         {name: "fi:", kind: "primitive", value: "fi"},
         {name: "exp:w", kind: "primitive", value: "romannumeral"},
@@ -6330,7 +6334,23 @@ pub fn enable_script_expl3(st: State) State^ {
         source:"\\" ++ shape.pop ++ ":cnN" ++ suffix ++ "{\\exp_args:Nc\\" ++ shape.pop ++ ":NnN" ++ suffix ++ "}",protected_flag:true}];
     let prop_remove_variants=[for(shape in prop_pop_shapes) {
         source:"\\" ++ shape.remove ++ ":cn{\\exp_args:Nc\\" ++ shape.remove ++ ":Nn}",protected_flag:true}];
-    let macros = enable_expl_macro_sources(msg_support, [*variants,*pop_base,*pop_conditionals,*pop_variants,*prop_get_conditionals,*prop_get_variants,*prop_exp_helpers,*prop_pop_bases,*prop_remove_bases,*prop_pop_conditionals,*prop_pop_variants,*prop_remove_variants,
+    // The integer operations share TeX's register assignments and scope rules.
+    let integer_ops = [for (scope in ["", "g"], op in [
+        {name:"zero", params:"#1", body:"#1=\\c_zero_int"},
+        {name:"set", params:"#1#2", body:"#1=\\__int_eval:w#2\\__int_eval_end:"},
+        {name:"incr", params:"#1", body:"\\tex_advance:D#1\\c_one_int"},
+        {name:"decr", params:"#1", body:"\\tex_advance:D#1-\\c_one_int"}]) {
+        source:"\\int_" ++ scope ++ op.name ++ (if (op.name == "set") ":Nn" else ":N") ++ op.params ++
+            "{" ++ (if (scope == "g") "\\tex_global:D" else "") ++ op.body ++ "}", protected_flag:true}];
+    let integer_dynamic = [for (scope in ["", "g"], op in ["zero", "set", "incr", "decr"]) {
+        source:"\\int_" ++ scope ++ op ++ (if (op == "set") ":cn" else ":c") ++
+            "{\\exp_args:Nc\\int_" ++ scope ++ op ++ (if (op == "set") ":Nn" else ":N") ++ "}",
+        protected_flag:true}];
+    let macros = enable_expl_macro_sources(msg_support, [*variants,*pop_base,*pop_conditionals,*pop_variants,*prop_get_conditionals,*prop_get_variants,*prop_exp_helpers,*prop_pop_bases,*prop_remove_bases,*prop_pop_conditionals,*prop_pop_variants,*prop_remove_variants,*integer_ops,*integer_dynamic,
+        {source:"\\ior_new:N#1{\\cs_new_eq:NN#1\\c__ior_term_ior}",protected_flag:true},
+        {source:"\\ior_new:c{\\exp_args:Nc\\ior_new:N}",protected_flag:true},
+        {source:"\\int_new:N#1{\\__kernel_chk_if_free_cs:N#1\\cs:w newcount\\cs_end:#1}",protected_flag:true},
+        {source:"\\int_new:c{\\exp_args:Nc\\int_new:N}",protected_flag:true},
         {source:"\\q_no_value{\\q_no_value}",protected_flag:false},
         {source:"\\exp_args:NNe#1#2#3{\\exp_after:wN#1\\exp_after:wN#2\\tex_expanded:D{{#3}}}",protected_flag:false},
         {source:"\\exp_args:Nce#1#2#3{\\tex_expanded:D{\\exp_not:N#1\\exp_after:wN\\exp_not:N\\cs:w#2\\cs_end:{\\__kernel_exp_not:w\\tex_expanded:D{{#3}}}}}",protected_flag:false},
