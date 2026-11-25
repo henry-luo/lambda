@@ -1,0 +1,25 @@
+{
+  issue: null,
+  unsupported: null,
+  text: "[blue|blue|2][green|green|3]"
+}
+{
+  issue: null,
+  unsupported: null,
+  text: "T/F|F/T"
+}
+{
+  issue: null,
+  unsupported: null,
+  text: "T"
+}
+{
+  issue: null,
+  unsupported: null,
+  text: "[saved]/42[fallback-purple]"
+}
+{
+  issue: "tex-unsupported-primitive",
+  unsupported: "expl3 unknown key choice diagnostic",
+  text: ""
+}

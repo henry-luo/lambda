@@ -34,6 +34,15 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Expl3 choice and boolean keys, 2026-11-26:** Script now implements
+  `.choices:nn` and local/global boolean and inverse-boolean key properties
+  (D10.2.2v2). Choice dispatch uses scoped key macros, and its index is a TeX
+  count register whose value is restored across nested key calls. TeX Live
+  comparisons cover choice values and indices, defaults, inverse and global
+  booleans, state restoration and a user-defined unknown-choice handler.
+  Unknown-choice diagnostics and document source mapping remain unsupported.
+  Csvsimple now reaches the unported `clist_map_inline:nn` operation.
+
 - **Expl3 key definitions and execution, 2026-11-26:** Script now handles
   scoped `.code:n`, `.default:n`, `.initial:n`, `.tl_set:N`, `.tl_gset:N`
   and `.meta:n` properties through `keys_define:nn` and `keys_set:nn`
@@ -41,8 +50,8 @@ The existing native engine design and historical Phase IV work are in
   calls and key context, local redefinition, global token-list assignment and
   variable creation. The document digester still rejects key source mapping;
   other properties, diagnostic recovery, complex name tokens and assignment
-  prefixes remain explicitly unsupported. Csvsimple now reaches the
-  unimplemented `.choices:nn` property.
+  prefixes remain explicitly unsupported. Csvsimple's later blocker is
+  recorded in the current choice-key checkpoint above.
 
 - **Adapter and constructor regression migration, 2026-11-26:** Both
   previously failing fixtures now pass without changing their expected

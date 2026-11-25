@@ -625,6 +625,7 @@ fn expand_one(st: State, t, budget) State^ {
         latex_counter_format(st, t, primitive(st, t), budget)
     else if (st.script_expl3 and primitive(st, t) == "tl_use:N") expl3_tl_use(st, budget)
     else if (st.script_expl3 and expl3.keyval_parse(primitive(st, t))) expl3_keyval_parse(st, budget)
+    else if (st.script_expl3 and primitive(st, t) == "__keys_choice_find:n") expl3_key_choice(st, budget)
     else if (st.script_expl3 and expl3.ior_eof(primitive(st, t))) expl3_ior_eof(st, primitive(st, t))
     else if (st.script_expl3 and expl3.token_empty(primitive(st, t))) expl3_tl_empty(st, primitive(st, t), budget)
     else if (st.script_expl3 and expl3.token_equal(primitive(st, t))) expl3_tl_equal(st, primitive(st, t), budget)
@@ -3099,7 +3100,7 @@ fn expl3_keyval_parse(st: State, budget) State^ {
 }
 
 let KEYS_SCRATCH = ["l_keys_path_str", "l_keys_path_tl", "l_keys_key_str", "l_keys_key_tl",
-    "l_keys_value_tl", "l__keys_module_str", "l__keys_inherit_str"]
+    "l_keys_value_tl", "l_keys_choice_tl", "l__keys_module_str", "l__keys_inherit_str"]
 fn expl3_keys_next_token() => {kind:"expl3-keys-next", value:"", cat:null, start:-1, end:-1}
 
 // The l3keys path syntax discards spaces adjacent to module separators.
@@ -3141,9 +3142,11 @@ fn expl3_keys_begin(st: State, name) State^ {
         else {
             let saved = [for (variable in KEYS_SCRATCH)
                 {name:variable, value:current.definitions["control:" ++ variable]}];
+            let choice = meaning(current, control_token("l_keys_choice_int"))^;
             let frames = if (current.expl3_key_frames is array) current.expl3_key_frames else [];
             let frame = {module:expl3_key_path(token_text(current, module.tokens)^)^,
-                entries:entries, index:0, defining:name == "keys_define:nn", saved:saved};
+                entries:entries, index:0, defining:name == "keys_define:nn", saved:saved,
+                choice:if (choice.kind == "register") count_value(current, choice.index) else null};
             {*:current, expl3_key_frames:[*frames, frame],
                 input:stream.push(current.input, [expl3_keys_next_token()])}
         }
@@ -3155,6 +3158,97 @@ fn expl3_key_code(st: State, path, tokens) State^ {
     if (parsed.issue != null) fail(st, parsed.issue)
     else assign_meaning(st, "control:key code > " ++ path,
         latex_macro(1, false, true, false, [], parsed.tokens)^, false)
+}
+
+fn expl3_choice_base(st: State, path) State^ {
+    let parts = split(path, "/")^;
+    let parent = join(slice(parts, 0, len(parts) - 1)^, "/")^;
+    let parent_type = st.definitions["control:key type > " ++ parent];
+    if (parent_type != null and parent_type.kind == "macro" and token_text(st, parent_type.body)^ == "choice")
+        unsupported(st, "expl3 nested choice diagnostic")
+    else {
+        let body = [control_token("__keys_choice_find:n"), brace_token(true), parameter_token(0), brace_token(false)];
+        let code = assign_meaning(st, "control:key code > " ++ path,
+            latex_macro(1, false, true, false, [], body)^, false)^;
+        assign_meaning(code, "control:key type > " ++ path, expl3.token_list(text_tokens("choice")^), false)
+    }
+}
+
+// Choice values are stringified without expansion, then dispatched through normal key macros.
+fn expl3_key_choice(st: State, budget) State^ {
+    if (st.expansions >= budget) fail(st, "tex-budget")
+    else {
+        let arg = stream.argument(st.input, true)^;
+        let current = {*:st, input:arg.stream, expansions:st.expansions + 1, expl3_keys_seen:true};
+        let path = meaning(current, control_token("l_keys_path_str"))^;
+        if (arg.error != null) fail(current, arg.error)
+        else if (path.kind != "macro" or path.count != 0 or
+            any([for (token in arg.tokens) token.kind != "char" or token.cat == 1 or token.cat == 2]))
+            unsupported(current, "expl3 key choice tokens")
+        else {
+            let base = token_text(current, path.body)^;
+            let choice = expl3_key_path(token_text(current, arg.tokens)^)^;
+            let chosen = "key code > " ++ base ++ "/" ++ choice;
+            let fallback = "key code > " ++ base ++ "/unknown";
+            let selected = current.definitions["control:" ++ chosen];
+            let target = if (selected != null and selected.kind != "undefined") chosen else fallback;
+            let code = current.definitions["control:" ++ target];
+            if (code == null or code.kind == "undefined") unsupported(current, "expl3 unknown key choice diagnostic")
+            else {*:current, input:stream.push(current.input,
+                [control_token(target), brace_token(true), *arg.tokens, brace_token(false)])}
+        }
+    }
+}
+
+fn expl3_choices_install(st: State, path, choices, body, index = 0) State^ {
+    if (index >= len(choices) or st.issue != null) st
+    else {
+        let item = choices[index];
+        if (any([for (token in item) token.kind != "char" or token.cat == 1 or token.cat == 2]))
+            unsupported(st, "expl3 key choice tokens")
+        else {
+            let suffix = expl3_key_path(token_text(st, item)^)^;
+            let wrapped = [control_token("tl_set:Nn"), control_token("l_keys_choice_tl"),
+                brace_token(true), *item, brace_token(false), control_token("int_set:Nn"),
+                control_token("l_keys_choice_int"), brace_token(true), *text_tokens(string(index + 1))^,
+                brace_token(false), *body];
+            let added = expl3_key_code(st, path ++ "/" ++ suffix, wrapped)^;
+            expl3_choices_install(added, path, choices, body, index + 1)
+        }
+    }
+}
+
+fn expl3_key_choices(st: State, path, value) State^ {
+    let source = stream.push(stream.from_reader(reader.reader("")), value)^;
+    let choices = stream.argument(source, true)^;
+    let body = stream.argument(choices.stream, true)^;
+    let trailing = nonspace(body.stream)^;
+    if (choices.error != null or body.error != null or trailing.token != null)
+        unsupported(st, "expl3 key choices arguments")
+    else expl3_choices_install(expl3_choice_base(st, path)^, path, expl3.from_clist(choices.tokens)^, body.tokens)
+}
+
+fn expl3_key_bool(st: State, path, property, value) State^ {
+    if (len(value) != 1 or not is_control(value[0])) unsupported(st, "expl3 key boolean target")
+    else {
+        let target = value[0];
+        let ready = if (latex_definable(meaning(st, target)^))
+            assign_meaning(st, key(target), {kind:"chardef", value:0}, true)^ else st;
+        let base = expl3_choice_base(ready, path)^;
+        if (base.issue != null) base
+        else {
+            let global = starts_with(property, "bool_gset");
+            let inverse = contains(["bool_set_inverse:N", "bool_gset_inverse:N"], property);
+            let first_name = if (global) "bool_gset_" else "bool_set_";
+            let truth = latex_macro(1, false, true, false, [],
+                [control_token(first_name ++ (if (inverse) "false:N" else "true:N")), target])^;
+            let falsehood = latex_macro(1, false, true, false, [],
+                [control_token(first_name ++ (if (inverse) "true:N" else "false:N")), target])^;
+            let first = assign_meaning(base, "control:key code > " ++ path ++ "/true", truth, false)^;
+            let second = assign_meaning(first, "control:key code > " ++ path ++ "/false", falsehood, false)^;
+            assign_meaning(second, "control:key default > " ++ path, expl3.token_list(text_tokens("true")^), false)
+        }
+    }
 }
 
 fn expl3_key_define(st: State, module, path, property, value) State^ {
@@ -3179,6 +3273,9 @@ fn expl3_key_define(st: State, module, path, property, value) State^ {
     else if (property == "meta:n") expl3_key_code(st, path,
         [control_token("keys_set:nn"), brace_token(true), *text_tokens(module)^, brace_token(false),
             brace_token(true), *value, brace_token(false)])
+    else if (property == "choices:nn") expl3_key_choices(st, path, value)
+    else if (contains(["bool_set:N", "bool_gset:N", "bool_set_inverse:N", "bool_gset_inverse:N"], property))
+        expl3_key_bool(st, path, property, value)
     else if (property == "initial:n") {
         let code = st.definitions["control:key code > " ++ path];
         if (code == null or code.kind == "undefined") st
@@ -3199,8 +3296,13 @@ fn expl3_keys_next(st: State) State^ {
     else {
         let tail = len(frames) - 1;
         let frame = frames[tail];
-        if (frame.index >= len(frame.entries))
-            expl3_keys_scratch({*:st, expl3_key_frames:slice(frames, 0, tail)^}, frame.saved)
+        if (frame.index >= len(frame.entries)) {
+            let choice = meaning(st, control_token("l_keys_choice_int"))^;
+            let restored = expl3_keys_scratch({*:st, expl3_key_frames:slice(frames, 0, tail)^}, frame.saved)^;
+            if (frame.choice == null or choice.kind != "register")
+                unsupported(restored, "expl3 key choice integer")
+            else save_count(restored, choice.index, frame.choice, false)
+        }
         else {
             let entry = frame.entries[frame.index];
             let advanced = {*:st, expl3_key_frames:[*slice(frames, 0, tail)^, {*:frame, index:frame.index + 1}],
@@ -6495,7 +6597,12 @@ pub fn enable_script_expl3(st: State) State^ {
     let scratch = enable_expl_scratch(sequences, ["l_tmpa_tl", "l_tmpb_tl", "g_tmpa_tl", "g_tmpb_tl",
         "l__seq_internal_a_tl", "l__seq_internal_b_tl", "l__exp_internal_tl",
         *KEYS_SCRATCH], expl3.token_list([]))^;
-    let support = enable_expl_values(scratch, [
+    // The l3keys choice index is an ordinary count register shared with TeX.
+    let choice = if (scratch.definitions["control:l_keys_choice_int"] != null) scratch else {
+        let allocated = latex_allocate_register(scratch, 10, false)^;
+        assign_meaning(allocated.state, "control:l_keys_choice_int", {kind:"register", index:allocated.index}, true)^
+    };
+    let support = enable_expl_values(choice, [
         {name: "tex_let:D", kind: "primitive", value: "let", source_mapping_guard: "tl_eq"},
         {name: "tex_global:D", kind: "primitive", value: "global"},
         {name: "tex_advance:D", kind: "primitive", value: "advance"},
