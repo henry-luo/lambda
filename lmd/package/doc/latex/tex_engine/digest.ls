@@ -4052,6 +4052,8 @@ pub fn digest(expanded: map) Digested^ {
         {ast: null, issue: "latex-digest-unsupported", unsupported: "math character source mapping"}
     else if (expanded.expl3_bool_expr_seen == true)
         {ast: null, issue: "latex-digest-unsupported", unsupported: "expl3 boolean expression source mapping"}
+    else if (expanded.expl3_str_case_seen == true)
+        {ast: null, issue: "latex-digest-unsupported", unsupported: "expl3 string case source mapping"}
     else if (expanded.expl3_tl_replace_seen == true)
         {ast: null, issue: "latex-digest-unsupported", unsupported: "expl3 token replacement source mapping"}
     // Expanded tail results still need the native emission-origin mapping.

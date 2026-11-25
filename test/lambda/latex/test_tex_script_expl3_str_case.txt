@@ -1,0 +1,25 @@
+{
+  issue: null,
+  unsupported: null,
+  text: "BT/F",
+  diagnostics: []
+}
+{
+  issue: null,
+  unsupported: null,
+  text: "AT//A/F",
+  diagnostics: []
+}
+{
+  issue: null,
+  unsupported: null,
+  text: "MATCH/X",
+  diagnostics: []
+}
+{
+  issue: null,
+  unsupported: null,
+  text: "[,]",
+  diagnostics: []
+}
+true

@@ -590,6 +590,7 @@ fn expand_one(st: State, t, budget) State^ {
                 else if (macro.source_mapping_guard == "exp_args_value_once")
                     {*:st, expl3_exp_args_value_seen:true, expl3_exp_args_once_seen:true}
                 else if (macro.source_mapping_guard == "bool_expr") {*:st, expl3_bool_expr_seen:true}
+                else if (macro.source_mapping_guard == "str_case") {*:st, expl3_str_case_seen:true}
                 else if (macro.source_mapping_guard == "int_math") {*:st, expl3_int_math_seen: true} else st;
             let traced = if (st.prefix_scan == true) {*:marked, prefixed_macro_seen: true} else marked;
             expand_macro(traced, macro, budget, t)
@@ -6659,6 +6660,8 @@ pub fn enable_script_expl3(st: State) State^ {
         {name: "if_true:", kind: "primitive", value: "iftrue"},
         {name: "if_bool:N", kind: "primitive", value: "ifodd"},
         {name: "if_predicate:w", kind: "primitive", value: "ifodd"},
+        {name: "s__str_mark", kind: "primitive", value: "relax"},
+        {name: "s__str_stop", kind: "primitive", value: "relax"},
         {name: "if_int_compare:w", kind: "primitive", value: "ifnum"},
         {name: "if_int_odd:w", kind: "primitive", value: "ifodd"},
         {name: "int_value:w", kind: "primitive", value: "number"},
@@ -6964,6 +6967,13 @@ pub fn enable_script_expl3(st: State) State^ {
         {source: "\\__bool_choose:NNN#1#2#3{\\use:c{__bool_\\token_to_str:N#3_#1#2{\\if_meaning:w0#21\\else:0\\fi:}20:}}", protected_flag:false},
         {source: "\\use:c#1{\\cs:w#1\\cs_end:}", protected_flag:false},
         {source: "\\tl_if_empty:oT{\\exp_args:No\\tl_if_empty:nT}", protected_flag:false},
+        {source: "\\str_case:nn#1#2{\\exp:w\\__str_case:nnTF{#1}{#2}{}{}}", protected_flag:false, source_mapping_guard:"str_case"},
+        {source: "\\str_case:nnT#1#2#3{\\exp:w\\__str_case:nnTF{#1}{#2}{#3}{}}", protected_flag:false, source_mapping_guard:"str_case"},
+        {source: "\\str_case:nnF#1#2{\\exp:w\\__str_case:nnTF{#1}{#2}{}}", protected_flag:false, source_mapping_guard:"str_case"},
+        {source: "\\str_case:nnTF#1#2{\\exp:w\\__str_case:nnTF{#1}{#2}}", protected_flag:false, source_mapping_guard:"str_case"},
+        {source: "\\__str_case:nnTF#1#2#3#4{\\__str_case:nw{#1}#2{#1}{}\\s__str_mark{#3}\\s__str_mark{#4}\\s__str_stop}", protected_flag:false},
+        {source: "\\__str_case:nw#1#2#3{\\str_if_eq:nnTF{#1}{#2}{\\__str_case_end:nw{#3}}{\\__str_case:nw{#1}}}", protected_flag:false},
+        {source: "\\__str_case_end:nw#1#2#3\\s__str_mark#4#5\\s__str_stop{\\exp_end:#1#4}", protected_flag:false},
         {source: "\\bool_to_str:c{\\exp_args:Nc\\bool_to_str:N}", protected_flag: false},
         {source: "\\bool_if:cTF{\\exp_args:Nc\\bool_if:NTF}", protected_flag: false},
         {source: "\\bool_if:cT{\\exp_args:Nc\\bool_if:NT}", protected_flag: false},
@@ -7313,7 +7323,7 @@ pub fn resume(st: State, source: string, name: string = "<input>", budget: int =
             main_file: id, echo_incomplete: false, prefixed_macro_seen: false, prefix_scan: false,
             mathchardef_emission_seen: false,
             expl3_tl_head_seen: false, expl3_tl_tail_seen: false, expl3_keyval_seen: false, expl3_keys_seen:false,
-            expl3_clist_map_seen:false, expl3_bool_expr_seen:false, expl3_tl_replace_seen:false,
+            expl3_clist_map_seen:false, expl3_bool_expr_seen:false, expl3_tl_replace_seen:false, expl3_str_case_seen:false,
             expl3_exp_args_once_seen: false, expl3_exp_args_value_seen: false, expl3_exp_args_f_seen: false,
             sources: [*st.sources, {id: id, name: name, origin: origin, data: source}]};
         run(resumed, budget)
