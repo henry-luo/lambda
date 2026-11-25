@@ -1,0 +1,1 @@
+[["CASE:macro:->\\x "], ["CASE:macro:->\\relax A"], ["CASE:macro:->\\relax A"], ["CASE:macro:->\\x "]]

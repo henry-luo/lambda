@@ -34,6 +34,22 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Filename parsing and indirect expansion, 2026-11-26:** Script now executes
+  `\filename@parse` as scoped TeX definitions, preserving the active letter and
+  space categories. Nine text and diagnostic cases match the isolated retired
+  engine, including empty names, multiple dots, expansion, scope and `\ifx`.
+  The shared text-macro constructor now also uses the native short-definition
+  and category rules. The bundled `ifthen` package exposed an independent
+  `\expandafter` bug: token-list protection was applied to an indirectly
+  expanded `\the` or `\unexpanded`. Only direct definition scans retain that
+  protection now; four retired-engine comparisons and both actual `ifthen`
+  equality branches match. The full bundled-package fixture and the three
+  focused goldens pass the existing GTest limit (S1.8, D10.2.2v2). The
+  bundled fixture finished close to its limit. Seven adjacent definition,
+  kernel-reuse and generated-environment fixtures pass, and the filename,
+  `ifthen` and indirect-token-list goldens pass interpreter and JIT with
+  forced GC and poisoning; see `temp/latex-retirement/`.
+
 - **Format-date checks, 2026-11-26:** The kernel implements
   `\IfFormatAtLeastTF` through LaTeX's version comparison macros and the
   active `\fmtversion`, replacing the retired engine's unconditional true

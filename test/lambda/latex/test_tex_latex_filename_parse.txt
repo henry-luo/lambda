@@ -1,0 +1,28 @@
+[{
+    text: "[a/b/][file][sty]",
+    diagnostics: []
+  }, {
+    text: "[dir/][name][none]",
+    diagnostics: []
+  }, {
+    text: "[][][hidden]",
+    diagnostics: []
+  }, {
+    text: "[a/][b][]",
+    diagnostics: []
+  }, {
+    text: "\\def\\path{dir/one.two.tex}[dir/][one.two][tex]",
+    diagnostics: []
+  }, {
+    text: "{[inner]}[outer]",
+    diagnostics: []
+  }, {
+    text: "\\def\\a{file}Y",
+    diagnostics: []
+  }, {
+    text: "\\def\\a{zile}Y",
+    diagnostics: []
+  }, {
+    text: "[][][none]",
+    diagnostics: []
+  }]

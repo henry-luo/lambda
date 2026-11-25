@@ -1,0 +1,7 @@
+[{
+    text: " alpha ",
+    diagnostics: []
+  }, {
+    text: " other ",
+    diagnostics: []
+  }]

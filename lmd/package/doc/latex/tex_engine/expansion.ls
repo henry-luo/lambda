@@ -725,8 +725,10 @@ fn expand_after(st: State, budget) State^ {
         if (first.token == null) advanced
         else if (second.token == null) {*:advanced, input: stream.push(advanced.input, [first.token])}
         else {
-            let expanded = expand_one(advanced, second.token, budget);
-            {*:expanded, input: stream.push(expanded.input, [first.token])}
+            // Only a direct \the or \unexpanded is protected by definition scanning.
+            let expanded = expand_one({*:advanced, token_text_scan:false}, second.token, budget);
+            {*:expanded, token_text_scan:advanced.token_text_scan,
+                input: stream.push(expanded.input, [first.token])}
         }
     }
 }
@@ -4932,9 +4934,16 @@ fn latex_end(st: State, original, budget) State^ {
     }
 }
 
-fn define_text_macro(st: State, name, value) State^ {
-    let macro = latex_macro(0, false, false, false, [], text_tokens(value))^;
-    assign_meaning(st, "control:" ++ name, macro, true)
+// LaTeX's text macros retain letter and space catcodes from the active table.
+fn latex_text_token(st: State, token) any^ {
+    let cat = reader.catcode(token.value, st.input.reader.catcodes);
+    {*:token, cat:if (cat == 10 or cat == 11) cat else 12}
+}
+
+fn define_text_macro(st: State, name, value, global = true) State^ {
+    let tokens = [for (token in text_tokens(value)^) latex_text_token(st, token)^];
+    let macro = latex_macro(0, true, false, false, [], tokens)^;
+    assign_meaning(st, "control:" ++ name, macro, global)
 }
 
 fn record_package(st, name, opts, is_class, kind) map^ {
@@ -5471,6 +5480,28 @@ fn latex_yargdef(st: State, budget) State^ {
     }
 }
 
+fn latex_filename_parse(st: State, budget) State^ {
+    let arg = stream.argument(st.input, true)^;
+    let current = {*:st,input:arg.stream};
+    if (arg.error != null) fail(current, arg.error)
+    else {
+        let named = expand_argument_name(current, arg.tokens, budget)^;
+        if (named.state.issue != null) named.state
+        else {
+            let segments = split(named.name, "/")^;
+            let filename = segments[len(segments) - 1];
+            let area = if (len(segments) > 1) join(take(segments, len(segments) - 1), "/") ++ "/" else "";
+            let parts = split(filename, ".")^;
+            let has_extension = len(parts) > 1;
+            let base = if (has_extension) join(take(parts, len(parts) - 1), ".") else filename;
+            let area_state = define_text_macro(named.state, "filename@area", area, false)^;
+            let base_state = define_text_macro(area_state, "filename@base", base, false)^;
+            if (has_extension) define_text_macro(base_state, "filename@ext", parts[len(parts) - 1], false)
+            else assign_meaning(base_state, "control:filename@ext", meaning(base_state, control_token("relax")), false)
+        }
+    }
+}
+
 fn latex_needs_format(st: State) State^ {
     let arg = stream.argument(st.input, true)^;
     let version_arg = latex_optional(arg.stream)^;
@@ -5928,6 +5959,7 @@ fn step(st: State, budget) State^ {
         latex_ifnextchar(current, cmd == "@ifstar")
     else if (st.latex and contains(["@for", "@tfor"], cmd)) latex_for(current, cmd == "@tfor")
     else if (st.latex and cmd == "@yargdef") latex_yargdef(current, budget)
+    else if (st.latex and cmd == "filename@parse") latex_filename_parse(current, budget)
     else if (st.latex and cmd == "NeedsTeXFormat") latex_needs_format(current)
     else if (st.latex and contains(["documentclass", "LoadClass", "LoadClassWithOptions"], cmd))
         latex_documentclass(current, t, budget, cmd)
