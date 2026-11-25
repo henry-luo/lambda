@@ -1,0 +1,29 @@
+<latex_document
+  <paragraph
+    <newcommand source_offset: 0, argument_groups: [{
+          kind: "required",
+          raw: "\\boxit",
+          start: 11,
+          end: 19
+        }, {
+          kind: "optional",
+          raw: "1",
+          start: 19,
+          end: 22
+        }, {
+          kind: "required",
+          raw: "\\begin{tcolorbox}[colback=cyan]#1\\end{tcolorbox}",
+          start: 22,
+          end: 72
+        }],
+      "\\boxit"
+      <brack_group
+        "1">
+      <curly_group
+        <tcolorbox source_offset: 23, options_raw: "colback=cyan",
+          <paragraph
+            "#1">>>>>
+  <document source_offset: 72,
+    <tcolorbox source_offset: 97, options_raw: "colback=cyan",
+      <paragraph
+        "Hi">>>>

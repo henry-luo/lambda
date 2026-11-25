@@ -3364,14 +3364,14 @@ fn declaration(name, offset, groups, children, starred = false) =>
 fn environment_node(name, offset, children, attrs = {}) => <[name] source_offset: offset, *:attrs, *children>
 
 // foreign environment offsets follow reconstructed segment boundaries.
-fn environment_offset(token) any^ => if (token.read_offset == null) token.start
-    else if (token.output_start != null and token.output_segments != null)
+fn environment_offset(token) any^ => if ((token.read_offset != null or token.direct != true) and
+        token.output_start != null and token.output_segments != null)
         rebuild.map_offset(token.output_segments,token.output_start)
-    else token.read_offset
+    else if (token.read_offset != null) token.read_offset else token.start
 
 // Native digestion assigns special headers, math or raw bodies to these environments.
 fn special_environment(name) any^ => tex_reader.raw_environment_name(name)^ or common_math_environment(name) or contains([
-    "tcolorbox", "tabbing",
+    "tabbing",
     "eqnarray", "eqnarray*", "aligned*", "multline", "multline*", "split*",
     "IEEEeqnarray*", "array*", "smallmatrix*"], name)
 
@@ -3384,6 +3384,16 @@ fn environment_command_gap(tokens, sources, index) any^ {
     if (next == null or token.direct != true or next.direct != true or token.file != next.file or
         next.start <= token.end) ""
     else source_span({direct: true, file: token.file, start: token.end, end: next.start}, sources)
+}
+
+// Generated environment names are admitted only when their emitted bytes match the token sequence.
+fn reconstructed_environment(tokens, index, arg) any^ {
+    let first = tokens[index];
+    let final_token = tokens[arg.end - 1];
+    if (first.output_text == null or first.output_start == null or final_token.output_end == null or
+        final_token.output_text != first.output_text or final_token.output_end < first.output_start) false
+    else utf8.decode(slice(binary(first.output_text)^, first.output_start, final_token.output_end))^ ==
+        "\\" ++ first.value ++ "{" ++ group_text(arg) ++ "}"
 }
 
 // Subfigure headers retain their raw argument groups rather than becoming body text.
@@ -3677,7 +3687,8 @@ fn parse_environment(tokens, sources, index, environment) any^ {
     let token = tokens[index];
     let arg = read_group(tokens, index + 1)^;
     if (arg.issue != null) arg
-    else if (not plain_group(arg) or token.direct != true or arg.direct != true or
+    else if (not plain_group(arg) or
+        ((token.direct != true or arg.direct != true) and not reconstructed_environment(tokens, index, arg)^) or
         (group_text(arg) == "document" and environment != null)) unsupported(index, "environment")
     else if (contains(["equation", "equation*", "align", "align*", "alignat", "alignat*",
         "gather", "gather*", "multline", "multline*", "eqnarray", "eqnarray*", "IEEEeqnarray", "IEEEeqnarray*"], group_text(arg)))
@@ -3687,7 +3698,7 @@ fn parse_environment(tokens, sources, index, environment) any^ {
         let name = group_text(arg);
         let header = if (contains(["subfigure", "subtable"], name)) subfigure_header(tokens, sources, arg)^
             else if (contains(["multicols", "multicols*"], name)) multicols_header(tokens, sources, arg)^
-            else if (list_environment(name)) list_header(tokens, sources, arg)^
+            else if (list_environment(name) or name == "tcolorbox") list_header(tokens, sources, arg)^
             else table_header(name, tokens, sources, arg)^;
         if (header.issue != null) header
         else {
@@ -3746,7 +3757,8 @@ fn blocks(tokens, sources, index = 0, nodes = [], environment = null) Parsed^ {
         else if (control(token, "end")) {
             let arg = read_group(tokens, index + 1)^;
             if (arg.issue != null) arg
-            else if (environment != null and plain_group(arg) and group_text(arg) == environment)
+            else if (environment != null and plain_group(arg) and group_text(arg) == environment and
+                ((token.direct == true and arg.direct == true) or reconstructed_environment(tokens, index, arg)^))
                 {index: arg.end, nodes: nodes, tokens: tokens, issue: null}
             else unsupported(index, "environment end")
         }

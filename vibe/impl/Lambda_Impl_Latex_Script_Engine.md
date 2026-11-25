@@ -34,6 +34,17 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Generated document environments, 2026-11-26:** Script digestion accepts
+  generated environment boundaries after checking their reconstructed opening
+  and closing bytes, maps their offsets back to the source, and reads
+  `tcolorbox` options with the existing environment-option scanner (D10.2.2v2).
+  The previously failing nested-macro fixture now matches its golden. Seven of
+  eight adjacent environment fixtures pass; the eighth has two older guarded
+  cases whose output is unchanged against the preceding Script version, but
+  whose historical native-parsed assertions remain unmet. A focused generated
+  environment tree also passes interpreter and JIT with forced GC and
+  poisoning. Evidence is in `temp/latex-retirement/`.
+
 - **Package loops and source mapping, 2026-11-26:** Script now executes the
   retired engine's `\@for` and `\@tfor` token loops, including grouped and
   empty items, one leading macro expansion, nested loops and malformed-syntax
