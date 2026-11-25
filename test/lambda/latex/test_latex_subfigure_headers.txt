@@ -1,0 +1,23 @@
+<latex_document
+  <document source_offset: 0,
+    <subfigure source_offset: 16, argument_groups: [{
+          kind: "optional",
+          raw: "b",
+          start: 33,
+          end: 36
+        }, {
+          kind: "required",
+          raw: "0.45\\textwidth",
+          start: 36,
+          end: 52
+        }],
+      <paragraph
+        "Hi">>
+    <subtable source_offset: 69, argument_groups: [{
+          kind: "required",
+          raw: "3cm",
+          start: 86,
+          end: 91
+        }],
+      <paragraph
+        "There">>>>

@@ -1,0 +1,23 @@
+<latex_document
+  <document source_offset: 0,
+    <multicols source_offset: 16, argument_groups: [{
+          kind: "required",
+          raw: "3",
+          start: 33,
+          end: 36
+        }, {
+          kind: "optional",
+          raw: "\\subsection{Spread}",
+          start: 36,
+          end: 57
+        }, {
+          kind: "optional",
+          raw: "2em",
+          start: 57,
+          end: 62
+        }], columns: "3",
+      <multicols_preface
+        <subsection source_offset: 37, title: <curly_group
+            "Spread">>>
+      <paragraph
+        "Body text.">>>>

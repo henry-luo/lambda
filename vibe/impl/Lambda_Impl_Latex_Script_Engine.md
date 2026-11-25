@@ -34,6 +34,18 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Document environment headers, 2026-11-25:** The 70-case LaTeX document
+  sweep initially passed 59 cases; ten mismatched and the 31-document corpus
+  exceeded its existing 60-second limit. Script digestion now preserves the
+  native argument groups for `subfigure` and `subtable`, the column and width
+  headers for `longtable`, `tabularx` and `xltabular`, and the separate
+  `multicols` preface (D10.2.2v2). The previously failing caption and document
+  boundary goldens now match. Three independent exact-tree fixtures pass in
+  interpreter and JIT with forced collection and poisoning. Other mismatches
+  remain under investigation; the showcase also reaches unported `\@for` in
+  the bundled `calc` package. The original sweep and focused evidence are in
+  `temp/latex-retirement/`; no full passing sweep is claimed.
+
 - **Resource restarts and expl3 preload, 2026-11-25:** Repeated parses no
   longer evict their initial kernel snapshot when the host captures a package
   resource, and the separate expl3 snapshot is prepared only when requested.

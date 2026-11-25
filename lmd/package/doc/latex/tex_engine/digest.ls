@@ -3356,8 +3356,7 @@ fn environment_offset(token) any^ => if (token.read_offset == null) token.start
 
 // Native digestion assigns special headers, math or raw bodies to these environments.
 fn special_environment(name) any^ => tex_reader.raw_environment_name(name)^ or common_math_environment(name) or contains([
-    "longtable", "tabularx", "xltabular", "subfigure", "subtable",
-    "multicols", "multicols*", "tcolorbox", "tabbing",
+    "tcolorbox", "tabbing",
     "eqnarray", "eqnarray*", "aligned*", "multline", "multline*", "split*",
     "IEEEeqnarray*", "array*", "smallmatrix*"], name)
 
@@ -3372,14 +3371,89 @@ fn environment_command_gap(tokens, sources, index) any^ {
     else source_span({direct: true, file: token.file, start: token.end, end: next.start}, sources)
 }
 
+// Subfigure headers retain their raw argument groups rather than becoming body text.
+fn environment_header_group(tokens, sources, index, previous_end, file, optional) any^ {
+    let at = nonspace_index(tokens, index)^;
+    let token = if (at < len(tokens)) tokens[at] else null;
+    let present = if (optional) token != null and token.kind == "char" and token.value == "["
+        else opening(token);
+    if (not present) {issue:null, index:index, end:previous_end, groups:[], tokens:null}
+    else {
+        let gap = if (token.direct == true and token.file == file and token.start >= previous_end)
+            source_span({direct:true, file:file, start:previous_end, end:token.start}, sources)^ else null;
+        let group = if (optional) read_generic_delimited(tokens, at, "[", "]", "latex-digest-unclosed-optional")^
+            else read_group(tokens, at)^;
+        if (group.issue != null) group
+        else {
+            let raw = group_raw(group, sources)^;
+            if (gap == null or (trim(gap) ^ { null }) != "" or raw == null or
+                any([for (part in group.tokens) part.direct != true or part.file != file]))
+                unsupported(at, "environment header source mapping")
+            else {issue:null, index:group.end, end:group.end_offset, tokens:group.tokens,
+                groups:[{kind:if (optional) "optional" else "required", raw:raw,
+                    start:environment_offset(token)^, end:argument_end_offset(tokens, group)^}]}
+        }
+    }
+}
+
+fn multicols_header(tokens, sources, arg) any^ {
+    let count = environment_header_group(tokens, sources, arg.end, arg.end_offset, arg.file, false)^;
+    if (count.issue != null) count
+    else {
+        let preface = environment_header_group(tokens, sources, count.index, count.end, arg.file, true)^;
+        if (preface.issue != null) preface
+        else {
+            let skip = environment_header_group(tokens, sources, preface.index, preface.end, arg.file, true)^;
+            if (skip.issue != null) skip
+            else {
+                let parsed = if (preface.tokens != null) blocks(preface.tokens, sources)^ else null;
+                if (parsed != null and parsed.issue != null) parsed
+                else {issue:null, index:skip.index,
+                    attrs:{argument_groups:[*count.groups, *preface.groups, *skip.groups],
+                        *:if (len(count.groups) > 0) {columns:count.groups[0].raw} else {}},
+                    nodes:if (parsed != null) [<multicols_preface *parsed.nodes>] else []}
+            }
+        }
+    }
+}
+
+fn subfigure_header(tokens, sources, arg) any^ {
+    let option = environment_header_group(tokens, sources, arg.end, arg.end_offset, arg.file, true)^;
+    if (option.issue != null) option
+    else {
+        let width = environment_header_group(tokens, sources, option.index, option.end, arg.file, false)^;
+        if (width.issue != null) width
+        else {issue:null, index:width.index, attrs:{argument_groups:[*option.groups, *width.groups]}}
+    }
+}
+
+fn table_columns_environment(name) bool => contains(["tabular", "array", "longtable", "tabularx", "xltabular"], name)
+
+// Table width and column groups are consumed only when adjacent to the preceding group.
+fn table_header_group(tokens, sources, index, previous_end, file) any^ {
+    let next = if (index < len(tokens)) tokens[index] else null;
+    if (not opening(next)) {issue:null, index:index, end:previous_end, raw:null}
+    else if (next.direct != true or next.file != file) unsupported(index, "table header source mapping")
+    else if (next.start != previous_end) {issue:null, index:index, end:previous_end, raw:null}
+    else {
+        let group = read_group(tokens, index)^;
+        if (group.issue != null) group
+        else {
+            let raw = group_raw(group, sources)^;
+            if (raw == null or any([for (part in group.tokens) part.direct != true or part.file != file]))
+                unsupported(index, "table columns source mapping")
+            else {issue:null, index:group.end, end:group.end_offset, raw:raw}
+        }
+    }
+}
+
 // table headers belong to the environment only when they touch its name.
 fn table_header(name, tokens, sources, arg) any^ {
     let at = arg.end;
     let next = if (at < len(tokens)) tokens[at] else null;
     let adjacent = next != null and next.direct == true and arg.direct == true and
         next.file == arg.file and next.start == arg.end_offset;
-    let header_syntax = next != null and ((name == "table" and next.kind == "char" and next.value == "[") or
-        (name == "tabular" and opening(next)));
+    let header_syntax = next != null and name == "table" and next.kind == "char" and next.value == "[";
     if (header_syntax and (next.direct != true or next.file != arg.file))
         unsupported(at, "table header source mapping")
     else if (name == "table" and adjacent and next.kind == "char" and next.value == "[") {
@@ -3396,14 +3470,16 @@ fn table_header(name, tokens, sources, arg) any^ {
             else {issue: null, index: option.end, attrs: {placement: <brack_group *content.items>}}
         }
     }
-    else if (name == "tabular" and adjacent and opening(next)) {
-        let columns = read_group(tokens, at)^;
-        if (columns.issue != null) columns
+    else if (table_columns_environment(name)) {
+        let width = if (contains(["tabularx", "xltabular"], name))
+            table_header_group(tokens, sources, at, arg.end_offset, arg.file)^ else
+            {issue:null, index:at, end:arg.end_offset, raw:null};
+        if (width.issue != null) width
         else {
-            let raw = group_raw(columns, sources)^;
-            if (raw == null or any([for (token in columns.tokens) token.direct != true or token.file != columns.file]))
-                unsupported(at, "table columns source mapping")
-            else {issue: null, index: columns.end, attrs: {columns: raw}}
+            let columns = table_header_group(tokens, sources, width.index, width.end, arg.file)^;
+            if (columns.issue != null) columns
+            else {issue:null, index:columns.index, attrs:{*:if (width.raw != null) {width:width.raw} else {},
+                *:if (columns.raw != null) {columns:columns.raw} else {}}}
         }
     }
     else { {issue: null, index: at, attrs: map([])} }
@@ -3594,14 +3670,20 @@ fn parse_environment(tokens, sources, index, environment) any^ {
     else if (special_environment(group_text(arg))^) unsupported(index, "environment")
     else {
         let name = group_text(arg);
-        let header = if (list_environment(name)) list_header(tokens, sources, arg)^
+        let header = if (contains(["subfigure", "subtable"], name)) subfigure_header(tokens, sources, arg)^
+            else if (contains(["multicols", "multicols*"], name)) multicols_header(tokens, sources, arg)^
+            else if (list_environment(name)) list_header(tokens, sources, arg)^
             else table_header(name, tokens, sources, arg)^;
         if (header.issue != null) header
         else {
             let body = blocks(if (header.tokens == null) tokens else header.tokens, sources, header.index, [], name)^;
             if (body.issue != null) body
             // nested blocks can insert gap tokens; return the stream that owns their cursor.
-            else {issue: null, index: body.index, tokens: body.tokens, node: environment_node(name, environment_offset(token)^, body.nodes, header.attrs)}
+            else {
+                let prefix = if (header.nodes == null) [] else header.nodes;
+                {issue: null, index: body.index, tokens: body.tokens, node: environment_node(name,
+                    environment_offset(token)^, [*prefix, *body.nodes], header.attrs)}
+            }
         }
     }
 }
@@ -3622,7 +3704,7 @@ fn blocks(tokens, sources, index = 0, nodes = [], environment = null) Parsed^ {
             let run = paragraph_run(tokens,sources,index)^;
             if (run.issue != null) run
             else if (run.fast) {
-                let para = inline(tokens,sources,index,"",[],true,environment == "tabular")^;
+                let para = inline(tokens,sources,index,"",[],true,table_columns_environment(environment))^;
                 if (para.issue != null) para
                 else blocks(para.tokens,sources,para.index,[*nodes,<paragraph *para.items>],environment)
             }
@@ -3641,7 +3723,7 @@ fn blocks(tokens, sources, index = 0, nodes = [], environment = null) Parsed^ {
             if ((trim(env_gap) ^ { null }) != "") unsupported(index, "environment command source gap")
             else {
                 let rest = restore_control_gap(tokens, sources, index)^;
-                let para = inline(rest, sources, index + 1, "", [], true, environment == "tabular")^;
+                let para = inline(rest, sources, index + 1, "", [], true, table_columns_environment(environment))^;
                 if (para.issue != null) para
                 else blocks(para.tokens, sources, para.index, [*nodes, <paragraph *para.items>], environment)
             }
@@ -3718,7 +3800,7 @@ fn blocks(tokens, sources, index = 0, nodes = [], environment = null) Parsed^ {
             }
         }
         else {
-            let para = inline(tokens, sources, index, "", [], true, environment == "tabular")^;
+            let para = inline(tokens, sources, index, "", [], true, table_columns_environment(environment))^;
             if (para.issue != null) para
             // A split source span can emit nodes while leaving its replacement at the same index.
             else if (para.index == index and len(para.items) == 0) unsupported(index, "empty paragraph")

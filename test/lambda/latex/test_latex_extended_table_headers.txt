@@ -1,0 +1,20 @@
+<latex_document
+  <document source_offset: 0,
+    <longtable source_offset: 16, columns: "lc",
+      <paragraph
+        "A"
+        'alignment_tab'
+        "B"
+        'row_sep'>>
+    <tabularx source_offset: 57, width: "5cm", columns: "lX",
+      <paragraph
+        "C"
+        'alignment_tab'
+        "D"
+        'row_sep'>>
+    <xltabular source_offset: 101, width: "\\textwidth", columns: "rX",
+      <paragraph
+        "E"
+        'alignment_tab'
+        "F"
+        'row_sep'>>>>
