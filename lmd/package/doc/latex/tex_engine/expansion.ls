@@ -2025,8 +2025,10 @@ fn general_text(st, budget, xpand) any^ {
         let m = if (is_control(opening.token)) meaning(opening.state, opening.token) else null;
         let valid = charcat(opening.token, 1) or (m.kind == "char" and m.cat == 1);
         // Native inserts a missing opening brace and scans the returned token as text.
+        // Native expanded lookahead supplies a relax token when it reaches EOF.
+        let returned = if (opening.token == null) control_token("relax") else opening.token;
         let current = if (valid) opening.state else record_diagnostic(
-            put_back(opening.state, opening.token), "tex-missing-brace", "Missing { inserted")^;
+            put_back(opening.state, returned), "tex-missing-brace", "Missing { inserted")^;
         definition_tokens(current, budget, null, xpand, true)
     }
 }
@@ -2581,7 +2583,7 @@ fn numeric_math(st: State, budget) State^ {
 }
 
 fn terminal_message(st: State, budget, is_error) State^ {
-    let text = expanded_text(st, budget)^;
+    let text = expanded_text(st, budget, true)^;
     if (text.state.issue != null) text.state
     else {
         let message_text = token_text(text.state, text.tokens)^;

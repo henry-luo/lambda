@@ -33,6 +33,28 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Native-engine retirement, 2026-11-25:** The user requested retirement of
+  both native engines. Production `tex`, `latex` and `latex-ts` still dispatch
+  to `lambda-input`'s TeX expander and direct digester. The existing
+  `InputScriptParser` host boundary, used by graph and TikZ, is a possible
+  integration point, but the earlier direction to avoid a native-to-Script
+  call boundary and the needs of standalone Input clients remain unresolved
+  (D9.1.3v2).
+  First build and qualify a script-owned parse facade that preserves explicit
+  unsupported outcomes and caller-provided resources, then migrate every
+  production and native-client entry point and qualify the full corpus before
+  removing the native provider. TeX remains data (S1.8); resource acquisition
+  and capabilities remain governed by D9.1.2v2 and D11.1.2. This migration is
+  in progress and neither production dispatch nor the native engine is retired.
+  A new Script-owned facade returns TeX output or LaTeX trees with explicit
+  unsupported results and accepts captured resources. Initial text, tree,
+  diagnostic and included-file comparisons match native. Shared expanded-text
+  recovery now matches 48 native comparisons including EOF and missing braces
+  in `\\message` and `\\errmessage`, in both tiers under forced GC. A first
+  13-case archive preserves native text and trees independently of the native
+  provider; it is only a starting point for corpus-wide qualification (S1.8,
+  D10.2.2).
+
 - **Property lookup, 2026-11-25:** Native-shaped `\\prop_get:NnN` and
   `\\prop_get:cnN`, including T/F/TF variants, now use the existing property
   splitter and native conditional flow. Twenty native text, message and
