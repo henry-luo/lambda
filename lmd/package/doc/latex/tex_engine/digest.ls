@@ -214,6 +214,32 @@ fn raw_group_element(token, index, nested) any^ {
     }
 }
 
+// Definition bodies are re-read from source, so their raw commands need the same capture.
+fn source_raw_group(tokens, sources, index, nested) any^ {
+    let token = tokens[index];
+    let at = nonspace_index(tokens, index + 1)^;
+    let next = if (at < len(tokens)) tokens[at] else null;
+    if (not opening(next) or token.direct != true or next.direct != true or token.file != next.file)
+        unsupported(index,"raw group source mapping")
+    else {
+        let group = read_group(tokens, at)^;
+        if (group.issue != null) group
+        else {
+            let gap = source_span({direct:true,file:token.file,start:token.end,end:next.start},sources)^;
+            let raw = group_raw(group,sources)^;
+            let full = source_span({direct:group.direct,file:group.file,start:group.start_offset,end:group.end_offset},sources)^;
+            let command = source_span({direct:true,file:token.file,start:token.start,end:group.end_offset},sources)^;
+            let scanned = if (full == null) null else scan_group_bytes(binary(full)^,1,1,false,false,123,125)^;
+            if (gap == null or (trim(gap) ^ { null }) != "" or raw == null or command == null or
+                not raw_command_safe(binary(command)^,command,nested,token)^ or scanned == null or
+                not scanned.closed or scanned.offset != len(binary(full)^) or
+                any([for (part in group.tokens) part.direct != true or part.file != group.file]))
+                unsupported(index,"raw group source mapping")
+            else {issue:null,index:group.end,node:<[token.value] source_offset:token.start, source:raw>}
+        }
+    }
+}
+
 // listings and minted nodes parse their reconstructed options, language and code.
 fn raw_inline_element(token, index, nested) any^ {
     let name = token.raw_inline_kind;
@@ -802,6 +828,34 @@ fn math_generic_arguments(tokens, index, items = []) any^ {
     else {issue: null, index: at, items: items}
 }
 
+// Raw TeX commands occupy one expansion token, but math digestion sees their emitted groups.
+fn math_raw_command(tokens, index) any^ {
+    let token = tokens[index];
+    if (token.output_text == null or token.output_start == null or token.output_end == null)
+        unsupported(index, "math raw command source mapping")
+    else {
+        let raw = utf8.decode(slice(binary(token.output_text)^,token.output_start,token.output_end))^;
+        let reader = {*:tex_reader.reader(raw), catcodes:{'{':1,'}':2,'$':3,'&':4,'#':6,'^':7,'_':8,'\t':10,'~':13}};
+        let read = span_tokens(reader,0,len(binary(raw)^))^;
+        let positioned = [for (part in read) {*:part,output_text:raw,output_start:part.start,output_end:part.end}];
+        if (len(positioned) == 0 or not control(positioned[0],token.value))
+            unsupported(index, "math raw command source mapping")
+        else {
+            let inner = math_generic_arguments(positioned,1)^;
+            if (inner.issue != null) inner
+            else if (inner.index != len(positioned)) unsupported(index, "math raw command source mapping")
+            else {
+                let following = math_generic_arguments(tokens,index + 1)^;
+                if (following.issue != null) following
+                else {
+                    let items = [*inner.items, *following.items];
+                    {issue:null,index:following.index,value:<command name:token.value, *items>}
+                }
+            }
+        }
+    }
+}
+
 // Matrix separators delimit independent math lists; nested environments own
 // their own separators and a row break can carry a raw spacing argument.
 fn math_matrix_boundary(tokens, index, braces = 0, environments = 0) any^ {
@@ -1089,7 +1143,8 @@ fn math_unported_special(name) => contains(["above", "angl", "anglk", "angln", "
 
 fn math_command(tokens, index) any^ {
     let name = tokens[index].value;
-    if (name == " " or name == "\t" or name == "\n") {issue:null, index:index + 1, value:" "}
+    if (tokens[index].raw_group_kind != null) math_raw_command(tokens,index)
+    else if (name == " " or name == "\t" or name == "\n") {issue:null, index:index + 1, value:" "}
     else if (contains(["{", "}", "[", "]", "(", ")", "$", "%", "#", "&", "_"], name)) {
         let token = tokens[index];
         let parsed = if (not math_positioned(token)) unsupported(index, "math escaped symbol source mapping")
@@ -3260,6 +3315,11 @@ fn inline(tokens, sources, index = 0, text = "", items = [], stop_blocks = true,
             if (raw.issue != null) raw
             else if (gap == null) unsupported(index,"raw group source gap")
             else inline(tokens,sources,index + 1,raw.tail ++ gap,[*append_text(items,text),raw.node],stop_blocks,table_mode)
+        }
+        else if (token.kind == "control" and contains(["directlua", "luaexec"], token.value)) {
+            let raw = source_raw_group(tokens, sources, index, not stop_blocks)^;
+            if (raw.issue != null) raw
+            else inline(tokens, sources, raw.index, "", [*append_text(items, text), raw.node], stop_blocks, table_mode)
         }
         // the native scanner can split UTF-8 inside a control symbol (LI-064).
         else if (token.kind == "control" and token.output_constructor_mode == true and token.output_start != null and

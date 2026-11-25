@@ -17,7 +17,7 @@ let cases=[
  {body:"\\def\\luaexec#1{EXPANDED}\\luaexec{X}",supported:true},
  {body:"\\directlua\n{X}",supported:false},
  {body:"\\directlua{\\end{document}}Z",supported:false},
- {body:"\\textbf{A\\directlua{B}C}",supported:false}
+ {body:"\\textbf{A\\directlua{B}C}",supported:true}
 ];
 fn check(c) any^ {
  let source="\\begin{document}" ++ c.body ++ "\\end{document}";

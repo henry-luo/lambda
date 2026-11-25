@@ -34,6 +34,17 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Lua source in definitions, 2026-11-26:** The 31-document corpus completed
+  in an isolated release run with four records different from the golden; it
+  still exceeds the GTest timeout. Script now captures `\directlua` and
+  `\luaexec` groups inside re-read definition bodies and parses their emitted
+  arguments in math without executing Lua (S1.8, D10.2.2v2). The arithmetic
+  sample now matches all six expected record fields. Definition, nested-command
+  and math trees match the isolated retired parser, five neighboring GTests
+  pass, and the new exact-tree fixture passes interpreter and JIT with forced
+  GC and poisoning. The remaining three corpus records and aggregate timeout
+  are open; see `temp/latex-retirement/corpus-release-before.out`.
+
 - **Optional heading titles, 2026-11-26:** The document parser now permits a
   sectioning command without a required title group and leaves following text
   and whitespace intact. This restores `\part` inside exam questions while
