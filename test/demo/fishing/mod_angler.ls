@@ -29,7 +29,7 @@ fn mix_angles(a, b, k) => [for (i in 0 to 2) a[i] + (b[i] - a[i]) * k]
 // ---- the building blocks
 let OARS_REST = {l: [0.0, 0.2], r: [0.0, 0.2]}
 let OARS_SHIPPED = {l: [1.38, -0.04], r: [1.38, -0.04]}
-let ROD_STOWED = {p: [-0.38, 0.06, -0.62], a: [0.0, -0.1, 0.0]}
+let ROD_STOWED = {p: [-0.3, 0.08, -0.9], a: [0.15, -0.08, 0.0]}
 let ROD_READY = {p: [-0.25, 0.44, 0.1], a: [-0.22, -0.78, 0.0]}
 // hands: "oar" (its handle), "grip" (the rod's grip), "butt" (the rod's end), "knee", or a boat-space point
 let ARMS_OARS = {hand_r: "oar", hand_l: "oar"}

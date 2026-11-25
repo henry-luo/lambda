@@ -72,7 +72,7 @@ fn rock(i: int) any^ {
     return {i: i, x: p.x, z: p.z, y: y, r: r, h: h, yaw: roll(100 + i, 4)^ * u.TAU, top: y + r * h}
 }
 pub let ROCKS = [for (i in 0 to 71, let k = rock(i) ^ { null } where k != null and (clear_of_start(k) ^ { false })) k]
-// rocks whose tops reach near the surface stop the boat, the otter and fish
+// rocks whose tops reach near the surface stop the boat, the beaver and fish
 pub let OBSTACLES = [for (k in ROCKS where k.top > -0.35) {x: k.x, z: k.z, r: k.r * 0.95}]
 
 // water lilies: pads in clusters near the banks and scattered singles across the shallows; about one in
@@ -80,7 +80,7 @@ pub let OBSTACLES = [for (k in ROCKS where k.top > -0.35) {x: k.x, z: k.z, r: k.
 let LILY_COLOURS = ["white", "pink", "yellow", "pink"]
 fn pad(n: int, cx: float, cz: float, spread: float) any^ => (let a = roll(n, 0)^ * u.TAU, let d = sqrt(roll(n, 1)^) * spread,
     {x: cx + cos(a) * d, z: cz + sin(a) * d, r: between(n, 2, 0.13, 0.3)^, yaw: roll(n, 3)^ * u.TAU,
-     flower: if (roll(n, 4)^ < 0.2) LILY_COLOURS[int(floor(roll(n, 5)^ * 4.0))^] else null, age: roll(n, 6)^})
+     flower: if (roll(n, 4)^ < 0.2) LILY_COLOURS[int(floor(roll(n, 5)^ * 4.0))] else null, age: roll(n, 6)^})
 fn cluster(c: int) any^ => (let p = polar(300 + c, 0.55, 0.93)^, [for (j in 0 to 15 where (roll(400 + c * 20 + j, 7) ^ { 1.0 }) < 0.85) pad(400 + c * 20 + j, p.x, p.z, 2.8)^])
 let SINGLES = [for (i in 0 to 41, let p = polar(700 + i, 0.45, 0.95) ^ { null } where p != null) pad(700 + i, p.x, p.z, 0.0) ^ { null }]
 fn wet_open(k) bool^ => (clear_of_start(k)^ and depth(k.x, k.z)^ > 0.12)

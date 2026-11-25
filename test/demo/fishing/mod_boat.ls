@@ -86,7 +86,7 @@ let LANTERN_GLASS = w.col("#ffd27a")
 let ROPE = w.col("#d7c49a")
 pub let OARLOCK = [0.56, 0.33, -0.08]     // port (+X); starboard mirrors x
 fn basket() any^ => m.merge([for (k in 0 to 4) m.tinted(prim.sweep([[0.36, DECK + k * 0.045, -0.92], [0.36, DECK + 0.045 + k * 0.045, -0.92]], 0.12 + 0.005 * k, 12, k == 0), if (k % 2 == 0) BASKET else BASKET_DARK)^])
-fn rope() any^ => m.tinted(prim.sweep([for (i in 0 to 24, let a = i * 0.6) [-0.32 + cos(a) * (0.07 + 0.002 * i), DECK + 0.016 + 0.012 * (i div 10), 0.55 + sin(a) * (0.07 + 0.002 * i)]], 0.016, 5, false), ROPE)^
+fn rope() any^ => m.tinted(prim.sweep([for (i in 0 to 24, let a = i * 0.6) [0.02 + cos(a) * (0.07 + 0.002 * i), DECK + 0.016 + 0.012 * (i div 10), 0.52 + sin(a) * (0.07 + 0.002 * i)]], 0.016, 5, false), ROPE)^
 fn lantern_pole() any^ => m.merge([m.tinted(m.post(0.0, 1.1, 0.25, 0.86, 0.018, 0.018, 6), IRON)^, board(-0.06, 0.8, 1.06, 0.06, 0.82, 1.18, IRON)^,
     board(-0.045, 0.68, 1.075, 0.045, 0.8, 1.165, LANTERN_GLASS)^, board(-0.055, 0.66, 1.065, 0.055, 0.68, 1.175, IRON)^])
 pub fn boat_buffer() any^ => m.merge([surface(0.0, false)^, surface(0.035, true)^, gunwale(1.0)^, gunwale(-1.0)^, transom()^,
@@ -134,7 +134,7 @@ let BOB_RED = w.col("#e2412f")
 let BOB_WHITE = w.col("#f6f1e6")
 // the bobber is skinned whole to the mid-line bone that rides at the float
 pub fn bobber_geometry() any^ {
-    let b = m.merge([blob(0.0, 1.02, 1.0, 0.045, 0.04, 0.045, BOB_RED)^, blob(0.0, 0.985, 1.0, 0.04, 0.03, 0.04, BOB_WHITE)^,
+    let b = m.merge([blob(0.0, 1.016, 1.0, 0.036, 0.032, 0.036, BOB_RED)^, blob(0.0, 0.988, 1.0, 0.032, 0.024, 0.032, BOB_WHITE)^,
         m.tinted(m.post(0.0, 1.0, 1.04, 1.12, 0.006, 0.004, 4), BOB_RED)^])
     let n = (len(b.positions) div 3)^;
     s.geometry(b.positions, {id: "g-bobber", normals: b.normals, colors: b.colors, indices: b.indices,
