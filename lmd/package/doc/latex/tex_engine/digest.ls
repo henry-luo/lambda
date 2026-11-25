@@ -3210,6 +3210,10 @@ fn inline(tokens, sources, index = 0, text = "", items = [], stop_blocks = true,
             if (gap == null) unsupported(index, "spacing command source gap")
             else inline(tokens, sources, index + 1, gap, [*append_text(items, text), value], stop_blocks, table_mode)
         }
+        else if (token.tabbing_command == true) {
+            let node = <[token.value] source_offset:environment_offset(token)^, argument_groups:[]>;
+            inline(tokens, sources, index + 1, "", [*append_text(items, text), node], stop_blocks, table_mode)
+        }
         else if (token.kind == "control" and accent_name(token.value)) {
             let accent = accent_node(tokens, sources, index)^;
             if (accent.issue != null) accent
@@ -3386,7 +3390,6 @@ fn environment_offset(token) any^ => if ((token.read_offset != null or token.dir
 
 // Native digestion assigns special headers, math or raw bodies to these environments.
 fn special_environment(name) any^ => tex_reader.raw_environment_name(name)^ or common_math_environment(name) or contains([
-    "tabbing",
     "eqnarray", "eqnarray*", "aligned*", "multline", "multline*", "split*",
     "IEEEeqnarray*", "array*", "smallmatrix*"], name)
 
@@ -3663,6 +3666,37 @@ fn math_environment_end(tokens, index, name, depth = 0, strict = true) any^ {
     }
     else math_environment_end(tokens, index + 1, name, depth, strict)
 }
+
+// Only commands at the top level of tabbing use its tab-stop meanings.
+fn tabbing_commands(tokens, index, end, groups = 0, environments = 0, found = []) any^ {
+    if (index >= end) found
+    else {
+        let token = tokens[index];
+        if (control(token,"begin") or control(token,"end")) {
+            let name = read_group(tokens, index + 1)^;
+            if (name.issue != null) found
+            else tabbing_commands(tokens, name.end, end, groups,
+                environments + if (control(token,"begin")) 1 else -1, found)
+        }
+        else {
+            let marked = groups == 0 and environments == 0 and token.kind == "control" and
+                contains(["=", "'", "`"], token.value);
+            tabbing_commands(tokens, index + 1, end,
+                groups + if (opening(token)) 1 else if (closing(token)) -1 else 0, environments,
+                if (marked) [*found, index] else found)
+        }
+    }
+}
+
+fn tabbing_stream(tokens, index) any^ {
+    let ending = math_environment_end(tokens, index, "tabbing", 0, false)^;
+    if (ending.issue != null) ending
+    else {
+        let marked = tabbing_commands(tokens, index, ending.index)^;
+        {issue:null, tokens:[for (i, token in tokens)
+            if (contains(marked, i)) {*:token, tabbing_command:true} else token]}
+    }
+}
 fn ascii_space(value) => contains([9, 10, 11, 12, 13, 32], value)
 fn math_trim_begin(bytes, at = 0) any^ =>
     if (at < len(bytes) and ascii_space(bytes[at])) math_trim_begin(bytes, at + 1) else at
@@ -3717,7 +3751,10 @@ fn parse_environment(tokens, sources, index, environment) any^ {
             else table_header(name, tokens, sources, arg)^;
         if (header.issue != null) header
         else {
-            let body = blocks(if (header.tokens == null) tokens else header.tokens, sources, header.index, [], name)^;
+            let base_tokens = if (header.tokens == null) tokens else header.tokens;
+            let prepared = if (name == "tabbing") tabbing_stream(base_tokens, header.index)^
+                else {issue:null, tokens:base_tokens};
+            let body = if (prepared.issue == null) blocks(prepared.tokens, sources, header.index, [], name)^ else prepared;
             if (body.issue != null) body
             // nested blocks can insert gap tokens; return the stream that owns their cursor.
             else {

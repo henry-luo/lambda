@@ -1,0 +1,28 @@
+<latex_document
+  <document source_offset: 0,
+    <tabbing source_offset: 16,
+      <paragraph
+        "\nab "
+        <'=' source_offset: 35, argument_groups: []>
+        " cd "
+        'row_sep'
+        "\n"
+        <'>' source_offset: 44, argument_groups: []>
+        " x "
+        'row_sep'
+        "\nz "
+        <kill source_offset: 54, argument_groups: []>
+        "\n">>>>
+<latex_document
+  <document source_offset: 0,
+    <tabbing source_offset: 16,
+      <paragraph
+        "a"
+        <'=' source_offset: 32, argument_groups: []>
+        " b "
+        <curly_group
+          <accent command: "`", source_offset: 38,
+            "e">>
+        " c "
+        <'\'' source_offset: 45, argument_groups: []>
+        "d">>>>

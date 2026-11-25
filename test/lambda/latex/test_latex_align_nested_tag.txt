@@ -1,0 +1,13 @@
+<latex_document
+  <document source_offset: 0,
+    <align source_offset: 16, source: "\\begin{split}x+y\\end{split}", ast: <math
+        <environment name: "split", body: <env_body
+            "x"
+            <operator value: "+">
+            "y">>>>>>
+<latex_document
+  <document source_offset: 0,
+    <align source_offset: 16, source: "x\\tag{1}", ast: <math
+        "x"
+        <equation_tag starred: false, body: <text_group source: "1",
+            "1">>>>>>

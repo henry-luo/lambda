@@ -119,16 +119,16 @@
     native: null
   }, {
     body: "\\begin{align}\\begin{split}x+y\\end{split}\\end{align}",
-    issue: "latex-digest-unsupported",
-    unsupported: "math command begin",
-    matches: null,
+    issue: null,
+    unsupported: null,
+    matches: true,
     actual: null,
     native: null
   }, {
     body: "\\begin{align}x\\tag{1}\\end{align}",
-    issue: "latex-digest-unsupported",
-    unsupported: "math command tag",
-    matches: null,
+    issue: null,
+    unsupported: null,
+    matches: true,
     actual: null,
     native: null
   }, {
@@ -176,7 +176,7 @@
   }, {
     body: "\\def\\e{equation}\\begin{\\e}x\\end{equation}",
     issue: "latex-digest-unsupported",
-    unsupported: "environment",
+    unsupported: "math environment source mapping",
     matches: null,
     actual: null,
     native: null

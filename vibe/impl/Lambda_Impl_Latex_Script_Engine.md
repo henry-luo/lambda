@@ -34,6 +34,15 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Tabbing and alignment trees, 2026-11-26:** Script now parses `tabbing`
+  using tab-stop meanings for top-level `\=`, `\'` and `\`` while keeping
+  accents inside nested groups. Both captured trees match the isolated retired
+  parser, and the phase-five kernel golden now passes (D10.2.2v2). Nested
+  `split` and equation-tag alignment trees also match the retired parser; the
+  old matrix golden now records their supported results and retains a separate
+  generated-name source-mapping guard. Six focused GTests pass, and the two
+  new tree fixtures pass interpreter and JIT with forced GC and poisoning.
+
 - **Raw-environment matrix, 2026-11-26:** The timed-out matrix repeatedly
   initialized the same kernel for each input. It now constructs one immutable
   preload for each of its two exact configurations and retains every source,
