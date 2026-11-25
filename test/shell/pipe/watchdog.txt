@@ -1,0 +1,7 @@
+09:38:48 [WARN]  lambda_shadow_lint: line 2: 'cmd' shadows a system function in this module; calls here resolve to your definition
+09:38:48 [WARN]  lambda_shadow_lint: line 16: 'sort' shadows a system function in this module; calls here resolve to your definition
+09:38:48 [WARN]  lambda_shadow_lint: line 16: 'input' shadows a system function in this module; calls here resolve to your definition
+09:38:48 [WARN]  lambda_shadow_lint: line 20: 'input' shadows a system function in this module; calls here resolve to your definition
+09:38:48 [WARN]  lambda_shadow_lint: line 20: 'count' shadows a system function in this module; calls here resolve to your definition
+09:38:48 [WARN]  lambda_shadow_lint: line 24: 'input' shadows a system function in this module; calls here resolve to your definition
+09:38:53 [ERR!]                                          concurrency scheduler: drain stopped with 1 live task(s) after watchdog timeout

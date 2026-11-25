@@ -69,7 +69,7 @@ LambdaTask* lambda_task_from_handle(Item item);
 LambdaTaskState lambda_task_state(const LambdaTask* task);
 Item lambda_task_result(const LambdaTask* task);
 bool lambda_task_cancel_requested(const LambdaTask* task);
-void lambda_task_set_cleanup_masked(LambdaTask* task, bool masked);
+bool lambda_task_set_cleanup_masked(LambdaTask* task, bool masked);
 
 LambdaSendStatus lambda_task_send(LambdaTask* sender, LambdaTask* target, Item message);
 bool lambda_task_mailbox_receive(LambdaTask* task, Item* out);
@@ -178,6 +178,11 @@ void lambda_socket_waiter_close(LambdaSocketWaiter* waiter);
 // The task running now: the root task on the base stack, NULL elsewhere
 // outside a task (a generator body).
 LambdaTask* lambda_task_running(void);
+// Query the running task without allocating a root task for ordinary CLI results.
+LambdaTask* lambda_task_running_if_present(void);
+// Native argv copy, owned by the caller. Rejects values containing a NUL.
+char* lambda_process_argument(Item value);
+bool lambda_read_milliseconds(Item value, int64_t* out);
 
 Item pn_send(Item handle, Item message);
 Item pn_receive(void);

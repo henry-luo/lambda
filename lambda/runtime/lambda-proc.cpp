@@ -26,6 +26,7 @@
 #include <string.h>  // for strlen
 #include "lambda/input/input.hpp"
 #include "concurrency.h"
+#include "shell_pipeline.hpp"
 #include "re2_wrapper.hpp"
 #include "lib/mime-detect.h"
 #include <curl/curl.h>
@@ -102,7 +103,7 @@ double pn_clock() {
 }
 
 // Helper: Create parent directories recursively for a file path
-static int create_parent_dirs(const char* file_path) {
+int lambda_create_output_parent_dirs(const char* file_path) {
     char* dir = file_path_dirname(file_path);
     if (!dir) return 0;
     bool ok = create_dir(dir);
@@ -141,6 +142,7 @@ static bool write_raw_bytes(const char* file_path, const char* mode, bool atomic
 // Returns: bytes written on success, ItemError on failure
 static Item pn_output_internal(Item source, Item target_item, const char* format_str, bool append, bool atomic, const ZipWriteOptions* zip_options = nullptr) {
     if (lambda_dry_run_enabled()) return dry_run_fabricated_output();
+    if (shell_output_is(source)) return shell_output_file(source, target_item, append, atomic);
     Item write_error = ItemError;
     const char* mode = append ? "a" : "w";
     const char* mode_binary = append ? "ab" : "wb";
@@ -186,7 +188,7 @@ static Item pn_output_internal(Item source, Item target_item, const char* format
     log_debug("pn_output_internal: writing to %s (mode=%s, format=%s)", file_path, mode, format_str ? format_str : "auto");
 
     // Brokered output authorizes and creates parents inside the same request.
-    if (!eval_context_security_io(context) && create_parent_dirs(file_path) != 0) {
+    if (!eval_context_security_io(context) && lambda_create_output_parent_dirs(file_path) != 0) {
         log_error("pn_output_internal: failed to create directories for %s", file_path);
         strbuf_free(path_buf);
         target_free(target);
@@ -953,7 +955,7 @@ static bool fetch_job_configure(FetchJob* job, Item options, Item* callback, Ite
         if (job->part_path) snprintf(job->part_path, part_len + 1, "%s.part", path->str);
         strbuf_free(path);
         if (!job->sink_path || !job->part_path) return false;
-        if (create_parent_dirs(job->part_path) != 0) {
+        if (lambda_create_output_parent_dirs(job->part_path) != 0) {
             *error = io_fs_error(ERR_FILE_WRITE_ERROR, "io.fetch: cannot create the directory of %s", job->sink_path);
             return false;
         }
@@ -1449,7 +1451,7 @@ Item pn_io_copy(Item src_item, Item dst_item) {
         StrBuf* url_buf = strbuf_new();
         target_to_url_string(src_target, url_buf);
         target_free(src_target);
-        if (create_parent_dirs(dst_path) != 0) {
+        if (lambda_create_output_parent_dirs(dst_path) != 0) {
             log_error("io.copy: failed to create parent directories for %s", dst_path);
             strbuf_free(url_buf);
             strbuf_free(dst_buf);

@@ -8857,6 +8857,8 @@ void walk_lambda_ast(AstNode* node, LambdaAstVisitor visitor, void* data,
         LambdaAstBinaryNode* binary = (LambdaAstBinaryNode*)node;
         walk_lambda_ast(binary->left, visitor, data, descend_functions);
         walk_lambda_ast(binary->right, visitor, data, descend_functions);
+        if (descend_functions && node->node_type == AST_NODE_PIPE)
+            walk_lambda_ast((AstNode*)binary->shell_stage, visitor, data, true);
         break;
     }
     case AST_NODE_CALL_EXPR: {
@@ -11274,7 +11276,10 @@ static void resolve_binary(Transpiler* tp, LambdaAstBinaryNode* node) {
         }
         AstNode* target = ast_unwrap_primary_to_leaf(right);
         Type* target_type = target ? target->type : NULL;
-        if (target && target->node_type != AST_NODE_CALL_EXPR && target_type &&
+        TypeId source_type = left && left->type ? left->type->type_id : LMD_TYPE_ANY;
+        bool file_sink_possible = target_type && target_type->type_id == LMD_TYPE_PATH &&
+            (source_type == LMD_TYPE_ANY || source_type == LMD_TYPE_VMAP);
+        if (!file_sink_possible && target && target->node_type != AST_NODE_CALL_EXPR && target_type &&
                 target_type->type_id != LMD_TYPE_FUNC &&
                 target_type->type_id != LMD_TYPE_ANY &&
                 target_type->type_id != LMD_TYPE_TYPE) {
@@ -18507,7 +18512,16 @@ static AstNode* syntax_reduce(LambdaSyntaxSink* sink,
     case LAMBDA_REDUCE_BINARY: {
         if (reduction->child_count != 2) return NULL;
         LambdaAstBinaryNode* node = (LambdaAstBinaryNode*)alloc_syntax_node(tp,
-            AST_NODE_BINARY, span, sizeof(LambdaAstBinaryNode), LSF_BINARY, 0);
+            AST_NODE_BINARY, span, sizeof(LambdaAstBinaryNode), LSF_BINARY,
+            reduction->pipe_rhs ? 1 : 0);
+        if (reduction->pipe_rhs) {
+            size_t size = lambda_rd_pipe_rhs_size();
+            void* replay = syntax_scratch_alloc(sink->unit, size);
+            if (!replay) return NULL;
+            memcpy(replay, reduction->pipe_rhs, size);
+            syntax_tail((AstNode*)node, sizeof(LambdaAstBinaryNode))[0] = replay;
+            lambda_ast_build_state(node).syntax_aux = 1;
+        }
         node->left = child0;
         node->right = syntax_child(reduction, 1);
         node->op_str = direct_token_text(tp, reduction->detail_token);
@@ -18862,6 +18876,71 @@ static void resolver_predicate_end(LambdaResolver* r, AstFuncNode* fn,
     direct_complete_function(tp, fn->source_span, fn, scope, (AstNode*)fn->param,
         NULL, NULL, body, false, false, false);
     lambda_ast_leave_scope(tp, scope);
+}
+
+// S14.3.5: preserve the ordinary in-frame RHS and resolve a second copy
+// under a real procedure scope. The indexed closure machinery can then
+// capture its lexical inputs without retaining a pointer to the caller frame.
+static void resolver_outline_shell_stage(LambdaResolver* r, AstPipeNode* pipe) {
+    if (!lambda_ast_build_state(pipe).syntax_aux) return;
+    void** slot = syntax_tail((AstNode*)pipe, sizeof(LambdaAstBinaryNode));
+    const LambdaPipeRhs* rhs = (const LambdaPipeRhs*)*slot;
+    *slot = NULL;
+    lambda_ast_build_state(pipe).syntax_aux = 0;
+#if !defined(LAMBDA_NO_FILE_IO) && !defined(LAMBDA_NO_TASKS)
+    if (!resolver_in_proc(r->tp) || !pipe->left || !has_current_item_ref(pipe->right)) return;
+    Type* source = pipe->left->type;
+    if (source && source->type_id != LMD_TYPE_ANY && source->type_id != LMD_TYPE_TYPE &&
+            source->type_id != LMD_TYPE_VMAP && source->type_id != LMD_TYPE_MAP) return;
+    Transpiler* tp = r->tp;
+    LambdaSyntaxSink sink = {};
+    sink.tp = tp;
+    sink.unit = r->unit;
+    sink.header_function_depth = 1;
+    LambdaParseSink parse_sink = {syntax_sink_reduce};
+    LambdaParseValue value = 0;
+    LambdaParseStatus status = lambda_rd_replay_pipe_rhs(rhs, &parse_sink, &sink, &value);
+    hashmap_free(sink.append_tails);
+    if (status != LAMBDA_PARSE_OK || sink.failed || !value)
+        return resolver_fail(r, "failed to outline a shell pipe body");
+
+    AstNode* body = (AstNode*)(uintptr_t)value;
+    AstFuncNode* fn = build_function_syntax(tp, pipe->right->source_span, {}, true);
+    lambda_ast_build_state(fn).syntax_form = LSF_NONE;
+    resolver_function_begin(r, fn);
+    if (r->failed) return;
+    fn->is_shell_pipe_stage = true;
+    static const char* names[] = {"~", "~key", "<pipe-parent>", "<pipe-root>", "<pipe-error>"};
+    AstNode** next = &fn->params;
+    for (const char* name : names) {
+        AstNamedNode* parameter = build_param_syntax(tp, fn->source_span,
+            strview_from_cstr(name), NULL, NULL, false, false);
+        lambda_ast_build_state(parameter).syntax_form = LSF_NONE;
+        resolve_param(tp, parameter);
+        set_param_contract((TypeParam*)parameter->type, &TYPE_ANY, false);
+        *next = (AstNode*)parameter;
+        next = &parameter->next;
+    }
+    set_function_return_contract((TypeFunc*)fn->type, &TYPE_ANY, false);
+    size_t returns = r->returns_seen, raises = r->raises_seen;
+    size_t propagations = r->propagations_seen, writes = r->write_candidates_seen;
+    resolver_that_begin(r, false);
+    resolve_walk(r, body);
+    resolver_that_end(r);
+    FunctionExitFacts exits;
+    exits.returns.collected = r->returns_seen == returns;
+    exits.may_raise = r->raises_seen != raises;
+    exits.may_exit = !exits.returns.collected || exits.may_raise ||
+        r->propagations_seen != propagations;
+    exits.may_write_through = r->write_candidates_seen != writes;
+    direct_complete_function(tp, fn->source_span, fn, fn->vars, fn->params,
+        NULL, NULL, body, true, false, true, &exits);
+    resolver_function_end(r, &exits);
+    pipe->shell_stage = fn;
+#else
+    (void)r;
+    (void)rhs;
+#endif
 }
 
 static void resolver_type_alias_begin(LambdaResolver* r, LambdaAstDeclaratorNode* alias) {
@@ -20313,6 +20392,9 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         if (scoped) resolver_that_end(r);
         resolve_diagnostics(r, node);
         resolve_binary(tp, binary);
+        if (!r->failed && !tp->error_count &&
+                (binary->op == OPERATOR_PIPE || binary->op == OPERATOR_FILTER))
+            resolver_outline_shell_stage(r, binary);
         if (bare_pipe_target && pipe_target->node_type == AST_NODE_IDENT) {
             AstNode* resolved = ast_unwrap_primary(binary->right);
             AstNode* callee = resolved && resolved->node_type == AST_NODE_CALL_EXPR

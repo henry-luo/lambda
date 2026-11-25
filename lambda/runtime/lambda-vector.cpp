@@ -3,6 +3,7 @@
 // Implements element-wise arithmetic between scalars, arrays, lists, and ranges
 
 #include "transpiler.hpp"
+#include "shell_pipeline.hpp"
 #include "type_contract.hpp"
 #include "call_effects.h"
 #include "lambda-number-runtime.hpp"
@@ -2369,6 +2370,13 @@ Item fn_pipe_call(Item collection, Item func_or_result, uint32_t guard) {
     // For now, we check if it's a callable
     TypeId type = get_type_id(func_or_result);
 
+    if (type == LMD_TYPE_PATH) {
+        if (item_is_error(collection)) return collection;
+        if (shell_output_is(collection)) {
+            if (guard) return runtime_error_item(ERR_PROC_IN_FN, "pipe file output requires a procedure", NULL);
+            return shell_output_file(collection, func_or_result, false, false);
+        }
+    }
     if (type == LMD_TYPE_FUNC) {
         // A MIR callback needs an explicit number-stack result home that stays
         // valid until the generated caller adopts this native helper's result.

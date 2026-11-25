@@ -7,6 +7,7 @@
 // are stable but their data buffers move under gc_compact_data, so no
 // `items[]`/`data` pointer may ever be cached across an allocating call.
 
+#include "shell_pipeline.hpp"
 #include "interp.hpp"
 #include "mvp/mvp.hpp"
 #include "lambda/io/mark_output_builder.hpp"
@@ -3445,10 +3446,10 @@ class InterpErrorContextGuard {
     InterpErrorContext entry_;
 public:
     InterpErrorContextGuard(InterpState* st, uint64_t* error)
-            : st_(st), entry_{error, st->errors} {
-        st_->errors = &entry_;
+            : st_(st), entry_{error, st ? st->errors : NULL} {
+        if (st_) st_->errors = &entry_;
     }
-    ~InterpErrorContextGuard() { st_->errors = entry_.prev; }
+    ~InterpErrorContextGuard() { if (st_) st_->errors = entry_.prev; }
     InterpErrorContextGuard(const InterpErrorContextGuard&) = delete;
     InterpErrorContextGuard& operator=(const InterpErrorContextGuard&) = delete;
 };
@@ -3799,6 +3800,17 @@ static Item eval_pipe(InterpFrame* f, LambdaAstBinaryNode* node) {
     }
 
     Item source = left.get();
+    if (fn_shell_is_stream(source)) {
+        Function* callback = node->shell_stage
+            ? interp_make_closure(f->module, node->shell_stage, f) : NULL;
+        if (node->shell_stage && !callback) return ItemError;
+        Item root = f->st->contexts && f->st->contexts->root
+            ? (Item){.item = *f->st->contexts->root} : left.get();
+        Item caught = f->st->errors && f->st->errors->error
+            ? (Item){.item = *f->st->errors->error} : ItemNull;
+        return fn_shell_record_stage(left.get(), callback ? (Item){.function = callback} : ItemNull,
+            root, caught, node->op == OPERATOR_FILTER);
+    }
     TypeId source_tid = get_type_id(source);
     // S10.1.2v4: the canonical walk includes element attributes and children.
     SymbolKeyList* keys = item_keys(source);
@@ -7522,8 +7534,12 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
             uint64_t method_index = ITEM_NULL;
             uint64_t* subject = fn_node->is_that_predicate && params > 0
                 ? &frame->slots[0] : frame->method_self;
-            InterpContextGuard method_context(frame->st, subject,
-                &method_index, NULL, subject);
+            bool stage = fn_node->is_shell_pipe_stage;
+            InterpContextGuard method_context(frame->st, stage ? &frame->slots[0] : subject,
+                stage ? &frame->slots[1] : &method_index, stage ? &frame->slots[2] : NULL,
+                stage ? &frame->slots[3] : subject);
+            InterpErrorContextGuard stage_error(stage ? frame->st : NULL,
+                stage ? &frame->slots[4] : NULL);
             uint64_t iterations = 0;
             for (;;) {
                 result = output_destination ? interp_emit_output(frame, fn_node->body, output_destination)
@@ -8769,8 +8785,8 @@ extern "C" Item interp_eval_view_handler(Context* host, Script* module,
 // Runs one module's top level in its own frame. Used for every module in the
 // import cone and for the main script, so an initializer sees exactly the same
 // environment either way.
-static Item interp_execute_top_level_nodes(Runner* runner, InterpState* st,
-        Script* script, AstNode* first, bool run_main, bool procedural = false) {
+static Item interp_execute_top_level_nodes(InterpState* st, Script* script,
+        AstNode* first, bool run_main, bool procedural = false) {
     InterpFrameGuard guard(st, NULL, script, &script->interp_plan, NULL, 0);
     if (!guard.valid()) return ItemError;
     InterpFrame* frame = guard.frame();
@@ -8855,15 +8871,6 @@ static Item interp_execute_top_level_nodes(Runner* runner, InterpState* st,
             }
             if (interp_frame_pending(frame)) break;
         }
-#ifndef LAMBDA_NO_TASKS
-        // Tasks that outlive their starter still run before the script ends,
-        // exactly as the MIR runner drains them (D7.5.1).
-        if (st && st->ctx && st->ctx->scheduler &&
-                (!runner || !runner->runtime || !runner->runtime->no_task_drain)) {
-            lambda_scheduler_drain(st->ctx->scheduler);
-        }
-
-#endif
     }
 
     result = scalar_storage_read(tail.get(), false);
@@ -8921,7 +8928,7 @@ static Item interp_execute_module(Runner* runner, InterpState* st, Script* scrip
     if (!interp_enter_module(runner->context, script, module_state, satellite_image))
         return ItemError;
     interp_register_view_templates(script);
-    Item result = interp_execute_top_level_nodes(runner, st, script, root->child, run_main);
+    Item result = interp_execute_top_level_nodes(st, script, root->child, run_main);
     script->module_initialized = !item_is_error(result);
     return result;
 }
@@ -9009,7 +9016,7 @@ static Item interp_execute_repl_fragment(Runner* runner, InterpState* st,
     }
     // each admitted REPL fragment adds only its own templates before apply dispatch.
     interp_register_view_templates(script, fragment);
-    return interp_execute_top_level_nodes(runner, st, script, fragment, false,
+    return interp_execute_top_level_nodes(st, script, fragment, false,
         run->procedural);
 }
 
@@ -9205,13 +9212,22 @@ static Item interp_run_nodes(Runner* runner, bool run_main,
         lambda_recovery_frame_end(boundary);
     }
 
-    interp_static_member_names_destroy(&st);
-    g_interp_state = saved;
     // A fault landing bypasses C++ destructors. Restore the runner-level
     // binding unconditionally so a later REPL/history execution cannot see
     // an abandoned callee's rest list.
     runner->context->current_vargs = saved_vargs;
-    result = runtime_publish_result(runner->context, result);
+    result = runtime_publish_result(runner->context,
+        shell_script_result(runner->runtime, result, run_main));
+#ifndef LAMBDA_NO_TASKS
+    // A feeder can only finish while the CLI drains the returned child's
+    // stdout. Complete the shell result before joining the other tasks (S14.3.3).
+    if (run_main && runner->context->scheduler &&
+            (!runner->runtime || !runner->runtime->no_task_drain)) {
+        lambda_scheduler_drain(runner->context->scheduler);
+    }
+#endif
+    interp_static_member_names_destroy(&st);
+    g_interp_state = saved;
     if (runner->context->cwd) {
         url_destroy(runner->context->cwd);
         runner->context->cwd = NULL;

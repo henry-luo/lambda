@@ -30,6 +30,7 @@
 #include "recovery_frame.h"
 #include "side_stack.h"
 #include "concurrency.h"
+#include "shell_pipeline.hpp"
 #include "module_registry.h"
 #include "../jube/jube_registry.h"
 #include "rdb_host.h"
@@ -3317,6 +3318,7 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main) {
             log_debug("after main func, result type_id=%d", get_type_id(result));
         }
     }
+    result = runtime_publish_result(context, shell_script_result(runner->runtime, result, run_main));
     if ((!runner->runtime || !runner->runtime->no_task_drain) && context->scheduler) {
         lambda_scheduler_drain(context->scheduler);
     }

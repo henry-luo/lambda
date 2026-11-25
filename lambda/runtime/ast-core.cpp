@@ -969,9 +969,13 @@ void ast_visit_core_children(AstNode* node, AstChildVisitor visitor, void* ctx) 
         case AST_NODE_SPREAD: AST_VISIT(((AstSpreadNode*)node)->argument); break;
         case AST_NODE_YIELD: case AST_NODE_AWAIT:
             AST_VISIT(((AstYieldNode*)node)->argument); break;
-        case AST_NODE_BINARY: case AST_NODE_PIPE:
+        case AST_NODE_BINARY:
             AST_VISIT(((AstBinaryNode*)node)->left);
             AST_VISIT(((AstBinaryNode*)node)->right); break;
+        case AST_NODE_PIPE:
+            AST_VISIT(((AstPipeNode*)node)->left);
+            AST_VISIT(((AstPipeNode*)node)->right);
+            AST_VISIT(((AstPipeNode*)node)->shell_stage); break;
         case AST_NODE_BINARY_TYPE:
             AST_VISIT(((AstBinaryNode*)node)->left);
             AST_VISIT(((AstBinaryNode*)node)->right); break;

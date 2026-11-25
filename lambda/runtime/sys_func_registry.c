@@ -1376,6 +1376,12 @@ SysFuncInfo sys_func_defs[] = {
 
     {SYSPROC_IO_READ, "io_read", 1, &TYPE_STRING, true, false, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "pn_io_read", PROFILE_FILE_IO_FPTR(pn_io_read), NULL, NULL, false, 0, true},
+#if !defined(LAMBDA_NO_FILE_IO) && !defined(LAMBDA_NO_TASKS)
+    {SYSPROC_SHELL_START, "io_shell_start", 5, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_shell_start", FPTR(pn_shell_start), NULL, NULL, false, 0, true},
+    {SYSPROC_SHELL_STDIN, "io_shell_stdin", 0, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_shell_stdin", FPTR(pn_shell_stdin), NULL, NULL, false, 0, true},
+#endif
     {SYSPROC_IO_EXEC, "io_exec", 2, &TYPE_MAP, true, true, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "pn_io_exec2", PROFILE_FILE_IO_FPTR(pn_io_exec2), NULL, NULL, false, 0, true},
     {SYSPROC_IO_EXEC, "io_exec", 3, &TYPE_MAP, true, true, false, LMD_TYPE_ANY, true,
@@ -2439,6 +2445,10 @@ JitImport jit_runtime_imports[] = {
     {"pipe_end", FPTR(pipe_end)},
     {"fn_pipe_where", FPTR(fn_pipe_where)},
     {"fn_pipe_call", FPTR(fn_pipe_call)},
+#if !defined(LAMBDA_NO_FILE_IO) && !defined(LAMBDA_NO_TASKS)
+    {"fn_shell_is_stream", FPTR(fn_shell_is_stream)},
+    {"fn_shell_record_stage", FPTR(fn_shell_record_stage)},
+#endif
     {"fn_seq_count", FPTR(fn_seq_count)},
     {"iter_len", FPTR(iter_len)},
     {"fn_len_checked", FPTR(fn_len_checked), JIT_IMPORT_STABLE_ITEM},

@@ -3746,6 +3746,7 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
                 f->ast->node_type != AST_NODE_FUNC_EXPR))
             return mvp_reject(m, f->ast, "callable definition requires function/procedure lowering");
         TypeFunc* signature = (TypeFunc*)f->ast->type;
+        f->boxed_entry |= f->ast->is_shell_pipe_stage;
         NameScope* scope = f->ast->vars;
         for (AstBoundTypeUse* use = scope ? scope->bound_type_uses : NULL; use; use = use->next)
             if (ast_scope_function(use->binder->scope) != f->ast) f->captured_type_count++;
@@ -4144,7 +4145,12 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
         case AST_NODE_MATCH_ARM:
             if (!require_constraint_predicates(m, ((AstMatchArm*)node)->pattern)) return false;
             break;
-        case AST_NODE_PIPE:
+        case AST_NODE_PIPE: {
+            AstFuncNode* stage = ((AstPipeNode*)node)->shell_stage;
+            if (stage && !mvp_require_function_reference(m, stage, node))
+                return mvp_reject(m, node, "shell pipe callback requires a boxed entry");
+            break;
+        }
         case AST_NODE_JOIN_KEY:
             break;
         case AST_NODE_HANDLER_EXPR: case AST_NODE_HANDLER_STAM:
