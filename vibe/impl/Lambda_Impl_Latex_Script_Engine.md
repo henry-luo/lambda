@@ -34,12 +34,20 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Expl3 value insertion, 2026-11-26:** Script preloads the native
+  `exp_not:V`/`:v` and local/global left/right value-insertion macro bodies
+  (D10.2.2v2). TeX Live comparisons cover unexpanded token values, dynamic
+  names, aliases, group scope and integer-register values. Constructor argument
+  handling and value-source mapping remain explicitly unsupported. Csvsimple
+  now reaches `bool_until_do:nn`.
+
 - **Expl3 inline comma-list mapping, 2026-11-26:** Script implements literal
   and variable inline maps with normalized list storage, scoped protected
   callbacks, nested map counters and the standard break macros (D10.2.2v2).
   TeX Live comparisons cover grouping, empty items, nesting, break results and
   counter restoration. The document digester still rejects source mapping
-  for this operation. Csvsimple now reaches `tl_put_right:NV`.
+  for this operation. Csvsimple's later blocker is recorded in the value
+  insertion checkpoint above.
 
 - **Expl3 choice and boolean keys, 2026-11-26:** Script now implements
   `.choices:nn` and local/global boolean and inverse-boolean key properties

@@ -1,0 +1,20 @@
+{
+  issue: null,
+  unsupported: null,
+  text: "[AB\\foo ][CAB\\foo ][CCAB\\foo C][CCCAB\\foo CC]"
+}
+{
+  issue: null,
+  unsupported: null,
+  text: "[n=42]"
+}
+{
+  issue: null,
+  unsupported: null,
+  text: "[AB]"
+}
+true
+{
+  issue: "tex-unsupported-primitive",
+  unsupported: "constructor argument expl3 assignment"
+}

@@ -6773,7 +6773,15 @@ pub fn enable_script_expl3(st: State) State^ {
         source:"\\int_" ++ scope ++ op ++ (if (op == "set") ":cn" else ":c") ++
             "{\\exp_args:Nc\\int_" ++ scope ++ op ++ (if (op == "set") ":Nn" else ":N") ++ "}",
         protected_flag:true}];
-    let macros = enable_expl_macro_sources(msg_support, [*variants,*pop_base,*pop_conditionals,*pop_variants,*prop_get_conditionals,*prop_get_variants,*prop_exp_helpers,*prop_pop_bases,*prop_remove_bases,*prop_pop_conditionals,*prop_pop_variants,*prop_remove_variants,*integer_ops,*integer_dynamic,
+    // The four native insertion shapes share value expansion and assignment order.
+    let value_puts = [for (scope in ["", "g"], side in ["left", "right"], form in ["V", "v"]) {
+        let value = "\\exp_not:" ++ form ++ (if (form == "V") "#2" else "{#2}");
+        let prior = "\\__kernel_exp_not:w\\exp_after:wN{#1}";
+        {source:"\\tl_" ++ scope ++ "put_" ++ side ++ ":N" ++ form ++ "#1#2{\\__kernel_tl_" ++
+            scope ++ "set:Nx#1{" ++ (if (side == "left") value ++ prior else prior ++ value) ++ "}}",
+            protected_flag:true, source_mapping_guard:"exp_args_value", argument_unqualified:true}
+    }];
+    let macros = enable_expl_macro_sources(msg_support, [*variants,*pop_base,*pop_conditionals,*pop_variants,*prop_get_conditionals,*prop_get_variants,*prop_exp_helpers,*prop_pop_bases,*prop_remove_bases,*prop_pop_conditionals,*prop_pop_variants,*prop_remove_variants,*integer_ops,*integer_dynamic,*value_puts,
         {source:"\\ior_new:N#1{\\cs_new_eq:NN#1\\c__ior_term_ior}",protected_flag:true},
         {source:"\\ior_new:c{\\exp_args:Nc\\ior_new:N}",protected_flag:true},
         {source:"\\ior_open:cn{\\exp_args:Nc\\ior_open:Nn}",protected_flag:true},
@@ -6895,6 +6903,8 @@ pub fn enable_script_expl3(st: State) State^ {
         {source: "\\__exp_eval_register:N#1{\\exp_after:wN\\if_meaning:w\\exp_not:N#1#1\\if_meaning:w\\scan_stop:#1\\__exp_eval_error_msg:w\\fi:\\else:\\exp_after:wN\\use_i_ii:nnn\\fi:\\exp_after:wN\\exp_end:\\tex_the:D#1}", protected_flag: false},
         {source: "\\__exp_eval_error_msg:w#1\\tex_the:D#2{\\fi:\\fi:\\msg_expandable_error:nnn{kernel}{bad-variable}{#2}\\exp_end:}", protected_flag: false},
         {source: "\\__exp_eval_register:c#1{\\exp_after:wN\\__exp_eval_register:N\\cs:w#1\\cs_end:}", protected_flag: false},
+        {source: "\\exp_not:V#1{\\__kernel_exp_not:w\\exp_after:wN{\\exp:w\\__exp_eval_register:N#1}}", protected_flag:false, source_mapping_guard:"exp_args_value"},
+        {source: "\\exp_not:v#1{\\__kernel_exp_not:w\\exp_after:wN{\\exp:w\\__exp_eval_register:c{#1}}}", protected_flag:false, source_mapping_guard:"exp_args_value"},
         {source: "\\exp_args:Nv#1#2{\\exp_after:wN#1\\exp_after:wN{\\exp:w\\__exp_eval_register:c{#2}}}", protected_flag: false, source_mapping_guard: "exp_args_value"},
         {source: "\\tl_head:v{\\exp_args:Nv\\tl_head:n}", protected_flag: false},
         {source: "\\tl_tail:v{\\exp_args:Nv\\tl_tail:n}", protected_flag: false},
@@ -7152,9 +7162,10 @@ fn enable_expl_macro_sources(st: State, definitions, index = 0) State^ {
             define({*:st, input: stream.push(st.input, tokens)}, true, definition.long_ok != false,
                 definition.protected_flag, false, 20000000)^;
         let next = if (st.definitions[name] == null and created.issue == null and
-            definition.source_mapping_guard != null)
+            (definition.source_mapping_guard != null or definition.argument_unqualified == true))
                 assign_meaning(created, name, {*:created.definitions[name],
-                    source_mapping_guard: definition.source_mapping_guard}, true)^ else created;
+                    source_mapping_guard: definition.source_mapping_guard,
+                    expl3_argument_unqualified:definition.argument_unqualified == true}, true)^ else created;
         if (next.issue != null) next else enable_expl_macro_sources(next, definitions, index + 1)
     }
 }
