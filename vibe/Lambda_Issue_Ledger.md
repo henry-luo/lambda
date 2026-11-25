@@ -3077,6 +3077,12 @@ under each `LAMBDA_EXEC_BACKEND`. Determine whether `file.x` is intentionally
 a different syntactic form and whether accepting the binding requires a
 diagnostic or a member-access resolution change.
 
+**Reproduced 2026-11-25:** In both tiers,
+`let file = {issue: null}; [file, file.issue]` returns the map and `error`.
+Renaming the binding makes member access return `null`. Evidence:
+`temp/latex-parity/file-binding-repro.ls`. The cause remains unconfirmed;
+normal member access is ruled by **S8.2.3** and **S12.3.3v2**.
+
 ## Workspace-sync observation of member access on a `file` binding — 2026-11-11
 
 **Status:** OPEN — semantics and cause unconfirmed. This is independent evidence

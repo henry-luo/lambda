@@ -195,7 +195,7 @@
 [{
     body: "\\tl_head:N\\v",
     issue: "latex-digest-unsupported",
-    unsupported: "expl3 token head source mapping",
+    unsupported: "expl3 one-step argument source mapping",
     matches: null
   }, {
     body: "\\tl_tail:N\\v",
@@ -205,7 +205,7 @@
   }, {
     body: "\\let\\h\\tl_head:N\\h\\v",
     issue: "latex-digest-unsupported",
-    unsupported: "expl3 token head source mapping",
+    unsupported: "expl3 one-step argument source mapping",
     matches: null
   }, {
     body: "\\let\\t\\tl_tail:N\\t\\v",

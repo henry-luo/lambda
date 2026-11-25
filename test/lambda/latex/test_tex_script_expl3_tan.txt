@@ -1,0 +1,13 @@
+{
+  cases: 18,
+  failures: [],
+  guarded: [{
+      expr: "tan(1e35)",
+      issue: "tex-unsupported-primitive",
+      unsupported: "fp tan"
+    }]
+}
+{
+  cases: 2,
+  failures: []
+}

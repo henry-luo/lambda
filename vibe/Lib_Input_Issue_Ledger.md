@@ -15,6 +15,51 @@ Resolved records are in the [fixed issue ledger](<Lib_Input_Issue_Ledger (fixed)
 
 ## Open issues
 
+<a id="li-118"></a>
+
+### LI-118 — Unbraced Unicode math scripts produce invalid UTF-8
+
+**Open, 2026-11-25.** Parsing `\\begin{document}$x^é$\\end{document}` as
+LaTeX produces an AST whose punctuation value contains the isolated byte `C3`,
+so serialized output is invalid UTF-8. The native math parser's unbraced
+script-argument path advances one byte through punctuation, splitting the
+two-byte character. It should consume a complete Unicode scalar or return a
+valid explicit error. This blocks native-compatible Unicode script-argument
+support in the Script port; braced arguments are unaffected. Evidence:
+`temp/latex-parity/math-unicode-unbraced.ls` and its bytewise output check
+(S1.8, D10.2.2; ownership D9.1.3v2).
+
+<a id="li-117"></a>
+
+### LI-117 — Native xparse diagnostics can contain invalid UTF-8
+
+**Open, 2026-11-25.** For
+`parse("\\NewDocumentCommand\\foo{é}{A}\\foo X", {type:"tex"})`,
+the native `latex-arg-spec` diagnostic inserts byte `E9` into its message
+using single-byte character formatting. That byte is not valid UTF-8 on its
+own; the equivalent `λ` input produces byte `BB`. Native text output and
+other diagnostic fields remain available. The diagnostic should preserve a
+valid Unicode character or otherwise produce valid UTF-8. This does not block
+the Script port, which currently reproduces the native byte for parity, but it
+can affect consumers of native diagnostic strings. Evidence:
+`temp/latex-parity/xparse-unicode-v2.out` and the bytewise comparisons in
+`test_tex_script_document_processors` (S1.8, D10.2.2; ownership D9.1.3v2).
+
+<a id="li-116"></a>
+
+### LI-116 — Native expl3 Unicode case conversion produces incomplete output and can exhaust its budget
+
+**Open, 2026-11-25.** In the native TeX input engine,
+`parse("\\ExplSyntaxOn\\text_uppercase:n{Straße}\\ExplSyntaxOff",
+{type:"tex"})` returns `STRAße` without a diagnostic. Replacing the input
+with `café` produces an empty result and reaches the 20-million expansion
+budget after an improper-alphabetic diagnostic; Greek lowercase produced
+macro-mismatch diagnostics. The expected behavior is complete Unicode case
+conversion or a bounded, explicit unsupported result. The root cause is not
+yet confirmed. Evidence is in `temp/latex-parity/case-candidate/single-*.out`
+and `.err`. This blocks using native output as a reliable reference for the
+Script engine's Unicode text-case port (S1.8, D10.2.2; ownership D9.1.3v2).
+
 <a id="li-115"></a>
 
 ### LI-115 — The isolated input check expects removed Premake targets

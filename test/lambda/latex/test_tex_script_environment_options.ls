@@ -45,5 +45,5 @@ let path=root ++ "script_list_option_main.tex";
 let included=digest.digest(expanded(input(path,"text")^,path)^)^;
 {cases:len(checked),failures:[for(case in checked where not case.passed) case],
  guarded:{issue:guarded.issue,unsupported:guarded.unsupported,matches_native:guarded.passed},
- token_boundary:{issue:boundary.issue,unsupported:boundary.unsupported},
+ token_boundary:{issue:boundary.issue,unsupported:boundary.unsupported,matches_native:boundary.ast==parse(boundary_source,{type:"latex"})^},
  included:{issue:included.issue,matches_native:included.ast==input(path,"latex")^}}

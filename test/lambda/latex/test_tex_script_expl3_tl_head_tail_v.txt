@@ -227,7 +227,7 @@
 [{
     body: "\\tl_head:V\\v",
     issue: "latex-digest-unsupported",
-    unsupported: "expl3 token head source mapping",
+    unsupported: "expl3 value argument source mapping",
     matches: null
   }, {
     body: "\\tl_tail:V\\v",
@@ -237,7 +237,7 @@
   }, {
     body: "\\let\\h\\tl_head:V\\h\\v",
     issue: "latex-digest-unsupported",
-    unsupported: "expl3 token head source mapping",
+    unsupported: "expl3 value argument source mapping",
     matches: null
   }, {
     body: "\\let\\t\\tl_tail:V\\t\\v",

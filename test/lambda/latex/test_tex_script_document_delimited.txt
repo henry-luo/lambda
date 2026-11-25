@@ -1,0 +1,9 @@
+{
+  cases: 18,
+  failures: []
+}
+{
+  text: true,
+  diagnostics: true,
+  issue: null
+}

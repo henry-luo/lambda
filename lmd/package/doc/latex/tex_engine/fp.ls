@@ -31,17 +31,31 @@ fn magnitude(value: decimal) int^ {
 }
 
 // decimal ties are rounded to an even last digit, independently of Lambda's round().
-fn nearest_even(value: decimal) decimal^ {
+fn nearest_even(value: decimal, tie: decimal = 0m) decimal^ {
     let whole = trunc(value)^;
     let difference = abs(value - whole)^;
-    let up = difference > 0.5m or (difference == 0.5m and abs(whole % 2m)^ == 1m);
+    // Nonzero tie modes choose positive or negative infinity, as expl3 does.
+    let tie_up = if (tie > 0m) value > 0m else if (tie < 0m) value < 0m else abs(whole % 2m)^ == 1m;
+    let up = difference > 0.5m or (difference == 0.5m and tie_up);
     if (not up) whole else whole + if (value < 0m) -1m else 1m
 }
 
-fn places(value: decimal, digits: int) decimal^ {
+fn places(value: decimal, digits: int, tie: decimal = 0m) decimal^ {
     let power = 10m ** abs(digits);
-    if (digits >= 0) nearest_even(value * power)^ / power
-    else nearest_even(value / power)^ * power
+    if (digits >= 0) nearest_even(value * power,tie)^ / power
+    else nearest_even(value / power,tie)^ * power
+}
+
+// Scale decimal places before directed rounding and keep a negative zero result.
+fn directed_places(value: decimal, digits: int, name: string) decimal^ {
+    if (value == 0m) value
+    else {
+        let power = 10m ** abs(digits);
+        let scaled = if (digits >= 0) value * power else value / power;
+        let whole = if (name == "trunc") trunc(scaled)^ else if (name == "floor") floor(scaled)^ else ceil(scaled)^;
+        let result = if (digits >= 0) whole / power else whole * power;
+        if (result == 0m) value * 0m else result
+    }
 }
 
 fn normalize(value: decimal) decimal^ {
@@ -70,6 +84,62 @@ fn square_root(value: decimal) decimal^ {
         let half = int(floor(exp / 2))^;
         let start = 10m ** half;
         normalize(square_root_step(value, start, 0m, 20)^)
+    }
+}
+
+// Reduce bounded angles with enough decimal precision for expl3's 16 digits.
+fn trig_series(x: decimal, cosine: bool, term: decimal, sum: decimal, n: int) decimal^ {
+    let a = if (cosine) 2 * n - 1 else 2 * n;
+    let b = a + 1;
+    let next = -term * x * x / decimal(a * b)^;
+    let total = sum + next;
+    if (n >= 40 or total == sum) total else trig_series(x,cosine,next,total,n + 1)
+}
+fn trig(value: decimal, cosine: bool) any^ {
+    if (value == 0m and not cosine) {issue:null,value:value,raw:value,uncertainty:0m}
+    else {
+        let quarter_hi = 1.570796326794897m;
+        let quarter_lo = -0.0000000000000003807686783083602485579014153003124m;
+        let turns = nearest_even(value / (quarter_hi + quarter_lo))^;
+        let angle = (value - turns * quarter_hi) - turns * quarter_lo;
+        let reduction_error = abs(turns)^ * 1e-49m;
+        // Reject a quadrant choice if the pi uncertainty could cross its boundary.
+        if (abs(angle)^ + reduction_error >= (quarter_hi + quarter_lo) / 2m) {issue:"expl3-fp-unsupported"}
+        else {
+            // Reduce in decimal first: a large quadrant index can exceed the int domain.
+            let quadrant = int((turns % 4m + 4m) % 4m)^;
+            let use_cos = if (cosine) quadrant == 0 or quadrant == 2 else quadrant == 1 or quadrant == 3;
+            let negative = if (cosine) quadrant == 1 or quadrant == 2 else quadrant == 2 or quadrant == 3;
+            let first = if(use_cos) 1m else angle;
+            let raw = trig_series(angle,use_cos,first,first,1)^;
+            let result = if(negative) -raw else raw;
+            // Bound the truncated pi tail and series arithmetic before accepting a rounding.
+            let uncertainty = reduction_error + abs(result)^ * 1e-32m;
+            let low = normalize(result - uncertainty) ^ { null };
+            let high = normalize(result + uncertainty) ^ { null };
+            if(low == null or high == null or low != high) {issue:"expl3-fp-unsupported"}
+            else {issue:null,value:normalize(result)^,raw:result,uncertainty:uncertainty}
+        }
+    }
+}
+
+// Propagate both trig intervals through the quotient before accepting a result.
+fn tangent(value: decimal) any^ {
+    if (value == 0m) {issue:null,value:value}
+    else {
+        let numerator = trig(value,false)^;
+        let denominator = trig(value,true)^;
+        if (numerator.issue != null or denominator.issue != null or
+            abs(denominator.raw)^ <= denominator.uncertainty) {issue:"expl3-fp-unsupported"}
+        else {
+            let ratio = numerator.raw / denominator.raw;
+            let uncertainty = (numerator.uncertainty + abs(ratio)^ * denominator.uncertainty) /
+                (abs(denominator.raw)^ - denominator.uncertainty) + abs(ratio)^ * 1e-32m;
+            let low = normalize(ratio - uncertainty) ^ { null };
+            let high = normalize(ratio + uncertainty) ^ { null };
+            if (low == null or high == null or low != high) {issue:"expl3-fp-unsupported"}
+            else {issue:null,value:normalize(ratio)^}
+        }
     }
 }
 
@@ -140,25 +210,65 @@ fn primary(source: string, index: int) ParseStep^ {
     }
 }
 
+// Equal operands keep the first value, including the sign of zero.
+fn extreme_tail(source: string, name: string, current: ParseStep) ParseStep^ {
+    let at = skip(source, current.index);
+    if (current.issue != null) current
+    else if (ch(source, at) == ")") {*:current, index: at + 1}
+    else if (ch(source, at) != ",") {issue: "expl3-fp-missing-paren", index: at}
+    else {
+        let next = expression(source, at + 1)^;
+        if (next.issue != null) next
+        else {
+            let choose_next = if (name == "min") next.value < current.value else next.value > current.value;
+            extreme_tail(source, name, {*:next, value: if (choose_next) next.value else current.value})
+        }
+    }
+}
+
 fn call(source: string, name: string, start: int) ParseStep^ {
     let first = expression(source, start)^;
     let at = skip(source, first.index);
     if (first.issue != null) first
+    else if (name == "min" or name == "max") extreme_tail(source, name, first)
     else {
         let second = if (ch(source, at) == ",") expression(source, at + 1)^ else null;
-        let end = if (second == null) at else skip(source, second.index);
+        let after_second = if (second == null) at else skip(source, second.index);
+        let third = if (second != null and ch(source,after_second) == ",") expression(source,after_second + 1)^ else null;
+        let end = if (third == null) after_second else skip(source,third.index);
         if (second != null and second.issue != null) second
+        else if (third != null and third.issue != null) third
         else if (ch(source, end) != ")") {issue: "expl3-fp-missing-paren", index: end}
         else if (name == "sqrt" and second == null) {
             let value = square_root(first.value) ^ { null };
             if (value == null) {issue: "expl3-fp-domain", index: end}
             else {issue: null, value: value, index: end + 1}
         }
+        else if (contains(["sin","cos"],name) and second == null) {
+            let value = trig(first.value,name == "cos")^;
+            if(value.issue != null) {issue:value.issue,unsupported:name,index:end}
+            else {issue:null,value:value.value,index:end + 1}
+        }
+        else if (name == "tan" and second == null) {
+            let value = tangent(first.value)^;
+            if(value.issue != null) {issue:value.issue,unsupported:name,index:end}
+            else {issue:null,value:value.value,index:end + 1}
+        }
         else if (name == "abs" and second == null)
             {issue: null, value: abs(first.value), index: end + 1}
+        else if (name == "sign" and second == null)
+            {issue: null, value: if (first.value == 0m) first.value else if (first.value < 0m) -1m else 1m, index: end + 1}
+        else if (contains(["trunc","floor","ceil"],name) and third == null and
+            (second == null or (second.value >= -200m and second.value <= 200m and second.value == trunc(second.value)^))) {
+            let digits = if (second == null) 0 else int(second.value)^;
+            let value = normalize(directed_places(first.value,digits,name)^) ^ { null };
+            if (value == null) {issue: "expl3-fp-range", index: end}
+            else {issue: null, value: value, index: end + 1}
+        }
         else if (name == "round" and (second == null or (second.value >= -200m and second.value <= 200m and second.value == trunc(second.value)^))) {
             let digits = if (second == null) 0 else int(second.value)^;
-            let value = normalize(places(first.value, digits)^) ^ { null };
+            let tie = if (third == null) 0m else third.value;
+            let value = normalize(places(first.value, digits, tie)^) ^ { null };
             if (value == null) {issue: "expl3-fp-range", index: end}
             else {issue: null, value: value, index: end + 1}
         }

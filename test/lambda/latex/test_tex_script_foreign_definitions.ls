@@ -18,5 +18,5 @@ let unicode_path=root ++ "script_definition_unicode_main.tex";
 let unicode=digest.digest(expand(input(unicode_path,"text")^,unicode_path)^)^;
 {included:{issue:result.issue,matches_native:result.ast==input(path,"latex")^},
  direct:{issue:direct_result.issue,matches_native:direct_result.ast==parse(direct,{type:"latex"})^},
- incompatible_lexing:{issue:guarded.issue,unsupported:guarded.unsupported},
+ incompatible_lexing:{issue:guarded.issue,unsupported:guarded.unsupported,matches_native:guarded.ast==input(bad_path,"latex")^},
  unicode_control:{issue:unicode.issue,unsupported:unicode.unsupported}}

@@ -1,0 +1,8 @@
+{
+  cases: 9,
+  failures: []
+}
+{
+  issue: "latex-digest-unsupported",
+  unsupported: "font token source mapping"
+}

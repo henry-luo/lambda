@@ -21,7 +21,7 @@ fn report(source) any^ {
 "syntax nested restore:"; report("\\ExplSyntaxOn{\\ExplSyntaxOff\\number\\catcode95}\\number\\catcode95\\ExplSyntaxOff\\number\\catcode95")
 "expanded use:"; report("\\ExplSyntaxOn\\tl_new:N\\l_test_tl\\tl_set:Nn\\l_test_tl{A}\\edef\\x{\\tl_use:N\\l_test_tl}\\x\\ExplSyntaxOff")
 "protected function:"; report("\\ExplSyntaxOn\\cs_new_protected:Npn\\safe:{A}\\edef\\x{\\safe:}\\x\\ExplSyntaxOff")
-"unsupported operation:"; report("\\ExplSyntaxOn\\seq_pop_left:NN\\l_test_seq\\l_tmpa_tl")
+"unsupported operation:"; report("\\ExplSyntaxOn\\halign")
 "duplicate declaration:"; report("\\ExplSyntaxOn\\tl_new:N\\l_test_tl\\tl_new:N\\l_test_tl")
 "undefined token list:"; report("\\ExplSyntaxOn\\tl_use:N\\l_missing_tl")
 "custom syntax restoration:"; report("\\catcode95=12 \\ExplSyntaxOn\\ExplSyntaxOff\\number\\catcode95")
@@ -47,13 +47,13 @@ let sample_style = "\\ProvidesExplPackage{sample}{2026-11-11}{1.0}{test}\\cs_new
     {local: {'outer.sty': {data: "\\ProvidesExplPackage{outer}{2026}{1}{outer}\\RequirePackage{inner}\\cs_new:Npn\\outer:{O}"},
         'inner.sty': {data: "\\ProvidesExplPackage{inner}{2026}{1}{inner}\\cs_new:Npn\\inner:{I}"}}, bundled: {}})
 "unsupported package operation:"; report_package("\\usepackage{unsupported}",
-    {local: {'unsupported.sty': {data: "\\ProvidesExplPackage{unsupported}{2026}{1}{test}\\seq_pop_left:NN\\l_test_seq\\l_tmpa_tl"}}, bundled: {}})
+    {local: {'unsupported.sty': {data: "\\ProvidesExplPackage{unsupported}{2026}{1}{test}\\halign"}}, bundled: {}})
 "document command mandatory:"; report("\\NewDocumentCommand\\foo{m}{[#1]}\\foo{A}")
 "document command optional:"; report("\\NewDocumentCommand\\foo{O{Z}}{[#1]}\\foo/\\foo[X]")
 "document command two arguments:"; report("\\NewDocumentCommand\\foo{m m}{#1/#2}\\foo{A}{B}")
 "document command mixed:"; report("\\NewDocumentCommand\\foo{O{D} m}{#1/#2}\\foo{X}/\\foo[Q]{Y}")
 "document command scoped:"; report("{\\NewDocumentCommand\\foo{m}{[#1]}\\foo{X}}\\ifdefined\\foo BAD\\else OK\\fi")
-"document command unsupported spec:"; report("\\NewDocumentCommand\\foo{s}{#1}\\foo*")
+"document command star:"; report("\\NewDocumentCommand\\foo{s}{#1}\\foo*")
 "expl3 package document commands:"; report_package("\\usepackage{sample}\\greet/\\greet[Friend]/\\twice{A}",
     {local: {'sample.sty': {data: "\\ProvidesExplPackage{sample}{2026}{1}{test}\\cs_new:Npn\\double:n#1{#1#1}\\NewDocumentCommand\\greet{O{World}}{Hello,~#1!}\\NewDocumentCommand\\twice{m}{\\double:n{#1}}"}}, bundled: {}})
 let fixture_style = input("test/lambda/latex/fixtures/local_packages/lmdexpl.sty", "text")^;

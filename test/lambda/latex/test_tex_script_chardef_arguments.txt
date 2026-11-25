@@ -1,0 +1,18 @@
+{
+  cases: 24,
+  text_mismatches: 24,
+  failures: [],
+  guarded: [{
+      body: "\\mystery{\\x \n\nQ}",
+      unsupported: "character definition argument source mapping"
+    }, {
+      body: "\\mystery{\\x\r\n\r\nQ}",
+      unsupported: "character definition argument source mapping"
+    }, {
+      body: "\\mystery{\\x% c\n\nQ}",
+      unsupported: "character definition argument source mapping"
+    }, {
+      body: "\\textbf{\\wrap}",
+      unsupported: "character definition argument source mapping"
+    }]
+}

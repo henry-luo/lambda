@@ -6,8 +6,8 @@ fn check(case) any^ {
         {echo_definitions:true,adapters:[],resources:{local:{},bundled:{}}},100000)^;
     let actual=digest.digest(expanded)^;
     let native=parse(case.source,{type:"latex"})^;
-    let passes = if(case.guard==null) actual.issue==null and actual.ast==native
-        else actual.issue=="latex-digest-unsupported" and actual.unsupported==case.guard;
+    let passes = if(actual.issue==null) actual.ast==native
+        else case.guard!=null and actual.issue=="latex-digest-unsupported" and actual.unsupported==case.guard;
     {source:case.source,passed:passes,issue:actual.issue,unsupported:actual.unsupported,
         actual:if(actual.issue==null and actual.ast!=native)actual.ast else null,
         native:if(actual.issue==null and actual.ast!=native)native else null}

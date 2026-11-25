@@ -10,5 +10,6 @@
 {
   native_offsets: [27],
   issue: "latex-digest-unsupported",
-  unsupported: "command source mapping"
+  unsupported: "command source mapping",
+  matches_native: null
 }

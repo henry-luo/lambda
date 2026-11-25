@@ -1,0 +1,12 @@
+{
+  cases: 18,
+  text: [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true],
+  diagnostics: [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true],
+  issues: [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null],
+  trees: [true, true, true, true, true, true, true, true, true, true, true, true, true, true, null, null, null, null]
+}
+{
+  text: true,
+  diagnostics: true,
+  tree: true
+}

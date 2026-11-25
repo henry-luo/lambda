@@ -147,9 +147,9 @@
     native: null
   }, {
     body: "\\begin{equation}a\\ignorespaces  b\\end{equation}",
-    issue: "tex-unsupported-primitive",
-    unsupported: "ignorespaces",
-    matches: null,
+    issue: null,
+    unsupported: null,
+    matches: true,
     actual: null,
     native: null
   }, {

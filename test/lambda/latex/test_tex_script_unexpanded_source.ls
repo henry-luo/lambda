@@ -33,7 +33,8 @@ let guard_expanded=profile.expand_with_kernel(guard_source,kernel,options,100000
 let guard=digest.digest(guard_expanded)^;
 {cases:len(results),supported:all([for(r in results) r.supported]),
  text:all([for(r in results) r.text]),diagnostics:all([for(r in results) r.diagnostics]),
- tree:all([for(r in results) r.tree]),guard:guard.issue=="latex-digest-unsupported" and guard.unsupported=="command source mapping"};
+ tree:all([for(r in results) r.tree]),guard:if(guard.issue==null) guard.ast==parse(guard_source,{type:"latex"})^
+  else guard.issue=="latex-digest-unsupported" and guard.unsupported=="command source mapping"};
 let root="test/lambda/latex/fixtures/local_packages/";
 let path=root ++ "script-unexpanded-source-main.tex";
 let child="script-unexpanded-source-child.tex";

@@ -1,0 +1,17 @@
+{
+  cases: 16,
+  text: true,
+  diagnostics: true,
+  tree: true
+}
+{
+  text: true,
+  diagnostics: true,
+  tree: true
+}
+{
+  cases: 21,
+  text: true,
+  diagnostics: true,
+  tree: true
+}

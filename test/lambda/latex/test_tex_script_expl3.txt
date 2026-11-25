@@ -107,7 +107,7 @@
 {
   text: "",
   issue: "tex-unsupported-primitive",
-  unsupported: "seq_pop_left:NN",
+  unsupported: "halign",
   matches_native: null
 }
 "duplicate declaration:"
@@ -212,7 +212,7 @@
 {
   text: "",
   issue: "tex-unsupported-primitive",
-  unsupported: "seq_pop_left:NN",
+  unsupported: "halign",
   packages: [["unsupported", "local"]]
 }
 "document command mandatory:"
@@ -250,12 +250,12 @@
   unsupported: null,
   matches_native: true
 }
-"document command unsupported spec:"
+"document command star:"
 {
-  text: "",
-  issue: "latex-unsupported-document-argument",
-  unsupported: "s",
-  matches_native: null
+  text: "\\NewDocumentCommand\\foo{s}{#1}true ",
+  issue: null,
+  unsupported: null,
+  matches_native: true
 }
 "expl3 package document commands:"
 {

@@ -7,7 +7,7 @@ fn report(source) any^ {
 "basic:"; report("\\ExplSyntaxOn\\fp_eval:n{round(sqrt(2),4)}\\ExplSyntaxOff")
 "expanded macro:"; report("\\ExplSyntaxOn\\cs_new:Npn\\myval:{2}\\fp_eval:n{sqrt(\\myval:)}\\ExplSyntaxOff")
 "edef:"; report("\\ExplSyntaxOn\\edef\\saved{\\fp_eval:n{1/3}}\\saved\\ExplSyntaxOff")
-"unsupported:"; report("\\ExplSyntaxOn\\fp_eval:n{sin(1)}\\ExplSyntaxOff")
+"trigonometric:"; report("\\ExplSyntaxOn\\fp_eval:n{sin(1)}\\ExplSyntaxOff")
 "zero:"; report("\\ExplSyntaxOn\\fp_eval:n{1/0}\\ExplSyntaxOff")
 let fixture_style = input("test/lambda/latex/fixtures/local_packages/lmdexpl.sty", "text")^;
 let source = "\\usepackage{lmdexpl}\\greet/\\twice{A}/\\sumof{8}{5}/\\sorted{pear,apple,kiwi}/\\shout{Hello, world}/\\ready/\\roottwo";

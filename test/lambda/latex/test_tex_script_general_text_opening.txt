@@ -1,0 +1,7 @@
+{
+  cases: 28,
+  text: true,
+  diagnostics: true,
+  issues: true,
+  tree: true
+}

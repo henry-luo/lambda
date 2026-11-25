@@ -1,0 +1,11 @@
+{
+  cases: 26,
+  failures: [],
+  guarded: 4
+}
+{
+  issue: null,
+  text: true,
+  diagnostics: true,
+  messages: true
+}

@@ -50,8 +50,8 @@
 }
 "mismatched delimiter:"
 {
-  text: "",
-  issue: "tex-macro-mismatch"
+  text: "X",
+  issue: null
 }
 "brace delimiter:"
 {
@@ -175,7 +175,7 @@
 "incomplete conditional:"
 {
   text: "A",
-  issue: "tex-incomplete-if"
+  issue: null
 }
 "dimension conditional:"
 {
@@ -779,6 +779,13 @@
   resource_count: 2,
   resource_bytes: 2
 }
+"captured empty file checksum:"
+{
+  text: "D41D8CD98F00B204E9800998ECF8427E",
+  issue: null,
+  resource_count: 1,
+  resource_bytes: 0
+}
 "missing captured file:"
 {
   text: "[][][]",
@@ -1242,9 +1249,9 @@
 }
 "latex unterminated environment argument:"
 {
-  text: "",
-  issue: "tex-runaway-argument",
-  diagnostics: [],
+  text: "begin{broken",
+  issue: null,
+  diagnostics: ["tex-runaway-argument"],
   trailing: null
 }
 "latex document hooks:"

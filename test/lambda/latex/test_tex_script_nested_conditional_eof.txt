@@ -1,0 +1,6 @@
+{
+  cases: 16,
+  text: true,
+  diagnostics: true,
+  issues: true
+}

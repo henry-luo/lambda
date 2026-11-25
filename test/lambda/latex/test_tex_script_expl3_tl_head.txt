@@ -265,58 +265,58 @@
   }]
 [{
     body: "\\tl_head:n{abc}",
-    issue: "latex-digest-unsupported",
-    unsupported: "expl3 token head source mapping",
-    matches: null,
+    issue: null,
+    unsupported: null,
+    matches: true,
     actual: null,
     native: null
   }, {
     body: "A\\tl_head:n{{ab}c}B",
-    issue: "latex-digest-unsupported",
-    unsupported: "expl3 token head source mapping",
-    matches: null,
+    issue: null,
+    unsupported: null,
+    matches: true,
     actual: null,
     native: null
   }, {
     body: "\\tl_head:n{}X",
-    issue: "latex-digest-unsupported",
-    unsupported: "expl3 token head source mapping",
-    matches: null,
+    issue: null,
+    unsupported: null,
+    matches: true,
     actual: null,
     native: null
   }, {
     body: "\\tl_head:n{~abc}",
-    issue: "latex-digest-unsupported",
-    unsupported: "expl3 token head source mapping",
-    matches: null,
+    issue: null,
+    unsupported: null,
+    matches: true,
     actual: null,
     native: null
   }, {
     body: "\\tl_head:n{\\textbf{A}B}",
-    issue: "latex-digest-unsupported",
-    unsupported: "expl3 token head source mapping",
-    matches: null,
+    issue: null,
+    unsupported: null,
+    matches: true,
     actual: null,
     native: null
   }, {
     body: "\\textbf{\\tl_head:n{abc}}",
-    issue: "latex-digest-unsupported",
-    unsupported: "expl3 token head source mapping",
-    matches: null,
+    issue: null,
+    unsupported: null,
+    matches: true,
     actual: null,
     native: null
   }, {
     body: "\\section{\\tl_head:n{abc}}X",
-    issue: "latex-digest-unsupported",
-    unsupported: "expl3 token head source mapping",
-    matches: null,
+    issue: null,
+    unsupported: null,
+    matches: true,
     actual: null,
     native: null
   }, {
     body: "\\let\\h=\\tl_head:n\\h{abc}",
-    issue: "latex-digest-unsupported",
-    unsupported: "expl3 token head source mapping",
-    matches: null,
+    issue: null,
+    unsupported: null,
+    matches: true,
     actual: null,
     native: null
   }]

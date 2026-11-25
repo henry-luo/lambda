@@ -1,0 +1,7 @@
+{
+  cases: 10,
+  duplicate_guard: true,
+  preloaded: true,
+  property_prefix: true,
+  failures: []
+}

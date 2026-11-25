@@ -8,8 +8,9 @@
     matches_native: true
   },
   incompatible_lexing: {
-    issue: "latex-digest-unsupported",
-    unsupported: "inline definition token mapping"
+    issue: null,
+    unsupported: null,
+    matches_native: true
   },
   unicode_control: {
     issue: "latex-digest-unsupported",

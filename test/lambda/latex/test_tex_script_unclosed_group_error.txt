@@ -1,0 +1,6 @@
+{
+  cases: 5,
+  text: true,
+  diagnostics: true,
+  issues: ["latex-digest-unclosed-group", "latex-digest-unclosed-group", "latex-digest-unclosed-group", "latex-digest-unclosed-group", "latex-digest-unclosed-group"]
+}

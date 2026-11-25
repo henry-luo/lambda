@@ -7,8 +7,9 @@
     matches_native: true
   },
   token_boundary: {
-    issue: "latex-digest-unsupported",
-    unsupported: "environment option token boundary"
+    issue: null,
+    unsupported: null,
+    matches_native: true
   },
   included: {
     issue: null,

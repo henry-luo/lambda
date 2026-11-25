@@ -15,9 +15,7 @@ fn check(shape,g,mode) any^ {
     else "\\newcommand{\\q}[1][" ++ body ++ "]{#1}\\begin{document}X\\end{document}";
  let r=profile.expand_with_kernel(source,kernel,{echo_definitions:true,constructor_argument_mode:mode,adapters:[],resources:{local:{},bundled:{}}},100000)^;
  let d=digest.digest(r)^;let n=parse(source,{type:"latex"})^;let t=parse(source,{type:"tex"})^;
- let guarded=shape=="default" and (contains(g.pre,"%") or contains(g.post,"%"));
- {ok:if(guarded)d.issue=="latex-digest-unsupported" and d.unsupported=="definition option comment source mapping"
-    else d.issue==null and d.ast==n, text:reconstruct.reconstruct(r)^.text==t.text,
+ {ok:d.issue==null and d.ast==n, text:reconstruct.reconstruct(r)^.text==t.text,
     diagnostics:r.diagnostic_records==t.diagnostics}
 }
 let results=[for(shape in shapes,g in gaps,mode in [false,true])check(shape,g,mode)^];

@@ -1,0 +1,11 @@
+{
+  cases: 11,
+  text: true,
+  diagnostics: true,
+  issues: [null, null, null, null, null, null, null, null, null, null, null]
+}
+{
+  text: true,
+  diagnostics: true,
+  tree: true
+}

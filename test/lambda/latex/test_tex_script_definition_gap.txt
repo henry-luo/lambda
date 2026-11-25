@@ -154,9 +154,9 @@
     native: null
   }, {
     body: "\\newenvironment{x}\n\n{A}{B}X",
-    issue: "latex-digest-unsupported",
-    unsupported: "definition paragraph source mapping",
-    matches: null,
+    issue: null,
+    unsupported: null,
+    matches: true,
     actual: null,
     native: null
   }, {

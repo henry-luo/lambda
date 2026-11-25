@@ -8,6 +8,7 @@ import dimension: .dimension
 import glue: .glue
 import pdfstrings: .pdfstrings
 import md5: .md5
+import message_catalog: .message_catalog
 import utf8: lambda.io.utf8
 import path: lambda.io.path
 
@@ -164,17 +165,17 @@ fn definition_read(st, budget, xpand) any^ {
     }
 }
 
-fn definition_tokens_inner(st, budget, depth = 1, output = [], parameter_count = null, xpand = true) any^ {
+fn definition_tokens_inner(st, budget, depth = 1, output = [], parameter_count = null, xpand = true, recover_eof = false) any^ {
     let read = definition_read(st, budget, xpand)^;
     let t = read.token;
     if (read.state.issue != null) {state: read.state, tokens: output}
     // general expanded text needs separate source-provenance recovery at EOF.
-    else if (t == null) if (parameter_count == null)
+    else if (t == null) if (parameter_count == null and not recover_eof)
         {state:fail(read.state,"tex-runaway-definition"),tokens:output}
         else {state:record_diagnostic(read.state,"tex-runaway","File ended while scanning a text")^,tokens:output}
     else if (xpand and t.direct_toks == true) {
         let stored = {*:t, noexpand: false, direct_toks: false, trace_internal: false};
-        definition_tokens_inner(read.state, budget, depth, [*output, stored], parameter_count, xpand)
+        definition_tokens_inner(read.state, budget, depth, [*output, stored], parameter_count, xpand, recover_eof)
     }
     else if (charcat(t, 2) and depth == 1) {state: read.state, tokens: output}
     else if (parameter_count != null and charcat(t, 6)) {
@@ -187,15 +188,15 @@ fn definition_tokens_inner(st, budget, depth = 1, output = [], parameter_count =
         if (current.issue != null) {state:current,tokens:output}
         // end of input during parameter lookahead stops before appending #.
         else if (n == null) {state:current,tokens:output}
-        else if (charcat(n,6)) definition_tokens_inner(current,budget,depth,[*output,literal],parameter_count,xpand)
+        else if (charcat(n,6)) definition_tokens_inner(current,budget,depth,[*output,literal],parameter_count,xpand,recover_eof)
         else if (digit != null and digit < parameter_count)
-            definition_tokens_inner(current,budget,depth,[*output,parameter_token(digit,t.start,n.end)],parameter_count,xpand)
+            definition_tokens_inner(current,budget,depth,[*output,parameter_token(digit,t.start,n.end)],parameter_count,xpand,recover_eof)
         else {
             // buffered argument tokens use the current reader position for errors.
             let origin = if (not xpand and n.direct == true and
                 stream.raw_reader(read.state.input,n)^ != null) n else null;
             let diagnosed=record_diagnostic(current,"tex-illegal-param","Illegal parameter number in definition",origin)^;
-            definition_tokens_inner(put_back(diagnosed,n),budget,depth,[*output,literal],parameter_count,xpand)
+            definition_tokens_inner(put_back(diagnosed,n),budget,depth,[*output,literal],parameter_count,xpand,recover_eof)
         }
     }
     else {
@@ -203,12 +204,12 @@ fn definition_tokens_inner(st, budget, depth = 1, output = [], parameter_count =
         let stored = if (xpand) {*:t, noexpand:false, trace_internal:false} else t;
         definition_tokens_inner(read.state, budget,
             depth + if (charcat(t, 1)) 1 else if (charcat(t, 2)) -1 else 0,
-            [*output, stored], parameter_count, xpand)
+            [*output, stored], parameter_count, xpand, recover_eof)
     }
 }
 
-fn definition_tokens(st, budget, parameter_count = null, xpand = true) any^ {
-    let scanned = definition_tokens_inner({*:st, token_text_scan: xpand}, budget, 1, [], parameter_count, xpand)^;
+fn definition_tokens(st, budget, parameter_count = null, xpand = true, recover_eof = false) any^ {
+    let scanned = definition_tokens_inner({*:st, token_text_scan: xpand}, budget, 1, [], parameter_count, xpand, recover_eof)^;
     {*:scanned, state: {*:scanned.state, token_text_scan: st.token_text_scan}}
 }
 
@@ -239,9 +240,9 @@ fn match_prefix(input, prefix, index = 0) any^ {
     if (index == len(prefix)) {input: input, issue: null}
     else {
         let read = stream.next(input)^;
-        if (read.token == null) {input: read.stream, issue: "tex-macro-mismatch"}
+        if (read.token == null) {input: read.stream, issue: "tex-macro-mismatch", eof: true}
         else if (not stream.same_token(read.token, prefix[index]))
-            {input: stream.push(read.stream, [read.token]), issue: "tex-macro-mismatch"}
+            {input: stream.push(read.stream, [read.token]), issue: "tex-macro-mismatch", eof: false}
         else match_prefix(read.stream, prefix, index + 1)
     }
 }
@@ -257,6 +258,103 @@ fn collect_args(input, delimiters, brace_delim, long_ok, args = []) any^ {
 }
 
 fn stored_tokens(tokens) => [for (t in tokens) {*:t, direct: false}]
+
+// Delimited xparse arguments retain braces and nest matching delimiter pairs.
+fn document_delimited_scan(input, opening, closing, depth = 0, nested = 0, tokens = []) any^ {
+    let read = stream.next(input)^;
+    let token = read.token;
+    if (token == null) {input:read.stream,tokens:tokens}
+    else {
+        let level = depth + if(charcat(token,1)) 1 else if(charcat(token,2)) -1 else 0;
+        let open_match = level == 0 and token.kind == opening.kind and token.value == opening.value and
+            opening.value != closing.value;
+        let close_match = level == 0 and token.kind == closing.kind and token.value == closing.value;
+        if (close_match and nested == 0) {input:read.stream,tokens:tokens}
+        else document_delimited_scan(read.stream,opening,closing,level,
+            nested + if(open_match) 1 else if(close_match) -1 else 0,[*tokens,token])
+    }
+}
+
+// Body arguments stop before the matching end so the environment can close normally.
+fn document_body_scan(input, name, depth = 0, tokens = []) any^ {
+    let read = stream.next(input)^;
+    let token = read.token;
+    if (token == null) {input:read.stream,tokens:tokens}
+    else if (token.kind == "control" and contains(["begin","end"],token.value)) {
+        let next = stream.next(read.stream)^;
+        let argument = if (charcat(next.token,1)) stream.raw_argument(stream.push(next.stream,[next.token]))^
+            else {stream:next.stream,raw:if(next.token == null) [] else [next.token]};
+        let text = join([for(t in (argument.raw)^ where t.kind == "char" and not charcat(t,1)^ and not charcat(t,2)^) t.value],"");
+        let same = text == name;
+        if (same and token.value == "end" and depth == 0)
+            {input:stream.push(argument.stream,[token,*argument.raw]),tokens:tokens}
+        else document_body_scan(argument.stream,name,depth + if(same) if(token.value == "begin") 1 else -1 else 0,
+            [*tokens,token,*argument.raw])
+    }
+    else document_body_scan(read.stream,name,depth,[*tokens,token])
+}
+
+// Undeclared optional values use the native xparse sentinel.
+fn document_default(spec) any^ => if (contains(["o","g","d","r"],spec.kind))
+    text_tokens("-NoValue-") else stored_tokens(spec.default)
+
+// xparse signatures scan each argument in order, including boolean tests.
+fn collect_document_args(st, input, specs, index = 0, args = [], missing = []) any^ {
+    if (index >= len(specs)) {input:input, args:args, issue:null, missing:missing}
+    else {
+        let spec = specs[index];
+        if (spec.kind == "s" or spec.kind == "t") {
+            let read = nonspace(input)^;
+            let hit = if (read.token == null) false else if (spec.kind == "s") other(read.token,"*")
+                else stream.same_token(read.token,spec.want);
+            let next = if (hit or read.token == null) read.stream else stream.push(read.stream,[read.token]);
+            collect_document_args(st,next,specs,index + 1,[*args,[control_token(if(hit) "BooleanTrue" else "BooleanFalse")]],missing)
+        }
+        else if (spec.kind == "O" or spec.kind == "o") {
+            let arg = latex_optional(input)^;
+            if (arg.issue != null) {input:arg.input,args:args,issue:arg.issue,
+                cause:if(arg.issue == "tex-extra-brace") "brace" else "eof", optional_issue:true, missing:missing}
+            else collect_document_args(st,arg.input,specs,index + 1,
+                [*args,if(arg.present) arg.tokens else document_default(spec)^],missing)
+        }
+        else if (contains(["d","D","r","R"],spec.kind)) {
+            let read = nonspace(input)^;
+            let hit = stream.same_token(read.token,spec.open);
+            let restored = if (hit or read.token == null) read.stream else stream.push(read.stream,[read.token]);
+            let arg = if (hit) document_delimited_scan(restored,spec.open,spec.close)^
+                else {input:restored,tokens:document_default(spec)^};
+            let failures = if (not hit and (spec.kind == "r" or spec.kind == "R")) [*missing,read.stream] else missing;
+            collect_document_args(st,arg.input,specs,index + 1,[*args,arg.tokens],failures)
+        }
+        else if (spec.kind == "e" or spec.kind == "E")
+            collect_document_args(st,input,specs,index + 1,[*args,[]],missing)
+        else if (spec.kind == "b") {
+            let body = document_body_scan(input,spec.name)^;
+            collect_document_args(st,body.input,specs,index + 1,[*args,body.tokens],missing)
+        }
+        else if (spec.kind == "g" or spec.kind == "G") {
+            let read = nonspace(input)^;
+            let restored = if (read.token == null) read.stream else stream.push(read.stream,[read.token]);
+            if (charcat(read.token,1)) {
+                let arg = stream.delimited(restored,[],true,false)^;
+                if (arg.error != null) {input:arg.stream,args:args,issue:arg.error,cause:arg.cause,missing:missing}
+                else collect_document_args(st,arg.stream,specs,index + 1,[*args,arg.tokens],missing)
+            }
+            else collect_document_args(st,restored,specs,index + 1,
+                [*args,document_default(spec)^],missing)
+        }
+        else {
+            let arg = stream.delimited(input,[],true,false)^;
+            if (arg.error != null) {input:arg.stream,args:args,issue:arg.error,cause:arg.cause,missing:missing}
+            else {
+                // Native converts verbatim arguments to category-other tokens after scanning.
+                let tokens = if(spec.kind == "v") text_tokens(token_text({*:st,input:arg.stream},arg.tokens)^)^
+                    else arg.tokens;
+                collect_document_args(st,arg.stream,specs,index + 1,[*args,tokens],missing)
+            }
+        }
+    }
+}
 
 // spread after selecting the token array so an empty argument contributes nothing.
 fn substitute(body, args) => [for (t in body)
@@ -276,18 +374,27 @@ fn macro_diagnostic_name(call) any^ {
 }
 
 // failed argument scans discard the call but return their lookahead to TeX.
-fn recover_macro_argument(st: State, issue, cause, call) State^ {
-    let current = {*:st, expansions:st.expansions + 1};
+fn recover_macro_argument(st: State, issue, cause, call, count_expansion = true) State^ {
+    let current = {*:st, expansions:st.expansions + if (count_expansion) 1 else 0};
     let name = macro_diagnostic_name(call)^;
     if (cause == "missing") current
     else if (name == null or not contains(["eof","paragraph","brace"],cause)) fail(current,issue)
     else {
-        let tail = if (cause == "eof") stream.root_tail(current.input)^ else null;
-        let located = if (tail == null) current else {*:current, input:{*:current.input,last_main_offset:tail.start}};
         let message = if (cause == "eof") "File ended while scanning use of " ++ name
             else if (cause == "paragraph") "Paragraph ended before " ++ name ++ " was complete"
             else "Argument of " ++ name ++ " has an extra }";
-        record_diagnostic(located,issue,message)
+        // The last fresh token, including an emitted endline, owns the native diagnostic offset.
+        record_diagnostic(current,issue,message)
+    }
+}
+
+// Diagnose each missing required delimiter at the token that was peeked.
+fn document_missing_diagnostics(st: State, missing, index = 0) State^ {
+    if (missing == null or index >= len(missing)) st
+    else {
+        let noted = record_diagnostic({*:st,input:missing[index]},"latex-missing-arg",
+            "missing required delimited argument")^;
+        document_missing_diagnostics({*:noted,input:st.input},missing,index + 1)
     }
 }
 
@@ -295,19 +402,29 @@ fn expand_macro(st: State, macro, budget, call = null) State^ {
     if (st.expansions >= budget) fail(st, "tex-budget")
     else {
         let matched = match_prefix(st.input, macro.prefix);
-        if (matched.issue != null) fail({*:st, input: matched.input}, matched.issue)
+        if (matched.issue != null) {
+            // A prefix mismatch discards the call but leaves the unmatched token for TeX.
+            let current = {*:st, input: matched.input, expansions: st.expansions + 1};
+            let name = macro_diagnostic_name(call)^;
+            if (matched.eof) current
+            else if (name == null) fail(current, matched.issue)
+            else record_diagnostic(current, matched.issue, "Use of " ++ name ++ " doesn't match its definition")
+        }
         else {
-            let optional = if (macro.optional == true) latex_optional(matched.input)^
+            let optional = if (macro.document_specs == null and macro.optional == true) latex_optional(matched.input)^
                 else {input: matched.input, present: false, tokens: [], issue: null};
-            let initial = if (macro.optional == true)
+            let initial = if (macro.optional == true and macro.document_specs == null)
                 [if (optional.present) optional.tokens else stored_tokens(macro.optional_default)] else [];
-            let args = collect_args(optional.input, macro.delimiters, macro.brace_delim, macro.long_ok, initial);
+            let args = if (macro.document_specs != null) collect_document_args(st,matched.input,macro.document_specs)^
+                else collect_args(optional.input, macro.delimiters, macro.brace_delim, macro.long_ok, initial)^;
+            let noted = if (macro.document_specs != null) document_missing_diagnostics(st,args.missing)^ else st;
             // native scans LaTeX optional arguments with a synthetic \relax call.
-            if (optional.issue != null) recover_macro_argument({*:st, input: optional.input}, optional.issue,
+            if (optional.issue != null) recover_macro_argument({*:noted, input: optional.input}, optional.issue,
                 if (optional.issue == "tex-extra-brace") "brace" else "eof", control_token("relax"))^
-            else if (args.issue != null) recover_macro_argument({*:st, input: args.input}, args.issue, args.cause, call)
+            else if (args.issue != null) recover_macro_argument({*:noted, input: args.input}, args.issue, args.cause,
+                if(args.optional_issue == true) control_token("relax") else call)
             // replacement text is stored, while freshly scanned arguments retain their source identity.
-            else {*:st, input: stream.push(args.input, substitute(stored_tokens(macro.body), args.args)),
+            else {*:noted, input: stream.push(args.input, substitute(stored_tokens(macro.body), args.args)),
                 expansions: st.expansions + 1}
         }
     }
@@ -447,7 +564,7 @@ fn expandable(st, t) any^ => is_control(t) and t.noexpand != true and
         (st.script_expl3 and expl3.expandable(primitive(st, t))))))
 
 fn expand_one(st: State, t, budget) State^ {
-    let pending = len(st.conditions) > 0 and st.conditions[len(st.conditions) - 1] == "scanning";
+    let pending = len(st.conditions) > 0 and st.conditions[len(st.conditions) - 1].kind == "scanning";
     if (not expandable(st, t)) {*:st, input: stream.push(st.input, [t])}
     // TeX inserts a relax before a delimiter encountered during an if test.
     else if (pending and contains(["else", "fi", "or"], primitive(st, t)))
@@ -458,8 +575,7 @@ fn expand_one(st: State, t, budget) State^ {
         else if (st.latex and len(st.packages) > 0 and unresolved_package_cycle(st, macro)^)
             unsupported(st, "recursive package bootstrap")
         else {
-            let marked = if (macro.source_mapping_guard == "cs_exist") {*:st, expl3_cs_exist_seen: true}
-                else if (macro.source_mapping_guard == "cs_eq") {*:st, expl3_cs_eq_seen: true}
+            let marked = if (macro.source_mapping_guard == "cs_eq") {*:st, expl3_cs_eq_seen: true}
                 else if (macro.source_mapping_guard == "dynamic_assignment") {*:st, expl3_dynamic_assignment_seen: true}
                 else if (macro.source_mapping_guard == "dynamic_read") {*:st, expl3_dynamic_read_seen: true}
                 else if (macro.source_mapping_guard == "tl_head") {*:st, expl3_tl_head_seen: true}
@@ -518,6 +634,9 @@ fn expand_one(st: State, t, budget) State^ {
         expl3_str_compare(st, primitive(st, t), budget)
     else if (st.script_expl3 and expl3.text_case(primitive(st, t)))
         expl3_text_case(st, primitive(st, t), budget)
+    else if (st.latex and contains(["IfBooleanTF","IfBooleanT","IfBooleanF", "IfNoValueTF","IfNoValueT",
+            "IfNoValueF","IfValueTF","IfValueT","IfValueF"],primitive(st,t)))
+        latex_xparse_conditional(st,primitive(st,t),budget)
     else if (st.latex and primitive(st, t) == "lambda@xspace") latex_xspace(st, budget)
     else if (st.latex and (primitive(st, t) == "@ifpackagewith" or primitive(st, t) == "@ifclasswith"))
         if (st.expansions >= budget) fail(st, "tex-budget") else
@@ -553,6 +672,31 @@ fn xspace_exception(token) any^ {
     else if (token.kind == "active") token.value == "~"
     else token.kind == "control" and contains(["/", " ", "space", "@sptoken", "@xobeysp", "footnote",
         "footnotemark", "bgroup", "egroup"], token.value)
+}
+
+// xparse tests compare unexpanded argument tokens before selecting a branch.
+fn latex_xparse_conditional(st: State, name, budget) State^ {
+    if (st.expansions >= budget) fail(st,"tex-budget")
+    else {
+        let value = stream.argument(st.input,true)^;
+        let first = stream.argument(value.stream,true)^;
+        let second = if (ends_with(name,"TF")) stream.argument(first.stream,true)^
+            else {stream:first.stream,tokens:[],error:null};
+        let current = {*:st,input:second.stream,expansions:st.expansions + 1};
+        if (value.error != null) fail(current,value.error)
+        else if (first.error != null) fail(current,first.error)
+        else if (second.error != null) fail(current,second.error)
+        else {
+            let boolean = starts_with(name,"IfBoolean");
+            let absent = all([for (t in value.tokens) t.kind == "char"]) and
+                join([for(t in value.tokens) t.value],"") == "-NoValue-";
+            let truth = if (boolean) len(value.tokens) == 1 and is_control(value.tokens[0]) and
+                    value.tokens[0].value == "BooleanTrue"
+                else if (starts_with(name,"IfNoValue")) absent else not absent;
+            let take = if (ends_with(name,"F") and not ends_with(name,"TF")) not truth else truth;
+            {*:current,input:stream.push(current.input,if(take) first.tokens else second.tokens)}
+        }
+    }
 }
 
 fn latex_xspace(st: State, budget) State^ {
@@ -642,8 +786,8 @@ fn csname(st: State, budget) State^ {
 
 fn put_back(st, t) => if (t == null) st else {*:st, input: stream.push(st.input, [t])}
 
-// A token read by an expanded numeric scan has consumed its one-use protection.
-fn after_numeric_scan(t) => if (t != null and t.noexpand == true) {*:t, noexpand: false} else t
+// An expanded scan consumes the token's one-use protection before returning it.
+fn after_expanded_scan(t) => if (t != null and t.noexpand == true) {*:t, noexpand: false} else t
 fn other(t, value) => charcat(t, 12) and t.value == value
 
 fn signs(st, budget, negative = false) SignedScan^ {
@@ -669,7 +813,7 @@ fn digits(st, t, base, negative, budget, count = 0, value = 0, overflow = false,
     if (st.issue != null) {state: st, value: 0}
     else if (n == null and return_token) {state: st, value: value, token: t}
     else if (n == null) {
-        let returned = after_numeric_scan(t);
+        let returned = after_expanded_scan(t);
         let after = if (count > 0 and expanded_space(st, t)^) st else put_back(st, returned);
         // TeX reports the missing operand and scans the returned token again.
         if (count == 0) {state: record_diagnostic(after, "tex-missing-number", "Missing number, treated as zero")^, value: 0}
@@ -693,7 +837,7 @@ fn character_number(st, negative, budget) NumberScan^ {
         {state: fail(current, "tex-improper-alphabetic"), value: 0}
     else {
         let following = expanded_next(current, budget);
-        let after = if (expanded_space(following.state, following.token)^) following.state else put_back(following.state, after_numeric_scan(following.token));
+        let after = if (expanded_space(following.state, following.token)^) following.state else put_back(following.state, after_expanded_scan(following.token));
         {state: after, value: if (negative) -ord(t.value) else ord(t.value)}
     }
 }
@@ -1838,29 +1982,26 @@ fn token_primitive(st: State, name, budget) State^ {
     if (st.expansions >= budget) fail(st, "tex-budget")
     else {
         let current = {*:st, expansions: st.expansions + 1};
-        let opening = expanded_nonspace(current, budget)^;
-        if (opening.state.issue != null) opening.state
-        else if (not charcat(opening.token, 1)) fail(put_back(opening.state, opening.token), "tex-missing-brace")
+        let text = general_text(current, budget, false)^;
+        if (text.state.issue != null) text.state
         else {
-            let text = stream.argument(stream.push(opening.state.input, [opening.token]), true)^;
-            if (text.error != null) fail({*:opening.state, input: text.stream}, text.error)
-            else if (name == "scantokens") {
-                let scanned = token_text(opening.state, text.tokens)^;
-                if (len(text.stream.levels) >= 6000) fail({*:opening.state, input: text.stream}, "tex-capacity")
+            if (name == "scantokens") {
+                let scanned = token_text(text.state, text.tokens)^;
+                if (len(text.state.input.levels) >= 6000) fail(text.state, "tex-capacity")
                 else {
-                    let id = next_source_id(opening.state)^;
-                    let child = {*:reader.reader(scanned, id), catcodes: text.stream.reader.catcodes,
-                        endline: text.stream.reader.endline};
-                    {*:opening.state, input: stream.push_reader(text.stream, child),
-                        sources: [*opening.state.sources, {id: id, name: "\\scantokens", origin: "local", data: scanned}]}
+                    let id = next_source_id(text.state)^;
+                    let child = {*:reader.reader(scanned, id), catcodes: text.state.input.reader.catcodes,
+                        endline: text.state.input.reader.endline};
+                    {*:text.state, input: stream.push_reader(text.state.input, child),
+                        sources: [*text.state.sources, {id: id, name: "\\scantokens", origin: "local", data: scanned}]}
                 }
             } else {
-                let tokens = if (name == "detokenize") internal_text_tokens(opening.state, token_text(opening.state, text.tokens))
-                    else if (opening.state.token_text_scan) [for (t in text.tokens)
+                let tokens = if (name == "detokenize") internal_text_tokens(text.state, token_text(text.state, text.tokens))
+                    else if (text.state.token_text_scan) [for (t in text.tokens)
                         {*:t, noexpand: is_control(t), direct_toks: true}]
                     // native replay stores the scanned list and clears its direct-source flags.
                     else stored_tokens(text.tokens);
-                {*:opening.state, input: stream.push(text.stream, tokens)}
+                {*:text.state, input: stream.push(text.state.input, tokens)}
             }
         }
     }
@@ -1869,18 +2010,36 @@ fn token_primitive(st: State, name, budget) State^ {
 fn expanded_primitive(st: State, budget) State^ {
     if (st.expansions >= budget) fail(st, "tex-budget")
     else {
-        let text = expanded_text({*:st, expansions: st.expansions + 1}, budget)^;
+        let text = expanded_text({*:st, expansions: st.expansions + 1}, budget, true)^;
         if (text.state.issue != null) text.state
-        else {*:text.state, input: stream.push(text.state.input, text.tokens)}
+        // Native replays a stored token list, which no longer has direct-source identity.
+        else {*:text.state, input: stream.push(text.state.input, stored_tokens(text.tokens))}
     }
 }
 
-fn expanded_text(st, budget) any^ {
-    let opening = expanded_nonspace(st, budget)^;
+// TeX's general-text scanner inserts a missing brace and retains partial EOF text.
+fn general_text(st, budget, xpand) any^ {
+    let opening = expanded_nonrelax(st, budget, true)^;
     if (opening.state.issue != null) {state: opening.state, tokens: []}
-    else if (not charcat(opening.token, 1))
-        {state: fail(put_back(opening.state, opening.token), "tex-missing-brace"), tokens: []}
-    else definition_tokens(opening.state, budget)
+    else {
+        let m = if (is_control(opening.token)) meaning(opening.state, opening.token) else null;
+        let valid = charcat(opening.token, 1) or (m.kind == "char" and m.cat == 1);
+        // Native inserts a missing opening brace and scans the returned token as text.
+        let current = if (valid) opening.state else record_diagnostic(
+            put_back(opening.state, opening.token), "tex-missing-brace", "Missing { inserted")^;
+        definition_tokens(current, budget, null, xpand, true)
+    }
+}
+
+fn expanded_text(st, budget, recover_eof = false) any^ {
+    if (recover_eof) general_text(st,budget,true)
+    else {
+        let opening = expanded_nonspace(st, budget)^;
+        if (opening.state.issue != null) {state: opening.state, tokens: []}
+        else if (not charcat(opening.token, 1))
+            {state: fail(put_back(opening.state, opening.token), "tex-missing-brace"), tokens: []}
+        else definition_tokens(opening.state, budget)
+    }
 }
 
 // native expansion has no page builder, so marks read as empty token lists.
@@ -1895,10 +2054,15 @@ fn empty_mark_query(st: State, name, budget) State^ {
         else current
     }
 }
-fn expanded_nonrelax(st, budget) any^ {
+fn expanded_nonrelax(st, budget, temporary_relax = false) any^ {
     let read = expanded_nonspace(st, budget)^;
-    if (read.state.issue != null or primitive(read.state, read.token) != "relax") read
-    else expanded_nonrelax(read.state, budget)
+    if (read.state.issue != null) read
+    else {
+        // A noexpand-marked control has temporary relax meaning during this scan.
+        let relax = primitive(read.state, read.token) == "relax" or
+            (temporary_relax and is_control(read.token) and read.token.noexpand == true);
+        if (not relax) read else expanded_nonrelax(read.state, budget, temporary_relax)
+    }
 }
 // tex expands the opening brace before starting a group.
 fn scan_opening_brace(st, budget) any^ {
@@ -2028,7 +2192,8 @@ fn captured_resource(st, name, requested_scope = null) any^ {
         else if (not (entry.data is string or entry.data is binary))
             {state: fail(st, "tex-resource-invalid"), available: true, found: false, data: null}
         else {
-            let bytes = binary(entry.data)^;
+            // S2.2.2v2 represents empty binary as null; retain an empty resource as text.
+            let bytes = if (len(entry.data) == 0) "" else binary(entry.data)^;
             let resource_key = scope ++ ":" ++ cleaned;
             let seen = st.resources_seen[resource_key] != null;
             let next_count = st.resource_count + if (seen or scope == "bundled") 0 else 1;
@@ -2052,8 +2217,8 @@ fn captured_resource(st, name, requested_scope = null) any^ {
 type SourceText = {valid: bool, text: string}
 
 // Decode once at the resource boundary; scanners receive text plus explicit status.
-fn decode_source(data: binary) SourceText {
-    let decoded = utf8.decode(data) ^ { null };
+fn decode_source(data: string | binary) SourceText^ {
+    let decoded = utf8.decode(binary(data)^) ^ { null };
     {valid: decoded != null, text: decoded or ""}
 }
 
@@ -2786,7 +2951,7 @@ fn expl3_tl_empty(st: State, name, budget) State^ {
         let no = if (name == "tl_if_empty:NT" or name == "tl_if_empty:nT" or name == "tl_if_blank:nT" or name == "tl_if_blank:VT" or name == "seq_if_empty:NT")
             {stream: yes.stream, tokens: [], error: null} else stream.argument(yes.stream, true)^;
         let current = {*:st, input: stream.note_foreign_expansion(no.stream)^,
-            expansions: st.expansions + 1, expl3_tl_empty_seen: true};
+            expansions: st.expansions + 1};
         let value = if ((named or variable) and target.token != null) meaning(current, target.token) else null;
         if (argument.error != null) fail(current, argument.error)
         else if (yes.error != null) fail(current, yes.error)
@@ -2825,7 +2990,7 @@ fn expl3_tl_count(st: State, name, budget) State^ {
         let target = if (variable) nonspace(st.input)^ else null;
         let arg = if (variable) {stream: target.stream, tokens: [], error: null} else stream.argument(st.input, true)^;
         let current = {*:st, input: stream.note_foreign_expansion(arg.stream)^,
-            expansions: st.expansions + 1, expl3_tl_empty_seen: true};
+            expansions: st.expansions + 1};
         let value = if (variable and target.token != null) meaning(current, target.token) else null;
         if (arg.error != null) fail(current, arg.error)
         else if (variable and not is_control(target.token)) fail(current, "tex-missing-cs")
@@ -2847,7 +3012,7 @@ fn expl3_tl_string(st: State, name, budget) State^ {
         let arg = if (variable) {stream: target.stream, tokens: [], error: null} else stream.argument(st.input, true)^;
         // variable expansion has a macro origin even if its value is empty.
         let current = {*:st, input: if (variable) stream.note_foreign_expansion(arg.stream)^ else arg.stream,
-            expansions: st.expansions + 1, expl3_tl_empty_seen: true};
+            expansions: st.expansions + 1};
         let value = if (variable and target.token != null) meaning(current, target.token) else null;
         if (arg.error != null) fail(current, arg.error)
         else if (variable and not is_control(target.token)) fail(current, "tex-missing-cs")
@@ -2876,7 +3041,7 @@ fn expl3_tl_equal(st: State, name, budget) State^ {
         let no = if (name == "tl_if_eq:NNT" or name == "tl_if_eq:nnT")
             {stream: yes.stream, tokens: [], error: null} else stream.argument(yes.stream, true)^;
         let current = {*:st, input: if (named) stream.note_foreign_expansion(no.stream)^ else no.stream,
-            expansions: st.expansions + 1, expl3_tl_empty_seen: true};
+            expansions: st.expansions + 1};
         if (not named and first.error != null) fail(current, first.error)
         else if (not named and second.error != null) fail(current, second.error)
         else if (yes.error != null) fail(current, yes.error)
@@ -3530,41 +3695,48 @@ fn shift_case(st: State, budget, upper_case) State^ {
     }
 }
 
-fn skip_conditional(st, depth, allow_else) ConditionalScan^ {
+// Tests opened during operand expansion each resume a skipped branch at EOF.
+fn incomplete_skip_diagnostics(st: State, count) State^ => if (count <= 0) st else
+    incomplete_skip_diagnostics(record_diagnostic(st,"tex-incomplete-if",
+        "Incomplete conditional; all text was ignored after it")^,count - 1)
+
+fn skip_conditional(st, depth, allow_else, active_depth = 0) ConditionalScan^ {
     let read = stream.next(st.input)^;
     let t = read.token;
     let current = {*:st, input: read.stream};
-    if (t == null) {state: fail(current, "tex-incomplete-if"), delimiter: null}
+    if (t == null) {state: incomplete_skip_diagnostics(current,active_depth + 1)^, delimiter: "fi"}
     else if (primitive(st, t) != null and conditional_name(primitive(st, t)))
-        skip_conditional(current, depth + 1, allow_else)
+        skip_conditional(current, depth + 1, allow_else, active_depth)
     else if (primitive(st, t) == "fi") {
         if (depth == 0) {state: current, delimiter: "fi"}
-        else skip_conditional(current, depth - 1, allow_else)
+        else skip_conditional(current, depth - 1, allow_else,
+            if (depth <= active_depth) active_depth - 1 else active_depth)
     }
     else if (depth == 0 and allow_else and primitive(st, t) == "else") {state: current, delimiter: "else"}
-    else skip_conditional(current, depth, allow_else)
+    else skip_conditional(current, depth, allow_else, active_depth)
 }
 
-fn skip_case(st: State, remaining, depth = 0) State^ {
+fn skip_case(st: State, remaining, depth = 0, origin = null, active_depth = 0) State^ {
     let read = stream.next(st.input)^;
     let t = read.token;
     let current = {*:st, input: read.stream};
     let name = primitive(st, t);
-    if (t == null) fail(current, "tex-incomplete-if")
-    else if (name != null and conditional_name(name)) skip_case(current, remaining, depth + 1)
+    if (t == null) incomplete_skip_diagnostics(current,active_depth + 1)
+    else if (name != null and conditional_name(name)) skip_case(current, remaining, depth + 1, origin, active_depth)
     else if (name == "fi") {
-        if (depth == 0) current else skip_case(current, remaining, depth - 1)
+        if (depth == 0) current else skip_case(current, remaining, depth - 1, origin,
+            if (depth <= active_depth) active_depth - 1 else active_depth)
     }
-    else if (depth == 0 and name == "else") {*:current, conditions: [*current.conditions, false]}
+    else if (depth == 0 and name == "else") {*:current, conditions: [*current.conditions, {kind:"false",origin:origin}]}
     else if (depth == 0 and name == "or" and remaining > 0) {
-        if (remaining == 1) {*:current, conditions: [*current.conditions, "case"]}
-        else skip_case(current, remaining - 1, depth)
+        if (remaining == 1) {*:current, conditions: [*current.conditions, {kind:"case",origin:origin}]}
+        else skip_case(current, remaining - 1, depth, origin, active_depth)
     }
-    else skip_case(current, remaining, depth)
+    else skip_case(current, remaining, depth, origin, active_depth)
 }
 
 // reserve the outer condition before expanding any operand tokens.
-fn begin_scanning_conditional(st) => {*:st, conditions: [*st.conditions, "scanning"]}
+fn begin_scanning_conditional(st) => {*:st, conditions: [*st.conditions, {kind:"scanning",origin:st.condition_origin}]}
 
 fn case_conditional(st: State, budget) State^ {
     let depth = len(st.conditions);
@@ -3573,17 +3745,18 @@ fn case_conditional(st: State, budget) State^ {
     else {
         let prefix = slice(selected.state.conditions, 0, depth)^;
         let nested = slice(selected.state.conditions, depth + 1, len(selected.state.conditions))^;
-        if (selected.value == 0) {*:selected.state, conditions: [*prefix, "case", *nested]}
-        else skip_case({*:selected.state, conditions: prefix}, selected.value, len(nested))
+        let origin = selected.state.conditions[depth].origin;
+        if (selected.value == 0) {*:selected.state, conditions: [*prefix, {kind:"case",origin:origin}, *nested]}
+        else skip_case({*:selected.state, conditions: prefix}, selected.value, len(nested), origin, len(nested))
     }
 }
 
 fn begin_conditional(st: State, truth, negate = false) State^ {
-    if (truth != negate) {*:st, conditions: [*st.conditions, true]}
+    if (truth != negate) {*:st, conditions: [*st.conditions, {kind:"true",origin:st.condition_origin}]}
     else {
         let skipped = skip_conditional(st, 0, true)^;
         if (skipped.state.issue != null) skipped.state
-        else if (skipped.delimiter == "else") {*:skipped.state, conditions: [*st.conditions, false]}
+        else if (skipped.delimiter == "else") {*:skipped.state, conditions: [*st.conditions, {kind:"false",origin:st.condition_origin}]}
         else skipped.state
     }
 }
@@ -3592,11 +3765,12 @@ fn begin_conditional(st: State, truth, negate = false) State^ {
 fn finish_scanned_conditional(st: State, depth, truth, negate) State^ {
     let prefix = slice(st.conditions, 0, depth)^;
     let nested = slice(st.conditions, depth + 1, len(st.conditions))^;
-    if (truth != negate) {*:st, conditions: [*prefix, true, *nested]}
+    let origin = st.conditions[depth].origin;
+    if (truth != negate) {*:st, conditions: [*prefix, {kind:"true",origin:origin}, *nested]}
     else {
-        let skipped = skip_conditional(st, len(nested), true)^;
+        let skipped = skip_conditional(st, len(nested), true, len(nested))^;
         if (skipped.state.issue != null) skipped.state
-        else {*:skipped.state, conditions: [*prefix, *(if (skipped.delimiter == "else") [false] else [])]}
+        else {*:skipped.state, conditions: [*prefix, *(if (skipped.delimiter == "else") [{kind:"false",origin:origin}] else [])]}
     }
 }
 
@@ -3709,10 +3883,20 @@ fn input_eof_conditional(st: State, budget, negate) State^ {
     }
 }
 
+// Native reports where each unfinished conditional began, not where input ended.
+fn conditional_origin(st) any^ {
+    let active = stream.active_reader(st.input)^;
+    let source = if (active == null) st.input.reader else active;
+    let found = [for (entry in st.sources where entry.id == source.file_id) entry];
+    let name = if (len(found) == 0 or found[0].name == "<input>") "<main>" else found[0].name;
+    {name:name, line:source.line_no}
+}
+
 fn condition(st: State, name, budget, negate = false) State^ {
     if (st.expansions >= budget) fail(st, "tex-budget")
     else {
-        let current = {*:st, expansions: st.expansions + 1};
+        let current = {*:st, expansions: st.expansions + 1,
+            *:if (conditional_name(name)) {condition_origin:conditional_origin(st)^} else {}};
         let depth = len(st.conditions);
         if (name == "iftrue" or name == "iffalse") begin_conditional(current, name == "iftrue", negate)
         else if (contains(["ifvmode", "ifhmode", "ifmmode", "ifinner"], name))
@@ -3759,7 +3943,7 @@ fn condition(st: State, name, budget, negate = false) State^ {
             else {*:current, conditions: slice(st.conditions, 0, depth - 1)}
         }
         else if (name == "else") {
-            if (depth == 0 or (st.conditions[depth - 1] != true and st.conditions[depth - 1] != "case"))
+            if (depth == 0 or (st.conditions[depth - 1].kind != "true" and st.conditions[depth - 1].kind != "case"))
                 fail(current, "tex-extra-fi")
             else {
                 let skipped = skip_conditional(current, 0, false)^;
@@ -3768,7 +3952,7 @@ fn condition(st: State, name, budget, negate = false) State^ {
             }
         }
         else if (name == "or") {
-            if (depth == 0 or st.conditions[depth - 1] != "case") fail(current, "tex-extra-fi")
+            if (depth == 0 or st.conditions[depth - 1].kind != "case") fail(current, "tex-extra-fi")
             else {
                 let skipped = skip_conditional(current, 0, false)^;
                 if (skipped.state.issue != null) skipped.state
@@ -4072,16 +4256,35 @@ fn latex_command_diagnostic(st: State, code, token, suffix) State^ {
     else record_diagnostic(st, code, "LaTeX Error: Command \\" ++ name ++ suffix)
 }
 
+// Native definition targets end at the first closing brace, even inside a nested group.
+fn latex_cs_group(input, found = null) any^ {
+    let read = stream.next(input)^;
+    let token = read.token;
+    if (token == null or charcat(token,2)) {stream:read.stream,token:found,missing:found == null}
+    else latex_cs_group(read.stream,if(found == null and is_control(token)) token else found)
+}
+fn latex_cs_target(input) any^ {
+    let read = nonspace(input)^;
+    let token = read.token;
+    if (token == null) {stream:read.stream,token:control_token(chr(2) ++ "inaccessible"),missing:false}
+    else if (charcat(token,1)) {
+        let group = latex_cs_group(read.stream)^;
+        {*:group,token:if(group.token == null) control_token(chr(2) ++ "inaccessible") else group.token}
+    }
+    else if (is_control(token)) {stream:read.stream,token:token,missing:false}
+    else {stream:stream.push(read.stream,[token]),token:control_token(chr(2) ++ "inaccessible"),missing:true}
+}
+fn latex_cs_diagnostic(st: State, target) State^ => if (target.missing)
+    record_diagnostic({*:st,input:target.stream},"latex-missing-cs","Missing control sequence in definition")
+    else {*:st,input:target.stream}
+
 fn latex_newcommand(st: State, name) State^ {
     let star = nonspace(st.input)^;
     let starred = other(star.token, "*");
     let remaining = if (starred) star.stream else if (star.token == null) star.stream else stream.push(star.stream, [star.token]);
-    let target = stream.argument(remaining, true)^;
-    let controls = [for (t in target.tokens where (is_control(t) ^ { false })) t];
-    let current = {*:st, input: target.stream};
-    if (target.error != null) fail(current, target.error)
-    else if (len(controls) == 0) fail(current, "latex-missing-cs")
-    else {
+    let target = latex_cs_target(remaining)^;
+    let current = latex_cs_diagnostic(st,target)^;
+    {
         let count = latex_optional(target.stream)^;
         let default_arg = latex_optional(count.input)^;
         let body = stream.argument(default_arg.input, true)^;
@@ -4100,15 +4303,15 @@ fn latex_newcommand(st: State, name) State^ {
                     "Illegal number of arguments " ++ string(full_count))^ else count_state;
             let noted = {*:advanced, diagnostics: diagnosed.diagnostics, diagnostic_records: diagnosed.diagnostic_records,
                 issue: diagnosed.issue, unsupported: diagnosed.unsupported};
-            let old = meaning(noted, controls[0]);
+            let old = meaning(noted, target.token);
             let definable = latex_definable(old);
             if (noted.issue != null) noted
             else if (name == "newcommand" and not definable)
-                latex_command_diagnostic(noted, "latex-already-defined", controls[0], " already defined")
+                latex_command_diagnostic(noted, "latex-already-defined", target.token, " already defined")
             else if (name == "providecommand" and not definable) noted
             else {
                 let ready = if (name == "renewcommand" and definable)
-                    latex_command_diagnostic(noted, "latex-undefined", controls[0], " undefined")^
+                    latex_command_diagnostic(noted, "latex-undefined", target.token, " undefined")^
                     else noted;
                 // native converts parameters only when it will install the definition.
                 let initial = body_params(body.tokens, nargs)^;
@@ -4118,56 +4321,147 @@ fn latex_newcommand(st: State, name) State^ {
                 else {
                     let macro = latex_macro(nargs, starred, name == "DeclareRobustCommand", default_arg.present,
                         default_arg.tokens, parsed.tokens)^;
-                    assign_meaning(recovered, key(controls[0]), macro, false)
+                    assign_meaning(recovered, key(target.token), macro, false)
                 }
             }
         }
     }
 }
 
-// The first xparse subset supports mandatory arguments and one leading default.
-fn document_signature(input, count = 0, optional = false, defaults = []) any^ {
+// Native accepts either a braced default or a single token in the signature.
+fn document_spec_default(input) any^ {
     let read = nonspace(input)^;
-    let t = read.token;
-    if (t == null) {issue: null, count: count, optional: optional, defaults: defaults}
-    else if (t.kind == "char" and t.value == "m")
-        if (count >= 9) {issue: "latex-document-argument-count"}
-        else document_signature(read.stream, count + 1, optional, defaults)
-    else if (t.kind == "char" and t.value == "O" and count == 0 and not optional) {
-        let opening = nonspace(read.stream)^;
-        if (not charcat(opening.token, 1)) {issue: "latex-document-argument-default"}
-        else {
-            let value = stream.argument(stream.push(opening.stream, [opening.token]), true)^;
-            if (value.error != null) {issue: value.error}
-            else document_signature(value.stream, 1, true, value.tokens)
-        }
+    if (read.token == null) {input:read.stream,tokens:[],issue:null}
+    else if (charcat(read.token,1)) {
+        let value = stream.argument(stream.push(read.stream,[read.token]),true)^;
+        {input:value.stream,tokens:value.tokens,issue:value.error}
     }
-    else {issue: "latex-unsupported-document-argument", unsupported: if (t == null) null else t.value}
+    else {input:read.stream,tokens:[read.token],issue:null}
 }
 
-fn latex_document_command(st: State, name) State^ {
-    let target = stream.argument(st.input, true)^;
-    let signature = stream.argument(target.stream, true)^;
-    let body = stream.argument(signature.stream, true)^;
-    let current = {*:st, input: body.stream};
-    if (target.error != null) fail(current, target.error)
-    else if (signature.error != null) fail(current, signature.error)
-    else if (body.error != null) fail(current, body.error)
-    else if (len(target.tokens) != 1 or not is_control(target.tokens[0])) fail(current, "latex-missing-cs")
+// Native formats unknown argument types as one C byte, including non-UTF-8 bytes.
+fn document_unknown_message(value) any^ {
+    let byte = ord(value) % 256;
+    if (byte == 0) "unknown argument type `"
+    else "unknown argument type `" ++ parse(binary([byte])^,{type:"text"})^ ++ "'"
+}
+
+// Scan xparse specifications and retain diagnostics in their original order.
+fn document_signature(input, specs = [], after_modifier = false, events = []) any^ {
+    let read = if (after_modifier) stream.next(input)^ else nonspace(input)^;
+    let t = read.token;
+    if (t == null) {issue:null,valid:not after_modifier,count:len(specs),specs:specs,events:events}
+    // Native records these modifiers while its current scanners use long arguments.
+    else if (t.kind == "char" and contains(["+","!"],t.value))
+        document_signature(read.stream,specs,true,events)
+    else if (t.kind == "char" and t.value == ">") {
+        let next = stream.next(read.stream)^;
+        let processor = if (charcat(next.token,1)) stream.raw_argument(stream.push(next.stream,[next.token]))^
+            else {stream:next.stream};
+        let added = [*events,{code:"latex-argument-processor",message:"xparse argument processors are not applied"}];
+        document_signature(processor.stream,specs,true,added)
+    }
+    else if (t.kind == "char" and contains(["m","s","o","g","v","b"],t.value))
+        document_signature(read.stream,[*specs,{kind:t.value}],false,events)
+    else if (t.kind == "char" and t.value == "t") {
+        let want = stream.next(read.stream)^;
+        // Missing delimiter fields are zero-initialized by the native parser.
+        let token = if(want.token == null) {kind:"char",value:chr(0),cat:0} else want.token;
+        document_signature(want.stream,[*specs,{kind:"t",want:token}],false,events)
+    }
+    else if (t.kind == "char" and (t.value == "e" or t.value == "E")) {
+        let labels = document_spec_default(read.stream)^;
+        let defaults = if(t.value == "E") document_spec_default(labels.input)^
+            else {input:labels.input,tokens:[],issue:null};
+        let added = [*events,{code:"latex-embellishment",message:"xparse embellishment arguments are not supported"}];
+        if (labels.issue != null) {issue:labels.issue,specs:specs,events:events}
+        else if (defaults.issue != null) {issue:defaults.issue,specs:specs,events:events}
+        else document_signature(defaults.input,[*specs,{kind:t.value}],false,added)
+    }
+    else if (t.kind == "char" and contains(["d","D","r","R"],t.value)) {
+        let opening = stream.next(read.stream)^;
+        let closing = stream.next(opening.stream)^;
+        let complete = opening.token != null and closing.token != null;
+        let zero = {kind:"char",value:chr(0),cat:0};
+        let next = if(complete) closing.stream else read.stream;
+        let value = if (t.value == "D" or t.value == "R") document_spec_default(next)^
+            else {input:next,tokens:[],issue:null};
+        if (value.issue != null) {issue:value.issue,specs:specs,events:events}
+        else document_signature(value.input,[*specs,{kind:t.value,
+            open:if(complete) opening.token else zero,close:if(complete) closing.token else zero,default:value.tokens}],false,events)
+    }
+    else if (t.kind == "char" and contains(["O","G"],t.value)) {
+        let value = document_spec_default(read.stream)^;
+        if (value.issue != null) {issue:value.issue,specs:specs,events:events}
+        else document_signature(value.input,[*specs,{kind:t.value,default:value.tokens}],false,events)
+    }
+    else if (t.kind == "char") {issue:null,valid:false,specs:specs,events:[*events,
+        {code:"latex-arg-spec",message:document_unknown_message(t.value)^}]}
+    else {issue:null,valid:false,specs:specs,events:events}
+}
+
+fn document_spec_diagnostics(st: State, events, index = 0) State^ {
+    if (events == null or index >= len(events)) st
     else {
-        let spec = document_signature(stream.push(stream.from_reader(reader.reader("")), signature.tokens))^;
-        let old = meaning(current, target.tokens[0]);
+        let noted = record_diagnostic(st,events[index].code,events[index].message)^;
+        document_spec_diagnostics(noted,events,index + 1)
+    }
+}
+
+fn latex_document_command(st: State, name, budget) State^ {
+    let environment = ends_with(name,"Environment");
+    let target = if (environment) stream.argument(st.input,true)^ else latex_cs_target(st.input)^;
+    let target_state = if(environment) {*:st,input:target.stream} else latex_cs_diagnostic(st,target)^;
+    let named = if (environment) expand_argument_name(target_state,target.tokens,budget)^
+        else {state:target_state,name:null};
+    let signature = stream.argument(named.state.input,true)^;
+    let signature_state = if(signature.error == null) {*:named.state,input:signature.stream}
+        else recover_macro_argument({*:named.state,input:signature.stream},signature.error,signature.cause,control_token("relax"),false)^;
+    let body = stream.argument(signature_state.input,true)^;
+    let body_state = if(body.error == null) {*:signature_state,input:body.stream}
+        else recover_macro_argument({*:signature_state,input:body.stream},body.error,body.cause,control_token("relax"),false)^;
+    let final_body = if (environment) stream.argument(body_state.input,true)^
+        else {stream:body_state.input,tokens:[],error:null};
+    let current = if(final_body.error == null) {*:body_state,input:final_body.stream}
+        else recover_macro_argument({*:body_state,input:final_body.stream},final_body.error,final_body.cause,control_token("relax"),false)^;
+    if (environment and target.error != null) fail(current,target.error)
+    else if (named.state.issue != null) named.state
+    else if (current.issue != null) current
+    else {
+        let spec = document_signature(stream.push(stream.from_reader(reader.reader("")),signature.tokens))^;
+        let diagnosed = document_spec_diagnostics(current,spec.events)^;
+        let token = if (environment) control_token(named.name) else target.token;
+        let old = meaning(diagnosed,token);
         let definable = latex_definable(old);
-        if (name == "ProvideDocumentCommand" and not definable) current
-        else if (name == "NewDocumentCommand" and not definable) fail(current, "latex-already-defined")
-        else if (name == "RenewDocumentCommand" and definable) fail(current, "latex-undefined")
-        else if (spec.issue != null) {*:current, issue: spec.issue, unsupported: spec.unsupported}
+        let new = starts_with(name,"NewDocument");
+        let renew = starts_with(name,"RenewDocument");
+        let provide = starts_with(name,"ProvideDocument");
+        let duplicate = new and not definable;
+        let missing = renew and definable;
+        let noted = if (duplicate) record_diagnostic(diagnosed,"latex-already-defined",
+                "LaTeX Error: Command or environment already defined")^
+            else if (missing) record_diagnostic(diagnosed,"latex-undefined",
+                "LaTeX Error: Command or environment undefined")^ else diagnosed;
+        if (duplicate or (provide and not definable)) noted
+        else if (spec.issue != null) {*:noted,issue:spec.issue,unsupported:spec.unsupported}
+        else if (spec.valid == false) noted
+        else if (spec.count > 9) record_diagnostic(noted,"latex-bad-arg-count","too many arguments in signature")
         else {
-            let parsed = body_params(body.tokens, spec.count)^;
-            if (parsed.issue != null) fail(current, parsed.issue)
+            let parsed = body_params(body.tokens,spec.count)^;
+            let ending = if (environment) body_params(final_body.tokens,0)^ else {issue:null,tokens:[]};
+            if (parsed.issue != null) fail(noted,parsed.issue)
+            else if (ending.issue != null) fail(noted,ending.issue)
             else {
-                let macro = latex_macro(spec.count, false, true, spec.optional, spec.defaults, parsed.tokens)^;
-                assign_meaning(current, key(target.tokens[0]), macro, effective_global(current, false)^)
+                let base = latex_macro(spec.count,false,true,false,[],parsed.tokens)^;
+                // Native stores xparse specifications separately from TeX parameter text.
+                let specs = [for(item in spec.specs) if(item.kind == "b") {*:item,name:token.value} else item];
+                let macro = {*:base,delimiters:[],document_specs:specs};
+                let added = assign_meaning(noted,key(token),macro,false)^;
+                if (not environment) added
+                else {
+                    let end_macro = latex_macro(0,false,false,false,[],ending.tokens)^;
+                    assign_meaning(added,"control:end" ++ named.name,end_macro,false)
+                }
             }
         }
     }
@@ -4531,11 +4825,19 @@ fn latex_begin_regular(st: State, original, argument, named, closed, budget, beg
     }
 }
 
+// Native continues with the partial environment name after an argument scan error.
+fn recover_environment_argument(traced: State, argument) State^ {
+    let scanned = {*:traced, input: argument.stream};
+    if (argument.error == null) scanned else recover_macro_argument(scanned,argument.error,
+        if (argument.error == "tex-extra-brace") "brace" else if (len(argument.raw) == 0) "missing" else "eof",
+        control_token("relax"),false)
+}
+
 fn latex_begin(st: State, original, budget) State^ {
     let traced = begin_main_trace(st, original)^;
     let argument = stream.raw_argument(traced.input)^;
-    let current = {*:traced, input: argument.stream};
-    if (argument.error != null) fail(current, argument.error)
+    let current = recover_environment_argument(traced,argument)^;
+    if (current.issue != null) current
     else {
         let named = expand_argument_name(current, argument.tokens, budget)^;
         let closed = end_main_trace(named.state, original)^;
@@ -4556,8 +4858,8 @@ fn latex_begin(st: State, original, budget) State^ {
 fn latex_end(st: State, original, budget) State^ {
     let traced = begin_main_trace(st, original)^;
     let argument = stream.raw_argument(traced.input)^;
-    let current = {*:traced, input: argument.stream};
-    if (argument.error != null) fail(current, argument.error)
+    let current = recover_environment_argument(traced,argument)^;
+    if (current.issue != null) current
     else {
         let named = expand_argument_name(current, argument.tokens, budget)^;
         let closed = end_main_trace(named.state, original)^;
@@ -5145,8 +5447,9 @@ fn echo_definition(st: State, token, cmd, budget) State^ {
                 false, false, cmd == "edef" or cmd == "xdef", budget)^)^
         else if (contains(["newcommand", "renewcommand", "providecommand", "DeclareRobustCommand"], cmd))
             latex_newcommand(current, cmd)^
-        else if (contains(["NewDocumentCommand", "RenewDocumentCommand", "ProvideDocumentCommand", "DeclareDocumentCommand"], cmd))
-            latex_document_command(current, cmd)^
+        else if (contains(["NewDocumentCommand", "RenewDocumentCommand", "ProvideDocumentCommand", "DeclareDocumentCommand",
+                "NewDocumentEnvironment", "RenewDocumentEnvironment", "ProvideDocumentEnvironment", "DeclareDocumentEnvironment"], cmd))
+            latex_document_command(current, cmd, budget)^
         else latex_newenvironment(current, cmd, budget)^;
     finish_definition_echo(st, after, tracing, true)
 }
@@ -5302,6 +5605,16 @@ fn echo_redefined_command(st: State, token) State^ {
 }
 
 
+fn finish_conditionals(st: State, index) State^ {
+    if (index < 0) {*:st, conditions:[], finished:true}
+    else {
+        let origin = st.conditions[index].origin;
+        let message = "(\\end occurred when a conditional on line " ++ string(origin.line) ++ " of " ++ origin.name ++ " was incomplete)";
+        let diagnosed = record_diagnostic(st,"tex-incomplete-if",message)^;
+        finish_conditionals(diagnosed,index - 1)
+    }
+}
+
 fn step(st: State, budget) State^ {
     let read = stream.next(st.input)^;
     let raw = read.token;
@@ -5310,7 +5623,7 @@ fn step(st: State, budget) State^ {
     let cmd = primitive(st, t);
     let resolved = if (is_control(t)) meaning(st, t) else null;
     let assignment_global = effective_global(st, false)^;
-    if (t == null) if (len(st.conditions) > 0) fail(current, "tex-incomplete-if") else {*:current, finished: true}
+    if (t == null) if (len(st.conditions) > 0) finish_conditionals(current,len(st.conditions) - 1) else {*:current, finished: true}
     else if ((charcat(t, 10) or (is_control(t) and t.value == "par")) and direct_package_token(st, t)) current
     else if (t.kind == "expl3-sort-end") {*:current, expl_sort_done: true}
     else if (t.kind == "counter-value-end") current
@@ -5355,16 +5668,21 @@ fn step(st: State, budget) State^ {
         scanned.state
     }
     else if (cmd == "unpenalty" or cmd == "unkern") current
+    // TeX expands while skipping space tokens, then returns the first other token.
+    else if (cmd == "ignorespaces") {
+        let read = expanded_nonspace(current, budget)^;
+        put_back(read.state, after_expanded_scan(read.token))
+    }
     // native unskip removes only a final emitted space token.
     else if (cmd == "unskip") {
         let count = len(current.output);
         if (count > 0 and charcat(current.output[count - 1], 10))
-            if (any([for (scope in current.groups) scope.discard_output != null and count <= scope.discard_output]))
-                unsupported(current, "insert cross-boundary unskip")
-            else {*:current, output: slice(current.output, 0, count - 1)^,
-                // native adjusts each open box capture when removal crosses its start.
-                groups:[for(scope in current.groups) if(scope.box_start != null and scope.box_start >= count)
-                    {*:scope,box_start:count - 1} else scope]} else current
+            {*:current, output: slice(current.output, 0, count - 1)^,
+                // A removed outer space moves every open capture boundary with it.
+                groups:[for(scope in current.groups) {*:scope,
+                    box_start:if(scope.box_start != null and scope.box_start >= count) count - 1 else scope.box_start,
+                    discard_output:if(scope.discard_output != null and scope.discard_output >= count) count - 1 else scope.discard_output}]}
+        else current
     }
     else if (contains(["def", "gdef", "edef", "xdef"], cmd)) {
         // token-list assignment aliases share the existing source-mapping guard.
@@ -5410,7 +5728,8 @@ fn step(st: State, budget) State^ {
         latex_counter_command(current, t, cmd, budget)
     else if (st.latex and contains(["newcommand", "renewcommand", "providecommand", "DeclareRobustCommand",
         "newenvironment", "renewenvironment", "NewDocumentCommand", "RenewDocumentCommand",
-        "ProvideDocumentCommand", "DeclareDocumentCommand"], cmd)) echo_definition(current, t, cmd, budget)
+        "ProvideDocumentCommand", "DeclareDocumentCommand", "NewDocumentEnvironment", "RenewDocumentEnvironment",
+        "ProvideDocumentEnvironment", "DeclareDocumentEnvironment"], cmd)) echo_definition(current, t, cmd, budget)
     else if (st.latex and (cmd == "AtBeginDocument" or cmd == "AtEndDocument"))
         latex_document_hook(current, cmd == "AtBeginDocument")
     else if (st.latex and contains(["usepackage", "RequirePackage", "RequirePackageWithOptions"], cmd))
@@ -5488,7 +5807,7 @@ fn step(st: State, budget) State^ {
     else if (cmd == "showbox") show_box(current, budget)
     else if (contains(["showlists", "showgroups", "showifs"], cmd)) {*:current, inspection_seen: true}
     else if (cmd == "end" or (cmd == "@@end" and st.latex))
-        if (len(st.conditions) > 0) fail(current, "tex-incomplete-if") else {*:current, finished: true}
+        if (len(st.conditions) > 0) finish_conditionals(current,len(st.conditions) - 1) else {*:current, finished: true}
     else if (cmd == "afterassignment") save_after_assignment(current)
     else if (cmd == "aftergroup") save_aftergroup(current)
     else if (cmd == "begingroup") begin_group(current, null, true)
@@ -5506,7 +5825,7 @@ fn step(st: State, budget) State^ {
         // synthesized characters need the current main-source position.
         {*:current, output: [*st.output,
             {kind: "char", value: chr(resolved.value), cat: 12, start: t.start, end: t.end,
-                chardef_emission: true, read_offset: current.input.last_main_offset, read_file: current.main_file}]}
+                chardef_emission: true, chardef_origin: t, read_offset: current.input.last_main_offset, read_file: current.main_file}]}
     }
     else if (resolved.kind == "mathchardef")
         {*:current, output: [*st.output, t], mathchardef_emission_seen:
@@ -5621,11 +5940,166 @@ pub fn enable_script_expl3(st: State) State^ {
         {name: "exp_not:n", kind: "primitive", value: "unexpanded"},
         {name: "exp_stop_f:", kind: "char", value: " ", cat: 10},
         {name: "scan_stop:", kind: "primitive", value: "relax"},
-        {name: "s__seq", kind: "primitive", value: "relax"}])^;
+        {name: "s__seq", kind: "primitive", value: "relax"},
+        {name: "s__seq_stop", kind: "primitive", value: "relax"},
+        {name: "s__prop", kind: "primitive", value: "relax"},
+        {name: "s__prop_mark", kind: "primitive", value: "relax"},
+        {name: "s__prop_stop", kind: "primitive", value: "relax"},
+        {name: "s__msg_stop", kind: "primitive", value: "relax"},
+        {name: "tex_romannumeral:D", kind: "primitive", value: "romannumeral"},
+        {name: "token_to_str:N", kind: "primitive", value: "string"},
+        {name: "__str_if_eq:nn", kind: "primitive", value: "pdfstrcmp"},
+        {name: "cs_set_nopar:Npe", kind: "primitive", value: "edef"},
+        {name: "cs_gset_nopar:Npe", kind: "primitive", value: "xdef"}])^;
     // native Nx variants are protected macros that call the corresponding Nn operation.
     let variants = [for (name in expl3.expanded_argument_names()) {
         source:"\\" ++ name ++ "{\\exp_args:NNx\\" ++ slice(name,0,len(name) - 1)^ ++ "n}", protected_flag:true}];
-    let macros = enable_expl_macro_sources(support, [*variants,
+    // Native pop variants share the same conditional and argument-expansion shapes.
+    let pop_shapes=[for(direction in ["left","right"],scope in ["","g"]) {
+        name:"seq_" ++ scope ++ "pop_" ++ direction,
+        helper:"__seq_pop_" ++ direction ++ ":NNN",
+        setter:if(direction=="left") "tl_" ++ scope ++ "set:Nn" else "__kernel_tl_" ++ scope ++ "set:Nx"}];
+    let pop_base=[for(shape in pop_shapes) {
+        source:"\\" ++ shape.name ++ ":NN{\\__seq_pop:NNNN\\" ++ shape.helper ++ "\\" ++ shape.setter ++ "}",protected_flag:true}];
+    let pop_conditionals=[for(shape in pop_shapes, suffix in ["TF","T","F"]) {
+        source:"\\" ++ shape.name ++ ":NN" ++ suffix ++ "#1#2{\\__seq_pop_TF:NNNN\\" ++ shape.helper ++ "\\" ++ shape.setter ++ "#1#2\\exp_end:" ++
+            (if(suffix=="T") "\\use:n\\use_none:n" else if(suffix=="F") "{}" else "") ++ "}",protected_flag:true}];
+    let pop_variants=[for(shape in pop_shapes, suffix in ["","TF","T","F"]) {
+        source:"\\" ++ shape.name ++ ":cN" ++ suffix ++ "{\\exp_args:Nc\\" ++ shape.name ++ ":NN" ++ suffix ++ "}",protected_flag:true}];
+    // Preserve upstream macro expansion order so TeX lookahead and aliases behave normally.
+    let property_in_body="\\__prop_if_flat:NTF#1{\\exp_after:wN\\prop_map_tokens:Nn\\exp_after:wN#1{\\exp_after:wN\\__prop_if_in_flat:nnn\\exp_after:wN{\\tl_to_str:n{#2}}}\\prg_return_false:}{\\exp_after:wN\\__prop_get_linked:w#1{#2}\\use_none:n\\prg_return_true:\\prg_return_false:}\\exp_end:";
+    let prop_map_terminator="\\__prop_pair:wn\\fi:\\prop_map_break:\\s__prop{}";
+    let prop_map_steps=join([for(i in [2,4,6,8]) "\\if_false:#" ++ string(i) ++ "\\fi:\\use:n{#1}{#" ++ string(i) ++ "}{#" ++ string(i+1) ++ "}"],"");
+    // Preserve definitions supplied by the caller's kernel during bootstrap.
+    let property_support=if(support.definitions["control:c_empty_prop"]!=null) support else
+        assign_meaning(support,"control:c_empty_prop",expl3.token_list([control_token("s__prop"),control_token("__prop_chk:w")])^,true)^;
+    let msg_names=if(property_support.definitions["control:g_msg_module_name_prop"]!=null) property_support else
+        assign_meaning(property_support,"control:g_msg_module_name_prop",msg_module_property(message_catalog.name_properties())^,true)^;
+    let msg_support=if(msg_names.definitions["control:g_msg_module_type_prop"]!=null) msg_names else
+        assign_meaning(msg_names,"control:g_msg_module_type_prop",msg_module_property(message_catalog.type_properties())^,true)^;
+    // Native lookup variants share one splitter and conditional expansion order.
+    let prop_get_conditionals=[for(suffix in ["TF","T","F"]) {
+        source:"\\prop_get:NnN" ++ suffix ++ "#1#2#3{\\__prop_get:NnnTF#1{#2}{\\tl_set:Nn#3}\\prg_return_true:\\prg_return_false:\\exp_end:" ++
+            (if(suffix=="T") "\\use:n\\use_none:n" else if(suffix=="F") "{}" else "") ++ "}",protected_flag:true}];
+    // Build the native argument-expansion variants from their shared shapes.
+    let prop_get_variant_shapes=[
+        {name:"cnN",helper:"Nc"},{name:"NVN",helper:"NNV"},{name:"NvN",helper:"NNv"},
+        {name:"NoN",helper:"NNo"},{name:"NeN",helper:"NNe"},{name:"NxN",helper:"NNx"},
+        {name:"cVN",helper:"NcV"},{name:"cvN",helper:"Ncv"},{name:"coN",helper:"Nco"},
+        {name:"ceN",helper:"Nce"},{name:"cxN",helper:"Ncx"},{name:"cnc",helper:"Ncnc"}];
+    let prop_get_variants=[for(shape in prop_get_variant_shapes,suffix in ["","TF","T","F"]) {
+        source:"\\prop_get:" ++ shape.name ++ suffix ++ "{\\exp_args:" ++ shape.helper ++ "\\prop_get:NnN" ++ suffix ++ "}",protected_flag:true}];
+    let prop_exp_values=[{mode:"V",value:"\\exp:w\\__exp_eval_register:N#3"},
+        {mode:"v",value:"\\exp:w\\__exp_eval_register:c{#3}"},{mode:"o",value:"#3"}];
+    let prop_exp_helpers=[for(form in ["N","c"],value in prop_exp_values) {
+        source:"\\exp_args:N" ++ form ++ value.mode ++ "#1#2#3{\\exp_after:wN#1" ++
+            (if(form=="N") "\\exp_after:wN#2" else "\\cs:w#2\\exp_after:wN\\cs_end:") ++
+            "\\exp_after:wN{" ++ value.value ++ "}}",protected_flag:false,
+        source_mapping_guard:if(value.mode=="o") null else "exp_args_value"}];
+    // Native pop and remove variants share the splitter and scope-specific setters.
+    let prop_pop_shapes=[for(scope in ["","g"]) {
+        pop:"prop_" ++ scope ++ "pop", remove:"prop_" ++ scope ++ "remove",
+        eq:"cs_" ++ scope ++ "set_eq:NN", set:"cs_" ++ scope ++ "set_nopar:Npe"}];
+    let prop_pop_bases=[for(shape in prop_pop_shapes) {
+        source:"\\" ++ shape.pop ++ ":NnN#1#2#3{\\__prop_pop:NnNNnTF#1{#2}\\" ++ shape.eq ++ "\\" ++ shape.set ++ "{\\tl_set:Nn#3}{}{\\tl_set:Nn#3{\\q_no_value}}}",protected_flag:true}];
+    let prop_remove_bases=[for(shape in prop_pop_shapes) {
+        source:"\\" ++ shape.remove ++ ":Nn#1#2{\\__prop_pop:NnNNnTF#1{#2}\\" ++ shape.eq ++ "\\" ++ shape.set ++ "\\use_none:n{}{}}",protected_flag:true}];
+    let prop_pop_conditionals=[for(shape in prop_pop_shapes,suffix in ["TF","T","F"]) {
+        source:"\\" ++ shape.pop ++ ":NnN" ++ suffix ++ "#1#2#3{\\__prop_pop:NnNNnTF#1{#2}\\" ++ shape.eq ++ "\\" ++ shape.set ++ "{\\tl_set:Nn#3}\\prg_return_true:\\prg_return_false:\\exp_end:" ++
+            (if(suffix=="T") "\\use:n\\use_none:n" else if(suffix=="F") "{}" else "") ++ "}",protected_flag:true}];
+    let prop_pop_variants=[for(shape in prop_pop_shapes,suffix in ["","TF","T","F"]) {
+        source:"\\" ++ shape.pop ++ ":cnN" ++ suffix ++ "{\\exp_args:Nc\\" ++ shape.pop ++ ":NnN" ++ suffix ++ "}",protected_flag:true}];
+    let prop_remove_variants=[for(shape in prop_pop_shapes) {
+        source:"\\" ++ shape.remove ++ ":cn{\\exp_args:Nc\\" ++ shape.remove ++ ":Nn}",protected_flag:true}];
+    let macros = enable_expl_macro_sources(msg_support, [*variants,*pop_base,*pop_conditionals,*pop_variants,*prop_get_conditionals,*prop_get_variants,*prop_exp_helpers,*prop_pop_bases,*prop_remove_bases,*prop_pop_conditionals,*prop_pop_variants,*prop_remove_variants,
+        {source:"\\q_no_value{\\q_no_value}",protected_flag:false},
+        {source:"\\exp_args:NNe#1#2#3{\\exp_after:wN#1\\exp_after:wN#2\\tex_expanded:D{{#3}}}",protected_flag:false},
+        {source:"\\exp_args:Nce#1#2#3{\\tex_expanded:D{\\exp_not:N#1\\exp_after:wN\\exp_not:N\\cs:w#2\\cs_end:{\\__kernel_exp_not:w\\tex_expanded:D{{#3}}}}}",protected_flag:false},
+        {source:"\\exp_args:Ncx#1#2#3{\\use:x{\\exp_not:N#1\\exp_after:wN\\exp_not:N\\cs:w#2\\cs_end:{#3}}}",protected_flag:true},
+        {source:"\\exp_args:Ncnc#1#2#3#4{\\tex_expanded:D{\\exp_not:N#1\\exp_after:wN\\exp_not:N\\cs:w#2\\cs_end:{\\exp_not:n{#3}}\\exp_after:wN\\exp_not:N\\cs:w#4\\cs_end:}}",protected_flag:false},
+        // Native mapping delimiters preserve nested breaks and expandable calls.
+        {source:"\\prg_break:#1\\prg_break_point:{}",protected_flag:false},
+        {source:"\\seq_map_break:{\\prg_map_break:Nn\\seq_map_break:{}}",protected_flag:false},
+        {source:"\\seq_map_break:n{\\prg_map_break:Nn\\seq_map_break:}",protected_flag:false},
+        {source:"\\seq_map_function:NN#1#2{\\exp_after:wN\\use_i_ii:nnn\\exp_after:wN\\__seq_map_function:Nw\\exp_after:wN#2#1\\prg_break:\\__seq_item:n{}\\__seq_item:n{}\\__seq_item:n{}\\__seq_item:n{}\\prg_break_point:\\prg_break_point:Nn\\seq_map_break:{}}",protected_flag:false},
+        {source:"\\__seq_map_function:Nw#1#2\\__seq_item:n#3#4\\__seq_item:n#5#6\\__seq_item:n#7#8\\__seq_item:n#9{#2#1{#3}#4#1{#5}#6#1{#7}#8#1{#9}\\__seq_map_function:Nw#1}",protected_flag:false},
+        {source:"\\seq_map_function:cN{\\exp_args:Nc\\seq_map_function:NN}",protected_flag:false},
+        {source:"\\__seq_pop:NNNN#1#2#3#4{\\if_meaning:w#3\\c_empty_seq\\tl_set:Nn#4{\\q_no_value}\\else:#1#2#3#4\\fi:}",protected_flag:true},
+        {source:"\\__seq_pop_TF:NNNN#1#2#3#4{\\if_meaning:w#3\\c_empty_seq\\prg_return_false:\\else:#1#2#3#4\\prg_return_true:\\fi:}",protected_flag:true},
+        {source:"\\__seq_pop_left:NNN#1#2#3{\\exp_after:wN\\__seq_pop_left:wnwNNN#2\\s__seq_stop#1#2#3}",protected_flag:true},
+        {source:"\\__seq_pop_left:wnwNNN#1\\__seq_item:n#2#3\\s__seq_stop#4#5#6{#4#5{#1#3}\\tl_set:Nn#6{#2}}",protected_flag:true},
+        {source:"\\__seq_pop_right:NNN#1#2#3{\\cs_set_eq:NN\\__seq_tmp:w\\__seq_item:n\\cs_set_eq:NN\\__seq_item:n\\scan_stop:#1#2{\\if_false:}\\fi:\\s__seq\\exp_after:wN\\use_i:nnn\\exp_after:wN\\__seq_pop_right_loop:nn#2{\\if_false:{\\fi:}\\__kernel_tl_set:Nx#3}{}\\use_none:nn\\cs_set_eq:NN\\__seq_item:n\\__seq_tmp:w}",protected_flag:true},
+        {source:"\\__seq_pop_right_loop:nn#1#2{#2{\\exp_not:n{#1}}\\__seq_pop_right_loop:nn}",protected_flag:false},
+        {source:"\\use_none:nn#1#2{}",protected_flag:false},
+        {source:"\\c__msg_text_prefix_tl{msg~text~>~}",protected_flag:false},
+        {source:"\\c__msg_more_text_prefix_tl{msg~extra~text~>~}",protected_flag:false},
+        {source:"\\cs_gset:cpn{\\exp_args:Nc\\cs_gset:Npn}",protected_flag:true,long_ok:false},
+        {source:"\\cs_set:cpn{\\exp_args:Nc\\cs_set:Npn}",protected_flag:true,long_ok:false},
+        {source:"\\msg_if_exist:nnT#1#2{\\cs_if_exist:cTF{\\c__msg_text_prefix_tl#1/#2}{\\prg_return_true:}{\\prg_return_false:}\\exp_end:\\use:n\\use_none:n}",protected_flag:false},
+        {source:"\\msg_if_exist:nnTF#1#2{\\cs_if_exist:cTF{\\c__msg_text_prefix_tl#1/#2}{\\prg_return_true:}{\\prg_return_false:}\\exp_end:}",protected_flag:false},
+        {source:"\\__msg_chk_free:nn#1#2{\\msg_if_exist:nnT{#1}{#2}{\\msg_error:nnnn{msg}{already-defined}{#1}{#2}}}",protected_flag:true},
+        {source:"\\msg_new:nnnn#1#2#3#4{\\__msg_chk_free:nn{#1}{#2}\\cs_gset:cpn{\\c__msg_text_prefix_tl#1/#2}##1##2##3##4{#3}\\cs_gset:cpn{\\c__msg_more_text_prefix_tl#1/#2}##1##2##3##4{#4}}",protected_flag:true},
+        {source:"\\msg_new:nnn#1#2#3{\\msg_new:nnnn{#1}{#2}{#3}{}}",protected_flag:true},
+        {source:"\\msg_set:nnnn#1#2#3#4{\\cs_set:cpn{\\c__msg_text_prefix_tl#1/#2}##1##2##3##4{#3}\\cs_set:cpn{\\c__msg_more_text_prefix_tl#1/#2}##1##2##3##4{#4}}",protected_flag:true},
+        {source:"\\msg_set:nnn#1#2#3{\\msg_set:nnnn{#1}{#2}{#3}{}}",protected_flag:true},
+        {source:"\\__msg_use_none_delimit_by_s_stop:w#1\\s__msg_stop{}",protected_flag:false},
+        {source:"\\msg_module_type:n#1{\\prop_if_in:NnTF\\g_msg_module_type_prop{#1}{\\prop_item:Nn\\g_msg_module_type_prop{#1}}{Package}}",protected_flag:false},
+        {source:"\\msg_module_name:n#1{\\prop_if_in:NnTF\\g_msg_module_name_prop{#1}{\\prop_item:Nn\\g_msg_module_name_prop{#1}}{#1}}",protected_flag:false},
+        {source:"\\msg_error_text:n#1{\\__msg_text:nn{#1}{Error}}",protected_flag:false},
+        {source:"\\__msg_text:nn#1#2{\\exp_args:Nf\\__msg_text:n{\\msg_module_type:n{#1}}\\exp_args:Nf\\__msg_text:n{\\msg_module_name:n{#1}}#2}",protected_flag:false},
+        {source:"\\__msg_text:n#1{\\tl_if_blank:nF{#1}{#1~}}",protected_flag:false},
+        {source:"\\exp_args:Nee#1#2#3{\\tex_expanded:D{\\exp_not:N#1{\\__kernel_exp_not:w\\tex_expanded:D{{#2}}}{\\__kernel_exp_not:w\\tex_expanded:D{{#3}}}}}",protected_flag:false},
+        {source:"\\exp_args:Noooo#1#2#3#4#5{\\tex_expanded:D{\\exp_not:N#1{\\__kernel_exp_not:w\\exp_after:wN{#2}}{\\__kernel_exp_not:w\\exp_after:wN{#3}}{\\__kernel_exp_not:w\\exp_after:wN{#4}}{\\__kernel_exp_not:w\\exp_after:wN{#5}}}}",protected_flag:false},
+        {source:"\\cs_to_str:N{\\tex_romannumeral:D\\if:w\\token_to_str:N\\ \\__cs_to_str:w\\fi:\\exp_after:wN\\__cs_to_str:N\\token_to_str:N}",protected_flag:false},
+        {source:"\\__cs_to_str:N#1{\\c_zero_int}",protected_flag:false},
+        {source:"\\__cs_to_str:w#1\\__cs_to_str:N{-\\int_value:w\\fi:\\exp_after:wN\\c_zero_int}",protected_flag:false},
+        {source:"\\__msg_expandable_error:nn#1#2{\\exp_after:wN\\exp_after:wN\\exp_after:wN\\__msg_use_none_delimit_by_s_stop:w\\use:n{\\???~!~#2:~#1}\\s__msg_stop}",protected_flag:false,question_letters:true},
+        {source:"\\msg_expandable_error:nnnnnn#1#2#3#4#5#6{\\exp_args:Nee\\__msg_expandable_error:nn{\\exp_args:Nc\\exp_args:Noooo{\\c__msg_text_prefix_tl#1/#2}{\\tl_to_str:n{#3}}{\\tl_to_str:n{#4}}{\\tl_to_str:n{#5}}{\\tl_to_str:n{#6}}}{\\msg_error_text:n{#1}}}",protected_flag:false},
+        {source:"\\msg_expandable_error:nnnnn#1#2#3#4#5{\\msg_expandable_error:nnnnnn{#1}{#2}{#3}{#4}{#5}{}}",protected_flag:false},
+        {source:"\\msg_expandable_error:nnnn#1#2#3#4{\\msg_expandable_error:nnnnnn{#1}{#2}{#3}{#4}{}{}}",protected_flag:false},
+        {source:"\\msg_expandable_error:nnn#1#2#3{\\msg_expandable_error:nnnnnn{#1}{#2}{#3}{}{}{}}",protected_flag:false},
+        {source:"\\msg_expandable_error:nn#1#2{\\msg_expandable_error:nnnnnn{#1}{#2}{}{}{}{}}",protected_flag:false},
+        {source:"\\prop_new:N#1{\\__kernel_chk_if_free_cs:N#1\\cs_gset_eq:NN#1\\c_empty_prop}",protected_flag:true},
+        {source:"\\__kernel_chk_if_free_cs:N#1{\\cs_if_free:NF#1{\\msg_error:nnee{kernel}{command-already-defined}{\\token_to_str:N#1}{\\token_to_meaning:N#1}}}",protected_flag:true},
+        {source:"\\prop_put:Nnn{\\__prop_put:nNNnn{}\\cs_set_nopar:Npe}",protected_flag:true},
+        {source:"\\prop_gput:Nnn{\\__prop_put:nNNnn{}\\cs_gset_nopar:Npe}",protected_flag:true},
+        {source:"\\use_i:nnn#1#2#3{#1}",protected_flag:false},
+        {source:"\\use_ii:nnn#1#2#3{#2}",protected_flag:false},
+        {source:"\\exp_not:o#1{\\__kernel_exp_not:w\\exp_after:wN{#1}}",protected_flag:false},
+        {source:"\\l__prop_internal_tl{}",protected_flag:false},
+        {source:"\\__prop_chk:w{\\__prop_chk_loop:nw{}}",protected_flag:true},
+        {source:"\\__prop_pair:wn#1\\s__prop#2{}",protected_flag:false},
+        {source:"\\__prop_put:nNNnn#1#2#3#4#5{\\tl_set:Nn\\l__prop_internal_tl{\\exp_not:N\\__prop_pair:wn\\tl_to_str:n{#4}\\s__prop{\\exp_not:n{#5}}}\\__prop_split:NnTFn#3{#4}{#1#2#3{\\s__prop\\__prop_chk:w\\exp_not:n{##1}\\l__prop_internal_tl\\exp_not:n{##3}}}{#2#3{\\exp_not:o{#3}\\l__prop_internal_tl}}{\\exp_after:wN\\__prop_put_linked:wnnN#3{#4}{#1}#2}}",protected_flag:true},
+        {source:"\\__prop_split:NnTFn#1#2{\\exp_after:wN\\__prop_split_aux:nNTFn\\exp_after:wN{\\tl_to_str:n{#2}}#1}",protected_flag:true},
+        {source:"\\__prop_split_aux:nNTFn#1#2#3{\\cs_set:Npn\\__prop_split_flat:w\\__prop_split_linked:w##1\\__prop_pair:wn#1\\s__prop##2##3\\s__prop_mark##4##5\\s__prop_stop{##4{#3}}\\exp_after:wN\\__prop_split_test:wn#2\\s__prop_mark\\use_i:nnn\\__prop_pair:wn#1\\s__prop{?\\fi:\\__prop_split_wrong:Nw#2}\\s__prop_mark\\use_ii:nnn\\s__prop_stop}",protected_flag:true},
+        {source:"\\__prop_split_flat:w{}",protected_flag:false},
+        {source:"\\__prop_pop:NnNNnTF#1#2#3#4#5#6#7{\\__prop_split:NnTFn#1{#2}{#4#1{\\exp_not:n{\\s__prop\\__prop_chk:w##1##3}}#5{##2}#6}{#7}{\\exp_after:wN\\__prop_pop_linked:wnNNnTF#1{#2}#3#4{#5}{#6}{#7}}}",protected_flag:true},
+        {source:"\\__prop_get:NnnTF#1#2#3#4#5{\\__prop_split:NnTFn#1{#2}{#3{##2}#4}{#5}{\\exp_after:wN\\__prop_get_linked:w#1{#2}{#3}{#4}{#5}}}",protected_flag:true},
+        {source:"\\prop_get:NnN#1#2#3{\\__prop_get:NnnTF#1{#2}{\\tl_set:Nn#3}{}{\\tl_set:Nn#3{\\q_no_value}}}",protected_flag:true},
+        {source:"\\__prop_split_test:wn#1\\s__prop#2{\\if_meaning:w\\__prop_chk:w#2\\exp_after:wN\\__prop_split_flat:w\\fi:\\__prop_split_linked:w}",protected_flag:true},
+        {source:"\\__prop_split_linked:w#1\\s__prop_stop#2#3{#3}",protected_flag:true},
+        {source:"\\__prop_if_flat:NTF#1{\\prop_if_exist:NT#1\\exp_after:wN\\__prop_if_flat_aux:w#1\\s__prop_mark\\use_ii:nn\\__prop_flatten:w\\s__prop_mark\\use_i:nn\\s__prop_stop}",protected_flag:false},
+        {source:"\\__prop_if_flat_aux:w#1\\__prop_flatten:w#2\\s__prop_mark#3#4\\s__prop_stop{#3}",protected_flag:false},
+        {source:"\\exp_args:NNo#1#2#3{\\exp_after:wN#1\\exp_after:wN#2\\exp_after:wN{#3}}",protected_flag:false},
+        {source:"\\:::#1{#1}",protected_flag:false},
+        {source:"\\::n#1\\:::#2#3{#1\\:::{#2{#3}}}",protected_flag:false},
+        {source:"\\__exp_arg_last_unbraced:nn#1#2{#2#1}",protected_flag:false},
+        {source:"\\::f_unbraced\\:::#1#2{\\exp_after:wN\\__exp_arg_last_unbraced:nn\\exp_after:wN{\\exp:w\\exp_end_continue_f:w#2}{#1}}",protected_flag:false},
+        {source:"\\exp_last_unbraced:Nnf{\\::n\\::f_unbraced\\:::}",protected_flag:false},
+        {source:"\\prg_break_point:Nn#1#2{#2}",protected_flag:false},
+        {source:"\\use_iii:nnn#1#2#3{#3}",protected_flag:false},
+        {source:"\\prg_map_break:Nn#1#2#3\\prg_break_point:Nn#4#5{#5\\if_meaning:w#1#4\\exp_after:wN\\use_iii:nnn\\fi:\\prg_map_break:Nn#1{#2}}",protected_flag:false},
+        {source:"\\prop_map_break:{\\prg_map_break:Nn\\prop_map_break:{}}",protected_flag:false},
+        {source:"\\prop_map_break:n{\\prg_map_break:Nn\\prop_map_break:}",protected_flag:false},
+        {source:"\\prop_map_tokens:Nn#1#2{\\exp_last_unbraced:Nnf\\use_i:nnn{\\__prop_map_tokens:nw{#2}}#1" ++ repeated(prop_map_terminator,4)^ ++ "\\prg_break_point:Nn\\prop_map_break:{}}",protected_flag:false},
+        {source:"\\__prop_map_tokens:nw#1\\__prop_pair:wn#2\\s__prop#3\\__prop_pair:wn#4\\s__prop#5\\__prop_pair:wn#6\\s__prop#7\\__prop_pair:wn#8\\s__prop#9{" ++ prop_map_steps ++ "\\__prop_map_tokens:nw{#1}}",protected_flag:false},
+        {source:"\\str_if_eq:eeT#1#2{\\if:w0\\__str_if_eq:nn{#1}{#2}\\__prg_T_true:w\\fi:\\use_none:n}",protected_flag:false},
+        {source:"\\__prop_item:nnn#1#2#3{\\str_if_eq:eeT{#1}{#2}{\\prop_map_break:n{\\exp_not:n{#3}}}}",protected_flag:false},
+        {source:"\\__prop_if_in_flat:nnn#1#2#3{\\str_if_eq:eeT{#1}{#2}{\\prop_map_break:n{\\use_i:nn\\prg_return_true:}}}",protected_flag:false},
+        {source:"\\prop_item:Nn#1#2{\\__prop_if_flat:NTF#1{\\exp_args:NNo\\prop_map_tokens:Nn#1{\\exp_after:wN\\__prop_item:nnn\\exp_after:wN{\\tl_to_str:n{#2}}}}{\\exp_after:wN\\__prop_get_linked:w#1{#2}\\exp_not:n{}{}}}",protected_flag:false},
+        {source:"\\prop_if_in:NnTF#1#2{" ++ property_in_body ++ "}",protected_flag:false},
+        {source:"\\prop_if_in:NnT#1#2{" ++ property_in_body ++ "\\use:n\\use_none:n}",protected_flag:false},
+        {source:"\\prop_if_in:NnF#1#2{" ++ property_in_body ++ "{}}",protected_flag:false},
         // bundled helpers evaluate their operands in the surrounding token stream.
         {source: "\\int_abs:n#1{\\int_value:w\\exp_after:wN\\__int_abs:N\\int_value:w\\__int_eval:w#1\\__int_eval_end:\\exp_stop_f:}", protected_flag: false, source_mapping_guard: "int_math"},
         {source: "\\__int_abs:N#1{\\if_meaning:w-#1\\else:\\exp_after:wN#1\\fi:}", protected_flag: false},
@@ -5735,28 +6209,28 @@ pub fn enable_script_expl3(st: State) State^ {
         {source: "\\cs_if_eq_p:NN#1#2{\\if_meaning:w#1#2\\__prg_p_true:w\\fi:\\c_false_bool}", protected_flag: false, source_mapping_guard: "cs_eq"},
         {source: "\\use_none:nnnn#1#2#3#4{}", protected_flag: false},
         {source: "\\__cs_if_free_c_aux:w\\fi:\\use_none:n#1\\if_true:{\\fi:\\exp_after:wN\\if_meaning:w\\cs:w#1\\cs_end:\\scan_stop:}", protected_flag: false},
-        {source: "\\cs_if_free:NTF#1{\\if_cs_exist:N#1\\else:\\use_none:nnnn\\fi:\\if_meaning:w#1\\scan_stop:\\__prg_TF_true:w\\fi:\\use_ii:nn}", protected_flag: false, source_mapping_guard: "cs_exist"},
-        {source: "\\cs_if_free:cTF#1{\\if_cs_exist:w#1\\cs_end:\\__cs_if_free_c_aux:w\\fi:\\use_none:n{#1}\\if_true:\\__prg_TF_true:w\\fi:\\use_ii:nn}", protected_flag: false, source_mapping_guard: "cs_exist"},
-        {source: "\\cs_if_free:NT#1{\\if_cs_exist:N#1\\else:\\use_none:nnnn\\fi:\\if_meaning:w#1\\scan_stop:\\__prg_T_true:w\\fi:\\use_none:n}", protected_flag: false, source_mapping_guard: "cs_exist"},
-        {source: "\\cs_if_free:cT#1{\\if_cs_exist:w#1\\cs_end:\\__cs_if_free_c_aux:w\\fi:\\use_none:n{#1}\\if_true:\\__prg_T_true:w\\fi:\\use_none:n}", protected_flag: false, source_mapping_guard: "cs_exist"},
-        {source: "\\cs_if_free:NF#1{\\if_cs_exist:N#1\\else:\\use_none:nnnn\\fi:\\if_meaning:w#1\\scan_stop:\\__prg_F_true:w\\fi:\\use:n}", protected_flag: false, source_mapping_guard: "cs_exist"},
-        {source: "\\cs_if_free:cF#1{\\if_cs_exist:w#1\\cs_end:\\__cs_if_free_c_aux:w\\fi:\\use_none:n{#1}\\if_true:\\__prg_F_true:w\\fi:\\use:n}", protected_flag: false, source_mapping_guard: "cs_exist"},
-        {source: "\\cs_if_free_p:N#1{\\if_cs_exist:N#1\\else:\\use_none:nnnn\\fi:\\if_meaning:w#1\\scan_stop:\\__prg_p_true:w\\fi:\\c_false_bool}", protected_flag: false, source_mapping_guard: "cs_exist"},
-        {source: "\\cs_if_free_p:c#1{\\if_cs_exist:w#1\\cs_end:\\__cs_if_free_c_aux:w\\fi:\\use_none:n{#1}\\if_true:\\__prg_p_true:w\\fi:\\c_false_bool}", protected_flag: false, source_mapping_guard: "cs_exist"},
+        {source: "\\cs_if_free:NTF#1{\\if_cs_exist:N#1\\else:\\use_none:nnnn\\fi:\\if_meaning:w#1\\scan_stop:\\__prg_TF_true:w\\fi:\\use_ii:nn}", protected_flag: false},
+        {source: "\\cs_if_free:cTF#1{\\if_cs_exist:w#1\\cs_end:\\__cs_if_free_c_aux:w\\fi:\\use_none:n{#1}\\if_true:\\__prg_TF_true:w\\fi:\\use_ii:nn}", protected_flag: false},
+        {source: "\\cs_if_free:NT#1{\\if_cs_exist:N#1\\else:\\use_none:nnnn\\fi:\\if_meaning:w#1\\scan_stop:\\__prg_T_true:w\\fi:\\use_none:n}", protected_flag: false},
+        {source: "\\cs_if_free:cT#1{\\if_cs_exist:w#1\\cs_end:\\__cs_if_free_c_aux:w\\fi:\\use_none:n{#1}\\if_true:\\__prg_T_true:w\\fi:\\use_none:n}", protected_flag: false},
+        {source: "\\cs_if_free:NF#1{\\if_cs_exist:N#1\\else:\\use_none:nnnn\\fi:\\if_meaning:w#1\\scan_stop:\\__prg_F_true:w\\fi:\\use:n}", protected_flag: false},
+        {source: "\\cs_if_free:cF#1{\\if_cs_exist:w#1\\cs_end:\\__cs_if_free_c_aux:w\\fi:\\use_none:n{#1}\\if_true:\\__prg_F_true:w\\fi:\\use:n}", protected_flag: false},
+        {source: "\\cs_if_free_p:N#1{\\if_cs_exist:N#1\\else:\\use_none:nnnn\\fi:\\if_meaning:w#1\\scan_stop:\\__prg_p_true:w\\fi:\\c_false_bool}", protected_flag: false},
+        {source: "\\cs_if_free_p:c#1{\\if_cs_exist:w#1\\cs_end:\\__cs_if_free_c_aux:w\\fi:\\use_none:n{#1}\\if_true:\\__prg_p_true:w\\fi:\\c_false_bool}", protected_flag: false},
         {source: "\\__cs_if_exist_c_aux:w\\fi:\\use_none:n#1\\if_false:{\\fi:\\exp_after:wN\\if_meaning:w\\cs:w#1\\cs_end:\\scan_stop:\\else:}", protected_flag: false},
-        {source: "\\cs_if_exist:cTF#1{\\if_cs_exist:w#1\\cs_end:\\__cs_if_exist_c_aux:w\\fi:\\use_none:n{#1}\\if_false:\\__prg_TF_true:w\\fi:\\use_ii:nn}", protected_flag: false, source_mapping_guard: "cs_exist"},
-        {source: "\\cs_if_exist:cT#1{\\if_cs_exist:w#1\\cs_end:\\__cs_if_exist_c_aux:w\\fi:\\use_none:n{#1}\\if_false:\\__prg_T_true:w\\fi:\\use_none:n}", protected_flag: false, source_mapping_guard: "cs_exist"},
-        {source: "\\cs_if_exist:cF#1{\\if_cs_exist:w#1\\cs_end:\\__cs_if_exist_c_aux:w\\fi:\\use_none:n{#1}\\if_false:\\__prg_F_true:w\\fi:\\use:n}", protected_flag: false, source_mapping_guard: "cs_exist"},
-        {source: "\\cs_if_exist_p:c#1{\\if_cs_exist:w#1\\cs_end:\\__cs_if_exist_c_aux:w\\fi:\\use_none:n{#1}\\if_false:\\__prg_p_true:w\\fi:\\c_false_bool}", protected_flag: false, source_mapping_guard: "cs_exist"},
+        {source: "\\cs_if_exist:cTF#1{\\if_cs_exist:w#1\\cs_end:\\__cs_if_exist_c_aux:w\\fi:\\use_none:n{#1}\\if_false:\\__prg_TF_true:w\\fi:\\use_ii:nn}", protected_flag: false},
+        {source: "\\cs_if_exist:cT#1{\\if_cs_exist:w#1\\cs_end:\\__cs_if_exist_c_aux:w\\fi:\\use_none:n{#1}\\if_false:\\__prg_T_true:w\\fi:\\use_none:n}", protected_flag: false},
+        {source: "\\cs_if_exist:cF#1{\\if_cs_exist:w#1\\cs_end:\\__cs_if_exist_c_aux:w\\fi:\\use_none:n{#1}\\if_false:\\__prg_F_true:w\\fi:\\use:n}", protected_flag: false},
+        {source: "\\cs_if_exist_p:c#1{\\if_cs_exist:w#1\\cs_end:\\__cs_if_exist_c_aux:w\\fi:\\use_none:n{#1}\\if_false:\\__prg_p_true:w\\fi:\\c_false_bool}", protected_flag: false},
         {source: "\\use_i:nnnn#1#2#3#4{#1}", protected_flag: false},
         {source: "\\__prg_TF_true:w\\fi:\\use_ii:nn{\\fi:\\use_i:nn}", protected_flag: false},
         {source: "\\__prg_T_true:w\\fi:\\use_none:n{\\fi:\\use:n}", protected_flag: false},
         {source: "\\__prg_F_true:w\\fi:\\use:n{\\fi:\\use_none:n}", protected_flag: false},
         {source: "\\__prg_p_true:w\\fi:\\c_false_bool{\\fi:\\c_true_bool}", protected_flag: false},
-        {source: "\\cs_if_exist:NTF#1{\\if_meaning:w#1\\scan_stop:\\use_i:nnnn\\else:\\fi:\\if_cs_exist:N#1\\__prg_TF_true:w\\fi:\\use_ii:nn}", protected_flag: false, source_mapping_guard: "cs_exist"},
-        {source: "\\cs_if_exist:NT#1{\\if_meaning:w#1\\scan_stop:\\use_i:nnnn\\else:\\fi:\\if_cs_exist:N#1\\__prg_T_true:w\\fi:\\use_none:n}", protected_flag: false, source_mapping_guard: "cs_exist"},
-        {source: "\\cs_if_exist:NF#1{\\if_meaning:w#1\\scan_stop:\\use_i:nnnn\\else:\\fi:\\if_cs_exist:N#1\\__prg_F_true:w\\fi:\\use:n}", protected_flag: false, source_mapping_guard: "cs_exist"},
-        {source: "\\cs_if_exist_p:N#1{\\if_meaning:w#1\\scan_stop:\\use_i:nnnn\\else:\\fi:\\if_cs_exist:N#1\\__prg_p_true:w\\fi:\\c_false_bool}", protected_flag: false, source_mapping_guard: "cs_exist"},
+        {source: "\\cs_if_exist:NTF#1{\\if_meaning:w#1\\scan_stop:\\use_i:nnnn\\else:\\fi:\\if_cs_exist:N#1\\__prg_TF_true:w\\fi:\\use_ii:nn}", protected_flag: false},
+        {source: "\\cs_if_exist:NT#1{\\if_meaning:w#1\\scan_stop:\\use_i:nnnn\\else:\\fi:\\if_cs_exist:N#1\\__prg_T_true:w\\fi:\\use_none:n}", protected_flag: false},
+        {source: "\\cs_if_exist:NF#1{\\if_meaning:w#1\\scan_stop:\\use_i:nnnn\\else:\\fi:\\if_cs_exist:N#1\\__prg_F_true:w\\fi:\\use:n}", protected_flag: false},
+        {source: "\\cs_if_exist_p:N#1{\\if_meaning:w#1\\scan_stop:\\use_i:nnnn\\else:\\fi:\\if_cs_exist:N#1\\__prg_p_true:w\\fi:\\c_false_bool}", protected_flag: false},
         {source: "\\exp_end_continue_f:w{`^^@}", protected_flag: true},
         {source: "\\exp_not:f#1{\\__kernel_exp_not:w\\exp_after:wN{\\exp:w\\exp_end_continue_f:w#1}}", protected_flag: false},
         {source: "\\__seq_put_left_aux:w\\s__seq{\\exp_stop_f:}", protected_flag: false},
@@ -5781,18 +6255,43 @@ pub fn enable_script_expl3(st: State) State^ {
         {source: "\\seq_if_in:NnTF#1#2{\\group_begin:\\tl_set:Nn\\l__seq_internal_a_tl{#2}\\cs_set_protected:Npn\\__seq_item:n##1{\\tl_set:Nn\\l__seq_internal_b_tl{##1}\\if_meaning:w\\l__seq_internal_a_tl\\l__seq_internal_b_tl\\exp_after:wN\\__seq_if_in:\\fi:}#1\\group_end:\\prg_return_false:\\prg_break_point:\\exp_end:}", protected_flag: true},
         {source: "\\seq_if_in:NnT#1#2{\\group_begin:\\tl_set:Nn\\l__seq_internal_a_tl{#2}\\cs_set_protected:Npn\\__seq_item:n##1{\\tl_set:Nn\\l__seq_internal_b_tl{##1}\\if_meaning:w\\l__seq_internal_a_tl\\l__seq_internal_b_tl\\exp_after:wN\\__seq_if_in:\\fi:}#1\\group_end:\\prg_return_false:\\prg_break_point:\\exp_end:\\use:n\\use_none:n}", protected_flag: true},
         {source: "\\seq_if_in:NnF#1#2{\\group_begin:\\tl_set:Nn\\l__seq_internal_a_tl{#2}\\cs_set_protected:Npn\\__seq_item:n##1{\\tl_set:Nn\\l__seq_internal_b_tl{##1}\\if_meaning:w\\l__seq_internal_a_tl\\l__seq_internal_b_tl\\exp_after:wN\\__seq_if_in:\\fi:}#1\\group_end:\\prg_return_false:\\prg_break_point:\\exp_end:{}}", protected_flag: true}])^;
-    let string_macro = if (macros.definitions["control:bool_to_str:N"] != null) macros else
-        assign_meaning(macros, "control:bool_to_str:N", expl3_bool_to_str_macro()^, true)^;
+    // Native substitutes this delimiter macro into the error body before tokenization.
+    let question_macro={*:latex_macro(0,false,false,false,[],[])^,prefix:text_tokens("?")^};
+    let with_question=if(msg_support.definitions["control:???"]!=null)macros else
+        assign_meaning(macros,"control:???",question_macro,true)^;
+    let msg_macro=with_question.definitions["control:__msg_expandable_error:nn"];
+    // Substitution retains a literal space after the special control sequence.
+    let msg_body=if(msg_support.definitions["control:__msg_expandable_error:nn"]!=null) [] else
+        [for(t in msg_macro.body) if(t.kind=="control" and t.value=="???") [t,{kind:"char",value:" ",cat:10,start:-1,end:-1}] else [t]];
+    let with_message=if(msg_support.definitions["control:__msg_expandable_error:nn"]!=null) with_question else
+        assign_meaning(with_question,"control:__msg_expandable_error:nn",{*:msg_macro,body:[for(part in msg_body, t in part) t]},true)^;
+    let prefix=with_message.definitions["control:c__msg_text_prefix_tl"];
+    let with_prefix=if(msg_support.definitions["control:c__msg_text_prefix_tl"]!=null)with_message else
+        assign_meaning(with_message,"control:c__msg_text_prefix_tl",{*:prefix,long_ok:false},true)^;
+    let more=with_prefix.definitions["control:c__msg_more_text_prefix_tl"];
+    let with_more=if(msg_support.definitions["control:c__msg_more_text_prefix_tl"]!=null)with_prefix else
+        assign_meaning(with_prefix,"control:c__msg_more_text_prefix_tl",{*:more,long_ok:false},true)^;
     let existence_aliases = [for (family in ["tl", "seq", "int", "bool", "clist", "prop", "str", "dim"],
         suffix in [":NTF", ":NT", ":NF", "_p:N", ":cTF", ":cT", ":cF", "_p:c"])
             {name: family ++ "_if_exist" ++ suffix, kind: "alias", value: "cs_if_exist" ++ suffix}];
-    let with_existence_aliases = enable_expl_values(string_macro, existence_aliases)^;
+    let early_existence=enable_expl_values(with_more,existence_aliases)^;
+    let with_iow=enable_expl_values(early_existence,[{name:"iow_char:N",kind:"alias",value:"cs_to_str:N"}])^;
+    let prefix_scan=csname_tokens({*:with_iow,input:stream.push(with_iow.input,[control_token("c__msg_text_prefix_tl"),control_token("endcsname")])},20000000)^;
+    let more_scan=if(prefix_scan.state.issue!=null) prefix_scan else
+        csname_tokens({*:prefix_scan.state,input:stream.push(prefix_scan.state.input,[control_token("c__msg_more_text_prefix_tl"),control_token("endcsname")])},20000000)^;
+    let with_catalog=if(more_scan.state.issue!=null)more_scan.state else
+        enable_msg_catalog(more_scan.state,message_catalog.prepared(),message_catalog.dynamic(),prefix_scan.name,more_scan.name)^;
+    let string_macro = if (with_catalog.definitions["control:bool_to_str:N"] != null) with_catalog else
+        assign_meaning(with_catalog, "control:bool_to_str:N", expl3_bool_to_str_macro()^, true)^;
     let sequence_eq_aliases = [for (scope in ["set", "gset"], pattern in ["cN", "Nc", "cc"])
         {name: "seq_" ++ scope ++ "_eq:" ++ pattern, kind: "alias", value: "tl_" ++ scope ++ "_eq:" ++ pattern}];
-    let with_sequence_aliases = enable_expl_values(with_existence_aliases, sequence_eq_aliases)^;
+    let with_sequence_aliases = enable_expl_values(string_macro, sequence_eq_aliases)^;
+    let pop_aliases=[for(scope in ["","g"],arg in ["NN","cN"],suffix in ["","TF","T","F"])
+        {name:"seq_" ++ scope ++ "pop:" ++ arg ++ suffix,kind:"alias",value:"seq_" ++ scope ++ "pop_left:" ++ arg ++ suffix}];
+    let with_pop_aliases=enable_expl_values(with_sequence_aliases,pop_aliases)^;
     let boolean_eq_aliases = [for (scope in ["set", "gset"], pattern in ["NN", "cN", "Nc", "cc"])
         {name: "bool_" ++ scope ++ "_eq:" ++ pattern, kind: "alias", value: "tl_" ++ scope ++ "_eq:" ++ pattern}];
-    enable_expl_values(with_sequence_aliases, boolean_eq_aliases)
+    enable_expl_values(with_pop_aliases, boolean_eq_aliases)
 }
 
 // tokenize trusted bundled TeX definitions under expl3 category codes.
@@ -5802,16 +6301,85 @@ fn expl3_definition_tokens(reader_state, output = []) any^ {
     else expl3_definition_tokens(next.reader, [*output, {*:next.token, direct: false}])
 }
 
+fn enable_msg_catalog(st: State, prepared, dynamic, prefix, more_prefix) State^ {
+    let items=[for(entry in prepared)
+        *["control:" ++ prefix ++ entry.module ++ "/" ++ entry.name,entry.text,
+          "control:" ++ more_prefix ++ entry.module ++ "/" ++ entry.name,entry.extra]];
+    let defaults=map(items);
+    // Caller-supplied definitions retain precedence over the standard catalog.
+    let merged={*:defaults,*:st.definitions};
+    enable_dynamic_messages({*:st,definitions:merged},dynamic,prefix,more_prefix)
+}
+
+fn enable_dynamic_messages(st: State, records, prefix, more_prefix, index = 0) State^ {
+    if (index >= len(records) or st.issue != null) st
+    else {
+        let entry=records[index];
+        let suffix=entry.module ++ "/" ++ entry.name;
+        let with_text=enable_msg_definition(st,prefix ++ suffix,entry.body,entry.preexpand)^;
+        let with_more=if(with_text.issue!=null)with_text else enable_msg_definition(with_text,more_prefix ++ suffix,entry.extra,entry.preexpand)^;
+        enable_dynamic_messages(with_more,records,prefix,more_prefix,index+1)
+    }
+}
+
+fn enable_msg_definition(st: State, name, body, preexpand, replace = false) State^ {
+    if(not replace and st.definitions["control:" ++ name]!=null) st
+    else {
+        let source="\\__msg_catalog_entry#1#2#3#4{" ++ body ++ "}";
+        let source_reader={*:reader.reader(source,-1),endline:-1,
+            catcodes:expl3.syntax_codes({'{':1,'}':2,'#':6,[chr(0)]:13})};
+        let raw=expl3_definition_tokens(source_reader)^;
+        // Native's enclosing use:e expands these bodies in the current format state.
+        let expanded=if(preexpand) definition_tokens({*:st,input:stream.push(st.input,[*slice(raw,10,len(raw)-1)^,brace_token(false)])},20000000)^
+            else {state:st,tokens:slice(raw,10,len(raw)-1)^};
+        let parsed=[*slice(raw,0,10)^,*expanded.tokens,brace_token(false)];
+        let tokens=[control_token(name),*slice(parsed,1,len(parsed))^];
+        let ready=expanded.state;
+        if(ready.issue!=null)ready else define({*:ready,input:stream.push(ready.input,tokens)},true,true,false,false,20000000)
+    }
+}
+
+// The catalog generator uses the same TeX definition scanner as runtime bootstrap.
+pub fn compile_message_templates(st: State, records) any^ => compile_message_templates_inner(st,records)
+fn compile_message_templates_inner(st: State, records, index = 0, output = []) any^ {
+    if(st.issue!=null) {issue:st.issue,templates:output}
+    else if(index>=len(records)) {issue:null,templates:output}
+    else {
+        let entry=records[index];
+        if(entry.preexpand) compile_message_templates_inner(st,records,index+1,output)
+        else {
+            let text_state=enable_msg_definition(st,"__catalog_compiler",entry.body,false,true)^;
+            let text=text_state.definitions["control:__catalog_compiler"];
+            let extra_state=if(text_state.issue!=null)text_state else
+                enable_msg_definition(text_state,"__catalog_compiler",entry.extra,false,true)^;
+            let extra=extra_state.definitions["control:__catalog_compiler"];
+            let next=[*output,{module:entry.module,name:entry.name,text:text,extra:extra}];
+            compile_message_templates_inner(extra_state,records,index+1,next)
+        }
+    }
+}
+
+
+fn msg_module_pair(entry) any^ {
+    let value_reader={*:reader.reader(entry.value,-1),endline:-1,
+        catcodes:expl3.syntax_codes({'{':1,'}':2,'#':6,[chr(0)]:13})};
+    let value=expl3_definition_tokens(value_reader)^;
+    [control_token("__prop_pair:wn"),*text_tokens(entry.name)^,control_token("s__prop"),
+        brace_token(true),*value,brace_token(false)]
+}
+fn msg_module_property(entries) any^ => expl3.token_list([control_token("s__prop"),control_token("__prop_chk:w"),
+    *[for(entry in entries, t in msg_module_pair(entry)^) t]])
+
 fn enable_expl_macro_sources(st: State, definitions, index = 0) State^ {
     if (index >= len(definitions)) st
     else {
         let definition = definitions[index];
         let source_reader = {*:reader.reader(definition.source, -1), endline: -1,
-            catcodes: expl3.syntax_codes({'{': 1, '}': 2, '#': 6, [chr(0)]: 13})};
+            catcodes: expl3.syntax_codes({'{': 1, '}': 2, '#': 6, [chr(0)]: 13, '?': if (definition.question_letters == true) 11 else 12})};
         let tokens = expl3_definition_tokens(source_reader)^;
         let name = key(tokens[0]);
         let created = if (st.definitions[name] != null) st else
-            define({*:st, input: stream.push(st.input, tokens)}, true, true,
+            define({*:st, input: stream.push(st.input, tokens)}, true, definition.long_ok != false,
                 definition.protected_flag, false, 20000000)^;
         let next = if (st.definitions[name] == null and created.issue == null and
             definition.source_mapping_guard != null)

@@ -1,0 +1,17 @@
+{
+  cases: 20,
+  failures: []
+}
+[{
+    constructor: false,
+    issue: null,
+    text: true,
+    diagnostics: true,
+    ast: true
+  }, {
+    constructor: true,
+    issue: null,
+    text: true,
+    diagnostics: true,
+    ast: true
+  }]

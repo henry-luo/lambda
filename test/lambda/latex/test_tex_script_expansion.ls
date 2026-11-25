@@ -232,6 +232,7 @@ fn test_latex_document(source) any^ {
 "pdf checksum file unsupported:"; test_unsupported("\\pdfmdfivesum file{missing.tex}")
 "captured file queries:"; test_captured("\\pdffilesize{a.tex},\\pdfmdfivesum file{a.tex},\\pdffilemoddate{a.tex}", {'a.tex': {data: "abc"}})
 "captured empty and unicode files:"; test_captured("\\pdffilesize{empty},\\pdffilesize{utf8}", {empty: {data: ""}, utf8: {data: "é"}})
+"captured empty file checksum:"; test_captured("\\pdfmdfivesum file{empty}", {empty: {data: ""}})
 "missing captured file:"; test_captured("[\\pdffilesize{missing}][\\pdfmdfivesum file{missing}][\\pdffilemoddate{missing}]", {})
 "captured path restrictions:"; test_captured("[\\pdffilesize{../secret}][\\pdffilesize{/secret}]", {'../secret': {data: "abc"}, '/secret': {data: "abc"}})
 "unavailable file source:"; test_unsupported("\\pdffilesize{missing}")

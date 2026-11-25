@@ -1,0 +1,13 @@
+{
+  cases: 15,
+  failures: [],
+  guarded: [{
+      expr: "sin(1e35)",
+      issue: "tex-unsupported-primitive",
+      unsupported: "fp sin"
+    }]
+}
+{
+  cases: 2,
+  failures: []
+}

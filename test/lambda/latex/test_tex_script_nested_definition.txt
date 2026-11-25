@@ -28,9 +28,9 @@
     native: null
   }, {
     body: "\\newenvironment{x}\n{\\renewcommand{\\foo} {A}}\n{B}X",
-    issue: "latex-digest-unsupported",
-    unsupported: "inline definition source gap",
-    matches: null,
+    issue: null,
+    unsupported: null,
+    matches: true,
     actual: null,
     native: null
   }, {

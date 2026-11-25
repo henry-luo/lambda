@@ -1,0 +1,5 @@
+{
+  cases: 21,
+  duplicate_guard: true,
+  failures: []
+}

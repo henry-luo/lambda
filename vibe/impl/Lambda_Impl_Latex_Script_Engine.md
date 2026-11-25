@@ -33,6 +33,726 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Property lookup, 2026-11-25:** Native-shaped `\\prop_get:NnN` and
+  `\\prop_get:cnN`, including T/F/TF variants, now use the existing property
+  splitter and native conditional flow. Twenty native text, message and
+  diagnostic comparisons cover found/missing keys, assignments, aliases,
+  protected expansion and macro meanings; two undeclared-target cases retain
+  the explicit `__prop_split_wrong:Nw` boundary. The 22-case candidate
+  regression passed interpreter and JIT with forced GC and poisoning, including
+  after installation, and eight tree comparisons matched or reached independent
+  guards. The regression also passes GTest. Expanded-key variants for N/c
+  property names, V/v/o/e/x keys and c targets now use native-shaped argument
+  helpers. The candidate matches 28 ordinary comparisons, ten macro-meaning,
+  alias and protected-expansion checks, and eight independently defined,
+  `\\ifx`-equivalent substitution probes. Sixteen document-tree probes match or
+  reach independent guards. Invalid key-variable probes match native; undeclared
+  properties retain the explicit splitter boundary. The three variant fixtures
+  and existing lookup fixture pass candidate GTest; the four permanent variant
+  regressions pass both tiers under forced GC. The installed package also passes
+  all four regressions in JIT under forced GC; linked-property and non-expandable
+  error recovery remain open (S1.8,
+  D10.2.2).
+
+- **Sequence function mapping, 2026-11-25:** Native-shaped
+  `\\seq_map_function:NN`/`:cN` and map-break macros now execute through the
+  general TeX macro engine. The isolated candidate matched 18 initial text,
+  message and diagnostic comparisons, plus eight nested-break and expanded
+  definition probes. Ten tree comparisons matched or reached independent
+  digest guards. A 20-case regression passed both tiers with forced GC and
+  poisoning. After adding a nested-break case, the installed 22-case regression
+  passes both tiers with forced GC and poisoning; the existing sequence-membership
+  and property regressions also pass in JIT under forced GC; the new regression
+  also passes GTest. Inline mapping and the broader non-expandable message layer remain
+  open (S1.8, D10.2.2).
+
+- **Expanded-space skipping, 2026-11-25:** `\\ignorespaces` now uses the
+  shared expanded-token scanner and returns the first non-space token to the
+  input, as native does. Twenty-six direct, macro-generated, conditional, alias,
+  grouping and EOF comparisons match native text, messages and diagnostics in
+  both constructor modes and in both execution tiers under forced GC and
+  poisoning. Ten document-tree probes match and two reach an existing inline
+  definition guard; a permanent tree regression covers both outcomes. A
+  subsequent `\\noexpand` probe exposed a one-use protection mismatch: the
+  scanner returned the protection flag after it had already consumed it.
+  The operation now shares numeric scanning's protection-reset helper; three
+  additional native comparisons pass both tiers under forced GC and poisoning;
+  the full regression passes GTest, and the shared expression-recovery golden
+  matches under forced GC in JIT. The math-environment golden now records its
+  newly native-equal `\\ignorespaces` tree and matches the live JIT result
+  (S1.8, D10.2.2).
+
+- **Property-list dependency investigation, 2026-11-25:** Native expandable
+  messages depend on generic expl3 property lists. An isolated candidate in
+  `temp/latex-parity/prop-candidate/` matches native on 18 ordinary and 13
+  alias/conditional cases and reproduces the public macro meanings. It is not
+  installed: `\\escapechar=-1\\prop_put:Nnn` executes the prototype's whole
+  assignment during number scanning, whereas native first completes the
+  numeric assignment; inserting `\\scan_stop:` makes the results match. Its
+  dispatch metadata may also differ from an independently defined, `\\ifx`-equal
+  macro, and duplicate declarations need native message recovery. The
+  underlying helpers need a substitutable, correctly staged implementation
+  rather than a per-name shortcut (S1.8, D10.2.2).
+
+  A second isolated candidate uses the shipped upstream macro shapes for
+  property assignment and flat-property lookup, including their expansion
+  helpers, rather than dispatch metadata. Eight key, category-code and
+  assignment-order probes match native text, diagnostics and messages in the
+  interpreter. Alias, macro-meaning, conditional and duplicate-declaration
+  checks match another 31 native comparisons, including an independently
+  defined equivalent macro. The upstream-shaped flat-property operations are
+  now installed; duplicate declarations explicitly stop at the unported native
+  message machinery, and sampled document trees stop at the existing
+  control-sequence existence source-mapping guard. The permanent regression
+  passes 21 native text, diagnostic and message comparisons in interpreter and
+  JIT, including forced collection and freed-memory poisoning; both were
+  rerun against the private stable executable after workspace binary drift.
+  Bootstrap now also preserves a `\\c_empty_prop` definition supplied by the
+  caller's kernel; the regression passes both tiers under forced GC and
+  poisoning.
+  The constructor
+  sweep's frozen expansion module predates this installation and needs
+  requalification (S1.8, D10.2.2).
+
+  Missing property assignment targets currently reach the explicit
+  `__prop_split_wrong:Nw` unsupported boundary; six other empty, missing-read,
+  expansion and replacement probes match native. A recovery regression was
+  added after the stable sweep manifest and passes both tiers with forced GC
+  and poisoning; it must be included in the sweep's final drift assessment.
+  Removing the existence, token-list conditional and
+  token-list assignment digest guards in isolation yielded 32 native tree
+  matches and one independent prefixed-macro guard; 34 further comparisons
+  match in both constructor modes. Historical token-list insertion examples
+  still differ in legacy nested formatting, but match in constructor mode.
+  A 30-case matrix found the same two legacy mismatches and no constructor
+  mismatches. However, the insertion guard is shared with sequence helpers:
+  an eight-case sequence comparison exposed a constructor-mode mismatch
+  inside `\\textbf`, where unimplemented expandable-message tokens leaked into
+  the output and diagnostics differed before message support. The shared
+  insertion guard was restored pending a fresh tree audit. After expandable
+  messages were installed, the previously failing nested sequence case and
+  a further 30 token-list and sequence tree comparisons match native in
+  constructor mode. Right-pop checks either match or reach the independent
+  constructor-argument assignment guard. The token-list assignment guard is
+  now limited to legacy mode, where the nested mismatch persists. Its 16-case
+  regression passes interpreter and JIT with forced GC and poisoning. The
+  token-list conditional and existence guards were subsequently removed after
+  the audits below (S1.8, D10.2.2).
+
+  A fresh isolated control-sequence existence guard audit now exercises
+  branches that define commands: 16 body-definition comparisons and all eight
+  mode variants of the original preamble-definition cases match native trees;
+  a further 32-case alias, nested and dynamic-name audit has no silent
+  mismatch. All 28 original guarded examples also match native trees. Their
+  regressions now compare trees, text, diagnostics and messages and pass with
+  forced GC in JIT; a new 16-case definition-branch regression passes in both
+  tiers and in the GTest harness after installation. The existence guard and
+  its unused tracking flag are removed; property examples initially reached
+  the independent token-list conditional guard addressed below (S1.8, D10.2.2).
+  The four larger strengthened existence fixtures match in direct JIT runs
+  with forced GC. A concurrent GTest run hit the 60-second fixture limit for
+  all four. Their native tree comparisons were moved to smaller dedicated
+  fixtures (the original four cases already have two-mode coverage above),
+  preserving all cases. A fresh GTest run is qualifying the split fixtures
+  without changing the timeout; its first two expansion-only fixtures still
+  time out under the concurrent sweep. A further split of all 130 original
+  expansion cases was applied using `temp/latex-parity/prepare-existence-split.py`.
+  All eleven resulting expansion and tree fixtures pass GTest with the original
+  timeout, including under the concurrent sweep. The shared comparison helper
+  retains the original expected fields and all original golden records.
+
+  Property pop/remove now reuses the native property splitter and generated
+  local/global conditional shapes. Twenty-four initial text, diagnostic and
+  message comparisons match native, and eight document-tree comparisons match
+  or reach independent guards. The candidate's permanent pop and removal
+  fixtures pass both tiers under forced GC, including after installation, and
+  both pass GTest. Malformed or linked-property paths and other
+  generated variants remain explicit unsupported boundaries (S1.8, D10.2.2).
+
+  An isolated follow-up removed that conditional guard. Twenty initial native
+  comparisons, including the earlier definition-offset cases, have no silent
+  mismatch; property examples in legacy mode reach the separate token-list
+  assignment guard, and both examples match native trees in constructor mode.
+  An additional 36 alias, nested-command and math comparisons and 30 token
+  count, stringification and sequence-emptiness comparisons have no silent
+  mismatch. Eighteen existing tree checks pass against the candidate; a new
+  16-case native tree regression passes both tiers with forced GC, including
+  after installation. The guard and unused tracking flag are now removed, and
+  the expanded property-tree regression checks native equality in constructor
+  mode and the separate assignment guard in legacy mode; it also passes both
+  tiers under forced GC after installation. Both regressions pass GTest
+  (S1.8, D10.2.2).
+
+- **Expandable message investigation, 2026-11-25:** An isolated candidate
+  under `temp/latex-parity/msg-candidate/` implements upstream-shaped message
+  expansion, its argument helpers and the delimiter mismatch used for native
+  diagnostics. Five comparisons with a user-defined message match native,
+  including execution, `\\edef` and public macro meanings. The candidate does
+  not yet initialize the built-in message catalog or module registrations and
+  is not installed. Sequence-message comparisons using explicitly initialized
+  data match all three constructor-mode probes, including the nested sequence
+  case. Five registration, replacement and meaning comparisons and seven
+  additional alias, unknown-message, scope and Unicode probes also match;
+  duplicate declarations explicitly reach the unported `msg_error:nnnn` path.
+  An experimental catalog extracted from the bundled expl3 source matches
+  native presence for all 201 statically named declarations; two are inactive
+  under native's engine conditions. Three catalog meanings differ because their
+  declarations occur within `\\use:e`; applying the engine's general TeX
+  expansion during catalog initialization makes the full batch of 201
+  macro-meaning comparisons match. Module-name and module-type property
+  meanings and the unseeded sequence-message probes also match native. The
+  two engine-dependent declarations are temporarily excluded in this isolated
+  prototype; their native conditions and preservation of preloaded definitions
+  need to be implemented and tested before installation. The full message
+  layer and malformed cases remain open (S1.8, D10.2.2).
+
+  A generator prototype now extracts 202 static declarations, obtains the 200
+  active names from the native format, and derives both module-registration
+  lists from bundled source. Compiling ordinary message bodies with the Script
+  engine and installing them as immutable values avoids reparsing hundreds of
+  bodies on each expansion; the three declarations under `\\use:e` still use
+  actual runtime expansion. The compiled prototype matches native module
+  property meanings and preserves a custom prefix and handler under forced GC.
+  All 404 text/help meaning comparisons match native across eight shards; the
+  builtin sequence-message probes pass under forced GC in JIT. The generator
+  derives the two engine-dependent decisions from a private native-format
+  query; a pooled representation shares 142 immutable token values. Its helper
+  meanings, sequence probes and two custom-prefix preload cases pass under JIT
+  forced GC; all 404 pooled text/help comparisons match native across eight
+  shards. Both-tier message and neighboring tests passed against the candidate.
+
+  Source review then found a dynamically named message declaration inside a
+  macro template: native has `str/unescape-name` and `str/unescape-url`, but
+  the static candidate reported both absent. The generator now replays the
+  enclosing source template with the Script engine, compares its generated
+  text and help meanings against native, and includes both entries. It uses
+  the shared Script reader for source scanning and audits unhandled message
+  declarations. The resulting 202-message catalog, expandable-message macros
+  and sequence-pop family are installed. The message regression, both
+  sequence-pop regressions and property recovery pass in interpreter and JIT
+  under forced collection and freed-memory poisoning; generator `--check`
+  matches bundled source and native format. Non-expandable `\\msg_error`
+  recovery and the full message layer remain open (S1.8, D10.2.2).
+
+  Native non-expandable error probes confirm that `\\msg_error` performs
+  module lookup, redirection, line wrapping and `\\errmessage` recovery;
+  duplicate property declarations use that same path. Script currently stops
+  explicitly at the unported message or redirect command. Porting the shared
+  error and I/O machinery remains necessary; emitting a special-case diagnostic
+  would not cover the native behavior (S1.8, D10.2.2).
+
+- **Large-angle trigonometric quadrant, 2026-11-25:** Tangent qualification
+  exposed an installed sine/cosine defect above the finite `int` range: the
+  quadrant index saturated under **S4.1.1** and **S4.1.6**, so modulo and branch
+  selection were wrong. The evaluator now reduces the index modulo four as a
+  decimal before converting it. Fourteen large positive/negative native
+  comparisons and the existing trig golden pass in both tiers under forced GC
+  and poisoning. Tangent now propagates the sine/cosine uncertainty through
+  division; 38 initial and 80 pole/random native comparisons matched. The old
+  fixed large-angle cutoff is replaced by a reduction-boundary and rounding
+  uncertainty check. Another 78 wide-angle comparisons match native and six
+  ambiguous cases stay guarded. The updated trig and tangent regressions pass
+  in both tiers under forced GC and poisoning. The constructor sweep snapshot
+  predates these FP changes and must be requalified against the corrected
+  module (S1.8, D10.2.2).
+
+- **Constructor final-snapshot sweep, 2026-11-25:** A second candidate under
+  `temp/latex-parity/constructor-final/lmd` uses constructor mode by default
+  with all current engine fixes. Its JIT sweep starts from the current test
+  set, records hashes for the binary, copied modules, test sources, goldens
+  and test resources, and checks source/golden stability per fixture. The
+  final audit reports changed or added inputs and module/binary drift. Run
+  `temp/latex-parity/constructor-final-sweep.py`; progress and outputs are in
+  `temp/latex-parity/constructor-final-sweep/`. A separate tail shard runs with
+  `TEX_SWEEP_SHARD=tail` and keeps its own outputs and progress. The earlier
+  sweep remains useful for classifying known improvements but predates fixes
+  (S1.8, D10.2.2).
+
+  The final-snapshot sweep is not valid as a frozen-binary qualification: its
+  tail audit reports that `lambda.exe` changed during the run, and a later
+  attempted shard independently detected another binary hash mismatch. The
+  running main shard was interrupted. Keep its comparisons as investigation
+  evidence only; rerun against a stable binary and the final installed modules
+  before changing the default. Property and FP changes also postdate this
+  frozen expansion snapshot (S1.8, D10.2.2).
+
+  A replacement snapshot in `temp/latex-parity/constructor-stable/` copies the
+  current executable and package, enables the candidate default, and hashes
+  the copied binary, modules and fixture inputs. Its smoke test matches the
+  property-tree golden. A private executable isolates it from workspace
+  rebuilds, while the manifest detects test-resource changes. The combined
+  main and tail shards cover all 285 snapshot fixtures: 277 match their
+  goldens and eight are the previously native-verified tree improvements.
+  The combined audit records no binary, snapshot-module or original-input
+  drift. Property recovery and message regressions were added after the
+  manifest; the former passes both tiers under forced GC, and the latter
+  passes against the isolated message candidate. The live property preload
+  fix also postdates the snapshot. The final package still requires its own
+  qualification before changing the default (S1.8, D10.2.2).
+
+  A new `temp/latex-parity/constructor-current/` snapshot includes the current
+  property, message, sequence, `\\ignorespaces` and digest changes, copies the
+  frozen executable, and enables the candidate default in its private profile.
+  Its hash-audited JIT fixture sweep was stopped at 278 of 293 fixtures when the
+  goal was cleared; no final audit was produced. The live default remains
+  unchanged pending classification and final input/module drift checks. The
+  existence regression sources and shared test helper were changed after its
+  manifest, and the existence/conditional guard removals, sequence mapping and
+  property operations postdate the module snapshot; the final audit must account
+  for this drift and the added regressions.
+  The sweep's `expl3_bool` and `expl3_bool_inverse` changes are successful
+  native-equal constructor trees exposed by the narrowed assignment guard;
+  their live legacy-mode goldens still match. The general expl3 fixture used
+  left-pop as an unsupported-operation sentinel; it now uses the still
+  unsupported `\\halign`, and the updated live fixture matches its golden.
+  The four `expl3_put_cn` guard assertions now check native equality when a
+  tree is returned and retain the legacy assignment guard; the full fixture
+  matches its golden with both legacy and constructor defaults. Eight analogous
+  `expl3_tl_set_eq` and `_c` trees also match native in constructor mode; those
+  tests now share the same native-tree-or-legacy-guard check. The three fixtures
+  were split into nine smaller expansion/tree tests, preserving 97 original
+  comparisons and their goldens; all nine pass GTest under the original timeout.
+  The sweep also exposed extra `unsupported` fields in the legacy
+  `missing_relation` and `number_overflow` outputs after a test-helper change.
+  The original helper result shape has been restored, with a separate detail
+  helper for the new boundary assertions; `number_overflow` and
+  `missing_relation` now match their unchanged live JIT goldens.
+
+  `constructor-final-v2/lmd` is a copy of the earlier final snapshot with only the current
+  FP module changed; `module-diff.json` verifies the sole module delta. The
+  `constructor-fp-recheck.py` replayed all 16 fixtures whose source references
+  FP or the bundled expl3 fixture; all match. The shared FP helper, binary and
+  candidate FP module also retain their recorded hashes. Selection is
+  source-based, so the broader sweep and final drift audit remain necessary.
+
+- **Discard-boundary `\\unskip`, 2026-11-25:** Native input fixed its stale
+  output boundaries under LI-019 on 2026-11-14. Script now adjusts each open
+  box and discard boundary when removing an outer space, matching the current
+  native behavior instead of reporting unsupported. Thirteen expansion cases
+  in both constructor modes match native text, messages and diagnostics;
+  22 of 26 corresponding trees match and four remain explicitly guarded. The
+  original LI-019 nested-discard and global-definition cases and an included
+  source pass the regression in both tiers under forced GC and poisoning.
+  Insert passes in both tiers; box-register passes in JIT and a direct
+  interpreter run matches its golden after the harness timed out. The frozen
+  constructor sweep predates this expansion change (S1.8, D10.2.2).
+
+- **Token-list head trees, 2026-11-25:** A 50-case native comparison across
+  constructor modes produced 47 tree matches and three cases stopped by
+  independent command/environment guards. Twenty-four `N`, `V` and `v`
+  probes all reached existing argument-mapping guards. The redundant global
+  `\\tl_head:n` digest guard was removed; a 24-case text/diagnostic/tree
+  regression passes in both tiers under forced GC and poisoning. All four
+  existing head-variant goldens match in direct forced-GC runs in both tiers.
+  The frozen constructor sweep predates this guard removal (S1.8, D10.2.2).
+
+- **Unicode math atoms, 2026-11-25:** Native groups contiguous non-ASCII
+  bytes into `unicode_text`, while Script previously rejected them as math
+  atoms. The math scanner now shares source-adjacency handling with raw math
+  text and constructs native-shaped Unicode atoms. The included Unicode
+  `\\vcenter` probe matches native text, diagnostics and tree in both
+  constructor modes. Twenty-six direct and ten macro-generated comparisons,
+  an included-source regression and the `\\vcenter` neighbor pass in both
+  tiers under forced GC and poisoning. The raw-math harness timed out in both
+  tiers under concurrent load; direct forced-GC runs matched the full golden.
+  Unbraced Unicode script arguments remain guarded, with the guard tested in
+  both tiers, because native consumes them bytewise and produces invalid
+  UTF-8; recorded as [LI-118](../Lib_Input_Issue_Ledger.md#li-118) (S1.8,
+  D10.2.2).
+
+- **Math `\\vcenter`, 2026-11-25:** Native math parsing represents the
+  expanded wrapper as a `box_transform` with a script-argument body. The
+  Script math digester now constructs that node and lets other source-mapping
+  checks handle non-math and nested-box cases. Four existing math examples
+  match native trees; all other examples in the 26-case corpus stop at more
+  specific mapping guards. A 20-case text/diagnostic/message/tree regression
+  across both constructor modes and the existing `\\vcenter` golden pass in
+  interpreter and JIT under forced GC and poisoning. An included ASCII source
+  matches text, diagnostics and tree in both modes in the same regression;
+  included Unicode previously reached a separate math-atom guard, which is
+  being investigated.
+  The frozen constructor sweep predates this digest change (S1.8, D10.2.2).
+
+- **Font-token source mapping, 2026-11-25:** The constructor-aware path
+  retains font commands within formatting arguments, resolving the older
+  mismatch where legacy argument expansion consumed them. The font-token
+  digest guard is now limited to legacy mode; the constructor-aware native
+  comparisons cover plain and math text, nested formatting, defined fonts,
+  aliases and `\\edef`. Nine text/diagnostic/message/tree regressions and the
+  existing font-token golden pass in interpreter and JIT under forced GC and
+  poisoning. Other font-family and generated-text
+  guards remain in force. The frozen constructor sweep predates this guard change (S1.8,
+  D10.2.2).
+
+- **Floating-point extrema and directed rounding, 2026-11-25:** `min` and
+  `max` now accept multiple operands and retain the first equal operand,
+  including its zero sign; `sign`, `trunc`, `floor` and `ceil` follow native
+  finite-number behavior. Nineteen extrema cases, two trees and 24 directed
+  rounding cases pass in interpreter and JIT under forced GC and poisoning;
+  another 30 deterministic and 12 extreme-scale directed-rounding cases match
+  native text, messages and diagnostics. Four extreme-scale cases are in the
+  permanent regression. The existing FP,
+  round and trig goldens pass in both tiers under the same GC settings.
+  Fractional or out-of-range precision
+  remains guarded (S1.8, D10.2.2).
+
+- **Definition-target recovery, 2026-11-25:** The `\\newcommand` family and
+  document-command definitions now share native-style control-sequence target
+  scanning, including missing targets, nested braces and unbraced input.
+  Document signatures and bodies also use shared malformed-argument recovery.
+  Fifteen native text/diagnostic cases and an included-file origin case pass
+  in interpreter and JIT with forced GC and poisoning. The frozen constructor
+  sweep predates this scanner change and the new regression, so its results
+  require requalification against the final package (S1.8, D10.2.2).
+
+- **Constructor sweep recovery, 2026-11-25:** The first sweep stopped after
+  67 recorded fixtures when debug workers filled the volume with a 13 GB
+  `log.txt`; its final 2,000 lines are saved in the sweep directory as
+  `disk-full-tail.log`. The generated log was cleared and the disk recovered.
+  The sweep resumed with the CLI's existing `--no-log` option, frozen module
+  and binary checks, and per-fixture source/golden hash checks. It completed
+  269 fixtures: 257 match, ten changes are native-verified improvements, the
+  grouped-source-gap fixture expected an obsolete guard for four comment cases
+  that now match native trees in both modes. Its assertion now requires native
+  trees; direct forced-GC runs match the golden in both tiers. The improvements
+  include paragraph assignments, a parenthesized command, a foreign-package
+  tree and trailing source. Their successful trees were checked against native.
+  `\\unexpanded` similarly matches native in constructor mode while legacy
+  mode retains its guard. Its strengthened test postdates the final sweep's
+  manifest; current interpreter/JIT tests and a forced-GC JIT run against
+  the final candidate match their golden. The FP fixture changed during the
+  earlier sweep and must be rerun against the final snapshot
+  (S1.8, D10.2.2).
+
+- **Floating-point rounding ties, 2026-11-25:** `round` now accepts the
+  third argument and follows native tie direction: positive chooses toward
+  positive infinity, negative toward negative infinity and zero chooses even.
+  Seventeen text/diagnostic comparisons and two document trees match native
+  in both tiers under forced GC and poisoning; fractional precision still
+  stops at the explicit `fp round` guard because native's message expansion
+  recovery is not ported. The existing FP golden passed in interpreter, and
+  the sine/cosine neighbor passes in both tiers (S1.8, D10.2.2).
+
+- **Floating-point sine and cosine, 2026-11-25:** Decimal quadrant reduction
+  now splits pi/2 to retain precision near roots and checks an uncertainty
+  interval before accepting the 16-digit result. Signed zero is preserved;
+  ambiguous rounding and quadrant indices outside signed 64-bit range remain
+  explicitly unsupported. The isolated candidate matched 158 ordinary and 80
+  near-root native results, plus large-angle probes through `10^18`. The
+  installed 14-case expansion and two-tree regression and the existing FP
+  golden pass in both tiers with forced GC and poisoning. The
+  269-fixture constructor sweep predates this FP change; its FP source and
+  golden also changed during the run, so that fixture must be requalified
+  against the final package (S1.8, D10.2.2).
+
+- **Unicode text-case investigation, 2026-11-25:** An isolated candidate
+  using Lambda's Unicode case mappings differs from native: `Straße` yields
+  `STRASSE` versus native `STRAße`; `café` exhausts native's 20-million
+  expansion budget with diagnostics; Greek lowercase emits native macro
+  mismatch diagnostics. The existing Unicode guard remains in place and the
+  combined long-running probe was stopped. Evidence is under
+  `temp/latex-parity/case-candidate/` (S1.8, D10.2.2).
+
+- **Trigonometry investigation, 2026-11-25:** An isolated decimal Taylor
+  candidate for `sin` and `cos` matched 157 of 158 initial native values; the
+  sole signed-zero difference was corrected in a follow-up probe. A targeted
+  set of 40 values near multiples of pi exposed 22 native last-digit
+  differences, so the candidate was not installed. Native's own range
+  reduction and rounding need to be reproduced; evidence is under
+  `temp/latex-parity/fp-candidate/` (S1.8, D10.2.2).
+
+- **Constructor default qualification, 2026-11-25:** A fresh isolated
+  package snapshot enables constructor argument mode by default while
+  preserving explicit false. All 24 character-definition cases match native
+  text and trees in that snapshot, versus 24 default-mode text mismatches in
+  the installed profile. A 269-fixture JIT golden sweep is running against
+  the frozen candidate (`temp/latex-parity/constructor-sweep/`, binary and
+  source/module hashes in `manifest.json`). Changed goldens require independent
+  native comparison; the installed default remains unchanged pending that
+  qualification (S1.8, D10.2.2).
+
+- **Document signature diagnostics, 2026-11-25:** Argument processors,
+  unknown types, excess argument counts and incomplete delimiter fields now
+  follow native definition recovery and diagnostic ordering. Unknown Unicode
+  types retain the exact single byte produced by native's C formatting, even
+  when it is not UTF-8. Twenty-three text/diagnostic cases match in both tiers
+  with forced GC and poisoning; modifier, embellishment and environment-tree
+  neighbors pass in both tiers. Native does not apply argument processors or
+  embellishments, so the matching diagnostic does not provide that feature
+  (S1.8, D10.2.2).
+
+- **Document signature modifiers and embellishments, 2026-11-25:** The `+`
+  and `!` modifiers now follow native signature scanning. The `e` and `E`
+  forms reproduce native's unsupported-embellishment diagnostic and empty
+  argument recovery. Ten cases for each path match native text and diagnostics
+  in both tiers with forced GC and poisoning. Argument processors and malformed
+  signature recovery remain open (S1.8, D10.2.2).
+
+- **Document environment bodies, 2026-11-25:** The `b` signature form
+  collects tokens through the matching environment end, preserves nested
+  same-name environments and leaves the closing command for normal handling.
+  Ten text/diagnostic cases, a child-to-parent file boundary and four document
+  trees match native in both tiers under forced GC and poisoning. Other
+  xparse forms and malformed-input recovery remain open (S1.8, D10.2.2).
+
+- **Document environments, 2026-11-25:** Document environment definitions
+  share the ordered xparse signature scanner and construct the native-shaped
+  begin/end macros. Duplicate definitions and renewals of undefined commands
+  or environments now recover with native diagnostics. Fourteen text and
+  diagnostic cases and four document trees match native in both tiers under
+  forced GC and poisoning. The `b` body argument and other unsupported
+  xparse forms remain open (S1.8, D10.2.2).
+
+- **Verbatim document arguments, 2026-11-25:** The `v` signature form uses
+  the native sequence of argument scanning, token printing and conversion to
+  category-other text tokens. Twelve expansion cases and four document
+  trees match native in both tiers with forced GC and poisoning. The scanner
+  now shares one implementation of the no-value default across optional
+  forms. Environment-body and embellishment arguments and malformed-input
+  recovery remain open (S1.8, D10.2.2).
+
+- **Delimited document arguments, 2026-11-25:** The `d`, `D`, `r` and `R`
+  signature forms now scan nested delimiters while preserving braces, support
+  equal opening and closing tokens, and use native absent/default behavior.
+  Missing required delimiters retain their input locations and emit native
+  diagnostics. The shared default scanner also accepts a single-token default.
+  Eighteen text/diagnostic cases, an included-file diagnostic and four document
+  trees match native in both tiers with forced GC and poisoning; optional
+  neighbors pass in both tiers. Other xparse variants and malformed signature
+  recovery remain open (S1.8, D10.2.2).
+
+- **Optional document arguments, 2026-11-25:** The ordered signature scanner
+  now supports `o`, `g` and `G` alongside the existing defaulted bracket
+  argument. `\\IfNoValue...` and `\\IfValue...` use the same unexpanded
+  argument and branch scanner as boolean tests. Thirteen expansion cases and
+  four document-tree cases match native text, diagnostics and trees where
+  applicable; both regressions pass in JIT and interpreter with forced GC and
+  poisoning. The 18 boolean cases also pass both tiers after the shared
+  conditional change. Other xparse argument forms and malformed-input recovery
+  remain open (S1.8, D10.2.2).
+
+- **Boolean document arguments, 2026-11-25:** Document command signatures now
+  store ordered `m`, `O`, `s` and `t` argument specifications separately
+  from TeX parameter text, and `\\IfBooleanTF`, `\\IfBooleanT` and
+  `\\IfBooleanF` select branches from unexpanded boolean tokens. Eighteen
+  expansion, alias, macro-meaning and protected-definition cases match native
+  text and diagnostics, and four document cases also match native trees; both
+  regressions pass in JIT and interpreter with forced GC and poisoning. The
+  existing expl3 golden passes in JIT after updating its former star-argument
+  guard; its interpreter GTest hit the 60-second limit, while a direct
+  interpreter replay matched the golden. Other xparse argument types and
+  malformed-input recovery remain open (S1.8, D10.2.2).
+
+- **Token-head source-mapping investigation, 2026-11-25:** With the existing
+  global `\\tl_head:n` tree guard temporarily removed, eight prior guarded
+  fixtures matched native. A further 12 control-sequence probes either
+  matched native or stopped at independent command/environment/math guards.
+  This does not prove source offsets for all expansion paths; the global
+  guard was restored unchanged. Probe outputs are in
+  `temp/latex-parity/tl-head-{candidate,controls-v2}.out` (S1.8, D10.2.2).
+
+- **Character definitions in constructor trees, 2026-11-25:** Character
+  emissions retain their source control token, and inline digestion reuses it
+  when its main-file origin is verified. Generic argument descriptors restore
+  verified control spellings and their source gaps; inline groups replay
+  adjacent controls together and preserve trailing whitespace. Twenty cases
+  match native trees and diagnostics in both tiers with forced GC and
+  poisoning; three nonidentical paragraph spans and one generated origin remain
+  guarded. The default non-constructor mode still reconstructs different TeX
+  text in all 24 regression cases;
+  constructor mode matches the investigated direct text case, so this is not
+  full expansion parity. The focused test and character golden pass both
+  tiers under forced GC and poisoning. The large integer-predicate fixture was
+  run directly in interpreter: its sole golden change is the newly matching
+  character-definition tree; the 60-second GTest harness was not used for
+  that long fixture. Further constructor-mode and source-mapping work remains
+  open (S1.8, D10.2.2).
+
+- **Included punctuation definitions, 2026-11-25:** The earlier native
+  control-word punctuation fix also resolves the included `\\catcode`
+  definition fixture. Its golden now checks the complete native tree and
+  passes in both tiers with forced GC and freed-memory poisoning. An included
+  UTF-8 control name still fails the independent native-token comparison and
+  remains guarded (S1.8, D10.2.2).
+
+- **Environment-argument recovery, 2026-11-25:** `\\begin` and `\\end` now
+  use the shared macro-argument recovery and continue with the partial name,
+  as native does. Fifteen missing, unclosed and extra-brace cases, including
+  an unfinished conditional, match native text and diagnostics in both tiers
+  with forced GC and freed-memory poisoning. The expansion golden was updated
+  for the recovered partial output; included environment diagnostics and
+  environment-option neighbors pass in both tiers. This covers TeX expansion;
+  native parser error-interface parity remains open (S1.8, D10.2.2).
+
+- **Incomplete conditionals and runaway offsets, 2026-11-25:** Conditional
+  stack entries now retain their origin and EOF recovery emits native-shaped
+  diagnostics for active conditions and skipped branches. Runaway macro
+  arguments retain the last fresh-token offset instead of unconditionally using
+  the file end. Thirty-seven conditional cases, six runaway-offset cases and an
+  included-file origin comparison match native text and diagnostics in both
+  tiers under forced GC and freed-memory poisoning. Five neighboring JIT
+  conditional goldens pass; four macro-argument goldens pass in both tiers and
+  the expansion golden was updated for recovery. Recovery also distinguishes
+  tests opened during operand expansion from conditionals skipped as source.
+  Malformed LaTeX `\\end` recovery, wider conditional variants and native
+  message-expansion behavior remain open (S1.8, D10.2.2).
+
+- **Sequence-pop recovery investigation, 2026-11-25:** Reproduced the
+  unsupported `\\seq_pop_left:NN`. An upstream-shaped macro candidate matches
+  native populated, empty and global-pop examples, but an undeclared sequence
+  exposes a broader incomplete-conditional defect: native reports both a
+  runaway-argument diagnostic and an incomplete conditional at offset 40,
+  while Script previously omitted the latter record and located the first at
+  offset 50. The later conditional and runaway fixes above resolve that probe.
+  An additional protected-expansion probe still differs because Script lacks
+  native `\\msg_expandable_error:nn` behavior. The sequence-pop candidate was
+  removed pending that separate parity work. Reproductions are in
+  `temp/latex-parity/seq-pop.ls` and `temp/latex-parity/incomplete-if.ls`
+  (S1.8, D10.2.2). A fresh upstream-shaped candidate with the property work
+  matches ordinary, empty, scoped and malformed-input cases, but in an `\\edef`
+  it leaves the unimplemented expandable-message tokens in the result instead
+  of producing native's macro-mismatch diagnostic. It remains isolated under
+  `temp/latex-parity/prop-upstream-candidate/`; installing it before fixing
+  generic expandable-message recovery would introduce incorrect output. With
+  the isolated message candidate, the upstream-shaped sequence-pop path now
+  matches native text and diagnostics in all 12 original cases, including
+  the protected-expansion case. The local/global left-pop operations, named
+  variants, conditionals and `\\seq_pop` aliases are now installed as
+  upstream-shaped macros. Two 16-case regressions compare text, diagnostics
+  and messages in both constructor modes; both pass interpreter and JIT with
+  forced collection and freed-memory poisoning. Local/global right-pop and
+  their named and conditional variants now use the same upstream-shaped macro
+  generator. Twenty initial and alias, assignment-order, malformed-input
+  and macro-meaning probes matched native; the permanent 20-case regression
+  and both left-pop regressions pass interpreter and JIT under forced GC and
+  poisoning. The earlier message and left-pop tests also pass the actual
+  GTest harness using a private frozen executable (S1.8, D10.2.2).
+
+- **Definition paragraph and comment gaps, 2026-11-25:** Echoed definition
+  spans now return the later paragraph tokens to the enclosing block parser;
+  comment-joined argument groups are retained through definition continuation.
+  Sixteen definition and line-ending cases and an included-file comparison match
+  native text, diagnostics and ASTs in both tiers under forced GC and
+  freed-memory poisoning. Five neighboring JIT goldens pass; the gap and
+  continuation goldens also pass in the interpreter under forced GC. Inline
+  continuation now leaves separated arguments to the enclosing parser and
+  retains consumed command whitespace; 21 nested formatting and generic-command
+  cases match native text, diagnostics and ASTs, and the former nested-definition
+  guard is resolved. The nested regression and golden pass in both tiers under
+  forced GC.
+  A concurrent workspace build temporarily removed `lambda.exe`, so one replay
+  could not start; the final regression was rerun successfully in both tiers
+  after the executable reappeared (S1.8, D10.2.2).
+
+- **Post-document comments, 2026-11-25:** Plain trailing source now uses the
+  shared paragraph/comment scanner, including empty comment paragraphs, CRLF,
+  blank lines and syntax characters inside comments. Sixteen text, diagnostic
+  and AST comparisons match native in both tiers with forced GC and
+  freed-memory poisoning. The tail-origin golden passes with one guard removed;
+  live trailing markup and the two other guarded document-end cases remain
+  open (S1.8, D10.2.2).
+
+- **Environment-option token boundary, 2026-11-25:** A verified emitted
+  control word is split when its spelling contains the closing option bracket;
+  the resulting token stream is retained for the list body. The formerly
+  guarded case now matches the native tree. Eighteen comparisons across three
+  list environments, three suffixes and spacing variants match native text,
+  diagnostics and trees in both tiers under forced GC and freed-memory
+  poisoning; the existing environment-option golden also passes in both tiers.
+  Boundaries in unverified emissions or skipped source gaps remain guarded
+  (S1.8, D10.2.2).
+
+- **Definition-option comments, 2026-11-25:** Removed the obsolete percent
+  guard after verifying that inline paragraph reconstruction retains raw
+  option bytes and matches native comment and escaped-percent trees. The
+  existing 28-case option golden now includes three formerly guarded matches;
+  nine additional nested, CRLF, blank-line and commented-bracket cases match
+  native text, diagnostics and ASTs. Both tests pass in both tiers with forced
+  GC and freed-memory poisoning (S1.8, D10.2.2).
+
+- **Control-word punctuation, 2026-11-25:** Extended native lexical splitting
+  to ordinary ASCII punctuation that TeX can assign letter category. Forty
+  native comparisons cover 21 characters in definition and formatting
+  contexts; text, diagnostics and ASTs match in both tiers under forced GC and
+  freed-memory poisoning. An unmatched opening parenthesis is treated as text
+  only after the complete reconstructed output proves it has no matching close;
+  both neighboring parenthesis goldens pass in both tiers. Other uncertain
+  parenthesized source mappings remain guarded (S1.8, D10.2.2).
+
+- **Unclosed-group error shape, 2026-11-25:** Group-scan failures now include
+  the cursor required when inline parsing propagates them. Five malformed
+  expanded and direct group cases previously failed with E201; they now return
+  `latex-digest-unclosed-group`, with text and TeX diagnostics matching native.
+  The regression passes in both tiers with forced GC and freed-memory poisoning;
+  the neighboring expanded and general-text goldens pass in JIT. Mapping the
+  digester error to the public native parser's error interface remains open
+  (S1.8, D10.2.2).
+
+- **Formatting-command control-word gaps, 2026-11-25:** The digester now
+  splits bracket-bearing TeX control words inside constructor arguments and
+  preserves following whitespace, comments and paragraph boundaries in the
+  reconstructed output. A 24-case regression matches native text, diagnostics
+  and trees in both tiers, including forced GC and freed-memory poisoning;
+  neighboring definition and environment goldens pass. The larger digest
+  GTest timed out at its unchanged 60-second limit twice, including an isolated
+  run; a direct JIT execution completed and exactly matched its golden. Further
+  punctuation and included-source coverage remains open (S1.8, D10.2.2).
+
+- **Raw general-text recovery, 2026-11-25:** Installed a shared scanner for
+  `\\expanded`, `\\unexpanded`, `\\detokenize` and `\\scantokens`. It inserts a
+  missing opening brace, retains partial text at EOF, and records native
+  diagnostics. Twelve direct cases match text and diagnostics; eight ASTs
+  match and four incomplete documents remain guarded as unclosed environments.
+  Three child-to-parent group boundaries match text, diagnostics and ASTs. The
+  regression passes in both tiers with forced GC and freed-memory poisoning;
+  seven neighboring goldens pass in both tiers. A 28-case opening-brace matrix
+  across all four primitives, active and `\\noexpand` aliases matches native
+  text, diagnostics and ASTs under forced GC in both tiers. Wider raw-text
+  matrices, release performance and error parity for incomplete document
+  trees remain open (S1.8, D10.2.2).
+
+- **`\\expanded` replay and recovery, 2026-11-25:** Installed a narrow
+  `\\expanded` path that replays stored tokens without direct-source identity,
+  recovers partial text at EOF, and follows native opening-brace scanning,
+  including aliases and temporary `\\noexpand` relax meanings. The 18-case
+  text/diagnostic regression and included-file location and AST comparison pass
+  in both tiers with forced GC and freed-memory poisoning. Four incomplete
+  document trees remain explicitly guarded. Seven expanded-argument,
+  parameter, `\\unexpanded`, `\\detokenize` and `\\noexpand` goldens pass in
+  both tiers. The broader staged raw-general-text work described below remains
+  open and the previous scratch snapshots are absent (S1.8, D10.2.2).
+
+- **Definition control-word source gaps, 2026-11-25:** The installed digester
+  splits `]` from a TeX control word when native source scanning ends before
+  it, and preserves the source gap consumed by the TeX reader. Restored gaps
+  retain comment spelling through paragraph reconstruction, including CRLF and
+  blank lines. A 24-case regression matches native text, diagnostics and ASTs
+  in both tiers, normally and with forced GC and freed-memory poisoning. The
+  environment-option, definition-gap, definition-join and generated-definition
+  parity goldens also pass in both tiers. Other punctuation and inline-format
+  source mappings still need qualification (S1.8, D10.2.2).
+
+- **Macro-prefix recovery, 2026-11-25:** Installed recovery for a mismatched
+  leading delimiter: the call is discarded, the unmatched token is returned,
+  and the native diagnostic is recorded; end of input does not diagnose a
+  mismatch. Eleven focused cases compare text and diagnostic records with native
+  TeX in both tiers, including aliases, matched calls and true EOF. They pass normally and
+  with forced GC and freed-memory poisoning; the expansion golden also passes
+  in both tiers after updating its former fatal-mismatch expectation. An
+  included-file case also matches native text, diagnostic location and AST in
+  both tiers under forced GC. Broader source-mapping qualification remains open
+  (S1.8, D10.2.2).
+
+- **Empty captured resources, 2026-11-25:** Installed the resource-boundary
+  fix: preserve zero-byte captured resources as empty text because conversion
+  to binary produces null (**S2.2.2v2**), then decode through the shared UTF-8
+  decoder. The previously failing profile, read and readline GTests pass with
+  unchanged goldens in both JIT and interpreter. The expansion golden now also
+  checks the MD5 of an existing empty file and passes in both tiers. The other
+  staged changes described below remain uninstalled and require fresh
+  reproductions: the prior scratch snapshots are absent from this checkout
+  (S1.8, D10.2.2, D11.1.2).
+
 - **Definition source-mapping regression, 2026-11-24:** The installed JIT
   corpus reports `definition command source mapping` instead of the existing
   `environment option token boundary` guard. The pre-session digest matches
@@ -1113,7 +1833,8 @@ The existing native engine design and historical Phase IV work are in
   triggering token instead of stopping expansion. The installed regression
   compares text and complete diagnostics with native for 21 ordinary cases,
   four expl3 expressions and an included file. A separate 31-case caller audit
-  finds no silent mismatch; `\\ignorespaces` remains explicitly unsupported.
+  finds no silent mismatch; `\\ignorespaces` was unsupported at that point and
+  is covered by the later expanded-space checkpoint above.
   A further 29-case JIT audit matches 24 cases and explicitly stops on five
   cases requiring unit, brace, relation or macro-parameter recovery. The
   subsequent checkpoint addresses a missing `\ifnum` relation; numeric

@@ -1,0 +1,21 @@
+{
+  cases: 12,
+  text: true,
+  diagnostics: true,
+  issues: [null, null, null, null, null, null, null, null, null, null, null, null],
+  trees: [true, true, true, null, true, true, null, null, true, true, true, null],
+  guards: [null, null, null, "unclosed environment", null, null, "unclosed environment", "unclosed environment", null, null, null, "unclosed environment"]
+}
+[{
+    text: true,
+    diagnostics: true,
+    tree: true
+  }, {
+    text: true,
+    diagnostics: true,
+    tree: true
+  }, {
+    text: true,
+    diagnostics: true,
+    tree: true
+  }]

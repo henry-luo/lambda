@@ -1,0 +1,11 @@
+{
+  cases: 21,
+  text: true,
+  diagnostics: true,
+  issues: true
+}
+{
+  text: true,
+  diagnostics: true,
+  issue: null
+}

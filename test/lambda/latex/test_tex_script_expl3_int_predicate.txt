@@ -171,9 +171,9 @@
     diagnostics_match: true
   }]
 {
-  issue: "latex-digest-unsupported",
-  unsupported: "character definition argument source mapping",
-  matches: null,
+  issue: null,
+  unsupported: null,
+  matches: true,
   actual: null,
   native: null
 }

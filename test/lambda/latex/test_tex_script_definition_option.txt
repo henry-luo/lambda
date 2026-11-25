@@ -53,18 +53,6 @@
     actual: null,
     native: null
   }, {
-    issue: "latex-digest-unsupported",
-    unsupported: "definition option comment source mapping",
-    matches: null,
-    actual: null,
-    native: null
-  }, {
-    issue: "latex-digest-unsupported",
-    unsupported: "definition option comment source mapping",
-    matches: null,
-    actual: null,
-    native: null
-  }, {
     issue: null,
     unsupported: null,
     matches: true,
@@ -131,9 +119,21 @@
     actual: null,
     native: null
   }, {
-    issue: "latex-digest-unsupported",
-    unsupported: "definition option comment source mapping",
-    matches: null,
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    issue: null,
+    unsupported: null,
+    matches: true,
     actual: null,
     native: null
   }, {

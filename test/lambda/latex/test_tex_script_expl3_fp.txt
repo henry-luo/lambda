@@ -16,11 +16,11 @@
   issue: null,
   unsupported: null
 }
-"unsupported:"
+"trigonometric:"
 {
-  text: "",
-  issue: "tex-unsupported-primitive",
-  unsupported: "fp sin"
+  text: "0.8414709848078965",
+  issue: null,
+  unsupported: null
 }
 "zero:"
 {

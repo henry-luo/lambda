@@ -17,4 +17,5 @@ let got=if (case.script.ast == null) [] else offsets(case.script.ast)^;
 fn generic_offsets(node) any^ => if (not (node is element)) [] else [*(if (string(name(node)) == "mystery") [node.source_offset] else []), *[for (child in node) *generic_offsets(child)^]]
 let foreign=parsed("script_foreign")^;
 "foreign generic source mapping pending:"; {native_offsets:generic_offsets(foreign.native)^,
- issue:foreign.script.issue, unsupported:foreign.script.unsupported}
+ issue:foreign.script.issue, unsupported:foreign.script.unsupported,
+ matches_native:if(foreign.script.ast==null)null else foreign.script.ast==foreign.native}
