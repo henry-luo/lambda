@@ -92,6 +92,7 @@ extern "C" void dom_install_window_font_global(void);
 extern "C" void dom_install_window_scroll_globals(void);
 extern "C" void dom_install_custom_elements_global(void);
 extern "C" void dom_install_history_interface(Item global, Item history);
+extern "C" void dom_install_window_location_global(Item global);
 Item dom_location_for_document(Item document);
 extern "C" void dom_tree_walker_install_interface(Item prototype);
 extern "C" void dom_node_iterator_install_interface(Item prototype);
@@ -101,6 +102,7 @@ extern "C" void dom_bind_interface_prototype(Item global, Item object, const cha
 
 /** The frame windows of the active document, as a fresh array. */
 extern "C" Item dom_collect_frame_windows_array(void);
+extern "C" int64_t dom_update_window_frame_count(int64_t count);
 
 /** Automation hooks: `__lambda_testdriver_key`, `__lambda_set_editing_behavior`. */
 extern "C" Item dom_testdriver_key(Item key_item, Item shift_item, Item ctrl_item, Item alt_item, Item meta_item);

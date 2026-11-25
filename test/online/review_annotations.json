@@ -5,13 +5,19 @@
     {
       "label": "saas_landing_365",
       "url": "https://supabase.com/customers",
-      "manual_major_remaining": "Customer-stories heading, supporting copy and all customer cards remain absent.",
+      "manual_major_remaining": "Customer-stories heading, supporting copy, filters and all customer cards remain absent. Chromium records 52 Element.animate calls, confirming the existing automatic Web Animations playback gap (JS13-L44 / JS13-L66).",
       "rechecks": [
         {
           "rechecked_at": "2026-11-18T04:43:31.020Z",
           "evidence": "comparison/repairs.html#round-83",
           "previous_manual_major_remaining": "Customer stories and cards remain absent after the theme repair.",
           "manual_major_remaining": "Customer-stories heading, supporting copy and all customer cards remain absent."
+        },
+        {
+          "rechecked_at": "2026-11-24T23:26:45.286Z",
+          "evidence": "comparison/repairs.html#round-180",
+          "previous_manual_major_remaining": "Customer-stories heading, supporting copy and all customer cards remain absent.",
+          "manual_major_remaining": "Customer-stories heading, supporting copy, filters and all customer cards remain absent. Chromium records 52 Element.animate calls, confirming the existing automatic Web Animations playback gap (JS13-L44 / JS13-L66)."
         }
       ]
     },
@@ -28,12 +34,20 @@
     {
       "label": "saas_landing_677",
       "url": "https://pitch.com/",
-      "manual_major_remaining": "Pitch remains almost blank despite a low mean error against its mostly white reference."
+      "manual_major_remaining": "The current native frame contains the announcement, partial header and pale background but lacks the large hero heading, main media, primary action and most navigation. The current Chromium frame contains those regions. Initialization remains unresolved; caught analytics and React probes are not assigned as its cause.",
+      "rechecks": [
+        {
+          "rechecked_at": "2026-11-25T05:50:52.262Z",
+          "evidence": "comparison/repairs.html#round-191",
+          "previous_manual_major_remaining": "Pitch remains almost blank despite a low mean error against its mostly white reference.",
+          "manual_major_remaining": "The current native frame contains the announcement, partial header and pale background but lacks the large hero heading, main media, primary action and most navigation. The current Chromium frame contains those regions. Initialization remains unresolved; caught analytics and React probes are not assigned as its cause."
+        }
+      ]
     },
     {
       "label": "saas_landing_121",
       "url": "https://banky.io/",
-      "manual_major_remaining": "Entire hero heading, supporting copy and primary actions remain absent.",
+      "manual_major_remaining": "",
       "rechecks": [
         {
           "rechecked_at": "2026-11-18T04:43:31.020Z",
@@ -41,7 +55,12 @@
           "previous_manual_major_remaining": "Hero background is restored but the main heading, copy and actions remain absent.",
           "manual_major_remaining": "Entire hero heading, supporting copy and primary actions remain absent."
         }
-      ]
+      ],
+      "resolved_at": "2026-11-25T05:41:06.582Z",
+      "resolution": "The ordinary current matched pair now contains the navigation, large hero heading, background media, copy and actions. The earlier blank frame predates accumulated shared runtime and capture-clock repairs; no unique cause is attributed. Remaining differences are localized.",
+      "resolution_evidence": "comparison/repairs.html#round-190",
+      "resolved_previous_manual_major_remaining": "Entire hero heading, supporting copy and primary actions remain absent.",
+      "resolved_capture_settle_ms": 1000
     },
     {
       "label": "saas_landing_473",
@@ -64,13 +83,19 @@
     {
       "label": "saas_landing_134",
       "url": "https://cequence.io/",
-      "manual_major_remaining": "Entire left-column hero heading, copy and primary action are absent.",
+      "manual_major_remaining": "The current application renders its own error screen because startup constructs the missing Intl.PluralRules (JS10-L2). Deleting only that constructor in Chromium reproduces this screen; the ordinary Chromium reference renders the full page. This substantial Intl feature gap remains high.",
       "rechecks": [
         {
           "rechecked_at": "2026-11-18T04:43:31.020Z",
           "evidence": "comparison/repairs.html#round-83",
           "previous_manual_major_remaining": "The main hero heading, copy and action remain absent despite the correct illustration and background.",
           "manual_major_remaining": "Entire left-column hero heading, copy and primary action are absent."
+        },
+        {
+          "rechecked_at": "2026-11-25T05:41:06.654Z",
+          "evidence": "comparison/repairs.html#round-190",
+          "previous_manual_major_remaining": "Entire left-column hero heading, copy and primary action are absent.",
+          "manual_major_remaining": "The current application renders its own error screen because startup constructs the missing Intl.PluralRules (JS10-L2). Deleting only that constructor in Chromium reproduces this screen; the ordinary Chromium reference renders the full page. This substantial Intl feature gap remains high."
         }
       ]
     },
@@ -190,7 +215,7 @@
     {
       "label": "saas_landing_087",
       "url": "https://greenlistapp.com/",
-      "manual_major_remaining": "Large hero illustrations, supporting copy and connect action are absent.",
+      "manual_major_remaining": "",
       "rechecks": [
         {
           "rechecked_at": "2026-11-18T04:43:31.020Z",
@@ -198,7 +223,12 @@
           "previous_manual_major_remaining": "CSSOM rule retention restores the green palette and header, but the main hero heading, copy, action and illustrations remain absent; retained after visual review despite the low coarse score.",
           "manual_major_remaining": "Large hero illustrations, supporting copy and connect action are absent."
         }
-      ]
+      ],
+      "resolved_at": "2026-11-25T05:50:52.126Z",
+      "resolution": "The ordinary current matched pair contains the main heading, large hero illustrations, supporting copy and connect action. The older omission predates accumulated shared DOM and elapsed-clock repairs; no unique fix attribution is made. Remaining color, spacing and fade-position differences are localized.",
+      "resolution_evidence": "comparison/repairs.html#round-191",
+      "resolved_previous_manual_major_remaining": "Large hero illustrations, supporting copy and connect action are absent.",
+      "resolved_capture_settle_ms": 1000
     },
     {
       "label": "saas_landing_271",
@@ -314,7 +344,7 @@
     {
       "label": "saas_landing_170",
       "url": "https://thecape.agency/",
-      "manual_major_remaining": "Entire hero headline, copy, primary action and large illustration remain absent.",
+      "manual_major_remaining": "",
       "reviewed_at": "2026-11-13T13:10:49.900130+00:00",
       "evidence": "comparison/repairs.html#round-23",
       "rechecks": [
@@ -324,7 +354,12 @@
           "previous_manual_major_remaining": "The hero heading, description, primary action and large geometric illustration remain absent. Only the dark section height has changed; visual review rejects automatic clearance and the remaining cause is unisolated.",
           "manual_major_remaining": "Entire hero headline, copy, primary action and large illustration remain absent."
         }
-      ]
+      ],
+      "resolved_at": "2026-11-25T04:29:22.975Z",
+      "resolution": "Current ordinary native and Chromium captures show the complete hero heading, supporting copy, action and geometric illustration. The major omission is resolved under accumulated repairs; this refresh does not uniquely attribute the historical frame to the font-listener change.",
+      "resolution_evidence": "comparison/repairs.html#round-188",
+      "resolved_previous_manual_major_remaining": "Entire hero headline, copy, primary action and large illustration remain absent.",
+      "resolved_capture_settle_ms": 1000
     },
     {
       "label": "saas_landing_160",
@@ -504,9 +539,17 @@
     {
       "label": "saas_landing_309",
       "url": "https://prismic.io/pricing",
-      "manual_major_remaining": "Pricing cards and customer logos remain absent below the heading; the primary pricing content does not match.",
+      "manual_major_remaining": "Pricing cards and customer logos now render, but an extra large consent dialog and dark backdrop obscure the page. Current Chromium has no such overlay; its cause remains unisolated.",
       "reviewed_at": "2026-11-18T04:43:31.020Z",
-      "evidence": "comparison/repairs.html#round-83"
+      "evidence": "comparison/repairs.html#round-83",
+      "rechecks": [
+        {
+          "rechecked_at": "2026-11-24T23:26:45.286Z",
+          "evidence": "comparison/repairs.html#round-180",
+          "previous_manual_major_remaining": "Pricing cards and customer logos remain absent below the heading; the primary pricing content does not match.",
+          "manual_major_remaining": "Pricing cards and customer logos now render, but an extra large consent dialog and dark backdrop obscure the page. Current Chromium has no such overlay; its cause remains unisolated."
+        }
+      ]
     },
     {
       "label": "saas_landing_299",
@@ -557,23 +600,59 @@
     {
       "label": "saas_landing_494",
       "url": "https://sierra.ai/",
-      "manual_major_remaining": "The main hero headline over the photograph remains absent; header and media are present.",
+      "manual_major_remaining": "The current application renders its own error boundary because localization constructs the missing Intl.ListFormat (JS10-L3). Deleting only Intl.ListFormat in Chromium reproduces that boundary. Locale-aware list formatting remains a major feature gap.",
       "reviewed_at": "2026-11-18T04:43:31.020Z",
-      "evidence": "comparison/repairs.html#round-83"
+      "evidence": "comparison/repairs.html#round-83",
+      "rechecks": [
+        {
+          "rechecked_at": "2026-11-25T01:26:24.173Z",
+          "evidence": "comparison/repairs.html#round-183",
+          "previous_manual_major_remaining": "The main hero headline over the photograph remains absent; header and media are present.",
+          "manual_major_remaining": "The current application renders its own error boundary because localization constructs the missing Intl.ListFormat (JS10-L3). Deleting only Intl.ListFormat in Chromium reproduces that boundary. Locale-aware list formatting remains a major feature gap."
+        }
+      ]
     },
     {
       "label": "saas_landing_542",
       "url": "https://www.diabrowser.com/",
-      "manual_major_remaining": "The giant DIA headline, introductory line and main download action remain absent.",
+      "manual_major_remaining": "The giant DIA wordmark, introductory heading and download action remain absent despite a low coarse score. The exact hero module and diagnostic Chromium trace confirm opacity [0,1] Web Animations for these regions. Automatic playback remains outside the existing explicit-seek profile (JS13-L66/L44); no forced visibility or API hiding is used.",
       "reviewed_at": "2026-11-18T04:43:31.020Z",
-      "evidence": "comparison/repairs.html#round-83"
+      "evidence": "comparison/repairs.html#round-83",
+      "rechecks": [
+        {
+          "rechecked_at": "2026-11-25T05:50:52.174Z",
+          "evidence": "comparison/repairs.html#round-191",
+          "previous_manual_major_remaining": "The giant DIA headline, introductory line and main download action remain absent.",
+          "manual_major_remaining": "The giant DIA wordmark, introductory heading and download action remain absent despite a low coarse score. The exact hero module and diagnostic Chromium trace confirm opacity [0,1] Web Animations for these regions. Automatic playback remains outside the existing explicit-seek profile (JS13-L66/L44); no forced visibility or API hiding is used."
+        }
+      ]
     },
     {
       "label": "saas_landing_456",
       "url": "https://gladia.io/",
-      "manual_major_remaining": "Main hero headline and supporting copy remain absent, and the large purple Canvas background is missing. The headline has a 1500ms JS feature-flag fallback beyond the native frame; the drawing script requires missing Canvas gradient APIs (JS13-L17). Matching animation origins does not establish complete JS clock parity.",
+      "manual_major_remaining": "The navigation, main heading, copy and announcement remain restored. RI-236 corrects the primary action container horizontal placement. The large purple Canvas background remains absent, and the primary action text/filter rendering is still incorrect. Retain major review.",
       "reviewed_at": "2026-11-20T05:08:00.293Z",
-      "evidence": "comparison/repairs.html#round-101"
+      "evidence": "comparison/repairs.html#round-101",
+      "rechecks": [
+        {
+          "rechecked_at": "2026-11-25T03:15:01.270Z",
+          "evidence": "comparison/repairs.html#round-185",
+          "previous_manual_major_remaining": "Main hero headline and supporting copy remain absent, and the large purple Canvas background is missing. The headline has a 1500ms JS feature-flag fallback beyond the native frame; the drawing script requires missing Canvas gradient APIs (JS13-L17). Matching animation origins does not establish complete JS clock parity.",
+          "manual_major_remaining": "The current native viewport is blank after initialization removes the main heading and content. Static markup and first-party-only diagnostic renders retain the heading; the destructive initialization path is being isolated. JS13-L73 and JS13-L74 are separately fixed and do not clear this page."
+        },
+        {
+          "rechecked_at": "2026-11-25T03:33:23.481Z",
+          "evidence": "comparison/repairs.html#round-186",
+          "previous_manual_major_remaining": "The current native viewport is blank after initialization removes the main heading and content. Static markup and first-party-only diagnostic renders retain the heading; the destructive initialization path is being isolated. JS13-L73 and JS13-L74 are separately fixed and do not clear this page.",
+          "manual_major_remaining": "The navigation, main heading, supporting copy and announcement panel are restored after JS13-L76 prevents fingerprint probes from replacing the parent body. The large purple Canvas background remains absent and the primary action is displaced to the left. Retain major review for those remaining differences; the headline wording varies with the authored experiment."
+        },
+        {
+          "rechecked_at": "2026-11-25T03:54:02.750Z",
+          "evidence": "comparison/repairs.html#round-187",
+          "previous_manual_major_remaining": "The navigation, main heading, supporting copy and announcement panel are restored after JS13-L76 prevents fingerprint probes from replacing the parent body. The large purple Canvas background remains absent and the primary action is displaced to the left. Retain major review for those remaining differences; the headline wording varies with the authored experiment.",
+          "manual_major_remaining": "The navigation, main heading, copy and announcement remain restored. RI-236 corrects the primary action container horizontal placement. The large purple Canvas background remains absent, and the primary action text/filter rendering is still incorrect. Retain major review."
+        }
+      ]
     },
     {
       "label": "pnpm_docs",
@@ -611,8 +690,16 @@
     {
       "label": "saas_landing_234",
       "url": "https://www.pelagohealth.com/",
-      "manual_major_remaining": "Hero media, heading and actions are present. The large browser consent dialog remains absent; retain the major review despite the lower coarse score.",
-      "evidence": "comparison/repairs.html#round-136"
+      "manual_major_remaining": "The current page shows its own application-error screen after ReferenceError: Worker. Deleting only Worker in Chromium reproduces the same page, while the ordinary reference renders the full hero (JS13-L69). The consent panel now renders. The dedicated-worker feature gap remains high; no cause is assigned to the historical frame change.",
+      "evidence": "comparison/repairs.html#round-136",
+      "rechecks": [
+        {
+          "rechecked_at": "2026-11-25T05:50:52.213Z",
+          "evidence": "comparison/repairs.html#round-191",
+          "previous_manual_major_remaining": "Hero media, heading and actions are present. The large browser consent dialog remains absent; retain the major review despite the lower coarse score.",
+          "manual_major_remaining": "The current page shows its own application-error screen after ReferenceError: Worker. Deleting only Worker in Chromium reproduces the same page, while the ordinary reference renders the full hero (JS13-L69). The consent panel now renders. The dedicated-worker feature gap remains high; no cause is assigned to the historical frame change."
+        }
+      ]
     },
     {
       "label": "saas_landing_173",
@@ -630,9 +717,14 @@
     {
       "label": "saas_landing_072",
       "url": "https://aircall.io/",
-      "manual_major_remaining": "Consent panel and backdrop now render, but the main application container is empty after startup. The header, hero image, heading and primary actions remain missing; retain major review despite the lower coarse score.",
+      "manual_major_remaining": "",
       "reviewed_at": "2026-11-23T09:40:08.365Z",
-      "evidence": "comparison/repairs.html#round-167"
+      "evidence": "comparison/repairs.html#round-167",
+      "resolved_at": "2026-11-25T05:41:06.619Z",
+      "resolution": "The ordinary current matched pair now contains the main navigation, hero media, large heading, actions and consent dialog. The earlier empty-root frame predates accumulated shared repairs; no unique fix attribution is made. The rotating headline and localized text/spacing differences remain.",
+      "resolution_evidence": "comparison/repairs.html#round-190",
+      "resolved_previous_manual_major_remaining": "Consent panel and backdrop now render, but the main application container is empty after startup. The header, hero image, heading and primary actions remain missing; retain major review despite the lower coarse score.",
+      "resolved_capture_settle_ms": 1000
     },
     {
       "label": "saas_landing_343",
@@ -673,6 +765,39 @@
       "manual_major_remaining": "Main navigation, heading, actions and product media now render. RI-227 repairs the consent notice width and fixed positioning, but missing :host custom-property styles leave transparent fill and unstyled text/buttons overlapping the product interface. Retain this large overlay defect under JS13-L2.",
       "reviewed_at": "2026-11-24T13:29:24.734Z",
       "evidence": "comparison/repairs.html#round-179"
+    },
+    {
+      "label": "saas_landing_129",
+      "url": "https://cleanup.pictures/",
+      "manual_major_remaining": "The interactive application and current upload interface remain absent because its startup bundle requires the missing IndexedDB interface IDBIndex (JS13-L36). Removing only IDBIndex in Chromium reproduces the same static green fallback and exception.",
+      "reviewed_at": "2026-11-25T00:26:24.400Z",
+      "evidence": "comparison/repairs.html#round-182"
+    },
+    {
+      "label": "saas_landing_082",
+      "url": "https://www.getmaple.ca/",
+      "manual_major_remaining": "The hero, heading, media and primary action render. The large consent panel and associated page shift visible in Chromium remain absent. JS05-L9 repairs the independent reveal-generator initialization failure; the consent difference remains unisolated.",
+      "reviewed_at": "2026-11-25T01:54:10.326Z",
+      "evidence": "comparison/repairs.html#round-184"
+    },
+    {
+      "label": "saas_landing_317",
+      "url": "https://primer.io/",
+      "manual_major_remaining": "JS13-L78 removes SplitText's missing FontFaceSet listener exception, but the main navigation, hero heading, supporting copy and textured artwork remain absent in the current matched frame.",
+      "reviewed_at": "2026-11-25T04:29:23.005Z",
+      "evidence": "comparison/repairs.html#round-188"
+    },
+    {
+      "label": "saas_landing_522",
+      "url": "https://ebury.com/",
+      "manual_major_remaining": "",
+      "reviewed_at": "2026-11-25T04:29:23.045Z",
+      "evidence": "comparison/repairs.html#round-188",
+      "resolved_at": "2026-11-25T04:54:48.538Z",
+      "resolution": "JS13-L77 / RI-237 add real RGBA8/sRGB Canvas readback with owned ImageData storage. The ordinary matched pair now shows the complete Iubenda consent panel and existing main page. Remaining differences are localized; no SDK, visibility, source-limit or capture-time override is used.",
+      "resolution_evidence": "comparison/repairs.html#round-189",
+      "resolved_previous_manual_major_remaining": "The main navigation, heading, copy, logos and product panel now render. The large Iubenda consent panel remains absent because Canvas getImageData/ImageData are unavailable (JS13-L77); the separate code-island stylesheet-adoption gap remains.",
+      "resolved_capture_settle_ms": 1000
     }
   ]
 }

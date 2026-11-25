@@ -461,8 +461,8 @@ static void loader_end_document_timing(RadiantScriptPhaseSummary* summary) {
 
 bool radiant_bind_document_script_host(UiContext* uicon, DomDocument* doc) {
     if (!doc || !context || !js_runtime_state_init(context)) return false;
-    // Lambda-only handlers share the same timing support, without claiming a JS realm.
-    if (doc->js.virtual_clock_enabled && !js_event_loop_virtual_clock_enabled()) {
+    // the JS loader owns its clock, including the elapsed-load phase before export freezes it.
+    if (!doc->js.runtime && doc->js.virtual_clock_enabled && !js_event_loop_virtual_clock_enabled()) {
         js_event_loop_set_virtual_clock(true, doc->js.virtual_clock_ms);
     }
     dom_set_host_driven_loop(doc->js.host_driven_loop);

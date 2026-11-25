@@ -333,6 +333,27 @@ static JsInterpCompletion js_interp_throw(Item value) {
     return {JS_INTERP_THROW, value, NULL, 0};
 }
 
+static void js_interp_trace_error_source(JsInterpFrame* frame, const JsAstNode* node, Item error) {
+    // retained AST spans identify generic host errors without inspecting guest values.
+    static __thread unsigned trace_count = 0;
+    const char* setting = getenv("LAMBDA_JS_ERROR_SOURCE_TRACE");
+    if (!setting || !*setting || !strcmp(setting, "0") || !item_is_error(error) || !frame || !frame->script || !node) return;
+    unsigned limit = (unsigned)strtoul(setting, nullptr, 10);
+    if (limit < 2) limit = 256;
+    if (limit > 4096) limit = 4096;
+    if (trace_count >= limit) return;
+    char message[128];
+    js_error_lane_format(error, message, sizeof(message));
+    if (!strstr(message, "at byte ")) return; // detailed errors need no generic-source fallback.
+    JsScript* script = frame->script;
+    uint32_t start = node->source_span.start_byte, end = node->source_span.end_byte;
+    if (!script->source || start > end || end > script->source_length) return;
+    uint32_t length = end - start;
+    if (length > 220) length = 220;
+    log_error("js-error-source: event=%u error=%s file=%s span=%u:%u source=%.*s", ++trace_count,
+        message, script->reference ? script->reference : "", start, end, (int)length, script->source + start);
+}
+
 static JsInterpCompletion js_interp_resume_completion(Item input);
 
 // A parked body's resume input as the completion of the expression that
@@ -2151,7 +2172,10 @@ static JsInterpCompletion js_interp_member_key_after_base(JsInterpFrame* frame,
         }
         if (require_object && !defer_property_reference) {
             Item checked = js_require_object_coercible(base);
-            if (item_is_error(checked)) return js_interp_throw(checked);
+            if (item_is_error(checked)) {
+                js_interp_trace_error_source(frame, member, checked);
+                return js_interp_throw(checked);
+            }
         }
         JsInterpCompletion key = js_interp_property_key(frame, member);
         if (key.kind == JS_INTERP_NORMAL) *key_home = key.value.item;
@@ -2191,7 +2215,10 @@ static JsInterpCompletion js_interp_member_key_after_base(JsInterpFrame* frame,
     }
     if (require_object && !defer_property_reference) {
         Item checked = js_require_object_coercible(base);
-        if (item_is_error(checked)) return js_interp_throw(checked);
+        if (item_is_error(checked)) {
+            js_interp_trace_error_source(frame, member, checked);
+            return js_interp_throw(checked);
+        }
     }
     if (defer_property_reference) {
         *key_home = raw_key_root.get().item;
@@ -3124,7 +3151,12 @@ static Item js_interp_host_call_array(Item callee, Item receiver, Item arguments
 
 static JsInterpMemberResult js_interp_eval_call_chain(JsInterpFrame* frame,
         JsCallNode* call, bool construct) {
-#define JS_INTERP_CALL_RETURN(value) return {(value), false}
+#define JS_INTERP_CALL_RETURN(expression) do { \
+    JsInterpCompletion traced_completion = (expression); \
+    if (traced_completion.kind == JS_INTERP_THROW) \
+        js_interp_trace_error_source(frame, (JsAstNode*)call, traced_completion.value); \
+    return {traced_completion, false}; \
+} while (0)
     if (!call) JS_INTERP_CALL_RETURN(js_interp_throw(ItemError));
     int plain_arg_count = 0;
     bool has_plain_arguments = js_interp_call_has_plain_arguments(call, &plain_arg_count);
@@ -7103,6 +7135,9 @@ extern "C" Item js_interp_generator_body(Activation* self, Item generator) {
     JsFunction* function = (JsFunction*)function_root.get().function;
     if (!function || !js_fn_ast_function(function) ||
             get_type_id(arguments_root.get()) != LMD_TYPE_ARRAY) return ItemError;
+    // first next() can run in an importing helper; subsequent parks retain this module.
+    RuntimeModuleStateScope module_state(context);
+    if (!js_interp_activate_outer_script(&module_state, js_fn_ast_script(function))) return ItemError;
     home_class_root.set(js_fn_home_class(function));
     JsBlockNode* body = js_fn_ast_function(function)->body &&
             js_fn_ast_function(function)->body->node_type == AST_NODE_BLOCK

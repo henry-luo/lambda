@@ -16959,6 +16959,19 @@ static JsClass js_intrinsic_prototype_parent_class(JsClass cls) {
     }
 }
 
+Item js_set_intrinsic_prototype_for_class(int class_id, Item prototype) {
+    if (class_id <= (int)JS_CLASS_NONE || class_id >= (int)JS_CLASS__COUNT ||
+            !js_is_object_value(prototype)) return ItemError;
+    RootFrame roots(1);
+    Rooted<Item> value(roots, prototype);
+    js_intrinsic_state_ensure_epoch();
+    Item* slot = js_intrinsic_prototype_slot(class_id);
+    if (!slot) return ItemError;
+    // dynamically installed interfaces are absent from the static constructor catalog.
+    *slot = value.get();
+    return value.get();
+}
+
 extern "C" Item js_get_intrinsic_prototype_for_class(int class_id) {
     if (class_id <= (int)JS_CLASS_NONE || class_id >= (int)JS_CLASS__COUNT) return ItemNull;
     js_intrinsic_state_ensure_epoch();

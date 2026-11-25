@@ -8,8 +8,8 @@
  * Internal layout of a FormData JS object:
  *   {
  *     _fd_entries: [[name, value], [name2, value2], ...],  // live entry list
- *     append: fn, delete: fn, get: fn, ...                 // IDL methods
  *   }
+ * IDL methods are shared through FormData.prototype.
  *
  * Iterators hold a direct reference to the _fd_entries array so mutations
  * during iteration are visible (live-view iteration per spec).
@@ -107,7 +107,11 @@ static const char* FD_ENTRIES_KEY = "_fd_entries";
 
 // Forward decls
 static Item fd_blob_to_file(Item value, Item filename_item);
-JS_FORWARD_STATIC_ITEM(fd_get_entries, (Item this_fd), prop_get, (this_fd, FD_ENTRIES_KEY))
+static Item fd_get_entries(Item this_fd) {
+    if (!dom_realm_object_has_class(this_fd, JS_CLASS_FORM_DATA))
+        return dom_realm_throw_type_error("Illegal FormData receiver");
+    return prop_get(this_fd, FD_ENTRIES_KEY);
+}
 
 static void fd_entries_remove_at(Item entries, int64_t index) {
     if (get_type_id(entries) != LMD_TYPE_ARRAY || !entries.array ||
@@ -180,7 +184,7 @@ static void fd_append_named_entry(Item entries, const char* name, Item value);
 
 static Item js_fd_append(Item name_item, Item value_item, Item filename_item) {
     Item this_fd = dom_realm_receiver();
-    Item entries = fd_get_entries(this_fd);
+    JS_ASSIGN_OR_RETURN(entries, fd_get_entries(this_fd));
     if (get_type_id(entries) != LMD_TYPE_ARRAY) return make_js_undefined();
 
     // 3-arg form append(name, blobValue, filename) is only valid when value is a Blob/File.
@@ -201,7 +205,7 @@ static Item js_fd_append(Item name_item, Item value_item, Item filename_item) {
 
 static Item js_fd_delete(Item name_item) {
     Item this_fd = dom_realm_receiver();
-    Item entries = fd_get_entries(this_fd);
+    JS_ASSIGN_OR_RETURN(entries, fd_get_entries(this_fd));
     if (get_type_id(entries) != LMD_TYPE_ARRAY) return make_js_undefined();
 
     const char* name_cs = fn_to_cstr(name_item);
@@ -238,7 +242,7 @@ static int64_t js_fd_find_entry(Item entries, const char* name) {
 
 static Item js_fd_get(Item name_item) {
     Item this_fd = dom_realm_receiver();
-    Item entries = fd_get_entries(this_fd);
+    JS_ASSIGN_OR_RETURN(entries, fd_get_entries(this_fd));
     if (get_type_id(entries) != LMD_TYPE_ARRAY) return ItemNull;
 
     const char* name_cs = fn_to_cstr(name_item);
@@ -256,6 +260,7 @@ static Item js_fd_getAll(Item name_item) {
     // Array growth can collect between matches; keep the result and its source live.
     Rooted<Item> result(roots, js_array_new(0));
     Rooted<Item> entries(roots, fd_get_entries(this_fd.get()));
+    JS_RETURN_IF_ERROR(entries.get());
     if (get_type_id(entries.get()) != LMD_TYPE_ARRAY) return result.get();
 
     const char* name_cs = fn_to_cstr(name.get());
@@ -273,7 +278,7 @@ static Item js_fd_getAll(Item name_item) {
 
 static Item js_fd_has(Item name_item) {
     Item this_fd = dom_realm_receiver();
-    Item entries = fd_get_entries(this_fd);
+    JS_ASSIGN_OR_RETURN(entries, fd_get_entries(this_fd));
     if (get_type_id(entries) != LMD_TYPE_ARRAY) return make_bool(false);
 
     const char* name_cs = fn_to_cstr(name_item);
@@ -284,7 +289,7 @@ static Item js_fd_has(Item name_item) {
 
 static Item js_fd_set(Item name_item, Item value_item, Item filename_item) {
     Item this_fd = dom_realm_receiver();
-    Item entries = fd_get_entries(this_fd);
+    JS_ASSIGN_OR_RETURN(entries, fd_get_entries(this_fd));
     if (get_type_id(entries) != LMD_TYPE_ARRAY) return make_js_undefined();
 
     // 3-arg form set(name, blobValue, filename) is only valid when value is a Blob/File.
@@ -339,7 +344,7 @@ static Item js_fd_forEach(Item callback, Item this_arg) {
     if (!dom_realm_is_callable(callback)) return make_js_undefined();
 
     Item this_fd = dom_realm_receiver();
-    Item entries = fd_get_entries(this_fd);
+    JS_ASSIGN_OR_RETURN(entries, fd_get_entries(this_fd));
     if (get_type_id(entries) != LMD_TYPE_ARRAY) return make_js_undefined();
 
     // Live iteration: re-read length each iteration so deletions are observed
@@ -408,7 +413,8 @@ static Item fd_make_iterator(Item entries, int mode) {
 
 #define JS_FD_ITERATOR_WRAPPER(name, mode) \
 static Item name() { \
-    return fd_make_iterator(fd_get_entries(dom_realm_receiver()), mode); \
+    JS_ASSIGN_OR_RETURN(entries, fd_get_entries(dom_realm_receiver())); \
+    return fd_make_iterator(entries, mode); \
 }
 JS_FD_ITERATOR_WRAPPER(js_fd_entries, FD_ITER_MODE_ENTRIES)
 JS_FD_ITERATOR_WRAPPER(js_fd_keys, FD_ITER_MODE_KEYS)
@@ -639,18 +645,22 @@ static void fd_collect_form_controls(Item entries, DomElement* form, DomElement*
 // ============================================================================
 
 static void fd_install_methods(Item fd_obj) {
-    prop_set(fd_obj, "append",  dom_realm_new_function(js_fd_append));
-    prop_set(fd_obj, "delete",  dom_realm_new_function(js_fd_delete));
-    prop_set(fd_obj, "get",     dom_realm_new_function(js_fd_get));
-    prop_set(fd_obj, "getAll",  dom_realm_new_function(js_fd_getAll));
-    prop_set(fd_obj, "has",     dom_realm_new_function(js_fd_has));
-    prop_set(fd_obj, "set",     dom_realm_new_function(js_fd_set));
-    prop_set(fd_obj, "entries", dom_realm_new_function(js_fd_entries));
-    prop_set(fd_obj, "keys",    dom_realm_new_function(js_fd_keys));
-    prop_set(fd_obj, "values",  dom_realm_new_function(js_fd_values));
-    prop_set(fd_obj, "forEach", dom_realm_new_function(js_fd_forEach));
-    // Symbol.iterator → same as entries()
-    dom_realm_set(fd_obj, make_sym_iterator_key(), dom_realm_new_function(js_fd_entries));
+    RootFrame roots(2);
+    Rooted<Item> owner(roots, fd_obj), method(roots, ItemNull);
+#define FD_INSTALL_METHOD(name, target) \
+    method.set(dom_realm_new_function(target)); prop_set(owner.get(), name, method.get());
+    FD_INSTALL_METHOD("append", js_fd_append)
+    FD_INSTALL_METHOD("delete", js_fd_delete)
+    FD_INSTALL_METHOD("get", js_fd_get)
+    FD_INSTALL_METHOD("getAll", js_fd_getAll)
+    FD_INSTALL_METHOD("has", js_fd_has)
+    FD_INSTALL_METHOD("set", js_fd_set)
+    FD_INSTALL_METHOD("entries", js_fd_entries)
+    FD_INSTALL_METHOD("keys", js_fd_keys)
+    FD_INSTALL_METHOD("values", js_fd_values)
+    FD_INSTALL_METHOD("forEach", js_fd_forEach)
+#undef FD_INSTALL_METHOD
+    dom_realm_set(owner.get(), make_sym_iterator_key(), prop_get(owner.get(), "entries"));
 }
 
 // Current epoch milliseconds.
@@ -746,7 +756,8 @@ static Item fd_create(Item entries) {
     Rooted<Item> list(roots, entries);
     Rooted<Item> data(roots, dom_realm_new_object_of_class(JS_CLASS_FORM_DATA));
     prop_set(data.get(), FD_ENTRIES_KEY, list.get());
-    fd_install_methods(data.get());
+    // native-created event data and constructed instances share the same overridable methods.
+    dom_realm_set_prototype(data.get(), dom_realm_intrinsic_prototype(JS_CLASS_FORM_DATA));
     return data.get();
 }
 
@@ -841,26 +852,35 @@ extern "C" Item js_formdata_collect_form_entries(void* form_elem, void* submitte
 // ============================================================================
 
 extern "C" void js_formdata_install_globals(void) {
-    Item global = dom_realm_global();
+    RootFrame roots(6);
+    Rooted<Item> global(roots, dom_realm_global());
     // D7.2.2: global constructor bindings carry [[Construct]] themselves;
     // no compiler name interception remains to supply it.
-    Item ctor_fn = js_new_native_constructor(js_formdata_construct);
-    prop_set(global, "FormData", ctor_fn);
+    Rooted<Item> ctor_fn(roots, js_new_native_constructor(js_formdata_construct));
+    prop_set(global.get(), "FormData", ctor_fn.get());
+    Rooted<Item> prototype(roots, prop_get(ctor_fn.get(), "prototype"));
+    if (get_type_id(prototype.get()) != LMD_TYPE_MAP) {
+        prototype.set(dom_realm_new_object_of_class(JS_CLASS_OBJECT));
+        dom_realm_init_constructor_prototype(ctor_fn.get(), prototype.get());
+    }
+    fd_install_methods(prototype.get());
+    // cache the intrinsic before scripts can replace the global constructor binding.
+    js_set_intrinsic_prototype_for_class(JS_CLASS_FORM_DATA, prototype.get());
 
     // C1.3: the Blob/File fallback constructors that used to live here were
     // unreachable. js_register_clipboard_globals() installs the full-spec
     // Blob/File during global bootstrap, which always runs before this
     // installer (dom_set_document -> js_formdata_install_globals), so the
     // "not yet defined" guards never fired.
-    Item blob_ctor_fn = prop_get(global, "Blob");
-    Item file_ctor_fn = prop_get(global, "File");
+    Rooted<Item> blob_ctor_fn(roots, prop_get(global.get(), "Blob"));
+    Rooted<Item> file_ctor_fn(roots, prop_get(global.get(), "File"));
 
     // Also install on window if it exists
-    Item window = prop_get(global, "window");
-    if (get_type_id(window) == LMD_TYPE_MAP) {
-        prop_set(window, "FormData", ctor_fn);
-        prop_set(window, "Blob", blob_ctor_fn);
-        prop_set(window, "File", file_ctor_fn);
+    Rooted<Item> window(roots, prop_get(global.get(), "window"));
+    if (get_type_id(window.get()) == LMD_TYPE_MAP) {
+        prop_set(window.get(), "FormData", ctor_fn.get());
+        prop_set(window.get(), "Blob", blob_ctor_fn.get());
+        prop_set(window.get(), "File", file_ctor_fn.get());
     }
     log_debug("js_formdata_install_globals: FormData, Blob, File installed on global");
 }

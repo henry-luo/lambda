@@ -21,9 +21,12 @@
 #include "realm/dom_realm.h"
 #include "../js/js_runtime_state.hpp"
 #include "../js/js_class.h"
+#include "../js/js_function.hpp"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
 #include "../runtime/heap_api.h"
+#include "../runtime/root_vector.h"
+#include "../js/js_typed_array.h"
 #include "lambda/input/css/css_style.hpp"
 #include "lambda/core/well_known_markup_names.h"
 #include "dom_observers.h"
@@ -49,6 +52,8 @@ struct JsCanvasRuntimeState {
     FontContext* font_context;
     FontHandle* font_handles[MAX_CANVAS_FONT_HANDLES];
     int font_handle_count;
+    RootVector image_data_roots;
+    Item image_data_slots[2]; // private brand key and intrinsic prototype
 };
 
 static JsCanvasRuntimeState* canvas_runtime_state(void) {
@@ -67,8 +72,14 @@ static JsCanvasRuntimeState* canvas_runtime_state_ensure(void) {
     if (!js_active_runtime_state) return NULL;
     // Canvas setup is cold; measurement reads this context-owned table
     // directly and never contends with another JS realm.
-    return (JsCanvasRuntimeState*)context_capsule_ensure(
-        context, CONTEXT_CAPSULE_DOM_CANVAS, &js_canvas_capsule_ops);
+    JsCanvasRuntimeState* state = canvas_runtime_state();
+    if (!state) {
+        state = (JsCanvasRuntimeState*)context_capsule_ensure(
+            context, CONTEXT_CAPSULE_DOM_CANVAS, &js_canvas_capsule_ops);
+        if (state) root_vector_bind_external(&state->image_data_roots, (Context*)context,
+            state->image_data_slots, 2, "Canvas ImageData intrinsics");
+    }
+    return state;
 }
 
 static bool js_canvas_is_2d_context(Item item) {
@@ -103,6 +114,174 @@ static Item js_canvas_number_arg(Item* args, int argc, int index, float* out) {
         args && index < argc ? args[index] : make_js_undefined(), &value);
     if (!item_is_error(error)) *out = (float)value;
     return error;
+}
+
+static Item js_canvas_draw_failed(void);
+
+static Item js_canvas_integer(Item input, bool unsigned_value, int64_t* out) {
+    double value = NAN;
+    Item error = js_canvas_number_value(input, &value);
+    if (item_is_error(error)) return error;
+    // constructor dimensions wrap as unsigned long; readback coordinates use EnforceRange.
+    if (unsigned_value) {
+        *out = (uint32_t)js_to_int32(value);
+        return ItemNull;
+    }
+    value = trunc(value);
+    if (!isfinite(value) || value < -2147483648.0 || value > 2147483647.0)
+        return js_throw_type_error("Canvas integer is outside the WebIDL range");
+    *out = (int64_t)value;
+    return ItemNull;
+}
+
+static Item js_image_data_intrinsic(int slot) {
+    JsCanvasRuntimeState* state = canvas_runtime_state_ensure();
+    Item* value = state ? root_vector_external_at(&state->image_data_roots, slot) : nullptr;
+    return value ? *value : ItemNull;
+}
+
+static Item js_image_data_state(Item receiver) {
+    if (!dom_realm_object_has_class(receiver, JS_CLASS_WEB_API_RESOURCE) ||
+        js_private_in(receiver, js_image_data_intrinsic(0)).item != ITEM_TRUE)
+        return js_throw_type_error("Illegal ImageData receiver");
+    return dom_realm_native_private_array_state(receiver, JS_CLASS_WEB_API_RESOURCE, 3,
+        "Illegal ImageData receiver");
+}
+
+static Item js_image_data_settings(Item settings) {
+    if (settings.item == ITEM_NULL || settings.item == ITEM_JS_UNDEFINED) return ItemNull;
+    if (!js_is_object_value(settings)) return js_throw_type_error("ImageData settings must be a dictionary");
+    RootFrame roots(2);
+    Rooted<Item> options(roots, settings), value(roots, ItemNull);
+    static const char* names[] = {"colorSpace", "pixelFormat"};
+    static const char* supported[] = {"srgb", "rgba-unorm8"};
+    static const char* unsupported[] = {"display-p3", "rgba-float16"};
+    for (int index = 0; index < 2; index++) {
+        value.set(dom_realm_get_name(options.get(), names[index]));
+        if (item_is_error(value.get())) return value.get();
+        if (value.get().item == ITEM_JS_UNDEFINED) continue;
+        value.set(js_to_string(value.get()));
+        if (item_is_error(value.get())) return value.get();
+        String* text = it2s(value.get());
+        if (text->len == strlen(supported[index]) && !memcmp(text->chars, supported[index], text->len)) continue;
+        if (text->len == strlen(unsupported[index]) && !memcmp(text->chars, unsupported[index], text->len))
+            return dom_raise_exception("NotSupportedError", "ImageData currently supports sRGB RGBA8 pixels");
+        return js_throw_type_error("Invalid ImageData settings enumeration");
+    }
+    return ItemNull;
+}
+
+static Item js_image_data_create(Item data, uint32_t width, uint32_t height) {
+    RootFrame roots(4);
+    Rooted<Item> pixels(roots, data), record(roots, js_array_new(0));
+    Rooted<Item> key(roots, js_image_data_intrinsic(0)), prototype(roots, js_image_data_intrinsic(1));
+    JS_RETURN_IF_ERROR(js_array_push(record.get(), pixels.get()));
+    JS_RETURN_IF_ERROR(js_array_push(record.get(), (Item){.item = i2it(width)}));
+    JS_RETURN_IF_ERROR(js_array_push(record.get(), (Item){.item = i2it(height)}));
+    // the private record owns the typed array; no GC pointer escapes into native canvas storage.
+    return dom_realm_native_private_array_object(JS_CLASS_WEB_API_RESOURCE,
+        key.get(), record.get(), prototype.get());
+}
+
+static Item js_image_data_allocate(uint32_t width, uint32_t height) {
+    if (!width || !height) return dom_raise_exception("IndexSizeError", "ImageData dimensions must be non-zero");
+    if ((uint64_t)width * height > RADIANT_CANVAS_MAX_PIXELS)
+        return js_throw_range_error("ImageData exceeds the canvas pixel budget");
+    RootFrame roots(1);
+    Rooted<Item> pixels(roots, js_typed_array_new(JS_TYPED_UINT8_CLAMPED, (int)(width * height * 4)));
+    if (item_is_error(pixels.get())) return pixels.get();
+    return js_image_data_create(pixels.get(), width, height);
+}
+
+extern "C" Item dom_image_data_call(Item, Item, Item*, int, uint64_t*) {
+    return js_throw_type_error("ImageData requires new");
+}
+
+extern "C" Item dom_image_data_construct(Item, Item* args, int argc, Item new_target, uint64_t*) {
+    if (argc < 2) return js_throw_type_error("ImageData requires at least two arguments");
+    RootFrame roots(5);
+    Rooted<Item> input(roots, args[0]), target(roots, new_target), result(roots, ItemNull);
+    Rooted<Item> prototype(roots, ItemNull), settings(roots, ItemNull);
+    bool supplied = js_is_typed_array(input.get());
+    int64_t width = 0, height = 0;
+    JS_RETURN_IF_ERROR(js_canvas_integer(args[supplied ? 1 : 0], true, &width));
+    bool explicit_height = !supplied || (argc > 2 && args[2].item != ITEM_JS_UNDEFINED);
+    if (explicit_height) JS_RETURN_IF_ERROR(js_canvas_integer(args[supplied ? 2 : 1], true, &height));
+    settings.set(argc > (supplied ? 3 : 2) ? args[supplied ? 3 : 2] : make_js_undefined());
+    JS_RETURN_IF_ERROR(js_image_data_settings(settings.get()));
+    if (supplied) {
+        JsTypedArray* array = js_get_typed_array_ptr(input.get().map);
+        if (!array || array->element_type != JS_TYPED_UINT8_CLAMPED)
+            return js_throw_type_error("ImageData requires a Uint8ClampedArray");
+        int length = js_typed_array_length(input.get());
+        if (!length || length % 4 || js_arraybuffer_view_is_out_of_bounds(&array->base))
+            return dom_raise_exception("InvalidStateError", "Invalid ImageData pixel storage");
+        if (!width || (uint64_t)length % ((uint64_t)width * 4))
+            return dom_raise_exception("IndexSizeError", "ImageData row length does not match its width");
+        int64_t inferred = length / (width * 4);
+        if (!explicit_height) height = inferred;
+        if (height != inferred) return dom_raise_exception("IndexSizeError", "ImageData height does not match its storage");
+        result.set(js_image_data_create(input.get(), (uint32_t)width, (uint32_t)height));
+    } else result.set(js_image_data_allocate((uint32_t)width, (uint32_t)height));
+    if (item_is_error(result.get())) return result.get();
+    prototype.set(dom_realm_get_name(target.get(), "prototype"));
+    if (item_is_error(prototype.get())) return prototype.get();
+    if (js_is_object_value(prototype.get())) dom_realm_set_prototype(result.get(), prototype.get());
+    return result.get();
+}
+
+static Item js_image_data_get(Item callee, Item receiver, Item*, int, uint64_t*) {
+    RootFrame roots(1);
+    Rooted<Item> record(roots, js_image_data_state(receiver));
+    if (item_is_error(record.get())) return record.get();
+    int slot = (int)js_fn_native((JsFunction*)callee.function)->target.bits;
+    return slot < 3 ? js_elements_get_int(record.get(), slot)
+        : js_name_item(slot == 3 ? "srgb" : "rgba-unorm8");
+}
+
+static Item js_canvas_get_image_data(Item, Item receiver, Item* args, int argc, uint64_t*) {
+    RootFrame roots(3);
+    Rooted<Item> owner(roots, receiver), image(roots, ItemNull), pixels(roots, ItemNull);
+    void* element = js_canvas_context_element(owner.get());
+    if (!element) return js_throw_type_error("Illegal CanvasRenderingContext2D receiver");
+    if (argc < 4) return js_throw_type_error("getImageData requires four arguments");
+    int64_t rect[4] = {};
+    for (int index = 0; index < 4; index++) JS_RETURN_IF_ERROR(js_canvas_integer(args[index], false, &rect[index]));
+    JS_RETURN_IF_ERROR(js_image_data_settings(argc > 4 ? args[4] : make_js_undefined()));
+    if (rect[2] < 0) {rect[0] += rect[2]; rect[2] = -rect[2];}
+    if (rect[3] < 0) {rect[1] += rect[3]; rect[3] = -rect[3];}
+    image.set(js_image_data_allocate((uint32_t)rect[2], (uint32_t)rect[3]));
+    if (item_is_error(image.get())) return image.get();
+    pixels.set(js_elements_get_int(js_image_data_state(image.get()), 0));
+    uint8_t* bytes = (uint8_t*)js_typed_array_prepare_write_ptr(pixels.get());
+    // numeric/options coercion can retire the canvas; revalidate its wrapper after callbacks.
+    element = js_canvas_context_element(owner.get());
+    if (!bytes || !dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::read_pixels,
+            element, rect[0], rect[1], (uint32_t)rect[2], (uint32_t)rect[3], bytes,
+            (size_t)rect[2] * rect[3] * 4)) return js_canvas_draw_failed();
+    return image.get();
+}
+
+extern "C" void dom_canvas_install_readback_interface(Item constructor,
+        Item image_data_prototype, Item context_prototype) {
+    JsCanvasRuntimeState* state = canvas_runtime_state_ensure();
+    if (!state || !root_vector_ensure_external(&state->image_data_roots)) return;
+    RootFrame roots(5);
+    Rooted<Item> target(roots, constructor), prototype(roots, image_data_prototype);
+    Rooted<Item> context_root(roots, context_prototype), function(roots, ItemNull), key(roots, ItemNull);
+    key.set(dom_realm_private_key_for_class(target.get(), js_name_item("#ImageData")));
+    if (item_is_error(key.get())) return;
+    state->image_data_slots[0] = key.get(); state->image_data_slots[1] = prototype.get();
+    static const char* names[] = {"data", "width", "height", "colorSpace", "pixelFormat"};
+    for (int slot = 0; slot < 5; slot++) {
+        key.set(js_name_item(names[slot]));
+        function.set(js_new_native_payload_function(js_image_data_get, slot, 0));
+        js_set_function_name_from_property_key(function.get(), key.get(), 1);
+        dom_realm_install_accessor(prototype.get(), key.get(), function.get(), ItemNull, 0);
+    }
+    function.set(js_new_native_payload_function(js_canvas_get_image_data, 0, 4));
+    js_set_function_name(function.get(), js_name_item("getImageData"));
+    dom_realm_set_name(context_root.get(), "getImageData", function.get());
 }
 
 static bool js_canvas_numbers_are_finite(const float* values, int count) {
@@ -1190,6 +1369,7 @@ extern "C" void js_canvas_cleanup(void) {
 
 static void js_canvas_capsule_destroy(void* capsule) {
     JsCanvasRuntimeState* state = (JsCanvasRuntimeState*)capsule;
+    root_vector_destroy(&state->image_data_roots);
     for (int i = 0; i < state->font_handle_count; i++) {
         if (state->font_handles[i]) font_handle_release(state->font_handles[i]);
     }

@@ -174,6 +174,71 @@ TEST(JsTimers, HtmlNestingClampsTimeoutsAndIntervalsWithoutChangingNodeTimers) {
     runtime_cleanup(&runtime);
 }
 
+struct LoadClockTimerProbe {
+    int order[4] = {};
+    unsigned count = 0;
+    unsigned intervals = 0;
+};
+static thread_local LoadClockTimerProbe* load_clock_timer_probe;
+
+static Item load_clock_timer_tick(Item tag) {
+    auto* probe = load_clock_timer_probe;
+    if (!probe) return make_js_undefined();
+    int id = it2i(tag);
+    if (id == 3) ++probe->intervals;
+    else if (probe->count < 4) probe->order[probe->count++] = id;
+    return make_js_undefined();
+}
+
+TEST(JsTimers, FreezeLoadClockKeepsDeadlinesCancellationRefsAndIntervalCadence) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    ASSERT_FALSE(item_is_error(transpile_js_to_mir(&runtime, "0;", "load-clock-bootstrap.js", NULL)));
+    js_event_loop_init();
+    js_event_loop_set_virtual_clock(false, 0.0);
+    {
+        RootFrame roots(7);
+        Rooted<Item> callback(roots, js_new_native_function(load_clock_timer_tick));
+        Rooted<Item> handles[5] = {
+            {roots, ItemNull}, {roots, ItemNull}, {roots, ItemNull}, {roots, ItemNull}, {roots, ItemNull}
+        };
+        Rooted<Item> args(roots, ItemNull);
+        LoadClockTimerProbe probe;
+        load_clock_timer_probe = &probe;
+        const int delays[] = {40, 10, 10, 1, 5};
+        for (int id = 0; id < 5; id++) {
+            args.set(js_array_new(1));
+            args.get().array->items[0] = Item{.item = i2it(id)};
+            handles[id].set(js_schedule_timer(callback.get(), Item{.item = i2it(delays[id])},
+                args.get(), true, id == 3, false));
+        }
+        js_clearTimeout(handles[4].get());
+        js_call_function(js_get_key_cstr(handles[3].get(), "unref"), handles[3].get(), NULL, 0);
+        double before = js_performance_now_ms();
+        uv_sleep(60);
+        js_event_loop_freeze_load_clock();
+        EXPECT_TRUE(js_event_loop_virtual_clock_enabled());
+        EXPECT_GE(js_performance_now_ms() - before, 50.0);
+        EXPECT_EQ(js_call_function(js_get_key_cstr(handles[3].get(), "hasRef"),
+            handles[3].get(), NULL, 0).item, ITEM_FALSE);
+        EXPECT_EQ(js_call_function(js_get_key_cstr(handles[0].get(), "hasRef"),
+            handles[0].get(), NULL, 0).item, ITEM_TRUE);
+        js_event_loop_advance_virtual_time(0.0, 0);
+        ASSERT_EQ(probe.count, 3u);
+        EXPECT_EQ(probe.order[0], 1);
+        EXPECT_EQ(probe.order[1], 2);
+        EXPECT_EQ(probe.order[2], 0);
+        EXPECT_EQ(probe.intervals, 1u); // an overdue wall interval coalesces missed ticks.
+        js_event_loop_advance_virtual_time(0.0, 0);
+        EXPECT_EQ(probe.intervals, 1u);
+        js_event_loop_advance_virtual_time(10.0, 0);
+        EXPECT_EQ(probe.intervals, 11u); // subsequent virtual ticks retain their original cadence.
+        js_clearInterval(handles[3].get());
+        load_clock_timer_probe = nullptr;
+    }
+    runtime_cleanup(&runtime);
+}
+
 class JsComputedStyleTest : public ::testing::Test {
 protected:
     Runtime runtime = {};

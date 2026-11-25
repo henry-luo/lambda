@@ -29,6 +29,8 @@
 #include <algorithm>
 #include <chrono>
 
+#include "lib/shell.h"
+#include "lib/strbuf.h"
 #include "wpt_parallel_runner.hpp"
 
 #ifdef _WIN32
@@ -40,17 +42,8 @@
     #include <windows.h>
     #include <process.h>
     #include <io.h>
-    #include <direct.h>
-    #define getcwd _getcwd
-    #define popen _popen
-    #define pclose _pclose
-    #define WEXITSTATUS(status) (status)
-    #ifndef F_OK
-    #define F_OK 0
-    #endif
 #else
     #include <unistd.h>
-    #include <sys/wait.h>
     #include <dirent.h>
     #include <sys/stat.h>
 #endif
@@ -437,52 +430,6 @@ static std::string wrap_any_js(const std::string& js) {
     return std::string("<script>\n") + js + "\n</script>\n";
 }
 
-/**
- * Execute a JS file with a document and capture output.
- */
-static std::string execute_js_with_doc(const char* js_path, const char* html_path, int* exit_code) {
-    char command[1024];
-#if WPT_RUNNER_LAYOUT
-#ifdef _WIN32
-    snprintf(command, sizeof(command),
-             "lambda.exe layout \"%s\" --auto-close --no-log --view-output \"%s.json\" 2>&1", js_path, js_path);
-#else
-    snprintf(command, sizeof(command),
-             "./lambda.exe layout \"%s\" --auto-close --no-log --view-output \"%s.json\" 2>&1", js_path, js_path);
-#endif
-#else
-#ifdef _WIN32
-    snprintf(command, sizeof(command),
-             "lambda.exe js \"%s\" --document \"%s\" --no-log 2>&1", js_path, html_path);
-#else
-    snprintf(command, sizeof(command),
-             "./lambda.exe js \"%s\" --document \"%s\" --no-log 2>&1", js_path, html_path);
-#endif
-#endif
-
-    FILE* pipe = popen(command, "r");
-    if (!pipe) {
-        *exit_code = -1;
-        return "";
-    }
-
-    std::string output;
-    char buffer[1024];
-    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-        output += buffer;
-    }
-
-    int raw = pclose(pipe);
-#if WPT_RUNNER_LAYOUT && !defined(_WIN32)
-    // A signal does not have an exit status; do not turn it into a zero exit.
-    *exit_code = raw == -1 ? -1 : WIFEXITED(raw) ? WEXITSTATUS(raw) :
-        WIFSIGNALED(raw) ? 128 + WTERMSIG(raw) : -1;
-#else
-    *exit_code = WEXITSTATUS(raw);
-#endif
-    return output;
-}
-
 // ---------------------------------------------------------------------------
 // Test parameter and discovery
 // ---------------------------------------------------------------------------
@@ -702,12 +649,6 @@ static WptDomEventsResult run_wpt_dom_events_case(const WptDomEventsParam& p) {
         return result;
     }
 
-    if (p.variant[0]) {
-        scripts.insert(0, "\" };\n");
-        scripts.insert(0, p.variant);
-        scripts.insert(0, "var location = { search: \"");
-    }
-
     std::string shim = read_file_contents(SHIM_PATH);
     if (shim.empty()) {
         result.setup_error = std::string("Could not read testharness shim: ") + SHIM_PATH;
@@ -756,18 +697,45 @@ static WptDomEventsResult run_wpt_dom_events_case(const WptDomEventsParam& p) {
         }
     }
     result.output += "\n<script>\n" + combined + "\n</script>\n";
+    StrBuf* view_path = strbuf_new_cap(temp_js.size() + sizeof(".json"));
+    if (!view_path) {
+        result.setup_error = "Could not allocate layout output path";
+        return result;
+    }
+    strbuf_append_all(view_path, 2, temp_js.c_str(), ".json");
     write_file_contents(temp_js.c_str(), result.output);
+    doc_arg = temp_js;
 #else
     write_file_contents(temp_js.c_str(), combined);
 #endif
 
-    std::string output = execute_js_with_doc(
-        temp_js.c_str(), doc_arg.c_str(), &result.exit_code);
-    result.output = output;
+    // initialize the real Location with the variant because assigning to it navigates.
+    doc_arg += p.variant;
+#ifdef _WIN32
+    const char* executable = "lambda.exe";
+#else
+    const char* executable = "./lambda.exe";
+#endif
+#if WPT_RUNNER_LAYOUT
+    const char* args[] = {executable, "layout", doc_arg.c_str(), "--auto-close",
+                          "--no-log", "--view-output", view_path->str, nullptr};
+#else
+    const char* args[] = {executable, "js", temp_js.c_str(), "--document",
+                          doc_arg.c_str(), "--no-log", nullptr};
+#endif
+    ShellOptions options = {};
+    options.merge_stderr = true;
+    ShellResult child = shell_exec(executable, args, &options);
+    result.exit_code = child.exit_code;
+    result.output.clear();
+    if (child.stdout_buf) result.output.assign(child.stdout_buf, child.stdout_len);
+    if (child.output_limit_exceeded) result.setup_error = "WPT child output exceeded the capture limit";
+    shell_result_free(&child);
 
     // Parse output for FAIL lines and summary.
     //   FAIL: <name> - <error message>
     //   WPT_RESULT: N/M passed
+    const auto& output = result.output;
     size_t pos = 0;
     while (pos < output.size()) {
         size_t eol = output.find('\n', pos);
@@ -784,7 +752,8 @@ static WptDomEventsResult run_wpt_dom_events_case(const WptDomEventsParam& p) {
 
     if (!WPT_RUNNER_KEEP_TEMP) unlink(temp_js.c_str());
 #if WPT_RUNNER_LAYOUT
-    if (!WPT_RUNNER_KEEP_TEMP) unlink((temp_js + ".json").c_str());
+    if (!WPT_RUNNER_KEEP_TEMP) unlink(view_path->str);
+    strbuf_free(view_path);
 #endif
     result.crash_test_passed =
         p.test_name.find("crash") != std::string::npos &&
