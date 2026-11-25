@@ -1,0 +1,25 @@
+{
+  issue: null,
+  unsupported: null,
+  text: "[{ab}ab][{ab}]",
+  diagnostics: []
+}
+{
+  issue: null,
+  unsupported: null,
+  text: "[a][xxax][xax][a]",
+  diagnostics: []
+}
+{
+  issue: null,
+  unsupported: null,
+  text: "[ac]",
+  diagnostics: []
+}
+{
+  issue: "tex-unsupported-primitive",
+  unsupported: "expl3 replacement search pattern",
+  text: "",
+  diagnostics: []
+}
+true

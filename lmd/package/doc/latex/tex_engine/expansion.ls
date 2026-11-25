@@ -3438,7 +3438,8 @@ fn expl3_tl_replace(st: State, name) State^ {
         else {
             let body = expl3.replace_tokens(stored_tokens(prior.body), search.tokens,
                 stored_tokens(replacement.tokens), contains(name, "_once:"))^;
-            assign_meaning(advanced, key(target.token), expl3.token_list(body), effective_global(advanced, expl3.global(name))^)
+            assign_meaning({*:advanced, expl3_tl_replace_seen:true}, key(target.token), expl3.token_list(body),
+                effective_global(advanced, expl3.global(name))^)
         }
     }
 }
@@ -6783,6 +6784,9 @@ pub fn enable_script_expl3(st: State) State^ {
             scope ++ "set:Nx#1{" ++ (if (side == "left") value ++ prior else prior ++ value) ++ "}}",
             protected_flag:true, source_mapping_guard:"exp_args_value", argument_unqualified:true}
     }];
+    let token_removals = [for (scope in ["", "g"], form in ["once", "all"]) {
+        source:"\\tl_" ++ scope ++ "remove_" ++ form ++ ":Nn#1#2{\\tl_" ++ scope ++
+            "replace_" ++ form ++ ":Nnn#1{#2}{}}", protected_flag:true, argument_unqualified:true}];
     // The boolean parser's operator control sequences are named through csname.
     let bool_returns = [for (i in [0,1,2]) {source:"\\__lambda_bool_return:{\\c_" ++
         (if (i == 0) "false" else "true") ++ "_bool}", install_as:"__bool_)_" ++ string(i) ++ ":", protected_flag:false}];
@@ -6800,7 +6804,7 @@ pub fn enable_script_expl3(st: State) State^ {
         source:"\\" ++ loop.name ++ ":nn#1#2{" ++ (if (loop.first) "#2" else "") ++
             "\\bool_if:n" ++ loop.test ++ "{#1}{" ++ (if (loop.first) "" else "#2") ++
             "\\" ++ loop.name ++ ":nn{#1}{#2}}}", protected_flag:false}];
-    let macros = enable_expl_macro_sources(msg_support, [*variants,*pop_base,*pop_conditionals,*pop_variants,*prop_get_conditionals,*prop_get_variants,*prop_exp_helpers,*prop_pop_bases,*prop_remove_bases,*prop_pop_conditionals,*prop_pop_variants,*prop_remove_variants,*integer_ops,*integer_dynamic,*value_puts,*bool_returns,*bool_gates,*bool_selectors,*bool_loops,
+    let macros = enable_expl_macro_sources(msg_support, [*variants,*pop_base,*pop_conditionals,*pop_variants,*prop_get_conditionals,*prop_get_variants,*prop_exp_helpers,*prop_pop_bases,*prop_remove_bases,*prop_pop_conditionals,*prop_pop_variants,*prop_remove_variants,*integer_ops,*integer_dynamic,*value_puts,*token_removals,*bool_returns,*bool_gates,*bool_selectors,*bool_loops,
         {source:"\\ior_new:N#1{\\cs_new_eq:NN#1\\c__ior_term_ior}",protected_flag:true},
         {source:"\\ior_new:c{\\exp_args:Nc\\ior_new:N}",protected_flag:true},
         {source:"\\ior_open:cn{\\exp_args:Nc\\ior_open:Nn}",protected_flag:true},
@@ -7309,7 +7313,7 @@ pub fn resume(st: State, source: string, name: string = "<input>", budget: int =
             main_file: id, echo_incomplete: false, prefixed_macro_seen: false, prefix_scan: false,
             mathchardef_emission_seen: false,
             expl3_tl_head_seen: false, expl3_tl_tail_seen: false, expl3_keyval_seen: false, expl3_keys_seen:false,
-            expl3_clist_map_seen:false, expl3_bool_expr_seen:false,
+            expl3_clist_map_seen:false, expl3_bool_expr_seen:false, expl3_tl_replace_seen:false,
             expl3_exp_args_once_seen: false, expl3_exp_args_value_seen: false, expl3_exp_args_f_seen: false,
             sources: [*st.sources, {id: id, name: name, origin: origin, data: source}]};
         run(resumed, budget)

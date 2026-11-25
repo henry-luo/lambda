@@ -34,13 +34,21 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Expl3 token removal, 2026-11-26:** Script preloads the four native local
+  and global, once and all removal wrappers over the shared token-replacement
+  implementation (D10.2.2v2). TeX Live comparisons cover grouped tokens,
+  aliasing and scope. Empty search patterns, constructor argument handling
+  and replacement source mapping remain explicitly unsupported. Csvsimple
+  now reaches a grouped sequence-split delimiter; its origin needs tracing.
+
 - **Expl3 boolean expressions and loops, 2026-11-26:** Script preloads the
   native expandable boolean parser, alignment-safe helpers and four expression
   loop forms (D10.2.2v2). The macro-source reader now preserves TeX's category
   for `&`; otherwise native `&&` helpers reject their delimiter. TeX Live
   comparisons cover precedence, negation, grouping, loop entry conditions and
   an input stream through EOF. Boolean-expression source mapping remains
-  explicitly unsupported. Csvsimple now reaches `tl_remove_all:Nn`.
+  explicitly unsupported. Csvsimple's later blocker is recorded in the token
+  removal checkpoint above.
 
 - **Expl3 value insertion, 2026-11-26:** Script preloads the native
   `exp_not:V`/`:v` and local/global left/right value-insertion macro bodies
