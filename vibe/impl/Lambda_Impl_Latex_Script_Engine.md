@@ -34,13 +34,19 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Expl3 Roman integer conversion, 2026-11-26:** Script preloads the native
+  lower- and upper-case conversion macros and their letter emitters
+  (D10.2.2v2). TeX Live comparisons cover arithmetic, zero and negative
+  inputs, output category codes and generated control-sequence names. This
+  fixes csvsimple's missing `endcsname`; its next missing operation is
+  `tl_map_inline:nn`. Integer source mapping remains explicitly unsupported.
+
 - **Expl3 dynamic token-list assignment, 2026-11-26:** Script preloads the
   standard local/global `:cn` and `:cx` setters (D10.2.2v2). TeX Live
   comparisons cover expanded names, unexpanded and expanded values, aliases
   and scope. Constructor argument handling and dynamic-assignment source
-  mapping remain unsupported. Csvsimple now reports `tex-missing-endcsname`;
-  an isolated probe reproduces this when an unported `int_to_roman:n` occurs
-  inside a dynamic control-sequence name.
+  mapping remain unsupported. Csvsimple's subsequent generated-name failure
+  and fix are recorded in the Roman conversion checkpoint above.
 
 - **Expl3 sequence mapping, 2026-11-26:** Script preloads the native inline,
   indexed-inline and expandable indexed-function sequence maps, including

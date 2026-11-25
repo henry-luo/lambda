@@ -1,0 +1,19 @@
+{
+  issue: null,
+  unsupported: null,
+  text: "[i]/[ix]/[MCMXCIX]/[]/[]",
+  diagnostics: []
+}
+{
+  issue: null,
+  unsupported: null,
+  text: "Y/N",
+  diagnostics: []
+}
+{
+  issue: null,
+  unsupported: null,
+  text: "A",
+  diagnostics: []
+}
+true

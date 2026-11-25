@@ -6669,6 +6669,7 @@ pub fn enable_script_expl3(st: State) State^ {
         {name: "__int_sep:", kind: "primitive", value: "right"},
         {name: "__int_eval:w", kind: "primitive", value: "numexpr"},
         {name: "int_eval:w", kind: "primitive", value: "numexpr"},
+        {name: "__int_to_roman:w", kind: "primitive", value: "romannumeral"},
         {name: "__int_eval_end:", kind: "primitive", value: "relax"},
         {name: "reverse_if:N", kind: "primitive", value: "unless"},
         {name: "l_tmpa_bool", kind: "chardef", value: 0},
@@ -6784,6 +6785,10 @@ pub fn enable_script_expl3(st: State) State^ {
     let token_dynamic = [for (scope in ["", "g"], form in ["n", "x"]) {
         source:"\\tl_" ++ scope ++ "set:c" ++ form ++ "{\\exp_args:Nc\\tl_" ++ scope ++ "set:N" ++ form ++ "}",
         protected_flag:true, source_mapping_guard:"dynamic_assignment", argument_unqualified:true}];
+    // Native roman conversion emits letter-category tokens in both cases.
+    let roman_letters = [for (form in ["roman", "Roman"], letter in ["i", "v", "x", "l", "c", "d", "m"]) {
+        source:"\\__int_to_" ++ form ++ "_" ++ letter ++ ":w{" ++
+            (if (form == "Roman") upper(letter)^ else letter) ++ "}", protected_flag:false}];
     // The four native insertion shapes share value expansion and assignment order.
     let value_puts = [for (scope in ["", "g"], side in ["left", "right"], form in ["V", "v"]) {
         let value = "\\exp_not:" ++ form ++ (if (form == "V") "#2" else "{#2}");
@@ -6812,13 +6817,19 @@ pub fn enable_script_expl3(st: State) State^ {
         source:"\\" ++ loop.name ++ ":nn#1#2{" ++ (if (loop.first) "#2" else "") ++
             "\\bool_if:n" ++ loop.test ++ "{#1}{" ++ (if (loop.first) "" else "#2") ++
             "\\" ++ loop.name ++ ":nn{#1}{#2}}}", protected_flag:false}];
-    let macros = enable_expl_macro_sources(msg_support, [*variants,*pop_base,*pop_conditionals,*pop_variants,*prop_get_conditionals,*prop_get_variants,*prop_exp_helpers,*prop_pop_bases,*prop_remove_bases,*prop_pop_conditionals,*prop_pop_variants,*prop_remove_variants,*integer_ops,*integer_dynamic,*token_dynamic,*value_puts,*token_removals,*bool_returns,*bool_gates,*bool_selectors,*bool_loops,
+    let macros = enable_expl_macro_sources(msg_support, [*variants,*pop_base,*pop_conditionals,*pop_variants,*prop_get_conditionals,*prop_get_variants,*prop_exp_helpers,*prop_pop_bases,*prop_remove_bases,*prop_pop_conditionals,*prop_pop_variants,*prop_remove_variants,*integer_ops,*integer_dynamic,*token_dynamic,*roman_letters,*value_puts,*token_removals,*bool_returns,*bool_gates,*bool_selectors,*bool_loops,
         {source:"\\ior_new:N#1{\\cs_new_eq:NN#1\\c__ior_term_ior}",protected_flag:true},
         {source:"\\ior_new:c{\\exp_args:Nc\\ior_new:N}",protected_flag:true},
         {source:"\\ior_open:cn{\\exp_args:Nc\\ior_open:Nn}",protected_flag:true},
         {source:"\\ior_close:c{\\exp_args:Nc\\ior_close:N}",protected_flag:true},
         {source:"\\int_new:N#1{\\__kernel_chk_if_free_cs:N#1\\cs:w newcount\\cs_end:#1}",protected_flag:true},
         {source:"\\int_new:c{\\exp_args:Nc\\int_new:N}",protected_flag:true},
+        {source:"\\int_to_roman:n#1{\\exp_after:wN\\__int_to_roman:N\\__int_to_roman:w\\int_eval:n{#1}Q}",protected_flag:false,source_mapping_guard:"int_math"},
+        {source:"\\__int_to_roman:N#1{\\use:c{__int_to_roman_#1:w}\\__int_to_roman:N}",protected_flag:false},
+        {source:"\\__int_to_roman_Q:w#1{}",protected_flag:false},
+        {source:"\\int_to_Roman:n#1{\\exp_after:wN\\__int_to_Roman_aux:N\\__int_to_roman:w\\int_eval:n{#1}Q}",protected_flag:false,source_mapping_guard:"int_math"},
+        {source:"\\__int_to_Roman_aux:N#1{\\use:c{__int_to_Roman_#1:w}\\__int_to_Roman_aux:N}",protected_flag:false},
+        {source:"\\__int_to_Roman_Q:w#1{}",protected_flag:false},
         {source:"\\q_no_value{\\q_no_value}",protected_flag:false},
         {source:"\\exp_args:NNe#1#2#3{\\exp_after:wN#1\\exp_after:wN#2\\tex_expanded:D{{#3}}}",protected_flag:false},
         {source:"\\exp_args:Nce#1#2#3{\\tex_expanded:D{\\exp_not:N#1\\exp_after:wN\\exp_not:N\\cs:w#2\\cs_end:{\\__kernel_exp_not:w\\tex_expanded:D{{#3}}}}}",protected_flag:false},
