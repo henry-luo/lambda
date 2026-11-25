@@ -15,6 +15,18 @@ Resolved records are in the [fixed issue ledger](<Lib_Input_Issue_Ledger (fixed)
 
 ## Open issues
 
+<a id="li-115"></a>
+
+### LI-115 — The isolated input check expects removed Premake targets
+
+**Open, 2026-11-25.** `make check-input-isolation` stages
+`lambda-lib-cpp.make` and `lambda-data-cpp.make` through
+`utils/check_input_isolation.py`. The split build creates the two archives
+through the input owner's Makefile (D9.1.1v4, D9.1.3v2, D9.1.5), so the
+staging script stops on the first missing Premake file. The archive-header
+audit passes before this failure. The staged rebuild needs to use the input
+owner's build targets. This blocks the extra isolated rebuild gate.
+
 <a id="li-114"></a>
 
 - [LI-114 — Native JSX and LaTeX writers silently omitted large strings](<Lib_Input_Issue_Ledger (fixed).md#li-114>).

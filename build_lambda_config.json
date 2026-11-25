@@ -1363,7 +1363,6 @@
         "lambda/format/format-css.cpp",
         "lambda/input/input-tex*.cpp",
         "lambda/input/input-latex*.cpp",
-        "lambda/input/input-tikz*.cpp",
         "lambda/input/input-pdf*.cpp",
         "lambda/input/input-http.cpp",
         "lambda/input/input-psd.cpp",
@@ -5421,9 +5420,9 @@
           },
           {
             "source": "test_graph_parser_gtest.cpp",
-            "name": "Graph Parser Tests - DOT and Mermaid",
+            "name": "Hosted Graph Parser Tests - D2, DOT, Mermaid and Structurizr",
             "dependencies": [
-              "lambda-data"
+              "lambda-runtime-full"
             ],
             "libraries": [
               "gtest",
@@ -5436,7 +5435,7 @@
             "source": "test_graph_mermaid_gtest.cpp",
             "name": "Mermaid Graph Semantic Corpus",
             "dependencies": [
-              "lambda-data"
+              "lambda-runtime-full"
             ],
             "libraries": [
               "gtest",
@@ -5586,7 +5585,7 @@
             "source": "test_graph_formatter_gtest.cpp",
             "name": "Graph Formatter Tests - DOT, Mermaid, D2",
             "dependencies": [
-              "lambda-data"
+              "lambda-runtime-full"
             ],
             "libraries": [
               "gtest",

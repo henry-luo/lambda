@@ -1816,8 +1816,7 @@ int exec_convert(int argc, char* argv[]) {
         return 1;
     }
 
-        // Parse using Lambda's input system
-        Input* input = input_from_url(url_string, type_string, flavor_string, NULL);
+        Input* input = lambda_input_from_url(url_string, type_string, flavor_string, nullptr);
         if (!input) {
             printf("Error: Failed to parse input file\n");
             mem_pool_destroy(temp_pool);
@@ -1825,7 +1824,7 @@ int exec_convert(int argc, char* argv[]) {
         }
 
         // Check if parsing was successful
-        if (input->root.type_id() == LMD_TYPE_ERROR) {
+        if (input->parse_failed || input->root.type_id() == LMD_TYPE_ERROR) {
             printf("Error: Failed to parse input file\n");
             mem_pool_destroy(temp_pool);
             return 1;

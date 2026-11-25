@@ -33,6 +33,8 @@
 #include "lib/file.h"
 #include "lib/str.h"
 #include "lambda/core/utf_string.h"
+#include "lambda/input/input-context.hpp"
+#include "lambda/core/mark_reader.hpp"
 #include "re2_wrapper.hpp"
 #include "grammar/grammar.hpp"
 #include "native_collection.hpp"
@@ -212,6 +214,98 @@ static Item input_parse_error_item(const char* function_name, Input* input,
         return runtime_error_itemf(ERR_PARSE_ERROR,
             "%s: parser failed during format auto-detection", function_name);
     }
+}
+
+static bool read_script_input(void* owner, Input* input, const char* type,
+        const char* flavor, const char* source, size_t length, Item* output) {
+    bool fragment = !strcmp(type, "structurizr-fragment");
+    bool tikz = !strcmp(type, "tikz");
+    if (!fragment && !tikz && (strcmp(type, "graph") || !flavor)) return false;
+    const char* package = "lambda.graph.parser.dot";
+    if (tikz) package = "lambda.doc.tikz.parser";
+    else if (fragment || !strcmp(flavor, "structurizr") || !strcmp(flavor, "c4"))
+        package = "lambda.graph.parser.structurizr";
+    else if (!strcmp(flavor, "d2")) package = "lambda.graph.parser.d2";
+    else if (!strcmp(flavor, "mermaid")) package = "lambda.graph.parser.mermaid";
+
+    // The package builds GC-owned data. Adopt it into the Input only after the call.
+    struct AllocationScope {
+        InputAllocationContext* saved = input_allocation_context;
+        AllocationScope() { input_allocation_context = nullptr; }
+        ~AllocationScope() { input_allocation_context = saved; }
+    } allocation_scope;
+    Runtime* runtime = (Runtime*)owner;
+    EvalContext* eval = runtime_get_eval_context(runtime);
+    if (!eval_context_matches(eval)) {
+        // Native callers create the evaluator only if the selected format needs one.
+        Input* initialized = run_lambda_package_module(runtime, package);
+        bool ready = initialized && !item_is_error(initialized->root) && eval_context_matches(eval);
+        if (initialized) pool_destroy(initialized->pool);
+        if (!ready) {
+            input->parse_failed = true;
+            input->parse_error_message = pool_strdup(input->pool, "Could not initialize the script input parser");
+            return true;
+        }
+    }
+
+    RuntimeExecutionScope execution_scope(eval);
+    RootFrame roots(3);
+    Rooted<Item> bytes(roots, ItemNull);
+    Rooted<Item> reply(roots, ItemNull);
+    Rooted<Item> parent(roots, ItemNull);
+    {
+        bytes.set(heap_binary_value_from_bytes(source, length));
+        if (fragment) {
+            String* parent_name = heap_strcpy(flavor, strlen(flavor));
+            parent.set(parent_name ? (Item){.item = s2it(parent_name)} : ItemError);
+        }
+        Item args[] = {bytes.get(), parent.get()};
+        if (item_is_error(args[0]) || item_is_error(args[1])) reply.set(ItemError);
+        else reply.set(interp_call_package_export(runtime, package,
+            fragment ? "fragment" : "read", args, fragment ? 2 : 1));
+    }
+    input_allocation_context = allocation_scope.saved;
+
+    if (reply.get().type_id() != LMD_TYPE_MAP) {
+        LambdaError* error = reply.get().type_id() == LMD_TYPE_ERROR ? it2err(reply.get()) : nullptr;
+        input->parse_failed = true;
+        input->parse_error_message = pool_strdup(input->pool, error && error->message
+            ? error->message : "Script input parser failed");
+        return true;
+    }
+    MapReader result(reply.get().map);
+    ArrayReader errors = result.get("errors").asArray();
+    if (errors.length()) {
+        lambda::InputContext diagnostic(input, source, length);
+        for (int64_t i = 0; i < errors.length() && !diagnostic.shouldStopParsing(); i++) {
+            MapReader entry = errors.get(i).asMap();
+            const char* message = entry.get("message").cstring();
+            size_t offset = (size_t)entry.get("offset").asInt();
+            diagnostic.tracker.seek(offset);
+            diagnostic.addErrorCode(diagnostic.location(), nullptr, "%s", message ? message : "Invalid input");
+        }
+        diagnostic.logErrors();
+    } else {
+        MarkBuilder builder(input);
+        *output = builder.deep_copy(result.get("root").item());
+        if (item_is_error(*output)) input->parse_failed = true;
+    }
+    return true;
+}
+
+InputScriptParser lambda_input_script_parser(Runtime* runtime) {
+    return {runtime, read_script_input};
+}
+
+Input* lambda_input_from_url(String* url, String* type, String* flavor, Url* cwd) {
+    Runtime runtime;
+    runtime_init(&runtime);
+    const InputScriptParser parser = lambda_input_script_parser(&runtime);
+    InputParseOptions options = {};
+    options.script_parser = &parser;
+    Input* result = input_from_url_with_options(url, type, flavor, cwd, &options);
+    runtime_cleanup(&runtime);
+    return result;
 }
 
 static bool format_option_has_nul(const String* value) {
@@ -5992,9 +6086,11 @@ static Item input_resource(Item target_item, Item type, bool template_url_only) 
         return failure;
     }
 
+    const InputScriptParser parser = lambda_input_script_parser(context->runtime);
 #ifndef LAMBDA_IME_RESOURCE_IO
     if (fs_target) {
-        Item result = fs_node_input(input_target_root.get(), type_str, flavor_str);
+        Item result = fs_node_input(input_target_root.get(), type_str, flavor_str,
+            parser.context ? &parser : nullptr);
         if (get_type_id(result) == LMD_TYPE_ERROR) {
             if (context) eval_context_set_last_error(context, it2err(result));
             return result;
@@ -6018,7 +6114,8 @@ static Item input_resource(Item target_item, Item type, bool template_url_only) 
     // A schema-backed input inherits the schema/runtime pool; a schemaless
     // input keeps the existing id-less Input seam required by D5.6.2.
     Input *input = input_from_target_with_io(target, type_str, flavor_str,
-        schema_type ? context->name_pool : nullptr, eval_context_security_io(context));
+        schema_type ? context->name_pool : nullptr, eval_context_security_io(context),
+        parser.context ? &parser : nullptr);
     if (!input) {
         // input() is a can-raise effect: a loader failure must not become a
         // successful null, or callers cannot distinguish failed execution from
@@ -7111,6 +7208,8 @@ Item fn_parse2(Item str_item, Item type) {
     String* flavor_str = NULL;
     bool source_positions = false;
     InputParseOptions parse_options = {};
+    const InputScriptParser parser = lambda_input_script_parser(context ? context->runtime : nullptr);
+    parse_options.script_parser = parser.context ? &parser : nullptr;
     ArrayList* adapter_names = arraylist_new(8);
     ArrayList* raw_names = arraylist_new(8);
     ArrayList* chaptered_names = arraylist_new(8);
@@ -7221,7 +7320,7 @@ Item fn_parse2(Item str_item, Item type) {
     // captured ZIP members are values: parsing them never reacquires their source (S12.4.1v2).
 #ifndef LAMBDA_IME_RESOURCE_IO
     if (fs_node_is(str_item)) {
-        Item result = fs_node_input(str_item, type_str, flavor_str);
+        Item result = fs_node_input(str_item, type_str, flavor_str, parse_options.script_parser);
         arraylist_free(adapter_names);
         arraylist_free(raw_names);
         arraylist_free(chaptered_names);
@@ -7284,7 +7383,8 @@ Item fn_parse2(Item str_item, Item type) {
     Input* input = input_from_source_n_with_name_parent(str ? str->chars : (const char*)binary_data(binary),
         str ? str->len : binary_length(binary), dummy_url,
         type_str, flavor_str, NULL,
-        (source_positions || has_tex_options || parse_options.xml_preserve_whitespace || parse_options.io)
+        (source_positions || has_tex_options || parse_options.xml_preserve_whitespace || parse_options.io ||
+            parse_options.script_parser)
             ? &parse_options : NULL);
     arraylist_free(adapter_names);
     arraylist_free(raw_names);

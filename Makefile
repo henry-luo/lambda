@@ -2414,12 +2414,12 @@ test-input: build
 	@echo "Running input processing test suite..."
 	@node test/test_run.js --target=input --raw
 
-build-graph-mermaid-test:
-	@echo "Building Mermaid graph semantic runner..."
-	@mkdir -p build/premake
-	@$(MAKE) generate-premake
-	@PATH="/clang64/bin:$$PATH" $(PREMAKE5) gmake --file=$(PREMAKE_FILE)
-	@PATH="/clang64/bin:$$PATH" $(MAKE) -C build/premake config=debug_native lambda test_graph_mermaid_gtest test_lambda_gtest -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"
+.PHONY: build-graph-tests
+build-graph-tests: build
+	@echo "Building hosted graph parser and formatter tests..."
+	@PATH="/clang64/bin:$$PATH" $(MAKE) -C build/premake config=debug_native test_graph_parser_gtest test_graph_formatter_gtest test_graph_mermaid_gtest test_lambda_gtest -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"
+
+build-graph-mermaid-test build-graph-graphviz-test build-graph-structurizr-test: build-graph-tests
 
 test-graph-mermaid: build-graph-mermaid-test
 	@echo "Running Mermaid graph semantic corpus..."
@@ -2431,16 +2431,10 @@ test-graph-mermaid: build-graph-mermaid-test
 	@test "$$(grep -c 'data-graph-role=\"edge\"' temp/mermaid_layout_bridge.svg)" -eq 5
 	@rm -f temp/mermaid_layout_bridge.svg
 
-build-graph-graphviz-test:
-	@echo "Building Graphviz graph semantic runner..."
-	@mkdir -p build/premake
-	@$(MAKE) generate-premake
-	@PATH="/clang64/bin:$$PATH" $(PREMAKE5) gmake --file=$(PREMAKE_FILE)
-	@PATH="/clang64/bin:$$PATH" $(MAKE) -C build/premake config=debug_native lambda test_graph_parser_gtest test_lambda_gtest -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"
-
 test-graph-graphviz: build-graph-graphviz-test
-	@echo "Running native DOT parser coverage..."
+	@echo "Running hosted DOT parser coverage..."
 	@./test/test_graph_parser_gtest.exe --gtest_filter='GraphParserTest.ParserLocBudget:GraphParserTest.ParseDOTGraph:GraphParserTest.ParseComplexDOTGraph:GraphParserTest.ParseUndirectedGraph:GraphParserTest.ParseEmptyGraph'
+	@./test/test_graph_formatter_gtest.exe
 	@echo "Running manifest-driven Graphviz package fixtures..."
 	@./test/test_lambda_gtest.exe --gtest_filter='*graphviz*'
 	@echo "Running headless .gv view bridge..."
@@ -2448,15 +2442,8 @@ test-graph-graphviz: build-graph-graphviz-test
 	@! grep -qi 'memtrack: .*leak' temp/graphviz_view_memtrack.log
 	@rm -f temp/graphviz_view_memtrack.log
 
-build-graph-structurizr-test:
-	@echo "Building Structurizr graph test runners..."
-	@mkdir -p build/premake
-	@$(MAKE) generate-premake
-	@PATH="/clang64/bin:$$PATH" $(PREMAKE5) gmake --file=$(PREMAKE_FILE)
-	@PATH="/clang64/bin:$$PATH" $(MAKE) -C build/premake config=debug_native lambda test_graph_parser_gtest test_lambda_gtest -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"
-
 test-graph-structurizr: build-graph-structurizr-test
-	@echo "Running native Structurizr parser coverage..."
+	@echo "Running hosted Structurizr parser coverage..."
 	@./test/test_graph_parser_gtest.exe --gtest_filter='GraphParserTest.ParserLocBudget:GraphParserTest.ParseStructurizrWorkspace:GraphParserTest.ParseStructurizrArchetypes:GraphParserTest.AutoDetectStructurizrDsl:GraphParserTest.RecoverStructurizrWorkspaceRoot'
 	@echo "Running Structurizr/C4 package integration fixtures..."
 	@./test/test_lambda_gtest.exe --gtest_filter='*structurizr*'

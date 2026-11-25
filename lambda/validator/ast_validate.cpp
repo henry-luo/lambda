@@ -379,8 +379,8 @@ ValidationResult* run_ast_validation(const char* data_file, const char* schema_f
 
         Item data_item = {.item = ITEM_ERROR};
         if (url_string) {
-            Input* input = input_from_url(url_string, type_string, nullptr, nullptr);
-            if (input && input->root.item != ITEM_ERROR) {
+            Input* input = lambda_input_from_url(url_string, type_string, nullptr, nullptr);
+            if (input && !input->parse_failed && input->root.item != ITEM_ERROR) {
                 data_item = input->root;
                 log_debug("validator-cli: Successfully parsed input file");
             } else {

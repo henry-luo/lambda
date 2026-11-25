@@ -1,0 +1,31 @@
+[<graph type: "directed", layout: "hierarchical", flavor: "d2", ir-stage: "source",
+    <node id: "a", source-start: 0, source-end: 9, source-line: 1, source-column: 1, label: "é😀">
+    <node id: "a", source-start: 19, source-end: 31, source-line: 2, source-column: 1>
+    <node id: "b", source-start: 24, source-end: 31, source-line: 2, source-column: 6>
+    <edge from: "a", to: "b", label: "edge", source-start: 19, source-end: 31, source-line: 2, source-column: 1>>, "parse: Parse errors (1 error):\n\nline 1, col 1: error: Expected identifier\n  @bad\n  ^\n", <graph type: "directed", layout: "dot", flavor: "dot", version: "1", ir-stage: "source", directed: true, strict: true, source-start: 0, source-end: 50, source-line: 1, source-column: 1,
+    <dot-edge-statement id: "dot-stmt-0", source-start: 17, source-end: 25, source-line: 1, source-column: 18,
+      <dot-endpoint kind: "node", id: "é", source-kind: "quoted", source-start: 17, source-end: 22, source-line: 1, source-column: 18>>
+    <dot-edge-statement id: "dot-stmt-1", source-start: 27, source-end: 47, source-line: 1, source-column: 27,
+      <dot-endpoint kind: "node", id: "c", source-kind: "bare", port: "p", source-start: 27, source-end: 31, source-line: 1, source-column: 27>
+      <dot-endpoint kind: "node", id: "d", source-kind: "bare", source-start: 34, source-end: 36, source-line: 1, source-column: 34, operator: "->">
+      <properties namespace: "graphviz", source-list-index: 0, source-start: 36, source-end: 47, source-line: 1, source-column: 36,
+        <property name: "color", value: "red", name-source-kind: "bare", value-source-kind: "bare", source-start: 37, source-end: 46, source-line: 1, source-column: 37>>>
+    <diagnostics
+      <diagnostic code: "dot.endpoint", severity: "error", message: "Expected node or subgraph edge endpoint", source-start: 25, source-line: 1, source-column: 25, context: "strict digraph { \"é\" -> ; c:p -> d [color=red]; }">>>, <workspace keyword: "workspace", statement-index: 0, flavor: "structurizr", ir-stage: "source", source-start: 0, source-end: 86, source-line: 1, source-column: 1,
+    <model keyword: "model", statement-index: 1, source-start: 12, source-end: 84, source-line: 1, source-column: 13,
+      <declaration keyword: "person", statement-index: 2, identifier: "a", source-start: 20, source-end: 36, source-line: 1, source-column: 21,
+        <argument index: 0, kind: "quoted", value: "É", source-start: 31, source-end: 35, source-line: 1, source-column: 32>>
+      <declaration keyword: "softwareSystem", statement-index: 3, identifier: "b", source-start: 37, source-end: 60, source-line: 1, source-column: 37,
+        <argument index: 0, kind: "quoted", value: "S", source-start: 56, source-end: 59, source-line: 1, source-column: 56>>
+      <relationship keyword: "relationship", statement-index: 4, archetype: "uses", from: "a", to: "b", source-start: 61, source-end: 82, source-line: 1, source-column: 61,
+        <argument index: 0, kind: "quoted", value: "Reads", source-start: 74, source-end: 81, source-line: 1, source-column: 74>>>>, <graph type: "directed", layout: "mermaid", flavor: "mermaid", version: "1", ir-stage: "source", kind: "sequence", diagram-type: "sequence", directed: "true", direction: "TB", rank-dir: "TB", source-start: 0, source-end: 75, source-line: 1, source-column: 1,
+    <node id: "A", label: "Alice", shape: "box", label-format: "text", participant-kind: "actor", source-start: 17, source-end: 33, source-line: 2, source-column: 2>
+    <node id: "B", label: "B", shape: "box", source-start: 35, source-end: 54, source-line: 3, source-column: 2>
+    <edge from: "A", to: "B", label: "<b>x</b>", style: "dotted", arrow-start: "false", arrow-end: "true", id: "message-0", relation: "-->>", activation: "start", label-format: "html", arrow-head: "normal", source-start: 35, source-end: 54, source-line: 3, source-column: 2>
+    <annotation owner-kind: "node", owner-id: "A", kind: "note-over", label: "see", label-format: "text", source-start: 56, source-end: 74, source-line: 4, source-column: 2, to-id: "B">>, <tikz_picture
+    <node id: "a", x: 1, y: 2, coord_system: "cartesian", source: "É">
+    <path action: "draw", source: "(a) -- (0,0)",
+      <point ref: "a", move: false>
+      <point x: 0, y: 0, x_explicit: false, y_explicit: false, move: false>>>, "parse: Parse errors (1 error):\n\nline 1, col 33: error: tikz: unsupported path operator in TikZ geometry\n  \\draw (0,0) to[bend left] (1,1);\n                                  ^\n", <tikz_picture
+    <plot append_cycle: false, input_kind: "expression",
+      <number_literal value: 0>>>, "parse: Parse errors (3 errors):\n\nline 1, col 14: error: tikz: unclosed plot expression group\n  \\addplot{(((1};\n               ^\n\nline 1, col 14: error: tikz: unclosed plot expression group\n  \\addplot{(((1};\n               ^\n\nline 1, col 14: error: tikz: unclosed plot expression group\n  \\addplot{(((1};\n               ^\n", true, "dot"]

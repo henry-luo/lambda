@@ -15,6 +15,7 @@
 #include "lambda/core/mark_reader.hpp"
 #include "../lambda/host/safety/file_broker.h"
 #include "lib/file_utils.h"
+#include "lib/host_paths.h"
 #include "lib/log.h"
 #include "lib/strbuf.h"
 #include "lib/str.h"
@@ -662,6 +663,25 @@ TEST_P(SecurityRuntimeTest, TexLocalIncludesUseTheSameDataGrant) {
 }
 
 TEST_P(SecurityRuntimeTest, StructurizrIncludesRetainTheirNarrowerDocumentRoot) {
+    // Script parser dependencies use the same read-only shipped grant as other packages (D11.2.1).
+    lambda_home_init();
+    struct HomeScope {
+        char* saved = mem_strdup(host_path(HOST_PATH_HOME), MEM_CAT_SYSTEM);
+        ~HomeScope() { if (saved) host_paths_set(HOST_PATH_HOME, saved); mem_free(saved); }
+    } home_scope;
+    ASSERT_NE(home_scope.saved, nullptr);
+    char* asset_root = file_realpath(home_scope.saved);
+    ASSERT_NE(asset_root, nullptr);
+    bool configured = host_paths_set(HOST_PATH_HOME, asset_root);
+    mem_free(asset_root);
+    ASSERT_TRUE(configured);
+    char* package_root = host_path_join(HOST_PATH_HOME, "package");
+    ASSERT_NE(package_root, nullptr);
+    SecurityFileRootSpec shipped = {package_root, SECURITY_SCOPE_SHIPPED,
+        SECURITY_READ | SECURITY_METADATA | SECURITY_LOAD_SOURCE, 0, 0, true, false, nullptr};
+    uint64_t shipped_id = security_file_broker_admit_root(broker, &shipped);
+    mem_free(package_root);
+    ASSERT_NE(shipped_id, 0U);
     seed("docs/model.dsl", "workspace { model {\n!include part.dsl\n!include ../secret.dsl\n} }\n");
     seed("docs/part.dsl", "person \"SAFE\"\n"); seed("secret.dsl", "person \"FORBIDDEN\"\n");
     seed("entry.ls", "let graph = input(\"@ROOT@/docs/model.dsl\", {type: 'graph', flavor: 'structurizr'})^\n"
@@ -669,6 +689,7 @@ TEST_P(SecurityRuntimeTest, StructurizrIncludesRetainTheirNarrowerDocumentRoot) 
     Input* result = load_file(); ASSERT_NE(result, nullptr);
     ASSERT_EQ(get_type_id(result->root), LMD_TYPE_BOOL); EXPECT_TRUE(result->root.bool_val);
     EXPECT_EQ(atomic_load32(&capture.data_reads), 2);
+    EXPECT_GT(atomic_load32(&capture.source_reads), 1);
 }
 
 TEST_P(SecurityRuntimeTest, AmbientExplThreeFormatIsNotAnAuthorityCache) {

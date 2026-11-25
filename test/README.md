@@ -9,6 +9,8 @@ Last verified against tree: 2026-10-11; Radiant baseline runner: 2026-10-13
 
 Input parsers, formatters and shared-library unit tests live in `../lambda-input/test`; native layout, rendering, media and host-interface tests live in `../radiant/test` (D9.1.1v4, D9.1.3v2). Lambda keeps runtime, scripting, DOM adapters and integration tests here. Existing Lambda aggregate entries resolve the owner-local sources through `LAMBDA_INPUT_ROOT` and `RADIANT_ROOT` and continue to write their executables under this checkout's `test/` directory.
 
+The graph parser and formatter integration suites live here because their source readers execute shipped Lambda packages (D9.3.4). Run `make test-graph-graphviz test-graph-mermaid test-graph-structurizr` for the hosted suites and CLI checks. The `graph_parser_sources` Lambda golden compares source Mark, parser errors and dispatch for all five migrated formats.
+
 Run `make -C lambda-input test-input-baseline` and `make -C radiant test-radiant-baseline` for the native owner suites. The input target reads its YAML corpus from `lambda-test/yaml` and uses the shared Markdown corpus; Radiant uses that checkout's layout and media corpora (D9.1.1v4). Public-network input tests are a separate `test-network-online` target. Lambda's `test-lambda-baseline` and `test-radiant-baseline` select Lambda-owned sources and integration scripts; they do not run owner-repository unit tests. The full Lambda gate also invokes the input owner's baseline.
 
 ## Ground rules

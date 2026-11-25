@@ -1,17 +1,17 @@
 # Lambda Graph Package — Design
 
-**Status:** Consolidated working design, 2026-10-23. Rich-node layout, the semantic HTML transform, generated SVG paint with signed stacking, automatic layout connection, Mermaid flowchart/class/ER/flat-state support, Graphviz DOT with the layered `dot` engine, and Structurizr DSL with static, dynamic, and deployment C4 views are implemented. The C `layout_graph()`/`graph_to_svg()` pipeline is retired. §15 records open items and deferred work.
+**Status:** Consolidated working design, 2026-11-25. D2, DOT, Mermaid, Structurizr, and TikZ source parsing runs in Lambda Script (§11.1). Rich-node layout, the semantic HTML transform, generated SVG paint with signed stacking, automatic layout connection, Mermaid flowchart/class/ER/flat-state support, Graphviz DOT with the layered `dot` engine, and Structurizr DSL with static, dynamic, and deployment C4 views are implemented. The earlier C `layout_graph()`/`graph_to_svg()` pipeline is retired.
 
-**Scope:** Topology-oriented diagrams — node ranking or placement, recursive grouping, relationship routing, ports, markers, and overlap avoidance — from Mermaid, Graphviz DOT/GV, D2, Structurizr DSL, and authored Mark sources. This document replaces the former Stage 1–3 graph proposal and the separate Structurizr/C4 proposal (`Lambda_Pkg_Graph2.md`). Implementation phase plans, module inventories, parser LOC and binary-size ledgers, test-runner mechanics, and status reports are omitted.
+**Scope:** Topology-oriented diagrams from Mermaid, Graphviz DOT/GV, D2, Structurizr DSL, and authored Mark sources. The coordinated parser migration also covers TikZ/PGFPlots (§11.8). This document replaces the former Stage 1–3 graph proposal and the separate Structurizr/C4 proposal (`Lambda_Pkg_Graph2.md`). The [implementation plan](impl/Lambda_Impl_Graph_Script_Parsers.md) tracks phases, tests, and cutover.
 
-**Specification linkage:** [D9.5.6](../doc/Lambda_Formal_Design.md#d111-trust-and-io) covers the automatic Lambda↔Radiant layout connection (§7.2); [D6.3.3](../doc/Lambda_Formal_Design.md#d63-gc-rooting) covers the explicit rooting of generated paint (§7.2); [D9.3.4](../doc/Lambda_Formal_Design.md#d93-script-packages) covers the shipped `lambda.*` namespace and the graph/chart package split (§2); [S12.1.1v3](../doc/Lambda_Formal_Semantics.md#s121-the-one-bit-effect-system) covers the purity of the layout export and every normalizer (§1); [S7.6.2v3/S7.6.3v2](../doc/Lambda_Formal_Semantics.md#s76-discharge-the-handler-and-postfix-) cover the postfix error handler used by the CLI bridge (§7.4). Graph-specific choices below are working design, not formal-spec rulings.
+**Specification linkage:** [D9.5.6v2](../doc/Lambda_Formal_Design.md#d95-jube-data-and-async-contracts) covers the automatic Lambda↔Radiant layout connection (§7.2). [D6.3.3](../doc/Lambda_Formal_Design.md#d63-gc-rooting) covers explicit rooting at native boundaries. [D9.3.4](../doc/Lambda_Formal_Design.md#d93-script-packages) covers the shipped `lambda.*` namespace and package ownership (§2). [S12.1.1v5 and S12.1.2v3](../doc/Lambda_Formal_Semantics.md#s121-purity-and-effect-bounds) cover pure parsers and normalizers with local cursor state. [S7.6.2v5 and S7.6.3v3](../doc/Lambda_Formal_Semantics.md#s76-discharge-handlers-and-postfix-) cover the error handler and propagation at the CLI bridge (§7.4). Graph-specific parser choices are recorded in §11.1.
 
 ## 1. Purpose and design principles
 
 The graph package turns graph data from any supported source language into a semantic HTML document whose rich node content is laid out by Radiant and whose graph geometry — ranks, coordinates, routed edges, clusters, labels — is computed by pure Lambda functions.
 
 1. **Rich nodes.** Graph nodes contain arbitrary rich content, not only text labels. Radiant's existing block, inline, flex, grid, table, replaced-element, text, and whole-SVG layout paths measure every node; the graph layout never approximates text size.
-2. **Pure geometry.** Ranking, ordering, positioning, routing, clipping, and label placement are pure `fn` code (S12.1.1v3). The layout callback does not mutate the DOM, perform I/O, start timers, or request relayout.
+2. **Pure geometry.** Ranking, ordering, positioning, routing, clipping, and label placement are pure `fn` code (S12.1.1v5). The layout callback does not mutate the DOM, perform I/O, start timers, or request relayout.
 3. **One interchange format.** Every source language normalizes to one public Mark Graph IR (§4). Parsers record syntax; pure Lambda normalizers apply source-language semantics. There is no private per-language AST data model.
 4. **HTML first.** The primary output is semantic HTML, not a pre-laid-out SVG. Final SVG, PDF, PNG, and JPEG are produced by rendering that HTML through Radiant.
 5. **Nodes and links in one result.** One custom layout pass positions nodes and routes links, returning placements plus generated paint layers that interleave with nodes through one signed `z` order.
@@ -76,6 +76,7 @@ The package is organized around these stages:
 
 | Area | Responsibility |
 |---|---|
+| Source parsers (§11.1) | Pure Lambda entries that emit the existing source Mark, with shared lexical and diagnostic utilities. The host supplies acquired text and resolves admitted Structurizr includes separately. |
 | `lambda.graph.layout` | Pure geometry: `compute(model, opts)` over explicit node sizes and `from_velmts(parent, children, ctx, opts)` over measured Radiant children. Emits geometry and styling metadata, never markup, and does not depend on Radiant rendering types. |
 | `lambda.graph.transform` | `to_html(graph, opts)` semantic transform; the automatically resolved `layout(parent, children, ctx)` export; routed geometry to generated SVG paint; in-process `render_svg`/`render_scene` conveniences. |
 | normalization, schema, model, style, diagnostics | Common Graph IR validation and canonicalization, recursive model queries, the safe style cascade, and structured diagnostics. |
@@ -276,7 +277,7 @@ Serializing the transformed tree to a standalone `.html` file loses the retained
 
 ### 7.4 CLI bridge
 
-`render`, `view`, `layout`, and `convert -t html` route graph files (`.mmd`, `.d2`, `.dot`, `.gv`, `.structurizr`, and detected `.dsl`) through one Lambda bridge script and the normal HTML loader, with no separate graph-to-SVG branch and no temporary SVG file. Requested `.svg` output comes from Radiant's HTML-to-SVG renderer. The document runtime stays alive through layout, rendering, interaction, and window teardown. The bridge uses the postfix handler (**S7.6.2v3/S7.6.3v2**):
+`render`, `view`, `layout`, and `convert -t html` route graph files (`.mmd`, `.d2`, `.dot`, `.gv`, `.structurizr`, and detected `.dsl`) through the Lambda document transform and the normal HTML loader. Requested `.svg` output comes from Radiant's HTML-to-SVG renderer. The document runtime stays alive through layout, rendering, interaction, and window teardown. The migration preserves the parser selection at the `input` boundary and the postfix error handler (**S7.6.2v5/S7.6.3v3**).
 
 ```lambda
 import graph_transform: lambda.graph.transform
@@ -285,7 +286,7 @@ let graph = input("diagram.mmd", {type: "mermaid"}) ^ { null }
 graph_transform.to_html(graph, {theme: "zinc-dark"})
 ```
 
-Graph syntax parsing and data formatting remain native; all layout and painting is Lambda.
+The input service detects the source format and calls its Lambda parser. The resulting source Mark also feeds the native data formatters.
 
 ## 8. Layered layout and routing
 
@@ -393,15 +394,17 @@ Roles cover graph, node, edge, edge-label, cluster, cluster-label, and annotatio
 
 ### 11.1 Parser principles
 
-All graph parsers are compact manual C/C+ recursive-descent or line-oriented parsers that emit source-stage Mark directly.
+**GP1 — Direct Lambda parsers.** Port the supported syntax as recursive descent, line-oriented readers, or precedence parsing as each format requires. Build the existing Mark at the parser boundary. Keep declaration order, raw vs. decoded values where observable, legacy source projections, and format-specific recovery. Existing normalizers continue to apply graph semantics. Work through legacy parser behavior against the source Mark and its consumers before moving any semantic operation. Use pure `fn` entries with local mutable cursors where useful (S12.1.1v5, S12.1.2v3).
 
-- **Syntax only.** Parsers do not apply defaults, merge nodes, expand edge products, convert units, rename attributes into CSS names, resolve identifiers, evaluate view expressions, or apply style cascades. All interpretation lives in pure Lambda normalizers.
-- **Shared lexical helpers, separate grammars.** Whitespace/comment skipping, quoted strings, bounded identifier/value readers, boundary-aware keyword matching, source spans, diagnostics, generated source ids, balanced-block recovery, and Mark builders are shared and format-neutral. Grammar state machines are not unified: a generic graph parser would hide distinct grammars behind conditionals. A new format searches existing helpers and promotes a narrowly parameterized one before adding a local copy.
-- **Explicit limits.** Maximum statement/subgraph nesting depth, HTML-label nesting and table cells, chained endpoint count, edge count after expansion, identifier/string/value length, statement count, and input size each produce a diagnostic.
-- **Recovery.** Invalid input returns the recoverable source graph plus diagnostics, recovering at the next newline or balanced closing brace.
-- **Size is a constraint.** Parser physical LOC and release-binary contribution are actively budgeted and enforced by a test; a ceiling increase must first reduce duplication. LOC is never reduced by compressing statements or deleting comments.
+The migration ends at source Mark. Layout and rendering use their existing implementations (D9.5.6v2).
 
-**Why not Tree-sitter.** A 2026-07-15 experiment measured pinned Tree-sitter DOT and Mermaid grammars against the manual parsers. Generated DOT tables alone were ~36 KiB larger than the manual parser before a CST-to-Mark adapter; the full Mermaid grammar was ~179 KiB larger and parsed only 8 of 34 existing Lambda Mermaid fixtures without error nodes. The completed manual DOT parser added full DOT fidelity for a 16-byte release-binary delta. Tree-sitter remains an independent grammar reference, not a production dependency.
+**GP2 — Shared lexical operations.** [`lambda.io.source_scan`](../lmd/package/io/source_scan.ls) supplies a byte cursor, indexed source positions, token and trivia scans, common quote handling, and diagnostic construction. Each parser supplies its comment markers, newline policy, escape rules, operator boundaries, and recovery points. Keep DOT HTML labels, Mermaid shape syntax, Structurizr statement classification, and TikZ control sequences in their respective readers. TikZ also has a TeX-aware scanner for group and argument syntax.
+
+**GP3 — Recovery and limits.** DOT, Mermaid and Structurizr return source Mark with explicit diagnostics for recoverable errors. Every recovery advances or returns control to the enclosing block. D2 and TikZ preserve their existing raised parse errors. TikZ also preserves original-source anchors for generated fragments. Graph spans use half-open byte offsets and one-based line and column, with UTF-8 code points counted for columns. Enforce existing per-format bounds during scanning and parsing. Keep normalization limits such as expanded edge counts with the code that expands them.
+
+**GP4 — Package and host seam.** Shipped syntax and source Mark construction run in `lambda.graph.parser` and `lambda.doc.tikz.parser` (D9.3.4). The input service owns exact source acquisition, source identity, and the include I/O policy (D9.1.1v4, D9.1.2v2, D11.1.2, D11.2.1). Its request-scoped provider invokes the same parser for files, in-memory values, and explicitly typed archive members. Restricted runtimes load the parser through their approved shipped-package source grants (D11.2.1). The Structurizr include resolver invokes the fragment export in the including statement's context. The evaluator roots the reply until it copies the Mark into Input ownership (D6.3.3). Standalone input callers receive a parser-host-required error for these formats unless they supply the provider (D9.1.3v2).
+
+**Grammar comparison.** Lambda `grammar` already provides ordered choice, lookahead, space control, precedence, and labeled captures with byte spans. It fits DOT’s regular statement structure best. Its output is a rule-shaped tree requiring a lowering pass (GM4, GM10, GM11v2), and the current whole-input interface raises the furthest parse failure (GM12). In a DOT probe, the native parser reported an invalid endpoint and kept the next edge, while the grammar returned a single failure. Introducing statement slicing, catch-all recovery productions, or a grammar-engine change would add work to reproduce the existing contract. D2, Mermaid and Structurizr also need format-specific delimiter or newline handling, and TikZ needs TeX-aware scanning and source mapping for generated fragments. A bounded PGF math expression is a plausible isolated grammar candidate if it matches the existing expression Mark, limits, and error anchors. The [grammar design](Lambda_Design_Grammar_Parser.md) and [implementation plan](impl/Lambda_Impl_Graph_Script_Parsers.md) document the tradeoff and evidence.
 
 ### 11.2 Mermaid flowchart
 
@@ -633,7 +636,11 @@ Element and relationship styles lower to canonical style assignments and pass th
 
 ### 11.7 D2
 
-D2 input is parsed natively into Graph IR and rendered through the same transform, callback, and paint path. It has no dedicated conformance corpus yet.
+The D2 reader handles the supported identifiers and dotted paths, labels, node and style blocks, and directed `->` edges. D2 established the shared scanner, and the native source fixtures and routing golden pin its Mark and downstream geometry.
+
+### 11.8 TikZ and PGFPlots
+
+The TikZ reader belongs in `lambda.doc.tikz` (D9.3.4). It builds the existing `<tikz_picture>` Mark for authored picture environments and standalone fragments. Its consumers handle explicit coordinates, paths, style resolution, PGF math, and plot geometry. Standalone TikZ/PGF input, embedded LaTeX graphics islands, and generated fragments all use this reader. TikZ shares suitable scanning mechanics with the graph formats and TeX-specific lexical behavior with the LaTeX package. Its rendering contract is documented in [Lambda_Impl_Latex_Phase4.md](impl/Lambda_Impl_Latex_Phase4.md).
 
 ## 12. Diagnostics model
 

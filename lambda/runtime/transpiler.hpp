@@ -3,6 +3,7 @@
 #include "lib/document_transform.h"
 
 #include "lib/log.h"
+#include "lambda/input/input-parse-options.h"
 #include "lambda/io/input-allocation-context.h"
 #include "lambda/io/resource_policy.h"
 
@@ -270,6 +271,8 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path,
 // Load and initialize a file-backed package without synthesizing an import script.
 Input* run_lambda_package_module(Runtime* runtime, const char* package_module,
                                  Script** out_package = nullptr);
+InputScriptParser lambda_input_script_parser(Runtime* runtime);
+Input* lambda_input_from_url(String* url, String* type, String* flavor, Url* cwd);
 const LambdaDocumentTransformConfig* lambda_document_transform_for_input_type(
     const char* input_type);
 // Loads a file-backed package, parses the source through `input()`, and calls
