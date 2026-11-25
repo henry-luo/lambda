@@ -34,6 +34,14 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Unicode math arguments, 2026-11-25:** Script now consumes one complete
+  Unicode code point in an unbraced math superscript or subscript, preserving
+  subsequent characters and generated-token source mapping (S2.5.8,
+  D10.2.2v2). Independent AST, MathML and document checks cover BMP and
+  supplementary characters and pass in auto, interpreter and JIT with forced
+  GC and freed-memory poisoning. This returns valid Unicode instead of the
+  retired native engine's invalid-byte behavior recorded in LI-118.
+
 - **Production retirement and remaining parity, 2026-11-25:** The Input archive
   excludes the C TeX engine and the executable contains no native TeX engine
   symbols. Runtime and native CLI document inputs use the Script facade;

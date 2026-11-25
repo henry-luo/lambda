@@ -1440,6 +1440,10 @@ fn math_script_arg(tokens, index) any^ {
     }
     else if (math_letter(tokens[at]) or math_digit(tokens[at]))
         {issue: null, index: at + 1, value: tokens[at].value}
+    // One unbraced argument is one code point, even when its UTF-8 encoding spans bytes.
+    else if (math_unicode(tokens[at])^)
+        if (math_positioned(tokens[at])) {issue:null, index:at + 1, value:<unicode_text value:tokens[at].value>}
+        else unsupported(at, "math unicode source mapping")
     else if (tokens[at].kind == "control") math_command(tokens, at)
     else if (tokens[at].kind == "char" and len(tokens[at].value) == 1 and ord(tokens[at].value) < 128)
         math_punctuation(tokens, at)

@@ -16,6 +16,6 @@
     ast: true
   }]
 {
-  issue: "latex-digest-unsupported",
-  unsupported: "math script argument"
+  issue: null,
+  unsupported: null
 }

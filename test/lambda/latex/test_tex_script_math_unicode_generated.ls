@@ -26,5 +26,5 @@ fn check_file(constructor) any^ {
 let unbraced="\\begin{document}$x^é$\\end{document}";
 let expanded=profile.expand_with_kernel(unbraced,kernel,{echo_definitions:true,adapters:[],
  resources:{local:{},bundled:{}}},100000)^;
-let guarded=digest.digest(expanded)^;
-{issue:guarded.issue,unsupported:guarded.unsupported}
+let unbraced_result=digest.digest(expanded)^;
+{issue:unbraced_result.issue,unsupported:unbraced_result.unsupported}
