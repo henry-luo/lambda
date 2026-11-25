@@ -7303,7 +7303,8 @@ static Item parse_tex_script(Item source, Item options, const char* format, cons
         ~BasePath() { mem_free(value); }
     } base_path(base);
     if (base && !base_path.value) return ItemError;
-    RootFrame roots(7);
+    // The kernel and all restart state must stay visible to the precise GC.
+    RootFrame roots(8);
     Rooted<Item> text(roots, source);
     Rooted<Item> settings(roots, get_type_id(options) == LMD_TYPE_MAP ? options : ItemNull);
     Rooted<Item> result(roots, ItemNull);

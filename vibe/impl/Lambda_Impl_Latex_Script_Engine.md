@@ -34,6 +34,23 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Next work:** The baseline from the HTTP Path checkpoint did not finish:
+  `ValueRepresentationTest.UnsupportedDirectTransitionFailsClosed` timed out
+  at 180 seconds and also hung in an isolated rerun. Both aborting children
+  remained in macOS uninterruptible exit state, leaving the runner's pipe open;
+  the runner and isolated parent were stopped. Sampling shows the child in
+  `abort` → `pthread_kill`; the reason the OS call does not complete is not
+  yet confirmed.
+  See `temp/latex-retirement/path-baseline.log` and
+  `test_output/test_lambda_errors_gtest.log`. The Script handoff now reserves
+  all eight root slots, including its captured kernel; the local Path include
+  regression passes in both tiers with forced GC and freed-memory poisoning
+  (D5.2.1). Standalone math still uses Input's native
+  direct parser; `digest.ls` already owns the corresponding Script math atom
+  parser. Expose and qualify that parser for a runtime math entry point before
+  migrating embedded markup math and removing the native engines (D10.2.2v2,
+  D9.1.3v2).
+
 - **HTTP Path and document base, 2026-11-25:** HTTP Path input now shares the
   URL renderer used by other target consumers, encoding each NameKey and
   rejecting ambiguous or unrepresentable resource names. The underlying Path
