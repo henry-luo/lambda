@@ -4065,6 +4065,8 @@ pub fn digest(expanded: map) Digested^ {
         {ast: null, issue: "latex-digest-unsupported", unsupported: "expl3 key-value source mapping"}
     else if (expanded.expl3_keys_seen == true)
         {ast: null, issue: "latex-digest-unsupported", unsupported: "expl3 key execution source mapping"}
+    else if (expanded.expl3_clist_map_seen == true)
+        {ast: null, issue: "latex-digest-unsupported", unsupported: "expl3 comma-list mapping source mapping"}
     else if (any([for (token in expanded.output) token.generated_text_mapping == true]))
         {ast: null, issue: "latex-digest-unsupported", unsupported: "generated text source mapping"}
     else if (expanded.inspection_seen == true)

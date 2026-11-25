@@ -1,0 +1,31 @@
+{
+  issue: null,
+  unsupported: null,
+  text: "[[a][b,c][d][ e ]]/[a,{b,c},d,{ e }]"
+}
+{
+  issue: null,
+  unsupported: null,
+  text: "END[[a][b]]"
+}
+{
+  issue: null,
+  unsupported: null,
+  text: "[[a/1][a/2][b/1][b/2]]"
+}
+{
+  issue: null,
+  unsupported: null,
+  text: "[[X][Y,Z][][{Q}]]"
+}
+{
+  issue: null,
+  unsupported: null,
+  text: "[121]/0"
+}
+{
+  issue: null,
+  unsupported: null,
+  text: "0"
+}
+true

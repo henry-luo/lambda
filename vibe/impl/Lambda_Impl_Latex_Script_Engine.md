@@ -34,6 +34,13 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Expl3 inline comma-list mapping, 2026-11-26:** Script implements literal
+  and variable inline maps with normalized list storage, scoped protected
+  callbacks, nested map counters and the standard break macros (D10.2.2v2).
+  TeX Live comparisons cover grouping, empty items, nesting, break results and
+  counter restoration. The document digester still rejects source mapping
+  for this operation. Csvsimple now reaches `tl_put_right:NV`.
+
 - **Expl3 choice and boolean keys, 2026-11-26:** Script now implements
   `.choices:nn` and local/global boolean and inverse-boolean key properties
   (D10.2.2v2). Choice dispatch uses scoped key macros, and its index is a TeX
@@ -41,7 +48,7 @@ The existing native engine design and historical Phase IV work are in
   comparisons cover choice values and indices, defaults, inverse and global
   booleans, state restoration and a user-defined unknown-choice handler.
   Unknown-choice diagnostics and document source mapping remain unsupported.
-  Csvsimple now reaches the unported `clist_map_inline:nn` operation.
+  Csvsimple's later blocker is recorded in the inline-map checkpoint above.
 
 - **Expl3 key definitions and execution, 2026-11-26:** Script now handles
   scoped `.code:n`, `.default:n`, `.initial:n`, `.tl_set:N`, `.tl_gset:N`

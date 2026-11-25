@@ -12,6 +12,7 @@ let IOR_EOF = ["ior_if_eof:NTF", "ior_if_eof:NT", "ior_if_eof:NF", "ior_if_eof_p
 let KEYVAL_PARSE = ["keyval_parse:NNn", "keyval_parse:nnn"]
 let KEYS_ACTION = ["keys_define:nn", "keys_set:nn"]
 let KEYS_EXPAND = ["__keys_choice_find:n"]
+let CLIST_MAP = ["clist_map_inline:nn", "clist_map_inline:Nn"]
 let TL_NEW = ["tl_new:N", "tl_const:Nn"]
 let TL_SET = ["tl_set:Nn", "tl_set:Nx", "tl_gset:Nn", "tl_gset:Nx", "tl_clear:N", "tl_gclear:N"]
 let TL_PUT = ["tl_put_left:Nn", "tl_put_right:Nn", "tl_gput_left:Nn", "tl_gput_right:Nn",
@@ -51,10 +52,11 @@ pub fn exists(name) bool => contains(SEQ_EMPTY, name) or contains(INT_TEST, name
     contains(CS_GLOBAL, name) or contains(CS_VARIANT, name) or contains(IOR_ACTION, name) or contains(IOR_EOF, name) or contains(TL_NEW, name) or contains(TL_SET, name) or contains(TL_PUT, name) or contains(TL_REPLACE, name) or contains(TL_EMPTY, name) or contains(TL_BLANK, name) or contains(TL_EQUAL, name) or contains(TL_STRING, name) or contains(TL_COUNT, name) or
     contains(SEQ_NEW, name) or contains(SEQ_SET, name) or contains(SEQ_EXPAND, name) or
     contains(SEQ_SORT, name) or contains(SORT_RETURN, name) or contains(STR_COMPARE, name) or contains(TOKEN_EXPANDABLE, name) or contains(TEXT_CASE, name) or
-    contains(KEYVAL_PARSE, name) or contains(KEYS_ACTION, name) or contains(KEYS_EXPAND, name) or contains(["ExplSyntaxOn", "ExplSyntaxOff", "ProvidesExplPackage", "ProvidesExplClass", "ProvidesExplFile", "tl_use:N", "int_eval:n", "fp_eval:n", "cs_new_eq:NN"], name)
+    contains(KEYVAL_PARSE, name) or contains(KEYS_ACTION, name) or contains(KEYS_EXPAND, name) or contains(CLIST_MAP, name) or contains(["ExplSyntaxOn", "ExplSyntaxOff", "ProvidesExplPackage", "ProvidesExplClass", "ProvidesExplFile", "tl_use:N", "int_eval:n", "fp_eval:n", "cs_new_eq:NN"], name)
 pub fn expandable(name) bool => contains(KEYS_EXPAND, name) or contains(KEYVAL_PARSE, name) or contains(IOR_EOF, name) or contains(SEQ_EMPTY, name) or contains(INT_TEST, name) or contains(INT_COMPARE_EXPR, name) or contains(INT_COMPARE, name) or contains(INT_MATH, name) or contains(["tl_use:N", "int_eval:n", "fp_eval:n"], name) or contains(SEQ_EXPAND, name) or contains(STR_COMPARE, name) or contains(TOKEN_EXPANDABLE, name) or contains(TEXT_CASE, name) or contains(TL_EMPTY, name) or contains(TL_BLANK, name) or contains(TL_EQUAL, name) or contains(TL_STRING, name) or contains(TL_COUNT, name)
 pub fn keyval_parse(name) bool => contains(KEYVAL_PARSE, name)
 pub fn keys_action(name) bool => contains(KEYS_ACTION, name)
+pub fn clist_map(name) bool => contains(CLIST_MAP, name)
 pub fn cs_definition(name) bool => contains(CS_NEW, name) or contains(CS_LOCAL, name) or contains(CS_GLOBAL, name)
 pub fn cs_variant(name) bool => contains(CS_VARIANT, name)
 pub fn ior_action(name) bool => contains(IOR_ACTION, name)
@@ -157,6 +159,20 @@ fn split_individual(input, items = []) array^ {
 
 pub fn from_clist(tokens: map[]) array^ =>
     split_tokens(tokens, [{kind:"char", value:",", cat:12}], true, false, true, false)
+
+// Preserve items that would otherwise be split, trimmed or unbraced on a later read.
+pub fn to_clist(items: array) map[]^ {
+    let comma = [{kind:"char", value:",", cat:12}];
+    let opener = {kind:"char", value:"{", cat:1, start:-1, end:-1};
+    let closer = {kind:"char", value:"}", cat:2, start:-1, end:-1};
+    let values = [for (item in items) {
+        let grouped = len(item) == 0 or space_token(item[0]) or space_token(item[len(item) - 1]) or
+            len(stream.strip_outer(item)^) != len(item) or
+            len(split_tokens(item, comma, false, true, false, false)^) > 1;
+        if (grouped) [opener, *item, closer] else item
+    }];
+    stream.join_tokens(values, comma)
+}
 pub fn from_split(tokens: map[], delimiter: map[], trim_spaces: bool) array^ =>
     if (len(delimiter) == 0) split_individual(stream.push(stream.from_reader(reader.reader("")), tokens))
     else split_tokens(tokens, delimiter, trim_spaces, true, true, false)

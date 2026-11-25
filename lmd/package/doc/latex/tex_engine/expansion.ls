@@ -3337,6 +3337,52 @@ fn expl3_keys_next(st: State) State^ {
     }
 }
 
+fn expl3_clist_calls(items, callback, index = 0, output = []) any^ {
+    if (index >= len(items)) output
+    else expl3_clist_calls(items, callback, index + 1,
+        [*output, callback, brace_token(true), *items[index], brace_token(false)])
+}
+
+// Inline callbacks are real protected macros so nested maps and break points share TeX scope.
+fn expl3_clist_map(st: State, name) State^ {
+    let literal = name == "clist_map_inline:nn";
+    let first = if (literal) stream.argument(st.input, true)^
+        else { let target = nonspace(st.input)^; {stream:target.stream, tokens:[target.token], error:null} };
+    let body = stream.argument(first.stream, true)^;
+    let current = {*:st, input:body.stream, expl3_clist_map_seen:true};
+    if (first.error != null) fail(current, first.error)
+    else if (body.error != null) fail(current, body.error)
+    else if (current.after_assignment != null) unsupported(current, "expl3 comma-list map assignment prefix")
+    else {
+        let source = if (literal) expl3.token_list(first.tokens)
+            else if (len(first.tokens) == 1 and is_control(first.tokens[0])) meaning(current, first.tokens[0])^
+            else {kind:"undefined"};
+        if (source.kind != "macro" or source.count != 0) unsupported(current, "expl3 comma-list map target")
+        else {
+            let items = expl3.from_clist(source.body)^;
+            let saved = if (literal) assign_meaning(current, "control:l__clist_internal_clist",
+                expl3.token_list(expl3.to_clist(items)^), effective_global(current, false)^)^ else current;
+            if (len(items) == 0) saved
+            else {
+                let parsed = body_params(body.tokens, 1)^;
+                let counter = meaning(saved, control_token("g__kernel_prg_map_int"))^;
+                if (parsed.issue != null) fail(saved, parsed.issue)
+                else if (counter.kind != "register") unsupported(saved, "expl3 map counter")
+                else {
+                    let depth = count_value(saved, counter.index) + 1;
+                    let counted = save_count(saved, counter.index, depth, effective_global(saved, true)^)^;
+                    let callback = control_token("__clist_map_" ++ string(depth) ++ ":w");
+                    let installed = assign_meaning(counted, key(callback),
+                        latex_macro(1, false, true, false, [], parsed.tokens)^, effective_global(counted, true)^)^;
+                    let end = [control_token("prg_break_point:Nn"), control_token("clist_map_break:"),
+                        brace_token(true), control_token("int_gdecr:N"), control_token("g__kernel_prg_map_int"), brace_token(false)];
+                    {*:installed, input:stream.push(installed.input, [*expl3_clist_calls(items, callback)^, *end])}
+                }
+            }
+        }
+    }
+}
+
 fn expl3_tl_assign(st: State, name, budget) State^ {
     let target = nonspace(st.input)^;
     let current = {*:st, input: target.stream};
@@ -6399,6 +6445,8 @@ fn step(st: State, budget) State^ {
         after_assignment(current, expl3_cs_generate_variant(current))
     else if (st.script_expl3 and expl3.keys_action(cmd))
         expl3_keys_begin(current, cmd)
+    else if (st.script_expl3 and expl3.clist_map(cmd))
+        expl3_clist_map(current, cmd)
     else if (st.script_expl3 and expl3.ior_action(cmd))
         after_assignment(current, expl3_ior_action(current, cmd, budget))
     else if (st.script_expl3 and expl3.token_assignment(cmd))
@@ -6595,14 +6643,11 @@ pub fn enable_script_expl3(st: State) State^ {
     // expl3 predefines four empty scratch sequences alongside its token lists.
     let sequences = enable_expl_scratch(global_tl, ["l_tmpa_seq", "l_tmpb_seq", "g_tmpa_seq", "g_tmpb_seq"], expl3_seq_value([])^)^;
     let scratch = enable_expl_scratch(sequences, ["l_tmpa_tl", "l_tmpb_tl", "g_tmpa_tl", "g_tmpb_tl",
-        "l__seq_internal_a_tl", "l__seq_internal_b_tl", "l__exp_internal_tl",
+        "l__seq_internal_a_tl", "l__seq_internal_b_tl", "l__exp_internal_tl", "l__clist_internal_clist",
         *KEYS_SCRATCH], expl3.token_list([]))^;
-    // The l3keys choice index is an ordinary count register shared with TeX.
-    let choice = if (scratch.definitions["control:l_keys_choice_int"] != null) scratch else {
-        let allocated = latex_allocate_register(scratch, 10, false)^;
-        assign_meaning(allocated.state, "control:l_keys_choice_int", {kind:"register", index:allocated.index}, true)^
-    };
-    let support = enable_expl_values(choice, [
+    // Expl3's choice and mapping counters share TeX's ordinary count allocator.
+    let counts = enable_expl_counts(scratch, ["l_keys_choice_int", "g__kernel_prg_map_int"])^;
+    let support = enable_expl_values(counts, [
         {name: "tex_let:D", kind: "primitive", value: "let", source_mapping_guard: "tl_eq"},
         {name: "tex_global:D", kind: "primitive", value: "global"},
         {name: "tex_advance:D", kind: "primitive", value: "advance"},
@@ -6744,6 +6789,8 @@ pub fn enable_script_expl3(st: State) State^ {
         {source:"\\prg_break:#1\\prg_break_point:{}",protected_flag:false},
         {source:"\\seq_map_break:{\\prg_map_break:Nn\\seq_map_break:{}}",protected_flag:false},
         {source:"\\seq_map_break:n{\\prg_map_break:Nn\\seq_map_break:}",protected_flag:false},
+        {source:"\\clist_map_break:{\\prg_map_break:Nn\\clist_map_break:{}}",protected_flag:false},
+        {source:"\\clist_map_break:n{\\prg_map_break:Nn\\clist_map_break:}",protected_flag:false},
         {source:"\\seq_map_function:NN#1#2{\\exp_after:wN\\use_i_ii:nnn\\exp_after:wN\\__seq_map_function:Nw\\exp_after:wN#2#1\\prg_break:\\__seq_item:n{}\\__seq_item:n{}\\__seq_item:n{}\\__seq_item:n{}\\prg_break_point:\\prg_break_point:Nn\\seq_map_break:{}}",protected_flag:false},
         {source:"\\__seq_map_function:Nw#1#2\\__seq_item:n#3#4\\__seq_item:n#5#6\\__seq_item:n#7#8\\__seq_item:n#9{#2#1{#3}#4#1{#5}#6#1{#7}#8#1{#9}\\__seq_map_function:Nw#1}",protected_flag:false},
         {source:"\\seq_map_function:cN{\\exp_args:Nc\\seq_map_function:NN}",protected_flag:false},
@@ -7168,6 +7215,18 @@ fn enable_expl_scratch(st: State, names, value, index = 0) State^ {
     }
 }
 
+fn enable_expl_counts(st: State, names, index = 0) State^ {
+    if (index >= len(names)) st
+    else {
+        let name = "control:" ++ names[index];
+        let next = if (st.definitions[name] != null) st else {
+            let allocated = latex_allocate_register(st, 10, false)^;
+            assign_meaning(allocated.state, name, {kind:"register", index:allocated.index}, true)^
+        };
+        enable_expl_counts(next, names, index + 1)
+    }
+}
+
 fn enable_expl_primitives(st: State, names, index = 0) State^ {
     if (index >= len(names)) st
     else {
@@ -7192,6 +7251,7 @@ pub fn resume(st: State, source: string, name: string = "<input>", budget: int =
             main_file: id, echo_incomplete: false, prefixed_macro_seen: false, prefix_scan: false,
             mathchardef_emission_seen: false,
             expl3_tl_head_seen: false, expl3_tl_tail_seen: false, expl3_keyval_seen: false, expl3_keys_seen:false,
+            expl3_clist_map_seen:false,
             expl3_exp_args_once_seen: false, expl3_exp_args_value_seen: false, expl3_exp_args_f_seen: false,
             sources: [*st.sources, {id: id, name: name, origin: origin, data: source}]};
         run(resumed, budget)
