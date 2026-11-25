@@ -729,6 +729,89 @@ fn math_generic_arguments(tokens, index, items = []) any^ {
     else {issue: null, index: at, items: items}
 }
 
+// Text arguments retain nested groups and math switches instead of parsing all
+// of their contents as math atoms.
+fn math_text_items(tokens, index = 0, items = [], text = "") any^ {
+    if (index >= len(tokens)) {issue:null, items:append_text(items, text)}
+    else {
+        let token = tokens[index];
+        if (opening(token)) {
+            let group = math_text_argument(tokens, index)^;
+            if (group.issue != null) group
+            else math_text_items(tokens, group.index, [*append_text(items,text), group.value])
+        }
+        else if (dollar(token)) {
+            let close = math_close(tokens, index + 1, false)^;
+            // An unmatched dollar in text is literal, as in the native scanner.
+            if (close.issue == "latex-digest-unclosed-math") math_text_items(tokens, index + 1, items, text ++ "$")
+            else if (close.issue != null) close
+            else {
+                let body = math_atoms(slice(tokens, index + 1, close.index))^;
+                if (body.issue != null) body
+                else math_text_items(tokens, close.end,
+                    [*append_text(items,text), <embedded_math *math_content(body.items)^>])
+            }
+        }
+        else if (token.kind == "control") {
+            let accents = {["'"]:"acute", ["`"]:"grave", ["^"]:"hat", ["~"]:"tilde", ["="]:"bar",
+                ["."]:"dot", ['"']:"ddot", u:"breve", v:"check", H:"doubleacute", r:"mathring", c:"cedilla"};
+            let accent = accents[token.value];
+            if (accent != null) {
+                let arg = math_text_argument(tokens, index + 1)^;
+                if (arg.issue != null) arg
+                else math_text_items(tokens, arg.index,
+                    [*append_text(items,text), <accent cmd:accent, base:arg.value>])
+            }
+            else if (contains(["$", "%", "#", "&", "_", "{", "}", " ", ","], token.value))
+                math_text_items(tokens, index + 1, items, text ++ if (token.value == ",") " " else token.value)
+            else {
+                let command = math_command(tokens, index)^;
+                if (command.issue != null) command
+                else math_text_items(tokens, command.index, [*append_text(items,text), command.value])
+            }
+        }
+        else if (token.kind == "active" and token.value == "~") math_text_items(tokens, index + 1, items, text ++ " ")
+        else if (token.kind == "char") math_text_items(tokens, index + 1, items, text ++ token.value)
+        else unsupported(index, "math text token")
+    }
+}
+
+// Keep the original bytes while decoding only literal TeX punctuation escapes.
+fn math_text_content(bytes, tokens, base, index = 0, cursor = 0, text = "") any^ {
+    if (index >= len(tokens)) text ++ utf8.decode(slice(bytes, cursor, len(bytes)))^
+    else {
+        let token = tokens[index];
+        let start = if (token.output_start == null) -1 else token.output_start - base;
+        let end = if (token.output_end == null) -1 else token.output_end - base;
+        let literal = token.kind == "control" and contains(["$", "%", "#", "&", "_", "{", "}"], token.value) and
+            start >= cursor and end <= len(bytes) and end > start and
+            utf8.decode(slice(bytes,start,end))^ == "\\" ++ token.value;
+        if (literal) math_text_content(bytes,tokens,base,index + 1,end,
+            text ++ utf8.decode(slice(bytes,cursor,start))^ ++ token.value)
+        else math_text_content(bytes,tokens,base,index + 1,cursor,text)
+    }
+}
+
+fn math_text_argument(tokens, index) any^ {
+    let at = math_nonspace(tokens, index)^;
+    if (at >= len(tokens)) unsupported(at, "math text argument")
+    else if (opening(tokens[at])) {
+        let group = read_group(tokens, at)^;
+        if (group.issue != null) group
+        else {
+            let source = output_between(tokens[at], tokens[group.end - 1])^;
+            let body = math_text_items(group.tokens)^;
+            if (body.issue != null) body
+            else if (source == null) unsupported(at, "math text source mapping")
+            else {issue:null, index:group.end, source:source, items:body.items,
+                content:math_text_content(binary(source)^, group.tokens, tokens[at].output_end)^,
+                value:<text_group source:source, *body.items>}
+        }
+    }
+    else if (tokens[at].kind == "control") math_command(tokens, at)
+    else {issue:null, index:at + 1, value:<raw_math_text value:tokens[at].value>}
+}
+
 // adjacent escaped punctuation is represented as one native math atom.
 fn math_escaped_run(tokens, index, previous, text) any^ {
     if (index >= len(tokens)) {issue: null, index: index, text: text}
@@ -816,6 +899,69 @@ fn math_command(tokens, index) any^ {
         {issue: null, index: index + 1, value: symbol(name)}
     else if (name == "begin") math_environment(tokens, index)
     else if (name == "end") {issue:null, index:index + 1, value:<malformed_end>}
+    else if (name == "verb") {
+        let parsed = verb_element(tokens[index], index, false)^;
+        if (parsed.issue != null) parsed
+        else {
+            let raw = binary(parsed.node.raw_source)^;
+            let starred = parsed.node.starred == true;
+            let delimiter = if (starred) 6 else 5;
+            let value = utf8.decode(slice(raw, delimiter + 1, len(raw) - 1))^;
+            let separator = utf8.decode(slice(raw, delimiter, delimiter + 1))^;
+            {issue:null, index:index + 1, value:<verbatim value:value, starred:starred, delimiter:separator>}
+        }
+    }
+    else if (name == "tag") {
+        let star = index + 1 < len(tokens) and tokens[index + 1].kind == "char" and
+            tokens[index + 1].value == "*" and math_adjacent(tokens[index], tokens[index + 1]);
+        let arg = math_text_argument(tokens, index + if (star) 2 else 1)^;
+        if (arg.issue != null) arg
+        else {issue:null, index:arg.index, value:<equation_tag starred:star, body:arg.value>}
+    }
+    else if (contains(["text", "mbox", "hbox", "textrm", "textit", "textbf", "texttt", "textsf", "textsc", "emph"], name)) {
+        let arg = math_text_argument(tokens, index + 1)^;
+        if (arg.issue != null) arg
+        else if (arg.source == null) unsupported(index, "math text command argument")
+        else {
+            let nested = any([for (marker in ["\\", "$", "{", "~"]) contains(arg.source, marker)]);
+            let body = if (nested) <text_group *arg.items> else null;
+            {issue:null, index:arg.index, value:<text_command cmd:"\\" ++ name, content:arg.content,
+                *:if (arg.content != arg.source) {content_raw:arg.source} else {},
+                *:if (body != null) {body:body} else {}>}
+        }
+    }
+    else if (contains(["rm", "it", "bf", "sf", "tt", "cal"], name))
+        {issue:null, index:index + 1, value:<font_switch cmd:"\\" ++ name>}
+    else if (name == "raisebox" or name == "reflectbox") {
+        let offset = if (name == "raisebox") math_text_argument(tokens, index + 1)^
+            else {issue:null, index:index + 1};
+        if (offset.issue != null) offset
+        else if (name == "raisebox" and offset.source == null) unsupported(index, "raisebox dimension")
+        else {
+            let first = if (name == "raisebox") read_optional(tokens, math_nonspace(tokens, offset.index)^)^
+                else {issue:null, present:false, end:offset.index};
+            let second = if (first.issue == null and first.present)
+                read_optional(tokens, math_nonspace(tokens, first.end)^)^ else {issue:null, present:false, end:offset.index};
+            let body = if (first.issue != null) first else if (second.issue != null) second
+                else math_text_argument(tokens, second.end)^;
+            if (body.issue != null) body
+            else {issue:null, index:body.index, value:<box_transform cmd:"\\" ++ name,
+                *:if (name == "raisebox") {raise:offset.source} else {},
+                *:if (first.present) {height:group_text(first)} else {},
+                *:if (second.present) {depth:group_text(second)} else {}, body:body.value>}
+        }
+    }
+    else if (contains(["phantom", "hphantom", "vphantom", "smash"], name)) {
+        let at = math_nonspace(tokens, index + 1)^;
+        let opt = if (name == "smash") read_optional(tokens, at)^ else {issue:null, present:false, end:at};
+        if (opt.issue != null) opt
+        else {
+            let arg = math_script_arg(tokens, opt.end)^;
+            if (arg.issue != null) arg
+            else {issue:null, index:arg.index, value:<phantom_command cmd:"\\" ++ name,
+                *:if (opt.present) {options:<brack_group group_text(opt)>} else {}, content:arg.value>}
+        }
+    }
     // stackrel uses the same native AST command as overset.
     else if (contains(["overset", "underset", "stackrel"], name)) {
         let args = math_arguments(tokens, index + 1, 2)^;
@@ -927,7 +1073,7 @@ fn math_command(tokens, index) any^ {
         {issue: null, index: index + 1, value: <command name: name>}
     // these common symbols use native's generic math command shape.
     else if ((math_delimiter_control(name) and not contains(["{", "}"], name)) or
-        contains(["subseteq", "supseteq", "subsetneq", "supsetneq", "nsubseteq", "nsupseteq",
+        contains(["label", "subseteq", "supseteq", "subsetneq", "supsetneq", "nsubseteq", "nsupseteq",
             "varnothing", "emptyset", "varphi", "varepsilon", "vartheta", "varkappa", "varpi", "varrho", "varsigma",
             "aleph", "imath", "jmath", "Re", "Im", "dagger", "ddagger", "ell", "hbar", "wp", "Box"], name)) {
         let args = math_generic_arguments(tokens, index + 1)^;
@@ -1112,7 +1258,11 @@ fn math_element(tokens, sources, index) any^ {
             let source = if (mapped) output_between(start,finish)^ else
                 source_span({direct: true, file: start.file, start: start.end, end: finish.start}, sources)^;
             let offset = if (mapped and source != null) rebuild.map_offset(start.output_segments,start.output_end)^ else start.end;
-            let atoms = math_atoms(body)^;
+            // Text arguments need serialized positions even when the enclosing
+            // formula otherwise uses direct source spans.
+            let math_output = rebuild.reconstruct({output:body, sources:sources, main_file:start.file}, true)^;
+            let math_tokens = if (math_output.issue == null) mark_output_tokens(body, math_output, false)^ else body;
+            let atoms = math_atoms(math_tokens)^;
             if (source == null) unsupported(index, "math source mapping")
             else if (atoms.issue != null) atoms
             else {
@@ -3049,14 +3199,15 @@ fn parse_math_environment(tokens, sources, index, arg) any^ {
             any([for (part in body) part.direct != true or part.file != token.file]) == false;
         let raw = if (mapped) source_span({direct: true, file: token.file, start: arg.end_offset, end: end_token.start}, sources)^ else null;
         let reconstructed = if (raw == null or contains(raw, "%")) null else
-            rebuild.reconstruct({output: body, sources: sources, main_file: token.file})^;
+            rebuild.reconstruct({output: body, sources: sources, main_file: token.file}, true)^;
         if (reconstructed == null or reconstructed.issue != null) unsupported(index, "math environment source mapping")
         else {
             let bytes = binary(reconstructed.text)^;
             let begin = math_trim_begin(bytes)^;
             let end = math_trim_end(bytes, begin, len(bytes))^;
             let source = utf8.decode(slice(bytes, begin, end))^;
-            let atoms = math_atoms(body)^;
+            let math_tokens = mark_output_tokens(body, reconstructed, false)^;
+            let atoms = math_atoms(math_tokens)^;
             if (atoms.issue != null) atoms
             else {issue: null, index: finish.end, tokens: tokens,
                 node: environment_node(name, environment_offset(token)^, [], {source: source, ast: <math *math_content(atoms.items)^>})}

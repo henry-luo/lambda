@@ -48,9 +48,12 @@ The existing native engine design and historical Phase IV work are in
   comparisons that call `parse` now compare Script with itself, so they cannot
   establish native parity. Preserve independent expected results when migrating
   them. `test_math_extended_constructs` still reports two equation-reference
-  failures because digestion rejects `\\tag`. The rich-text suite also exposes
-  unsupported `\\text`, `\\textsf`, `\\verb` and `\\raisebox`; its first
-  propagated error alone does not enumerate every missing construct. The migrated custom-format test
+  failures caused by unsupported `\\tag` and `\\label` now pass. Text groups,
+  embedded math, verbatim and raised boxes also support the rich-text golden,
+  which passes in auto and interpreter. A hot typed error handler exposed
+  [LR09-37](<../Lambda_Issue_Ledger (fixed).md#lr09-37>), fixed by applying
+  the existing constrained-predicate satellite admission rule (S11.4.11,
+  D8.3.1). The migrated custom-format test
   `test_tex_retired_engine_format.ls` currently returns `[true, false]`: the
   automatic restart works but Script does not load the supplied `expl3.ltx`.
   Full corpus parity and native-client qualification remain open.

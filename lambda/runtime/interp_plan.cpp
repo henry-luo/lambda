@@ -2074,6 +2074,14 @@ static void interp_scan_satellite_node_kind(AstNode* node, SatelliteScanCtx* sc)
             return;
         }
         break;
+    case AST_NODE_HANDLER_EXPR:
+    case AST_NODE_HANDLER_STAM:
+        // Typed error handlers call the same predicate as `is` (S11.4.11).
+        if (ast_constrained_type(((AstHandlerNode*)node)->filter)) {
+            sc->ok = false;
+            return;
+        }
+        break;
     case AST_NODE_CALL_EXPR: {
         LambdaAstCallNode* call = (LambdaAstCallNode*)node;
         AstNode* callee = ast_unwrap_primary(call->function);

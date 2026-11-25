@@ -16,6 +16,20 @@
 > Semantic and design rulings remain cited by S# / D#; where no formal ruling
 > covers a point, the original vibe ledger ID is retained.
 
+<a id="lr09-37"></a>
+## LR09-37 — Hot typed error handlers linked an unavailable predicate
+
+**Fixed 2026-11-25.** A hot `^reader.CaptureError` handler was admitted to a
+satellite even though its imported constrained-type predicate had no generated
+entry in the interpreted dependency. Linking failed with `m46._that_b_1023`
+while the TeX verbatim parser ran. The handler must evaluate the predicate in
+its declaring module (**S11.4.11**).
+
+The satellite eligibility scan now applies the existing constrained-`is`
+restriction to typed handler filters as well (**D8.3.1**). The reader's hot
+handler regression passes in auto, interpreter and JIT modes, and the math
+rich-text golden that reproduced the link failure passes in auto and interpreter.
+
 <a id="lr09-36"></a>
 ## LR09-36 — Generic string concatenation changed an existing operand
 
