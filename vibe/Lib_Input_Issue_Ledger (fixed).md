@@ -6,6 +6,25 @@ remain in the [active issue ledger](Lib_Input_Issue_Ledger.md).
 
 ## Fixed issues
 
+<a id="li-122"></a>
+
+### LI-122 — Archive member names were lost during automatic format detection
+
+**Fixed 2026-11-25.** An archive member such as `doc.tex` has a relative
+name, but the Input archive reader passed it to the absolute-URL parser. The
+resulting null URL removed the filename from detection, so automatic reads
+returned plain text instead of the LaTeX tree. Input now passes the member
+name separately for synchronous detection (S12.4.1v2, D9.1.3v2, D10.2.2v2).
+
+Lazy TeX member content obtains a parser from the current runtime without
+retaining its pointer, adopts the result into the archive-owned Input, and
+never grants access to files beside the archive (D11.1.2). Without a host the
+read reports an error and can be retried. The archive native suite passes
+39/39; explicit, automatic and lazy member checks pass in interpreter and JIT,
+including forced GC and freed-memory poisoning. Security tests verify both the
+result and that a secret file is never read. See
+`test_latex_script_captured_member` and `LazyTexMemberCannotAcquireExternalResources`.
+
 <a id="li-120"></a>
 
 ### LI-120 — HTTP Path targets were formatted as Lambda syntax instead of URLs

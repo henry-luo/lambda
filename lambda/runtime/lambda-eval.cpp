@@ -219,6 +219,14 @@ static Item input_parse_error_item(const char* function_name, Input* input,
 
 static Item parse_tex_script(Item source, Item options, const char* format, const char* base, bool captured_member = false);
 
+// Script results must be GC-owned until they are adopted into the destination Input.
+struct ScriptInputAllocationScope {
+    InputAllocationContext* saved;
+    ScriptInputAllocationScope() : saved(input_allocation_context) { input_allocation_context = nullptr; }
+    void restore() { input_allocation_context = saved; }
+    ~ScriptInputAllocationScope() { restore(); }
+};
+
 static bool read_script_input(void* owner, Input* input, const char* type,
         const char* flavor, const char* source, size_t length, Item* output) {
     bool fragment = !strcmp(type, "structurizr-fragment");
@@ -232,11 +240,7 @@ static bool read_script_input(void* owner, Input* input, const char* type,
     else if (!strcmp(flavor, "mermaid")) package = "lambda.graph.parser.mermaid";
 
     // The package builds GC-owned data. Adopt it into the Input only after the call.
-    struct AllocationScope {
-        InputAllocationContext* saved = input_allocation_context;
-        AllocationScope() { input_allocation_context = nullptr; }
-        ~AllocationScope() { input_allocation_context = saved; }
-    } allocation_scope;
+    ScriptInputAllocationScope allocation_scope;
     Runtime* runtime = (Runtime*)owner;
     EvalContext* eval = runtime_get_eval_context(runtime);
     if (!eval_context_matches(eval)) {
@@ -267,7 +271,7 @@ static bool read_script_input(void* owner, Input* input, const char* type,
         else reply.set(interp_call_package_export(runtime, package,
             fragment ? "fragment" : "read", args, fragment ? 2 : 1));
     }
-    input_allocation_context = allocation_scope.saved;
+    allocation_scope.restore();
 
     if (reply.get().type_id() != LMD_TYPE_MAP) {
         LambdaError* error = reply.get().type_id() == LMD_TYPE_ERROR ? it2err(reply.get()) : nullptr;
@@ -296,7 +300,42 @@ static bool read_script_input(void* owner, Input* input, const char* type,
     return true;
 }
 
+#ifndef LAMBDA_IME_RESOURCE_IO
+static bool captured_script_parser(InputScriptParser* parser) {
+    if (!context || !context->runtime) return false;
+    *parser = lambda_input_script_parser(context->runtime);
+    return true;
+}
+
+static bool read_captured_tex(Input* owner, Item captured, const char* type, Item* result) {
+    if (!context || !context->runtime) return false;
+    if (get_type_id(captured) != LMD_TYPE_STRING) { *result = ItemError; return true; }
+    ScriptInputAllocationScope allocation_scope;
+    RootFrame roots(2);
+    Rooted<Item> source(roots, ItemNull);
+    Rooted<Item> parsed(roots, ItemNull);
+    String* copy = heap_strcpy(captured.get_chars(), captured.get_len());
+    if (copy) {
+        source.set((Item){.item = s2it(copy)});
+        parsed.set(parse_tex_script(source.get(), ItemNull, type, nullptr, true));
+    } else parsed.set(ItemError);
+    allocation_scope.restore();
+    if (item_is_error(parsed.get())) *result = ItemError;
+    else {
+        MarkBuilder builder(owner);
+        *result = builder.deep_copy(parsed.get());
+    }
+    return true;
+}
+#endif
+
 InputScriptParser lambda_input_script_parser(Runtime* runtime) {
+#ifndef LAMBDA_IME_RESOURCE_IO
+    if (runtime) {
+        fs_script_parser_provider = captured_script_parser;
+        fs_captured_tex_parser = read_captured_tex;
+    }
+#endif
     return {runtime, read_script_input};
 }
 
@@ -2976,7 +3015,7 @@ Item lambda_type_check_env(Item value, Type* expected, Type** env,
 
 Item lambda_report_boundary_failure(Item failure, const char* binding,
         int64_t tail_count, int64_t store) {
-    // S7.7.4/S7.7.6: report retained/partial state without replacing its error.
+    // S7.7.6v2: report retained/partial state without replacing the store error.
     StrBuf* message = strbuf_new();
     if (message) strbuf_append_format(message, "boundary-skip: %s '%s'; %lld following statement(s) skipped; %s",
         store ? "failed container store through" : "failed reassignment to",
@@ -2984,7 +3023,9 @@ Item lambda_report_boundary_failure(Item failure, const char* binding,
         store ? "container may retain partial state" : "binding kept its previous value");
     LambdaError report = {};
     report.code = ERR_TYPE_MISMATCH;
-    report.message = message ? message->str : (char*)"boundary-skip: checked boundary failed";
+    char fallback[] = "boundary-skip: checked boundary failed";
+    report.message = message ? message->str : fallback;
+    report.message_length = message ? message->length : sizeof(fallback) - 1;
     // This is a language diagnostic, so --no-log must not suppress the report.
     err_print(&report);
     strbuf_free(message);

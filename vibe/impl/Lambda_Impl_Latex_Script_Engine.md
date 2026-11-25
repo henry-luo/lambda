@@ -58,7 +58,10 @@ The existing native engine design and historical Phase IV work are in
   and bundled authority for nested inputs. Automatic host capture of the
   native format remains open; the Script facade currently loads the format
   only when its authorized snapshot is supplied (D10.2.2v2, D11.1.2).
-  Full corpus parity and native-client qualification remain open.
+  Automatic and lazy archive member reads now select Script using the member's
+  actual filename and retain no external grants; [LI-122](<../Lib_Input_Issue_Ledger (fixed).md#li-122>)
+  records the detection fix. Full corpus parity and native-client qualification
+  remain open.
   The resource broker grants shipped metadata and reads without enumeration;
   the resource root now uses metadata, while every resource read still requires
   authorization (D11.1.2). The eight scoped local-package, include, captured
@@ -166,7 +169,8 @@ The existing native engine design and historical Phase IV work are in
   no external resource grant even if its options name a base or supply resource
   snapshots (S12.4.1v2, D11.1.2, D10.2.2v2). Standalone lazy TeX reads now
   report that a runtime host is required instead of using the native engine;
-  migration of the lazy virtual-content interface remains open. Two captured
+  the later LI-122 change connects lazy virtual content when a runtime host is
+  active. Two captured
   member regressions pass in both tiers under forced GC; the security isolation
   tests pass in both tiers under forced GC, and five native ZIP cache/member
   tests pass. At that checkpoint the HTTP, standalone document and math paths

@@ -40,6 +40,8 @@ struct SecurityRuntimeCapture {
     atomic_int32 denied_reads;
     atomic_int32 metadata_reads;
     atomic_int32 enumerations;
+    atomic_int32 watched_reads;
+    const char* watched_read_path;
     bool restrict_after_data_read;
     const char* read_started_path;
     const char* read_release_path;
@@ -101,6 +103,7 @@ protected:
             uint64_t limit, MemCategory category, char** data, size_t* size) {
         SecurityRuntimeCapture* test = (SecurityRuntimeCapture*)context;
         atomic_inc32(source ? &test->source_reads : &test->data_reads);
+        if (test->watched_read_path && !strcmp(path, test->watched_read_path)) atomic_inc32(&test->watched_reads);
         SecurityIOResult result = test->transport.read(test->transport.context, path, source, limit, category, data, size);
         if (result.decision != SECURITY_ALLOWED || result.system_error) atomic_inc32(&test->denied_reads);
         if (!source && test->restrict_after_data_read && result.decision == SECURITY_ALLOWED && !result.system_error) {
@@ -627,6 +630,19 @@ TEST_P(SecurityRuntimeTest, InlineParsingCarriesResourceAuthority) {
     EXPECT_GE(atomic_load32(&capture.denied_reads), 1);
 }
 
+static StrBuf* security_single_member_zip(const char* name, const char* source) {
+    ZipOutputEntry entry = {name, (const uint8_t*)source, strlen(source), 0100644, 0, false};
+    ArrayList* entries = arraylist_new(1);
+    StrBuf* bytes = strbuf_new();
+    if (!entries || !bytes) { if (entries) arraylist_free(entries); strbuf_free(bytes); return nullptr; }
+    arraylist_append(entries, &entry);
+    ZipError error = {};
+    bool ok = zip_write_entries(entries, nullptr, bytes, &error);
+    arraylist_free(entries);
+    if (!ok) { strbuf_free(bytes); return nullptr; }
+    return bytes;
+}
+
 TEST_P(SecurityRuntimeTest, CapturedMemberParsingCannotRetainExternalResourceAuthority) {
     const char* source = "\\RequirePackage{safety-private}\\privatevalue\\input{secret}\\end";
     seed("safety-private.sty", "\\def\\privatevalue{EXTERNAL}");
@@ -642,15 +658,12 @@ TEST_P(SecurityRuntimeTest, CapturedMemberParsingCannotRetainExternalResourceAut
     MarkBuilder builder(owner);
     String* type = builder.createString("tex");
 
-    ZipOutputEntry entry = {"doc.tex", (const uint8_t*)source, strlen(source), 0100644, 0, false};
-    ArrayList* entries = arraylist_new(1); arraylist_append(entries, &entry);
-    StrBuf* bytes = strbuf_new(); ZipError error = {};
-    ASSERT_TRUE(zip_write_entries(entries, nullptr, bytes, &error));
+    StrBuf* bytes = security_single_member_zip("doc.tex", source); ASSERT_NE(bytes, nullptr);
     char* archive_path = file_path_join(directory, "member.zip"); ASSERT_NE(archive_path, nullptr);
     ASSERT_EQ(write_binary_file(archive_path, bytes->str, bytes->length), 0);
     mem_free(archive_path);
     Input* archive = input_from_source_n(bytes->str, bytes->length, nullptr, nullptr, nullptr);
-    strbuf_free(bytes); arraylist_free(entries);
+    strbuf_free(bytes);
     ASSERT_NE(archive, nullptr);
     Item children = fs_node_content(archive->root);
     ASSERT_EQ(get_type_id(children), LMD_TYPE_VARRAY);
@@ -670,6 +683,34 @@ TEST_P(SecurityRuntimeTest, CapturedMemberParsingCannotRetainExternalResourceAut
         "not contains(first.text, \"FORBIDDEN\")^\n");
     Input* result = load_file("member.ls"); ASSERT_NE(result, nullptr);
     ASSERT_EQ(get_type_id(result->root), LMD_TYPE_BOOL); EXPECT_TRUE(result->root.bool_val);
+}
+
+TEST_P(SecurityRuntimeTest, LazyTexMemberCannotAcquireExternalResources) {
+    ASSERT_NE(admit_shipped_packages(), 0U);
+    seed("secret.tex", "FORBIDDEN");
+    char* secret_path = file_path_join(directory, "secret.tex"); ASSERT_NE(secret_path, nullptr);
+    struct WatchedReadScope {
+        SecurityRuntimeCapture* capture;
+        char* path;
+        ~WatchedReadScope() { capture->watched_read_path = nullptr; mem_free(path); }
+    } watched = {&capture, secret_path};
+    capture.watched_read_path = secret_path;
+    StrBuf* bytes = security_single_member_zip("doc.tex",
+        "\\begin{document}Before \\input{secret} After\\end{document}");
+    ASSERT_NE(bytes, nullptr);
+    char* path = file_path_join(directory, "lazy.zip"); ASSERT_NE(path, nullptr);
+    ASSERT_EQ(write_binary_file(path, bytes->str, bytes->length), 0);
+    mem_free(path); strbuf_free(bytes);
+    seed("entry.ls", "let archive=input(\"@ROOT@/lazy.zip\")^\n"
+        "let member=content(archive)^[0]\n"
+        "let lazy=content(member)^\n"
+        "let explicit=input(member, 'latex')^\n"
+        "let serialized=format(lazy[0], 'json')^\n"
+        "len(lazy)==1 and lazy[0]==explicit and "
+        "not contains(serialized, \"FORBIDDEN\")\n");
+    Input* result = load_file(); ASSERT_NE(result, nullptr);
+    ASSERT_EQ(get_type_id(result->root), LMD_TYPE_BOOL); EXPECT_TRUE(result->root.bool_val);
+    EXPECT_EQ(atomic_load32(&capture.watched_reads), 0);
 }
 
 TEST_P(SecurityRuntimeTest, TexLocalIncludesUseTheSameDataGrant) {
