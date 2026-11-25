@@ -147,9 +147,9 @@
     native: null
   }, {
     body: "$!\\,1$",
-    issue: "latex-digest-unsupported",
-    unsupported: "math command ,",
-    matches: null,
+    issue: null,
+    unsupported: null,
+    matches: true,
     actual: null,
     native: null
   }, {

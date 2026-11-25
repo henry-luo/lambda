@@ -40,8 +40,10 @@ The existing native engine design and historical Phase IV work are in
   math shifts match the isolated retired parser. The semantic-inference sample
   now matches all six expected fields, as do the other three corpus records
   previously mismatching in the isolated run. The new tree fixture passes
-  interpreter and JIT with forced GC and poisoning; a broader math sweep is
-  in progress. The complete corpus has not yet been rerun, and its aggregate
+  interpreter and JIT with forced GC and poisoning. A broader math sweep passed
+  16/17; the one stale `\\,` expectation was checked against the retired
+  parser, corrected, and passed its focused rerun. The complete corpus has not
+  yet been rerun, and its aggregate
   timeout remains open.
 
 - **Nested math alignment, 2026-11-26:** The amsmath adapter now tracks nested
