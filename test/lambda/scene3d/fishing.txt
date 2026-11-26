@@ -21,6 +21,11 @@
   start_navigable: true,
   bank_navigable: false
 }
+"scene"
+{
+  valid: true,
+  emitters: 7
+}
 "fish"
 {
   count: 44,

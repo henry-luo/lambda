@@ -46,9 +46,10 @@ for you a beat after the bite.
   broad bright leading crest with a soft glow and a faint trough behind it, and
   on the larger ripples one weaker crest well back. Each ring meanders on its own, so no two run parallel,
   and its strength swells and fades round the ring, so it thickens, thins and
-  nearly breaks. The bands widen as they spread, round ripples turn a little as
-  they go, and they fade. A splash's foam crown is a soft band broken into
-  patches. Three ripple emitters (small, medium, large), a
+  nearly breaks. The bands widen as they spread, and they fade. Each round
+  ripple and foam crown is born turned its own way (a per-spawn rotation keyed to
+  where it lands), so no two wavy outlines repeat. A splash's foam crown is a
+  soft band broken into patches. Three ripple emitters (small, medium, large), a
   foam crown and splash droplets are spawned where the oar blades bite and leave
   the water, behind the boat, at the bobber, under nibbles and bites, where a
   hooked fish thrashes, where fish rise to sip, around the otter, and where it
@@ -156,6 +157,9 @@ three kinds of command through the explicit Radiant contracts (**D9.5.6v2**):
 - an animation batch when a clip must switch or a fish's tail-beat changes;
 - a particle batch for the frame's ripples and splashes.
 
+The emitters are built with `s.particle_emitter` and `s.particle_curve`, and the
+whole scene passes `s.validate`.
+
 The HUD (catch badge, hint, toast) changes only when its text does, and the
 toast and badge pop through the presentation channel.
 
@@ -199,7 +203,7 @@ LAMBDA_HEADLESS_GLFW_WINDOW=1 ./lambda.exe demo fishing --headless \
   --event-file test/demo/fishing/tests/catch.json --event-result temp/fishing-catch.json
 ```
 
-The model golden (`test/lambda/scene3d/fishing.ls`) checks the cove layout and
+The model golden (`test/lambda/scene3d/fishing.ls`) checks that the whole scene passes `s.validate`, the cove layout and
 flora counts, the roster and its skinned buffers, the angler's rod tip, bobber, blades, catch path
 and clips, the otter's rig, clips and dive timelines, and the pure game step. The step runs
 through the otter's idle dive under the boat and its dive to keep up with hard rowing, and checks

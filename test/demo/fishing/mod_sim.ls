@@ -22,7 +22,10 @@ pub fn to_world(b, p) any^ => (let c = cos(b.h), let sn = sin(b.h), [b.x + p[0] 
 // world to boat space on the water: [across (toward +x, the boat's left), along (forward)]
 pub fn to_boat(b, x, z) => (let rx = x - b.x, let rz = z - b.z, [rx * cos(b.h) - rz * sin(b.h), rx * sin(b.h) + rz * cos(b.h)])
 fn on_water(p) => [p[0], 0.02, p[2]]
-fn spawn(emitter, p, count) => {emitter: emitter, position: on_water(p), count: count}
+// round ripples and foam each take their own turn about the vertical, from where they are born, so their
+// wavy outlines never repeat; the boat's ovals keep the heading of the hull they ride
+fn spawn(emitter, p, count) => {emitter: emitter, position: on_water(p), count: count,
+    *: (if (emitter == "ring-s" or emitter == "ring-m" or emitter == "ring-l" or emitter == "foam") {rotation: [0.0, hash(p[0], p[2]) * u.TAU, 0.0]} else {})}
 fn splash(p, size) => [spawn("splash", p, size), spawn("foam", p, 1), spawn(if (size > 12) "ring-l" else "ring-m", p, 1)]
 
 // ---- starting state

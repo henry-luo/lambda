@@ -8,6 +8,8 @@ import angler: ~~.~~.demo.fishing.mod_angler
 import sim: ~~.~~.demo.fishing.mod_sim
 import otter: ~~.~~.demo.fishing.mod_otter
 import boat: ~~.~~.demo.fishing.mod_boat
+import scene: ~~.~~.demo.fishing.mod_scene
+import s: lambda.scene3d
 
 fn r2(x) => round(x * 100.0) / 100.0
 fn v2(p) => [for (x in p) r2(x)]
@@ -27,6 +29,10 @@ fn kinds(st) => [for (k in ["koi", "trout", "perch", "bluegill", "carp", "minnow
  swords: len(w.SWORDS), carpet: len(w.CARPET),
  centre_depth: r2(w.depth(0.0, 0.0) ^ { -1.0 }), start_shore: r2(w.shore(w.START.x, w.START.z)),
  start_navigable: w.navigable(w.START.x, w.START.z) ^ { false }, bank_navigable: w.navigable(0.0, 16.5) ^ { true }}
+// the whole scene as built, its particle emitters included, passes the scene3d package validator
+"scene";
+(let built = scene.scene(sim.initial() ^ { null }, {}) ^ { null }, {valid: s.validate(built) ^ { ^.message },
+    emitters: len([for (e in scene.EMITTERS) e])})
 
 // ---- fish
 "fish";

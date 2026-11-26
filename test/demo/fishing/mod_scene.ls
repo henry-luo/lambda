@@ -14,10 +14,9 @@ import fish: .mod_fish
 import otter: .mod_otter
 
 pub let NOBODY = {membership: 0, filter: 0}
-// ripples: final diameter, lifetime, how many crests (one, or a second trailing well behind), and how far
-// each turns over its life (each ring's wobble then sits differently from its neighbours')
-pub let RINGS = {'ring-s': {size: 1.7, life: 1.9, rings: 1, spin: 0.5}, 'ring-m': {size: 2.9, life: 2.4, rings: 2, spin: -0.4},
-    'ring-l': {size: 4.2, life: 2.9, rings: 2, spin: 0.35}}
+// ripples: final diameter, lifetime, and how many crests (one, or a second trailing well behind); each
+// spawn gives a round one its own turn (mod_sim.spawn), so no two wavy outlines repeat
+pub let RINGS = {'ring-s': {size: 1.7, life: 1.9, rings: 1}, 'ring-m': {size: 2.9, life: 2.4, rings: 2}, 'ring-l': {size: 4.2, life: 2.9, rings: 2}}
 // the boat's own ripples: ovals stretched along the hull (aspect is their width over length). Their
 // emitters ride the boat, so each ripple takes the hull's heading when it is born, then stays put.
 pub let HULL_RINGS = {'hull-ring': {size: 4.4, life: 2.8, rings: 2, aspect: 0.5}, 'wake-ring': {size: 3.0, life: 2.3, rings: 1, aspect: 0.58}}
@@ -58,23 +57,21 @@ fn ripple_geometry(band, aspect = 1.0) any^ {
 }
 fn ripple_point(r, a, aspect) => (let q = 0.5 * r * wobble(a, r), [cos(a) * q * aspect, 0.0, sin(a) * q])
 fn ripple_quad(a, b, seg) => [a, b, a + seg, b, b + seg, a + seg]
-fn ring_emitter(id, spec) any^ => (let rings = int(spec.rings) ^ { 1 }, <'particle-emitter' id: id, backend: "cpu", space: "world", rate: 0.0, burst: 0, capacity: 96,
-    lifetime: spec.life, gravity: [0.0, 0.0, 0.0], speed: 0.0, angle: 0.0, size: spec.size,
-    ripple_geometry((r, a) => ripple_band(r, a, rings), spec.aspect or 1.0)^; s.material('basic', {color: "#ffffff", transparent: true, side: 'double'});
-    <'particle-size-curve' times: [0.0, 0.3, 1.0], values: [0.1, 0.58, 1.0]>
-    <'particle-rotation-curve' times: [0.0, 1.0], values: [0.0, 0.0, 0.0, 0.0, spec.spin or 0.0, 0.0]>
-    <'particle-opacity-curve' times: [0.0, 0.07, 0.45, 1.0], values: [0.0, 1.0, 0.6, 0.0]>>)
+// the emitters only the sim fires, through spawn commands: world space, no births of their own, no gravity
+// unless given
+fn fired(id, geometry, material, options, curves) element => s.particle_emitter(geometry, material,
+    {id: id, backend: "cpu", space: "world", rate: 0.0, burst: 0, gravity: [0.0, 0.0, 0.0], *: options}, curves)
+let FILM = s.material('basic', {color: "#ffffff", transparent: true, side: 'double'})
+fn ring_emitter(id, spec) any^ => (let rings = int(spec.rings) ^ { 1 },
+    fired(id, ripple_geometry((r, a) => ripple_band(r, a, rings), spec.aspect or 1.0)^, FILM,
+        {capacity: 96, lifetime: spec.life, speed: 0.0, angle: 0.0, size: spec.size},
+        [s.particle_curve('size', [0.0, 0.3, 1.0], [0.1, 0.58, 1.0])^, s.particle_curve('opacity', [0.0, 0.07, 0.45, 1.0], [0.0, 1.0, 0.6, 0.0])^]))
 // droplets thrown up by a splash, and a short-lived foam crown
-fn splash_emitter() any^ => <'particle-emitter' id: "splash", backend: "cpu", space: "world", rate: 0.0, burst: 0, capacity: 320,
-    shape: "cone", angle: 32.0, speed: 2.1, spread: 0.6, lifetime: 0.7, 'lifetime-min': 0.45, gravity: [0.0, -9.81, 0.0], size: 0.05,
-    s.sphere(4, 6); s.material('basic', {color: "#f2fbff", transparent: true});
-    <'particle-size-curve' times: [0.0, 1.0], values: [1.0, 0.55]>
-    <'particle-opacity-curve' times: [0.0, 0.7, 1.0], values: [0.95, 0.85, 0.0]>>
-fn foam_emitter() any^ => <'particle-emitter' id: "foam", backend: "cpu", space: "world", rate: 0.0, burst: 0, capacity: 48,
-    lifetime: 0.55, gravity: [0.0, 0.0, 0.0], speed: 0.0, angle: 0.0, size: 0.8,
-    ripple_geometry(foam_band)^; s.material('basic', {color: "#ffffff", transparent: true, side: 'double'});
-    <'particle-size-curve' times: [0.0, 1.0], values: [0.35, 1.0]>
-    <'particle-opacity-curve' times: [0.0, 0.15, 1.0], values: [0.0, 0.95, 0.0]>>
+fn splash_emitter() any^ => fired("splash", s.sphere(4, 6), s.material('basic', {color: "#f2fbff", transparent: true}),
+    {capacity: 320, shape: "cone", angle: 32.0, speed: 2.1, spread: 0.6, lifetime: 0.7, 'lifetime-min': 0.45, gravity: [0.0, -9.81, 0.0], size: 0.05},
+    [s.particle_curve('size', [0.0, 1.0], [1.0, 0.55])^, s.particle_curve('opacity', [0.0, 0.7, 1.0], [0.95, 0.85, 0.0])^])
+fn foam_emitter() any^ => fired("foam", ripple_geometry(foam_band)^, FILM, {capacity: 48, lifetime: 0.55, speed: 0.0, angle: 0.0, size: 0.8},
+    [s.particle_curve('size', [0.0, 1.0], [0.35, 1.0])^, s.particle_curve('opacity', [0.0, 0.15, 1.0], [0.0, 0.95, 0.0])^])
 pub let EMITTERS = ["ring-s", "ring-m", "ring-l", "hull-ring", "wake-ring", "splash", "foam"]
 
 // the camera rides its own kinematic body, so following the boat is a pose command, not an attribute edit
