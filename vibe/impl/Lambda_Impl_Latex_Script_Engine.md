@@ -34,6 +34,19 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Expl3 Boolean assignments and predicate tokens, 2026-11-26:** Script now
+  evaluates `bool_set:Nn` and `bool_gset:Nn` with TeX's f-expansion and ordinary
+  scoped character definitions, and implements `int_compare_p:nNn` using its
+  native definition (D10.2.2v2). The shared primitive-predicate result now
+  returns `c_true_bool` or `c_false_bool` tokens, as TeX does; returning digit
+  characters previously broke Boolean expressions. TeX Live checks cover
+  assignments, predicates, token meanings, global overrides and
+  after-assignment. Seven focused GTests pass, and the new fixture matches in
+  interpreter and JIT under forced GC. The full CSV expansion now completes
+  without diagnostics and filters the intended rows, but its named columns
+  still contain an unexpanded `tl_trim_spaces:n` and its document tree remains
+  guarded; the six phase-five table assertions are not yet qualified.
+
 - **Expl3 string comparison variants, 2026-11-26:** The native `VnTF`, `VnT`
   and `VnF` value variants reuse the existing register-expansion and string
   comparator; `eeTF`, `eeF` and `p:ee` use the native expanded-comparison
@@ -43,8 +56,8 @@ The existing native engine design and historical Phase IV work are in
   match their goldens under forced GC in interpreter and JIT. Value-argument
   and expanded-comparison
   document source mappings remain guarded. The complete phase-five CSV
-  expansion now reaches the unported `bool_set:Nn`; its six table assertions
-  still fail.
+  expansion then reached `bool_set:Nn`; the subsequent Boolean checkpoint
+  records its current status.
 
 - **Expl3 regex matching, 2026-11-26:** The Script engine implements the
   public protected `regex_match:nnTF`, `nnT` and `nnF` macros with a bounded

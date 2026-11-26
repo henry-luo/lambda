@@ -3769,7 +3769,8 @@ fn expl3_compare_text(st, tokens) any^ => join([for (t in tokens)
 // The expl3 conditional suffix selects zero, one, or two raw branches.
 fn expl3_branch(st: State, name, matched, foreign = false) State^ {
     if (contains(name, "_p:"))
-        {*:st, input: stream.push(st.input, text_tokens(if (matched) "1" else "0")^)}
+        // Predicate results are TeX Boolean control sequences, not character digits.
+        {*:st, input: stream.push(st.input, [control_token(if (matched) "c_true_bool" else "c_false_bool")])}
     else {
         let first = stream.argument(st.input, true)^;
         let second = if (ends_with(name, "TF")) stream.argument(first.stream, true)^
@@ -6704,6 +6705,7 @@ pub fn enable_script_expl3(st: State) State^ {
     let support = enable_expl_values(counts, [
         {name: "tex_let:D", kind: "primitive", value: "let", source_mapping_guard: "tl_eq"},
         {name: "tex_global:D", kind: "primitive", value: "global"},
+        {name: "tex_chardef:D", kind: "primitive", value: "chardef"},
         {name: "tex_advance:D", kind: "primitive", value: "advance"},
         {name: "group_begin:", kind: "primitive", value: "begingroup"},
         {name: "group_end:", kind: "primitive", value: "endgroup"},
@@ -7021,6 +7023,11 @@ pub fn enable_script_expl3(st: State) State^ {
         {source: "\\cs_gset_eq:NN{\\tex_global:D\\cs_set_eq:NN}", protected_flag: true},
         {source: "\\cs_gset_eq:cN{\\exp_args:Nc\\cs_gset_eq:NN}", protected_flag:true,source_mapping_guard:"dynamic_assignment",argument_unqualified:true},
         {source: "\\cs_gset_eq:Nc{\\exp_args:NNc\\cs_gset_eq:NN}", protected_flag:true,source_mapping_guard:"dynamic_assignment",argument_unqualified:true},
+        // Boolean expression assignment uses TeX's f-expanded character definition.
+        {source:"\\exp_last_unbraced:NNNf#1#2#3#4{\\exp_after:wN#1\\exp_after:wN#2\\exp_after:wN#3\\exp:w\\exp_end_continue_f:w#4}",protected_flag:false,source_mapping_guard:"exp_args_f"},
+        {source:"\\exp_last_unbraced:NNNNf#1#2#3#4#5{\\exp_after:wN#1\\exp_after:wN#2\\exp_after:wN#3\\exp_after:wN#4\\exp:w\\exp_end_continue_f:w#5}",protected_flag:false,source_mapping_guard:"exp_args_f"},
+        {source:"\\bool_set:Nn#1#2{\\exp_last_unbraced:NNNf\\tex_chardef:D#1={\\bool_if_p:n{#2}}}",protected_flag:true,argument_unqualified:true},
+        {source:"\\bool_gset:Nn#1#2{\\exp_last_unbraced:NNNNf\\tex_global:D\\tex_chardef:D#1={\\bool_if_p:n{#2}}}",protected_flag:true,argument_unqualified:true},
         {source: "\\bool_set_true:N#1{\\cs_set_eq:NN#1\\c_true_bool}", protected_flag: true},
         {source: "\\bool_set_false:N#1{\\cs_set_eq:NN#1\\c_false_bool}", protected_flag: true},
         {source: "\\bool_gset_true:N#1{\\cs_gset_eq:NN#1\\c_true_bool}", protected_flag: true},
@@ -7063,6 +7070,7 @@ pub fn enable_script_expl3(st: State) State^ {
         {source: "\\tl_head:n#1{\\__kernel_exp_not:w\\tex_expanded:D{{\\if_false:{\\fi:\\__tl_head_aux:n#1{}}}}}", protected_flag: false, source_mapping_guard: "tl_head"},
         {source: "\\__tl_head_aux:n#1{\\__kernel_exp_not:w{#1}\\exp_after:wN\\use_none:n\\exp_after:wN{\\if_false:}\\fi:}", protected_flag: false},
         {source: "\\int_if_zero_p:n#1{\\if_int_compare:w\\__int_eval:w#1=\\c_zero_int\\__prg_p_true:w\\fi:\\c_false_bool}", protected_flag: false},
+        {source:"\\int_compare_p:nNn#1#2#3{\\if_int_compare:w\\__int_eval:w#1#2\\__int_eval:w#3\\__int_eval_end:\\__prg_p_true:w\\fi:\\c_false_bool}",protected_flag:false,source_mapping_guard:"int_math"},
         {source: "\\int_if_odd_p:n#1{\\if_int_odd:w\\__int_eval:w#1\\__int_eval_end:\\__prg_p_true:w\\fi:\\c_false_bool}", protected_flag: false},
         {source: "\\int_if_even_p:n#1{\\reverse_if:N\\if_int_odd:w\\__int_eval:w#1\\__int_eval_end:\\__prg_p_true:w\\fi:\\c_false_bool}", protected_flag: false},
         {source: "\\bool_if:NTF#1{\\if_bool:N#1\\__prg_TF_true:w\\fi:\\use_ii:nn}", protected_flag: false},
