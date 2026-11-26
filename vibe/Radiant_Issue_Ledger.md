@@ -20,6 +20,18 @@ observations still require re-verification. Add new Radiant issues here.
 
 ## Open issues
 
+<a id="ri-252"></a>
+
+- [RI-252 — Demo tile hover triggers a full catalog layout](<Radiant_Issue_Ledger (fixed).md#ri-252>).
+
+<a id="ri-251"></a>
+
+- [RI-251 — Widening a window retains narrow flex and grid geometry](<Radiant_Issue_Ledger (fixed).md#ri-251>).
+
+<a id="ri-250"></a>
+
+- [RI-250 — Demo window resizing repeats shadow and cascade work](<Radiant_Issue_Ledger (fixed).md#ri-250>).
+
 <a id="ri-249"></a>
 
 - [RI-249 — macOS clears the visible drawable during native resize](<Radiant_Issue_Ledger (fixed).md#ri-249>).

@@ -9847,10 +9847,10 @@ static bool css_selector_uses_hover(CssSelector* selector) {
     return css_selector_uses_pseudo_state(selector, PSEUDO_STATE_HOVER);
 }
 
-// A state condition in an ancestor or nested selector can affect other
-// elements, so a subject-only update requires a direct pseudo-class.
-static bool css_selector_tests_subject_state(CssSelector* selector,
-        uint32_t state, CssSelectorType selector_type) {
+// A direct pseudo-class can affect the subject or reach it through child and
+// descendant combinators. Sibling and functional dependencies need full restyle.
+static bool css_selector_tests_local_state(CssSelector* selector,
+        uint32_t state, CssSelectorType selector_type, bool* descendant = nullptr) {
     if (!selector || !css_selector_uses_pseudo_state(selector, state) ||
         selector->compound_selector_count == 0) return false;
 
@@ -9869,8 +9869,15 @@ static bool css_selector_tests_subject_state(CssSelector* selector,
                 return false;
             }
             if (!css_simple_selector_uses_pseudo_state(simple, state)) continue;
-            if (c != final_index || simple->type != selector_type) {
-                return false;
+            if (simple->type != selector_type) return false;
+            if (c != final_index) {
+                if (!descendant || !selector->combinators) return false;
+                for (size_t i = c; i < final_index; i++) {
+                    CssCombinator relation = selector->combinators[i];
+                    if (relation != CSS_COMBINATOR_CHILD &&
+                        relation != CSS_COMBINATOR_DESCENDANT) return false;
+                }
+                *descendant = true;
             }
             found_hover = true;
         }
@@ -9950,23 +9957,26 @@ static bool css_rule_uses_hover(CssRule* rule) {
     return css_rule_uses_pseudo_state(rule, PSEUDO_STATE_HOVER);
 }
 
-static bool css_rule_is_self_color_background_state(CssRule* rule,
-        uint32_t state, CssSelectorType selector_type, bool* found_hover) {
+static bool css_rule_is_local_paint_state(CssRule* rule, uint32_t state,
+        CssSelectorType selector_type, bool* found_hover,
+        lam::ArrayList<CssSelector*>* descendants = nullptr) {
     if (!rule || !found_hover) return true;
     if (rule->type == CSS_RULE_STYLE || rule->type == CSS_RULE_NESTING) {
         bool rule_uses_hover = false;
         CssSelectorGroup* group = rule->data.style_rule.selector_group;
-        if (group) {
-            for (size_t i = 0; i < group->selector_count; i++) {
-                CssSelector* selector = group->selectors ? group->selectors[i] : NULL;
-                if (!selector || !css_selector_uses_pseudo_state(selector, state)) continue;
-                rule_uses_hover = true;
-                if (!css_selector_tests_subject_state(selector, state, selector_type)) return false;
-            }
-        } else if (css_selector_uses_pseudo_state(rule->data.style_rule.selector, state)) {
+        size_t selector_count = group ? group->selector_count : 1;
+        for (size_t i = 0; i < selector_count; i++) {
+            CssSelector* selector = group
+                ? (group->selectors ? group->selectors[i] : nullptr)
+                : rule->data.style_rule.selector;
+            if (!css_selector_uses_pseudo_state(selector, state)) continue;
             rule_uses_hover = true;
-            if (!css_selector_tests_subject_state(
-                    rule->data.style_rule.selector, state, selector_type)) return false;
+            bool descendant = false;
+            if (!css_selector_tests_local_state(selector, state, selector_type,
+                    descendants ? &descendant : nullptr)) return false;
+            if (descendant && (rule->type != CSS_RULE_STYLE ||
+                    rule->data.style_rule.nested_rule_count ||
+                    !descendants->push_back(selector))) return false;
         }
         if (rule_uses_hover) {
             *found_hover = true;
@@ -9977,7 +9987,7 @@ static bool css_rule_is_self_color_background_state(CssRule* rule,
             }
         }
         for (size_t i = 0; i < rule->data.style_rule.nested_rule_count; i++) {
-            if (!css_rule_is_self_color_background_state(
+            if (!css_rule_is_local_paint_state(
                     rule->data.style_rule.nested_rules
                         ? rule->data.style_rule.nested_rules[i] : NULL,
                     state, selector_type, found_hover)) return false;
@@ -9985,10 +9995,10 @@ static bool css_rule_is_self_color_background_state(CssRule* rule,
     } else if (rule->type == CSS_RULE_MEDIA || rule->type == CSS_RULE_SUPPORTS ||
                rule->type == CSS_RULE_CONTAINER || rule->type == CSS_RULE_LAYER) {
         for (size_t i = 0; i < rule->data.conditional_rule.rule_count; i++) {
-            if (!css_rule_is_self_color_background_state(
+            if (!css_rule_is_local_paint_state(
                     rule->data.conditional_rule.rules
                         ? rule->data.conditional_rule.rules[i] : NULL,
-                    state, selector_type, found_hover)) return false;
+                    state, selector_type, found_hover, descendants)) return false;
         }
     }
     return true;
@@ -10019,7 +10029,7 @@ static bool active_rule_requires_layout(CssRule* rule, void* context) {
         ((rule->type == CSS_RULE_STYLE || rule->type == CSS_RULE_NESTING) &&
          rule->data.style_rule.nested_rule_count &&
          css_rule_uses_pseudo_state(rule, PSEUDO_STATE_ACTIVE))) return true;
-    return !css_rule_is_self_color_background_state(rule, PSEUDO_STATE_ACTIVE,
+    return !css_rule_is_local_paint_state(rule, PSEUDO_STATE_ACTIVE,
         CSS_SELECTOR_PSEUDO_ACTIVE, (bool*)context);
 }
 
@@ -10113,7 +10123,8 @@ static bool document_has_matched_hover_rules(DomDocument* doc, DocState* state) 
 // Unmatched hover rules cannot affect this document's cascade. In particular,
 // UA controls may define geometry-changing :hover styles while a file tree
 // pointer is over an unrelated row with paint-only author styles.
-static bool document_has_matched_layout_hover_rules(DomDocument* doc, DocState* state) {
+static bool document_has_matched_layout_hover_rules(DomDocument* doc, DocState* state,
+        lam::ArrayList<CssSelector*>* descendants) {
     if (!doc || !state || !doc->root || !doc->document_pool || !document_has_hover_rules(doc)) {
         return false;
     }
@@ -10126,8 +10137,13 @@ static bool document_has_matched_layout_hover_rules(DomDocument* doc, DocState* 
             CssRule* rule = stylesheet->rules ? stylesheet->rules[r] : NULL;
             if (!css_rule_uses_hover(rule)) continue;
             bool found_hover = false;
-            if (css_rule_is_self_color_background_state(rule, PSEUDO_STATE_HOVER,
-                    CSS_SELECTOR_PSEUDO_HOVER, &found_hover)) continue;
+            size_t previous_count = descendants ? descendants->size() : 0;
+            if (css_rule_is_local_paint_state(rule, PSEUDO_STATE_HOVER,
+                    CSS_SELECTOR_PSEUDO_HOVER, &found_hover,
+                    descendants)) continue;
+            if (descendants) {
+                descendants->remove_range(previous_count, descendants->size() - previous_count);
+            }
             if (css_rule_matches_hover_in_tree(rule, matcher,
                                                static_cast<DomNode*>(doc->root))) {
                 return true;
@@ -10135,6 +10151,14 @@ static bool document_has_matched_layout_hover_rules(DomDocument* doc, DocState* 
         }
     }
     return false;
+}
+
+static bool hover_rule_requires_full_context(CssRule* rule, void*) {
+    // Scoped roots, imported sheets and nesting can add conditions outside
+    // the selector tested by the descendant paint refresh.
+    return rule->type == CSS_RULE_SCOPE || rule->type == CSS_RULE_IMPORT ||
+        (rule->type == CSS_RULE_STYLE && rule->data.style_rule.nested_rule_count &&
+         css_rule_uses_hover(rule));
 }
 
 static bool document_has_matched_hover_rule_on_path(DomDocument* doc, DocState* state,
@@ -10371,7 +10395,7 @@ static bool refresh_hover_color_background_element(DocState* state,
         if (snapshot_pool) pool_destroy(snapshot_pool);
         return false;
     }
-    // Direct self-hover rules can only change this element's cascade.
+    // Update the cascade winner before resolving its retained paint values.
     radiant_cascade_styles_for_element_with_matcher(element, state->hover_matcher);
     bool unchanged = css_declaration_winner_equal(before,
         style_tree_get_declaration(element->specified_style, CSS_PROPERTY_COLOR));
@@ -10396,11 +10420,51 @@ static bool refresh_hover_color_background_path(DocState* state,
     return refreshed;
 }
 
+struct HoverPaintMatch {
+    DocState* state;
+    View* previous;
+};
+
+static bool resolve_hover_paint_match(void* context, DomElement* element, uint32_t pseudo_state) {
+    HoverPaintMatch* match = static_cast<HoverPaintMatch*>(context);
+    if (state_resolve_selector_pseudo_state(match->state, element, pseudo_state)) return true;
+    if (pseudo_state != PSEUDO_STATE_HOVER) return false;
+    // Include the previous hover path so leaving a tile also clears its
+    // descendant styles. The final cascade uses the current hover state only.
+    for (DomNode* node = match->previous; node; node = node->parent) {
+        if (node == element) return true;
+    }
+    return false;
+}
+
+static bool refresh_hover_paint_descendants(DocState* state, DomDocument* doc,
+        LayoutContext* lycon, View* previous, const lam::ArrayList<CssSelector*>& selectors) {
+    SelectorMatcher matcher;
+    selector_matcher_init(&matcher, doc->document_pool);
+    HoverPaintMatch match = {state, previous};
+    selector_matcher_set_pseudo_state_resolver(&matcher, resolve_hover_paint_match, &match);
+    DomNode* root = doc->root;
+    for (DomNode* node = root; node; node = dom_source_next_in_tree(root, node)) {
+        DomElement* element = node->as_element();
+        if (!element || element->is_synthetic()) continue;
+        for (size_t i = 0; i < selectors.size(); i++) {
+            if (!selector_matcher_matches(&matcher, selectors[i], element, nullptr)) continue;
+            if (!refresh_hover_color_background_element(state, doc, lycon, static_cast<View*>(node))) {
+                return false;
+            }
+            dirty_mark_element(state, node);
+            break;
+        }
+    }
+    return true;
+}
+
 // False when the paint-only refresh could not finish; the caller restyles in full.
 static bool refresh_hover_color_background_paths(DocState* state,
                                                  DomDocument* doc,
                                                  View* prev_hover,
-                                                 View* new_target) {
+                                                 View* new_target,
+                                                 const lam::ArrayList<CssSelector*>* descendants = nullptr) {
     UiContext* uicon = doc ? static_cast<UiContext*>(doc->js.host_ui_context) : nullptr;
     if (!state || !state->hover_matcher || !doc || !uicon || !doc->view_tree ||
         !doc->view_tree->prop_pool) return false;
@@ -10416,7 +10480,9 @@ static bool refresh_hover_color_background_paths(DocState* state,
     setup_font(uicon, &lycon.font, &uicon->default_font);
 
     return refresh_hover_color_background_path(state, doc, &lycon, prev_hover) &&
-        refresh_hover_color_background_path(state, doc, &lycon, new_target);
+        refresh_hover_color_background_path(state, doc, &lycon, new_target) &&
+        (!descendants || descendants->empty() ||
+         refresh_hover_paint_descendants(state, doc, &lycon, prev_hover, *descendants));
 }
 
 static void apply_document_condition_restyle(DomDocument* doc, DocState* state, uint32_t reason) {
@@ -10500,7 +10566,7 @@ static bool focus_selector_requires_document_cascade(CssSelector* selector, void
     };
     for (const auto& state : states) {
         if (!(query->flags & state.flag) || !css_selector_uses_pseudo_state(selector, state.flag)) continue;
-        if (!css_selector_tests_subject_state(selector, state.flag, state.type)) return true;
+        if (!css_selector_tests_local_state(selector, state.flag, state.type)) return true;
         CssCompoundSelector* subject = selector->compound_selectors[selector->compound_selector_count - 1];
         for (size_t i = 0; subject && i < 2; ++i) {
             // The pseudo-state itself changed. Check only the subject's
@@ -10597,7 +10663,14 @@ static void sync_hover_pseudo_state_after_transition(DocState* state,
     if (!doc) doc = hover_resolve_document(prev_hover);
     if (!doc) return;
 
-    bool layout_hover_active = document_has_matched_layout_hover_rules(doc, state);
+    lam::ArrayList<CssSelector*> descendants(MEM_CAT_LAYOUT, 0);
+    bool layout_hover_active = document_has_matched_layout_hover_rules(doc, state,
+        doc->js.has_shadow_roots ? nullptr : &descendants);
+    if (!layout_hover_active && !descendants.empty() &&
+        radiant_css_document_rule_tree_has_match(doc, hover_rule_requires_full_context, nullptr)) {
+        descendants.clear();
+        layout_hover_active = document_has_matched_layout_hover_rules(doc, state, nullptr);
+    }
     bool paint_only_hover = !layout_hover_active && !state->hover_styles_require_layout;
     // Direct paint-only selectors can only match the changed hover path; avoid
     // walking the complete document before repainting the affected elements.
@@ -10609,9 +10682,9 @@ static void sync_hover_pseudo_state_after_transition(DocState* state,
         // A matcher allocation failure must keep the existing complete path.
         paint_only_hover = false;
     }
-    if (hover_styles_active || state->hover_styles_active) {
+    if (hover_styles_active || state->hover_styles_active || !descendants.empty()) {
         if (!paint_only_hover ||
-            !refresh_hover_color_background_paths(state, doc, prev_hover, new_target)) {
+            !refresh_hover_color_background_paths(state, doc, prev_hover, new_target, &descendants)) {
             radiant_recascade_document(doc);
             if (doc->root) {
                 reflow_schedule(state, doc->root, REFLOW_SUBTREE, CHANGE_PSEUDO_STATE);

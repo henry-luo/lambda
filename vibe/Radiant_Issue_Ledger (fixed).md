@@ -14,6 +14,78 @@ are unchanged. Full evidence is under `../../lambda/temp/kianhup-style/`.
 
 ## Fixed issues
 
+<a id="ri-252"></a>
+
+### RI-252 — Demo tile hover triggers a full catalog layout
+
+**Fixed, 2026-11-26.** D9.1.1v4 and D9.5.6v2 place event handling in
+Lambda's host adapter and native layout and painting in Radiant. On the
+unnamed `lambda demo` page, the ancestor hover selectors for the Open pill
+sent every tile enter and exit through full layout, even though the rules
+only changed colors.
+
+The hover adapter now uses the existing retained paint refresh for
+paint-only selectors that reach their subject through child or descendant
+combinators. It matches against the old and new hover paths to refresh
+both tiles. Geometry-changing rules and selectors with broader effects
+still use the existing restyle path. The demo's border transition now
+uses a 90 ms ease-out.
+
+Across 32 native macOS pointer moves in release builds, the median to the
+first presented frame fell from 195 ms to 68 ms. The expected border
+color crossed the sampled pixel threshold after 259 ms before the fix
+and 68 ms after it. The headless profile showed eight hover reflows
+before the fix and only the initial layout after it. Fifteen focused
+headless replays passed, including scoped geometry and the extended
+descendant pixel fixture. A native demo replay also verified that the
+Open pills switch and clear when crossing between tiles.
+
+<a id="ri-251"></a>
+
+### RI-251 — Widening a window retains narrow flex and grid geometry
+
+**Fixed, 2026-11-26.** Radiant owns layout and its property storage under
+D9.1.3v2 and D5.5.1. Open `lambda demo`, narrow it below 760 CSS pixels,
+then widen it. The media query stops matching, but the hero still stacks
+its emblem above the title and the catalog keeps the sidebar above its
+contents. A minimal page reproduced the same stale flex direction, gap
+and explicit grid tracks.
+
+Full style resolution now restores the flex and grid container inputs
+from the allocation defaults before applying the current cascade. It
+releases the old grid templates and keeps the last committed baselines
+and used track text available until layout replaces them. The geometry
+regression fails on both returns to the wide viewport before the change
+and passes after it. All 151 tests in the native dynamic-layout suite pass.
+The release demo restores its wide geometry after both breakpoints in a
+native macOS window and headless. Eight additional headless replays and
+the native archive closure pass.
+
+<a id="ri-250"></a>
+
+### RI-250 — Demo window resizing repeats shadow and cascade work
+
+**Fixed, 2026-11-26.** Radiant owns native paint and layout under
+D9.1.3v2 and D9.5.6v2. In the unnamed `lambda demo`, changing the
+catalog width invalidated the shadow cache. Radiant blurred the whole
+panel, including its offscreen extent. Each viewport change also
+rematched the whole stylesheet between media-query breakpoints.
+
+Outer shadows now convolve identical straight spans once and reconstruct
+the original pixel image before applying the existing masks. The cascade
+compares media conditions at the old and new viewport sizes and retains
+the specified style when they agree. Layout still resolves lengths against
+the new viewport. Shadow roots and container-query documents retain the
+full recascade path.
+
+Across 40 distinct native resize steps in the release build, median
+resize-to-frame time was 47.7 ms before and 46.6 ms after. The 90th
+percentile fell from 180.4 ms to 82.3 ms and the maximum from 225.3 ms
+to 100.6 ms. Eight shadow captures at 1× and 2× matched pixel for pixel.
+Ten focused replays covered the demo's responsive layout, imported and
+nested media rules, observers, editors and clipping. Native Scene3D
+resize and the Radiant integer-cast lint also passed.
+
 <a id="ri-249"></a>
 
 ### RI-249 — macOS clears the visible drawable during native resize
