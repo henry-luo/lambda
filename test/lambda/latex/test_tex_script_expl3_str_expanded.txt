@@ -1,0 +1,65 @@
+[{
+    name: "expanded-left",
+    issue: null,
+    unsupported: null,
+    text: "T",
+    matches: true
+  }, {
+    name: "expanded-both",
+    issue: null,
+    unsupported: null,
+    text: "T",
+    matches: true
+  }, {
+    name: "expanded-different",
+    issue: null,
+    unsupported: null,
+    text: "F",
+    matches: true
+  }, {
+    name: "empty",
+    issue: null,
+    unsupported: null,
+    text: "T",
+    matches: true
+  }, {
+    name: "spaces",
+    issue: null,
+    unsupported: null,
+    text: "T",
+    matches: true
+  }, {
+    name: "true",
+    issue: null,
+    unsupported: null,
+    text: "T",
+    matches: true
+  }, {
+    name: "false",
+    issue: null,
+    unsupported: null,
+    text: "T",
+    matches: true
+  }, {
+    name: "predicate-equal",
+    issue: null,
+    unsupported: null,
+    text: "T",
+    matches: true
+  }, {
+    name: "predicate-different",
+    issue: null,
+    unsupported: null,
+    text: "F",
+    matches: true
+  }, {
+    name: "meaning",
+    issue: null,
+    unsupported: null,
+    text: "\\long macro:#1#2->\\if:w 0\\__str_if_eq:nn {#1}{#2}\\__prg_TF_true:w \\fi: \\use_ii:nn ",
+    matches: true
+  }]
+{
+  issue: "latex-digest-unsupported",
+  unsupported: "expl3 expanded string comparison source mapping"
+}

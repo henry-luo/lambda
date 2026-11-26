@@ -34,6 +34,18 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Expl3 string comparison variants, 2026-11-26:** The native `VnTF`, `VnT`
+  and `VnF` value variants reuse the existing register-expansion and string
+  comparator; `eeTF`, `eeF` and `p:ee` use the native expanded-comparison
+  definitions (D10.2.2v2). TeX Live checks cover token-list and integer
+  values, retained control tokens, branch selection, expanded operands,
+  predicates and macro meanings. Four focused GTests pass; both new fixtures
+  match their goldens under forced GC in interpreter and JIT. Value-argument
+  and expanded-comparison
+  document source mappings remain guarded. The complete phase-five CSV
+  expansion now reaches the unported `bool_set:Nn`; its six table assertions
+  still fail.
+
 - **Expl3 regex matching, 2026-11-26:** The Script engine implements the
   public protected `regex_match:nnTF`, `nnT` and `nnF` macros with a bounded
   matcher for ASCII character and control-sequence tokens (D10.2.2v2). It
@@ -44,11 +56,12 @@ The existing native engine design and historical Phase IV work are in
   Script primitive rather than the native introspectable macro. A 180-case
   generated matrix and targeted character-category, branching and meaning
   checks agree with TeX Live 2025. Interpreter and JIT forced-GC checks pass.
-  The four-case focused GTest passed three cases; the existing integer-compare
-  case exceeded its unchanged 60-second limit and is being checked separately.
+  The four-case focused GTest passed three cases; the integer-compare case
+  exceeded its unchanged 60-second limit both alone and with pre-regex Script
+  sources, so that performance failure predates the matcher.
   Regex document source mapping is guarded pending native tree qualification.
-  The full phase-five CSV expansion now reaches `str_if_eq:VnT`; its six table
-  assertions remain unresolved, and no CSV rendering parity is claimed.
+  The later string-comparison checkpoint records the next CSV blocker; no CSV
+  rendering parity is claimed.
 
 - **Expl3 `exp_args:NnV`, 2026-11-26:** Script preloads the native expandable
   helper, preserving the first argument and expanding the second variable's

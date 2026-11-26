@@ -1,0 +1,65 @@
+[{
+    name: "equal",
+    issue: null,
+    unsupported: null,
+    text: "T",
+    matches: true
+  }, {
+    name: "unequal",
+    issue: null,
+    unsupported: null,
+    text: "F",
+    matches: true
+  }, {
+    name: "true",
+    issue: null,
+    unsupported: null,
+    text: "T",
+    matches: true
+  }, {
+    name: "false",
+    issue: null,
+    unsupported: null,
+    text: "T",
+    matches: true
+  }, {
+    name: "control",
+    issue: null,
+    unsupported: null,
+    text: "T",
+    matches: true
+  }, {
+    name: "control-expanded",
+    issue: null,
+    unsupported: null,
+    text: "F",
+    matches: true
+  }, {
+    name: "spaces",
+    issue: null,
+    unsupported: null,
+    text: "T",
+    matches: true
+  }, {
+    name: "empty",
+    issue: null,
+    unsupported: null,
+    text: "T",
+    matches: true
+  }, {
+    name: "integer",
+    issue: null,
+    unsupported: null,
+    text: "T",
+    matches: true
+  }, {
+    name: "meaning",
+    issue: null,
+    unsupported: null,
+    text: "\\long macro:->\\exp_args:NV \\str_if_eq:nnTF ",
+    matches: true
+  }]
+{
+  issue: "latex-digest-unsupported",
+  unsupported: "expl3 value argument source mapping"
+}

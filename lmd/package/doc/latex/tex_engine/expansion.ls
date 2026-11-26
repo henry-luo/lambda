@@ -594,6 +594,7 @@ fn expand_one(st: State, t, budget) State^ {
                     {*:st, expl3_exp_args_value_seen:true, expl3_exp_args_once_seen:true}
                 else if (macro.source_mapping_guard == "bool_expr") {*:st, expl3_bool_expr_seen:true}
                 else if (macro.source_mapping_guard == "str_case") {*:st, expl3_str_case_seen:true}
+                else if (macro.source_mapping_guard == "str_ee") {*:st, expl3_str_ee_seen:true}
                 else if (macro.source_mapping_guard == "seq_map") {*:st, expl3_seq_map_seen:true}
                 else if (macro.source_mapping_guard == "tl_map") {*:st, expl3_tl_map_seen:true}
                 else if (macro.source_mapping_guard == "replicate") {*:st, expl3_replicate_seen:true}
@@ -6994,7 +6995,11 @@ pub fn enable_script_expl3(st: State) State^ {
         {source:"\\prop_map_break:n{\\prg_map_break:Nn\\prop_map_break:}",protected_flag:false},
         {source:"\\prop_map_tokens:Nn#1#2{\\exp_last_unbraced:Nnf\\use_i:nnn{\\__prop_map_tokens:nw{#2}}#1" ++ repeated(prop_map_terminator,4)^ ++ "\\prg_break_point:Nn\\prop_map_break:{}}",protected_flag:false},
         {source:"\\__prop_map_tokens:nw#1\\__prop_pair:wn#2\\s__prop#3\\__prop_pair:wn#4\\s__prop#5\\__prop_pair:wn#6\\s__prop#7\\__prop_pair:wn#8\\s__prop#9{" ++ prop_map_steps ++ "\\__prop_map_tokens:nw{#1}}",protected_flag:false},
+        // The expanded variants share the existing TeX string comparator.
+        {source:"\\str_if_eq:eeTF#1#2{\\if:w0\\__str_if_eq:nn{#1}{#2}\\__prg_TF_true:w\\fi:\\use_ii:nn}",protected_flag:false,source_mapping_guard:"str_ee"},
         {source:"\\str_if_eq:eeT#1#2{\\if:w0\\__str_if_eq:nn{#1}{#2}\\__prg_T_true:w\\fi:\\use_none:n}",protected_flag:false},
+        {source:"\\str_if_eq:eeF#1#2{\\if:w0\\__str_if_eq:nn{#1}{#2}\\__prg_F_true:w\\fi:\\use:n}",protected_flag:false,source_mapping_guard:"str_ee"},
+        {source:"\\str_if_eq_p:ee#1#2{\\if:w0\\__str_if_eq:nn{#1}{#2}\\__prg_p_true:w\\fi:\\c_false_bool}",protected_flag:false,source_mapping_guard:"str_ee"},
         {source:"\\__prop_item:nnn#1#2#3{\\str_if_eq:eeT{#1}{#2}{\\prop_map_break:n{\\exp_not:n{#3}}}}",protected_flag:false},
         {source:"\\__prop_if_in_flat:nnn#1#2#3{\\str_if_eq:eeT{#1}{#2}{\\prop_map_break:n{\\use_i:nn\\prg_return_true:}}}",protected_flag:false},
         {source:"\\prop_item:Nn#1#2{\\__prop_if_flat:NTF#1{\\exp_args:NNo\\prop_map_tokens:Nn#1{\\exp_after:wN\\__prop_item:nnn\\exp_after:wN{\\tl_to_str:n{#2}}}}{\\exp_after:wN\\__prop_get_linked:w#1{#2}\\exp_not:n{}{}}}",protected_flag:false},
@@ -7041,6 +7046,10 @@ pub fn enable_script_expl3(st: State) State^ {
         {source:"\\regex_match:nnF#1#2{\\__regex_if_match:nn{\\__regex_build:n{#1}}{#2}\\__regex_return:\\exp_end:{}}",protected_flag:true,argument_unqualified:true},
         // Preserve the first argument while expanding the second variable's value.
         {source: "\\exp_args:NnV#1#2#3{\\tex_expanded:D{\\exp_not:N#1{\\exp_not:n{#2}}{\\__kernel_exp_not:w\\exp_after:wN{\\exp:w\\__exp_eval_register:N#3}}}}", protected_flag:false, source_mapping_guard:"exp_args_value"},
+        // Value variants reuse TeX's existing register expansion.
+        {source:"\\str_if_eq:VnTF{\\exp_args:NV\\str_if_eq:nnTF}",protected_flag:false},
+        {source:"\\str_if_eq:VnT{\\exp_args:NV\\str_if_eq:nnT}",protected_flag:false},
+        {source:"\\str_if_eq:VnF{\\exp_args:NV\\str_if_eq:nnF}",protected_flag:false},
         {source: "\\tl_head:V{\\exp_args:NV\\tl_head:n}", protected_flag: false},
         {source: "\\tl_tail:V{\\exp_args:NV\\tl_tail:n}", protected_flag: false},
         {source: "\\exp_args:No#1#2{\\exp_after:wN#1\\exp_after:wN{#2}}", protected_flag: false, source_mapping_guard: "exp_args_once"},

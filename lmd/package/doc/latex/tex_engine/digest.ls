@@ -4094,6 +4094,8 @@ pub fn digest(expanded: map) Digested^ {
         {ast:null, issue:"latex-digest-unsupported", unsupported:"expl3 regex source mapping"}
     else if (expanded.expl3_bool_expr_seen == true)
         {ast: null, issue: "latex-digest-unsupported", unsupported: "expl3 boolean expression source mapping"}
+    else if (expanded.expl3_str_ee_seen == true)
+        {ast: null, issue: "latex-digest-unsupported", unsupported: "expl3 expanded string comparison source mapping"}
     else if (expanded.expl3_str_case_seen == true)
         {ast: null, issue: "latex-digest-unsupported", unsupported: "expl3 string case source mapping"}
     else if (expanded.expl3_seq_map_seen == true)
