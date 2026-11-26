@@ -18,12 +18,27 @@ import chrome: lambda.doc.document_chrome
 // Toolbar and window
 // ---------------------------------------------------------------------------
 
-pub fn file_label(session, dirty, source = false) =>
+fn viewer_tabs(modes, session, source, source_intent) {
+  let current = if (source and session.rich_format != null) "Source" else "Edit";
+  chrome.mode_tabs([for (mode in modes)
+    (let intent = if (mode == "Edit") {event:"edit_cmd", detail:{cmd:"view_rich"}}
+      else if (mode == "Source" and source_intent != null) source_intent
+      else {event:"viewer_preview", detail:{mode:lower(mode)}},
+     chrome.mode_button(mode, mode == current, intent))])
+}
+
+pub fn file_label(session, dirty, source = false, modes = null, source_intent = null) =>
   <div class: "edit-file",
     chrome.title(session.path, session.name, "document-name edit-name");
     <span class: "edit-dirty", title: if (dirty) "Unsaved changes" else "Saved", if (dirty) "*" else "">
-    chrome.badge(if (source) "Source" else "Edit", if (source) "source" else "editing")
+    if (modes == null) chrome.badge(if (source) "Source" else "Edit", if (source) "source" else "editing")
+    else viewer_tabs(modes, session, source, source_intent)
   >
+
+// An embedded editor needs space for the document at rest. Show feedback
+// from file and editing actions below its toolbar only when there is a message.
+pub fn status_notice(status) =>
+  if (status == null or status == "") null else <div class:"edit-notice", role:"status", status>
 
 // Publish the dirty state to the window: the title marks it, and an armed
 // close guard routes a close request through the Save / Discard dialog.
@@ -104,6 +119,9 @@ pub pn navigation_decision(node, session, doc, entry) {
   return {navigate:true, dialog:null}
 }
 
+pub fn navigation_result(entry, node, session) =>
+  {entry:entry, node:node, edit_path:session.path}
+
 // The file dialogs; null for no dialog or another kind.
 pub fn dialog_view(dialog, session) any^ {
   if (dialog == null) null
@@ -115,7 +133,8 @@ pub fn dialog_view(dialog, session) any^ {
   }
   else if (dialog.kind == 'navigate') {
     dialog_frame("navigate", "Unsaved changes",
-      "Save the changes to " ++ session.name ++ " before opening another file?", [],
+      "Save the changes to " ++ session.name ++
+        (if (dialog.entry.preview_mode != null) " before leaving the editor?" else " before opening another file?"), [],
       [dialog_button("cancel", "Cancel", false, true), dialog_button("discard", "Don't Save", false),
        dialog_button("save", "Save", true)])
   }
@@ -242,6 +261,8 @@ pub pn dialog_action(action, node, before) {
 }
 
 pub let css = "
+  .edit-notice { flex: none; padding: 4px 12px; font-size: 12px; color: var(--document-muted);
+                 background: var(--document-status); border-bottom: 1px solid var(--document-rule); }
   * { box-sizing: border-box; }
   html { height: 100%; }
   .edit-dialog-backdrop { position: fixed; left: 0; top: 0; right: 0; bottom: 0;

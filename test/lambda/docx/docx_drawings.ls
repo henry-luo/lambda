@@ -4,7 +4,8 @@ let paragraphs = content(r.document)
 let back = content(paragraphs[0])
 let front = content(paragraphs[1])[0]
 let unsupported = d.convert("test/input/docx/drawing-unsupported.docx")^
-let omitted = d.convert("test/input/docx/drawing-layers.docx",{images:"omit"})^;
+let omitted = d.convert("test/input/docx/drawing-layers.docx",{images:"omit"})^
+let outset = d.convert("test/input/docx/drawing-page-outset.docx")^;
 [
     len(r.diagnostics) == 0 and not contains(r.text,"Fallback"),
     contains(r.document.style,"position:relative;z-index:0;"),
@@ -21,5 +22,7 @@ let omitted = d.convert("test/input/docx/drawing-layers.docx",{images:"omit"})^;
     [for (issue in unsupported.diagnostics) issue.code] == ["unsupported-alternate-content",
         "unsupported-shape","unsupported-shape","unsupported-image-crop","unsupported-floating-image"],
     (d.convert("test/input/docx/drawing-unsupported.docx",{unsupported:"error"}) ^ { ^.code }) == 7606,
-    [for (issue in omitted.diagnostics) issue.code] == ["omitted-image"] and not contains(omitted.html,"<img")
+    [for (issue in omitted.diagnostics) issue.code] == ["omitted-image"] and not contains(omitted.html,"<img"),
+    contains(outset.html,"width:80%;height:80%;left:20%;"),
+    [for (issue in outset.diagnostics) issue.code] == ["unsupported-floating-image","unsupported-floating-image"]
 ]

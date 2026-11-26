@@ -5,10 +5,13 @@
     {"type": "assert_text", "target": {"selector": ".document-name"}, "equals": "property-tree.json"},
     {"type": "assert_count", "target": {"selector": ".file-panel"}, "count": 0},
     {"type": "assert_count", "target": {"selector": "#property-preview"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": ".document-header .tab-view[aria-current='true']"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": ".document-panel > .document-tabs, .document-header .preview-kind"}, "count": 0},
     {"type": "click", "target": {"selector": "#property-filter"}},
     {"type": "type", "text": "count"},
     {"type": "assert_text", "target": {"selector": ".property-entry[data-property-name='count'] > .property-row .property-value"}, "equals": "2"},
-    {"type": "click", "target": {"selector": ".tab-source"}},
+    {"type": "click", "target": {"selector": ".document-header .tab-source"}},
+    {"type": "assert_count", "target": {"selector": ".document-header .tab-source[aria-current='true']"}, "count": 1},
     {"type": "assert_text", "target": {"selector": "#source-preview"}, "contains": "\"details\": {\"count\": 2}"}
   ]
 }

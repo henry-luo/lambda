@@ -159,11 +159,12 @@ MC = "http://schemas.openxmlformats.org/markup-compatibility/2006"
 A = "http://schemas.openxmlformats.org/drawingml/2006/main"
 
 
-def anchor(graphic, x, y, layer, behind=True, relative="column", wrap='<wp:wrapNone/>', clearance=None):
+def anchor(graphic, x, y, layer, behind=True, relative="column", wrap='<wp:wrapNone/>',
+           clearance=None, vertical="paragraph"):
     distances = '' if clearance is None else ''.join(f' dist{side}="{clearance}"' for side in 'TRBL')
     return (f'<w:drawing><wp:anchor simplePos="0" behindDoc="{int(behind)}" relativeHeight="{layer}"{distances}>'
             f'<wp:positionH relativeFrom="{relative}"><wp:posOffset>{x}</wp:posOffset></wp:positionH>'
-            f'<wp:positionV relativeFrom="paragraph"><wp:posOffset>{y}</wp:posOffset></wp:positionV>'
+            f'<wp:positionV relativeFrom="{vertical}"><wp:posOffset>{y}</wp:posOffset></wp:positionV>'
             '<wp:extent cx="1905000" cy="952500"/>' + wrap +
             '<a:graphic><a:graphicData>' + graphic + '</a:graphicData></a:graphic></wp:anchor></w:drawing>')
 
@@ -200,6 +201,16 @@ body += anchor(rectangle(style=theme_ref.replace('idx="1"','idx="2"')),0,0,1)
 body += anchor(cropped_image.replace('l="25000"','l="90000"'),0,0,1)
 body += anchor(cropped_image,0,0,1,relative='page') + '</w:r></w:p>'
 package("drawing-unsupported.docx",body,rels=layer_rels,extras=layer_parts)
+
+page_rectangle = anchor(rectangle(flat_fill),-190500,-95250,1,relative="page",vertical="page")
+outset_image = cropped_image.replace('<a:srcRect l="25000" r="25000" t="10000" b="10000"/>',
+                                     '<a:srcRect l="-25000" b="-25000"/>')
+body = '<w:p><w:r>' + page_rectangle + '<w:t>Cover</w:t></w:r></w:p>'
+body += '<w:p><w:r>' + anchor(outset_image,381000,1905000,2,False) + '<w:t>Outset image</w:t></w:r></w:p>'
+body += '<w:p><w:r>' + page_rectangle + '</w:r></w:p>'
+body += '<w:sectPr><w:pgSz w:w="6000" w:h="9000"/>'
+body += '<w:pgMar w:top="600" w:right="600" w:bottom="600" w:left="600"/></w:sectPr>'
+package("drawing-page-outset.docx",body,rels=layer_rels,extras=layer_parts)
 
 # A near-edge square float leaves no room for text on its starting side inside the clearance.
 square_wrap = '<wp:wrapSquare wrapText="bothSides"/>'

@@ -217,7 +217,8 @@ void-element implementations.
 | SmartArt data | Render bounded composite/linear layouts with rectangular text/spacing nodes, source constraints/selection/direction and theme colors as SVG; other layouts retain saved text with a diagnostic |
 | Embedded OLE objects | Show the matching saved raster or bitmap/text EMF preview without reading or executing the object; unsupported previews retain a labelled placeholder and one diagnostic |
 | Paragraph-relative anchored drawings | CSS alignment/wrapping for supported column-relative left/right/center anchors and signed column-start/paragraph offsets with square wrapping on both sides; a small positive offset is supported when its left clearance still reaches the column edge |
-| No-wrap drawings | Explicit signed column/paragraph offsets, saved extents and source front/behind-text order; raster inset crops preserve their frames |
+| No-wrap drawings | Explicit signed column/paragraph offsets, saved extents and source front/behind-text order. The viewer also places no-wrap drawings with page offsets in the first body paragraph of a single-section document with known paper size, clipping them to the first paper rectangle (D9.3.4). |
+| Raster source rectangles | Stretch fills with bounded signed offsets on all four source edges. Negative offsets leave transparent space, and the image frame keeps its saved dimensions (D9.3.4). |
 | Decorative rectangles | Flat DrawingML preset rectangles with solid RGB/theme fills and no stroke/effects; select a supported modern compatibility branch once |
 | Source presentation | Resolve theme fonts/colors, inherited run size and tracking, paragraph spacing, table grid widths, cell shading/borders, row heights, and page dimensions into validated CSS |
 | Page/section break | Stable semantic break marker; no claim of Word pagination |
@@ -393,7 +394,7 @@ relevant Radiant baseline only for this viewer integration.
   and additional field types.
 - More complete table borders/styles, column layout, and shapes beyond flat rectangles.
 - Equations, chart types beyond cached clustered columns, SmartArt, embedded
-  OLE, drawing canvas, and page-relative anchored placement.
+  OLE, drawing canvas, and page-relative anchors that require repagination.
 - Faithful page layout or PDF rendering from DOCX.
 - A DOCX writer, editing, and round-trip preservation.
 - `docm`, encrypted documents, legacy `.doc`, and remote resource resolution.

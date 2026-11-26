@@ -66,6 +66,7 @@ pub pn open_state(path, options) map^ {
   let session = {*: sess.new_session(path, format, source, loaded), rich_format: rich_format}
   let status = if (reason != null) "Opened source: " ++ reason
                else if (nul_source) "Opened " ++ session.name ++ " in source view."
+               else if (options != null and options.quiet_open == true) ""
                else "Opened " ++ session.name ++ "."
   if (format.surface == 'source') {mode: 'source', session: session, doc: loaded.doc, status: status}
        else if (format.surface == 'property') {mode: 'property', session: session, doc: loaded.doc, status: status}
@@ -81,15 +82,16 @@ pub pn open_document(path, options) element^ { return page(open_state(path, opti
 edit <edit_doc> () any^ state shown: ~.shown {
   // the surface's own <body> is this template's result as well; both handle
   // its events, the surface first (render_map_wrapper_lookup)
-  if (shown.mode == 'source') src.app(shown.session, shown.doc, shown.status)
-  else if (shown.mode == 'property') property.app(shown.session, shown.doc, shown.status)
-  else shell.app(shown.session, shown.doc, shown.status)
+  if (shown.mode == 'source') src.app(shown.session, shown.doc, shown.status, ~.embedded, ~.modes)
+  else if (shown.mode == 'property') property.app(shown.session, shown.doc, shown.status, ~.embedded, ~.modes)
+  else shell.app(shown.session, shown.doc, shown.status, ~.embedded, ~.modes)
 }
 on edit_switch(next) {
   shown = next
 }
 
-pub fn surface(shown) => apply(<edit_doc shown: shown>, {mode: "edit"})
+pub fn surface(shown, embedded = false, modes = null) =>
+  apply(<edit_doc shown:shown, embedded:embedded, modes:modes>, {mode:"edit"})
 pub let stylesheet = chrome.css ++ files.css ++ tools.css ++ shell.surface_css ++ src.surface_css ++ property.css
 
 fn page(shown) =>

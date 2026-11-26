@@ -6,7 +6,8 @@
   "events": [
     {"type": "click", "target": {"selector": ".tree-entry[data-tree-path$='/property_tree.toml'] .tree-label"}},
     {"type": "click", "target": {"selector": ".tab-edit"}},
-    {"type": "assert_count", "target": {"selector": ".property-toolbar button"}, "count": 5},
+    {"type": "assert_count", "target": {"selector": ".property-toolbar .edit-document-actions button"}, "count": 4},
+    {"type": "assert_count", "target": {"selector": ".property-toolbar .document-tabs button"}, "count": 3},
     {"type": "click", "target": {"selector": "#property-row-0 .property-name"}, "button": 1},
     {"type": "assert_count", "target": {"selector": "#property-tree-menu button"}, "count": 1},
     {"type": "assert_text", "target": {"selector": "#property-tree-menu .property-add"}, "equals": "Add property"},

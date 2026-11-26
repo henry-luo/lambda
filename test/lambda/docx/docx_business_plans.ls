@@ -25,5 +25,5 @@ let cases = [
             len(split(r.html,"class=\"docx-shape\""))-1 == 1 and
             len(split(r.html,"class=\"docx-image-crop\""))-1 == 2 and
             contains(r.html,"left:-96px;top:671.2px;width:816px;height:288.96px;z-index:-2;") and
-            contains(r.html,"background-color:#DCDDD7;") and len(r.diagnostics) == 12)
+            contains(r.html,"background-color:#DCDDD7;") and len(r.diagnostics) == 11)
     ]}]

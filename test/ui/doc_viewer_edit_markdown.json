@@ -7,6 +7,7 @@
   "html": "test/ui/edit/sample.md",
   "working_copy": "temp/edit-ui/view-edit-markdown.md",
   "events": [
+    {"type": "assert_script", "js": "Array.from(document.querySelectorAll('.document-header .document-tab'), b => b.textContent.trim()).join(' ') === 'View Edit Source'"},
     {
       "type": "click",
       "target": {
@@ -20,6 +21,9 @@
       },
       "count": 1
     },
+    {"type": "assert_count", "target": {"selector": ".edit-document-bar .document-tabs button"}, "count": 3},
+    {"type": "assert_count", "target": {"selector": ".edit-document-bar .tab-edit[aria-current='true']"}, "count": 1},
+    {"type": "assert_script", "js": "globalThis.editBarHeight = document.querySelector('.edit-document-bar').getBoundingClientRect().height; Array.from(document.querySelectorAll('.edit-document-bar .document-tab'), b => b.textContent.trim()).join(' ') === 'View Edit Source'"},
     {
       "type": "click",
       "target": {
@@ -30,6 +34,24 @@
       "type": "type",
       "text": "KEPT"
     },
+    {"type": "click", "target": {"selector": ".edit-document-bar .tab-source"}},
+    {"type": "assert_count", "target": {"selector": ".edit-document-bar .tab-source[aria-current='true']"}, "count": 1},
+    {"type": "assert_script", "js": "Math.abs(document.querySelector('.edit-toolbar').getBoundingClientRect().height - globalThis.editBarHeight) < 0.5 && Array.from(document.querySelectorAll('.edit-document-bar .document-tab'), b => b.textContent.trim()).join(' ') === 'View Edit Source'"},
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "contains": "KEPT"},
+    {"type": "assert_count", "target": {"selector": ".edit-notice, .edit-btn-view_rich"}, "count": 0},
+    {"type": "click", "target": {"selector": ".edit-document-bar .tab-edit"}},
+    {"type": "assert_count", "target": {"selector": ".edit-document-bar .tab-edit[aria-current='true']"}, "count": 1},
+    {"type": "click", "target": {"selector": ".edit-document-bar .tab-view"}},
+    {"type": "assert_count", "target": {"selector": ".edit-dialog-navigate"}, "count": 1},
+    {"type": "click", "target": {"selector": ".edit-dialog-cancel"}},
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "contains": "KEPT"},
+    {"type": "click", "target": {"selector": ".edit-document-bar .tab-view"}},
+    {"type": "click", "target": {"selector": ".edit-dialog-save"}},
+    {"type": "assert_count", "target": {"selector": ".document-header .tab-view[aria-current='true']"}, "count": 1},
+    {"type": "assert_text", "target": {"selector": "#rendered-preview"}, "contains": "KEPT"},
+    {"type": "click", "target": {"selector": ".document-header .tab-edit"}},
+    {"type": "click", "target": {"text": "Sample Document"}},
+    {"type": "type", "text": "CLOSETEST"},
     {
       "type": "window_close"
     },
@@ -49,7 +71,7 @@
     {
       "type": "assert_file",
       "path": "temp/edit-ui/view-edit-markdown.md",
-      "contains": "KEPT"
+      "contains": "CLOSETEST"
     }
   ]
 }

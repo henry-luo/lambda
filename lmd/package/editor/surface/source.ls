@@ -215,15 +215,18 @@ fn follow_left(b, vw, p) any^ {
   }
 }
 
-// The thumb uses the widest rendered line. Selection-only renders and
-// horizontal gestures reuse the sample for the current window.
+// A partial window can extend the known width, but only a whole-file sample
+// can prove that a former widest line is gone.
 fn sample_width(b, vw) any^ {
   let sample = vw.width_sample
   if (vw.wrap or vw.cols <= 0 or
       (sample != null and sample.version == b.version and sample.top == vw.top and sample.rows == vw.rows)) vw
   else {
     let widths = [for (t in (buf.lines(b, vw.top, vw.rows))^) display_len(t)]
-    {*: vw, width_sample: {version: b.version, top: vw.top, rows: vw.rows, cols: max(widths)}}
+    let widest = max(widths) or 0
+    let whole_file = vw.top == 0 and b.count <= vw.rows
+    let cols = if (sample == null or whole_file) widest else max(sample.cols, widest);
+    {*: vw, width_sample: {version: b.version, top: vw.top, rows: vw.rows, cols: cols}}
   }
 }
 
@@ -986,15 +989,15 @@ pub let surface_css = source_css ++ syn.css
 // The source surface as the edit application's body. Opening highlights the
 // first window at once: at the top of the file the parse starts at line 0 with
 // no restart scan, so it costs one pass 2 whatever the file's size.
-pub fn app(session, b, status) =>
-  apply(<source_app session: session, buf: b, status: status, readonly:false,
+pub fn app(session, b, status, embedded = false, modes = null) =>
+  apply(<source_app session:session, buf:b, status:status, readonly:false, embedded:embedded, modes:modes,
                     hs: exact(new_highlight(session.path), b, new_view())>, {mode: "edit"})
 
 // The viewer supplies its already-decoded text, including archive members.
 pub fn readonly(path, text) {
   let b = buf.from_text(text)
   let session = sess.new_session(path, descriptor, text, {doc:b, envelope:null});
-  apply(<source_app session:session, buf:b, status:"", readonly:true,
+  apply(<source_app session:session, buf:b, status:"", readonly:true, embedded:false,
                     hs:exact(new_highlight(path), b, new_view())>, {mode:"edit"})
 }
 
@@ -1005,7 +1008,7 @@ pub fn readonly(path, text) {
 // ---------------------------------------------------------------------------
 
 // The source view of `text` for the file `session` edits.
-pub fn source_view(session, text, dirty) {
+pub fn source_view(session, text, dirty, quiet = false) {
   let doc = buf.from_text(text)
   let saved = if (dirty) buf.from_text(session.disk_text) else doc
   // dirty state compares buffer versions (same_doc): the unsaved text is one
@@ -1013,7 +1016,7 @@ pub fn source_view(session, text, dirty) {
   let current = if (dirty) {*: doc, version: saved.version + 1} else doc
   let s = {*: sess.new_session(session.path, descriptor, session.disk_text, {doc: saved, envelope: null}),
            rich_format: session.rich_format};
-  {mode: 'source', session: s, doc: current, status: "Source view."}
+  {mode: 'source', session: s, doc: current, status: if (quiet) "" else "Source view."}
 }
 
 pub fn reloaded_view(session, text, status) =>
@@ -1092,9 +1095,11 @@ edit <source_app> state session: ~.session, b: ~.buf, status: ~.status, sel: car
                          rev: 0, comp: null, hs: ~.hs, frame: 0, wheel_px: 0.0, wheel_dx: 0.0, drag: null, dialog: null,
                          after_save: null, selection_drag: null, selection_frame: 0 {
   let dirty = sess.is_dirty(session, b);
-  <body class: "edit-app edit-format-source",
-    if (not ~.readonly) tools.toolbar(files.file_label(session, dirty, true), history_probe(hist), dirty, null, [],
-                  if (session.rich_format != null) tools.rich_view_group else []) else null;
+  <body class: "edit-app edit-format-source" ++ (if (~.embedded or ~.readonly) "" else " edit-source-compact"),
+    if (not ~.readonly) tools.toolbar(files.file_label(session, dirty, true, ~.modes),
+                  history_probe(hist), dirty, null, [],
+                  if (~.modes == null and session.rich_format != null) tools.rich_view_group else []) else null;
+    if (~.embedded) files.status_notice(status) else null;
     <div class: "src-main",
       gutter(b, vw, ~.readonly);
       <div id: "src-pane", class: "src-pane",
@@ -1110,7 +1115,7 @@ edit <source_app> state session: ~.session, b: ~.buf, status: ~.status, sel: car
       <span id: "src-measure", class: "src-measure", ["aria-hidden"]: "true", MEASURE_TEXT>
       if (hs.find != null) find_bar(hs.find) else null
     >
-    if (~.readonly) null else status_line(b, sel, hs, status, dirty)
+    if (~.readonly or ~.embedded) null else status_line(b, sel, hs, status, dirty)
     if (~.readonly) null else files.dialog_view(dialog, session)
   >
 }
@@ -1215,7 +1220,7 @@ on edit_dialog(req) {
     {session: session, doc: b, status: status, dialog: dialog, after_save: after_save})^
   if ((filed.navigation != null)^) {
     session = filed.session; status = filed.status; dialog = filed.dialog; after_save = filed.after_save
-    emit("viewer_navigation", {entry:filed.navigation, node:req.node})
+    emit("viewer_navigation", files.navigation_result(filed.navigation, req.node, session)^)
     return
   }
   session = filed.session
@@ -1238,7 +1243,7 @@ on edit_dialog(req) {
 on editor_navigate(evt) {
   if ((dialog != null)^) { return }
   let decision = files.navigation_decision(evt.target, session, b, evt.detail)^
-  if (decision.navigate) { emit("viewer_navigation", {entry:evt.detail, node:evt.target}); return }
+  if (decision.navigate) { emit("viewer_navigation", files.navigation_result(evt.detail, evt.target, session)^); return }
   dialog = decision.dialog
 }
 on keydown(evt) {

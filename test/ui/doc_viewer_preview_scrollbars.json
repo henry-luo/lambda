@@ -6,24 +6,24 @@
   "events": [
     {"type": "click", "target": {"selector": ".tree-entry[data-tree-path$='/go-package.dot'] .tree-label"}},
     {"type": "assert_script", "js": "var p=document.querySelector('#rendered-preview'); p.scrollWidth > p.clientWidth && p.scrollHeight > p.clientHeight"},
-    {"type": "assert_pixel", "target": {"selector": ".document-tabs", "offset_x": 125, "offset_y": -6}, "min_r": 190, "max_r": 194, "min_g": 190, "max_g": 194, "min_b": 190, "max_b": 194},
+    {"type": "assert_pixel", "x": 425, "y": 874, "min_r": 190, "max_r": 194, "min_g": 190, "max_g": 194, "min_b": 190, "max_b": 194},
     {"type": "assert_pixel", "target": {"selector": "#rendered-preview", "offset_x": 534, "offset_y": 223}, "min_r": 190, "max_r": 194, "min_g": 190, "max_g": 194, "min_b": 190, "max_b": 194},
-    {"type": "mouse_down", "target": {"selector": ".document-tabs", "offset_x": 125, "offset_y": -6}},
+    {"type": "mouse_down", "x": 425, "y": 874},
     {"type": "assert_state_store", "target": {"selector": "#rendered-preview"}, "scrollbar_h_dragging": true},
-    {"type": "mouse_move", "target": {"selector": ".document-tabs", "offset_x": 235, "offset_y": -6}},
-    {"type": "mouse_up", "target": {"selector": ".document-tabs", "offset_x": 235, "offset_y": -6}},
+    {"type": "mouse_move", "x": 535, "y": 874},
+    {"type": "mouse_up", "x": 535, "y": 874},
     {"type": "assert_script", "js": "var p=document.querySelector('#rendered-preview'); p.scrollLeft > 100 && p.scrollTop === 0"},
     {"type": "resize", "width": 840, "height": 1120},
     {"type": "assert_script", "js": "var p=document.querySelector('#rendered-preview'); p.scrollWidth > p.clientWidth && p.scrollHeight === p.clientHeight"},
     {"type": "assert_pixel", "target": {"selector": "#rendered-preview", "offset_x": 534, "offset_y": 223}, "min_r": 254, "min_g": 254, "min_b": 254},
-    {"type": "assert_pixel", "target": {"selector": ".document-tabs", "offset_x": 340, "offset_y": -6}, "min_r": 190, "max_r": 194, "min_g": 190, "max_g": 194, "min_b": 190, "max_b": 194},
+    {"type": "assert_pixel", "x": 640, "y": 1114, "min_r": 190, "max_r": 194, "min_g": 190, "max_g": 194, "min_b": 190, "max_b": 194},
     {"type": "resize", "width": 1300, "height": 660},
     {"type": "assert_script", "js": "var p=document.querySelector('#rendered-preview'); p.scrollWidth === p.clientWidth && p.scrollHeight > p.clientHeight && p.scrollLeft === 0"},
     {"type": "assert_pixel", "target": {"selector": "#rendered-preview", "offset_x": 994, "offset_y": 223}, "min_r": 190, "max_r": 194, "min_g": 190, "max_g": 194, "min_b": 190, "max_b": 194},
-    {"type": "assert_pixel", "target": {"selector": ".document-tabs", "offset_x": 80, "offset_y": -6}, "min_r": 254, "min_g": 254, "min_b": 254},
+    {"type": "assert_pixel", "x": 380, "y": 654, "min_r": 254, "min_g": 254, "min_b": 254},
     {"type": "click", "target": {"selector": ".tree-entry[data-tree-path$='/test_graph.dot'] .tree-label"}},
     {"type": "assert_script", "js": "var p=document.querySelector('#rendered-preview'); p.scrollWidth === p.clientWidth && p.scrollHeight === p.clientHeight"},
     {"type": "assert_pixel", "target": {"selector": "#rendered-preview", "offset_x": 994, "offset_y": 223}, "min_r": 254, "min_g": 254, "min_b": 254},
-    {"type": "assert_pixel", "target": {"selector": ".document-tabs", "offset_x": 125, "offset_y": -6}, "min_r": 254, "min_g": 254, "min_b": 254}
+    {"type": "assert_pixel", "x": 425, "y": 654, "min_r": 254, "min_g": 254, "min_b": 254}
   ]
 }

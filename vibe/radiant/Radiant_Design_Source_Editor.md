@@ -193,7 +193,16 @@ Files (proposed): `lmd/package/edit/source.ls` (descriptor, surface view, handle
 - `wheel`: `top_line += round(deltaY / line_h)` (accumulating fractional remainders), clamped to `[0, count − visible]`; `'prevent-default'`.
 - Under D10.2.1, the editor shows its vertical track when the source exceeds the visible row capacity. The thumb uses `top_line / count` for position and `max(min_thumb, visible / count)` for height. The editor starts a drag on thumb press, maps pointer movement to lines, and ends the drag on release. A click on the track pages.
 - Keyboard: PageUp/PageDown move the caret a page and the window follows; Home/End/arrows move the caret; `ensure_visible(sel.head)` adjusts `top_line` after every caret change.
-- Horizontal: the editor holds the first visible display column in `left` and shifts the text inside a fixed clip box. The horizontal track appears when unwrapped lines in the window overflow. Its thumb, track, wheel and caret movement use the same column range. A resize keeps the scroll origin within the new bounds. Soft wrap resets the horizontal offset.
+- Horizontal (CED13, D10.2.1): the editor holds the first visible display
+  column in `left` and shifts the text inside a fixed clip box. With wrap
+  off, each rendered window can grow the known maximum tab-expanded line
+  width. Scrolling past a wide line retains that width and the horizontal
+  offset. A window that covers the entire buffer can replace the maximum
+  after an edit, and opening or reloading a file starts a new sample.
+  The track appears when the known width exceeds the available columns.
+  Its thumb, track, wheel and caret use the same range. A resize clamps
+  the offset to the new bounds. Soft wrap hides the track and resets the
+  offset.
 - A text-selection drag near the clip box edge scrolls the virtual window. The editor keeps the original model anchor. Each frame uses D10.2.1 hit testing to find the selection head under the pointer in the current window. Releasing the button ends edge scrolling.
 
 ### 6.3 Geometry for mouse and caret

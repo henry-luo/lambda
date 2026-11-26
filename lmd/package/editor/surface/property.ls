@@ -234,8 +234,8 @@ view <property_button> { <button class: "property-" ++ ~.action ++ (if (~.toolba
   title: ~.title, ['aria-label']: if (~.title != null) ~.title else ~.label, ~.label> }
 on click(evt) { emit("property_command", {action: ~.action, node: evt.target, first: ~.first, kind: ~.kind, path: ~.path, limit: ~.limit}) }
 
-pub fn app(session, doc, status) =>
-  apply(<property_app session: session, doc: doc, status: status>, {mode: "edit"})
+pub fn app(session, doc, status, embedded = false, modes = null) =>
+  apply(<property_app session:session, doc:doc, status:status, embedded:embedded, modes:modes>, {mode:"edit"})
 
 fn edited(format, doc, target) any^ {
   let first = int(dom.get_attribute(target, "data-first"))
@@ -296,13 +296,16 @@ edit <property_app> () any^ state session: ~.session, doc: ~.doc, status: ~.stat
       <div class:"property-tree", node_view("root", doc.tree, null, null, null, session.format, draft, "0", tree)>
     };
   <body id:"property-surface", class: "edit-app edit-format-property", tabindex: "0",
-    <div class: "property-toolbar edit-toolbar edit-document-bar", files.file_label(session, dirty);
+    <div class: "property-toolbar edit-toolbar edit-document-bar",
+      files.file_label(session, dirty, false, ~.modes, {event:"property_command", detail:{action:"source"}});
       <div class: "edit-document-actions",
-        for (action, label in {save:"Save", save_as:"Save As", undo:"Undo", redo:"Redo", source:"Source"})
+        for (action, label in {save:"Save", save_as:"Save As", undo:"Undo", redo:"Redo", source:"Source"}
+            where action != 'source' or ~.modes == null)
           apply(<property_button action:string(action), label:label, toolbar:true>)>
     >
+    if (~.embedded) files.status_notice(status) else null;
     <div class:"property-content" ++ (if (grid) " property-grid-content" else ""), content>
-    <div class: "property-status edit-status", role:"status", status>
+    if (~.embedded) null else <div class: "property-status edit-status", role:"status", status>
     if (menu != null) context_menu.frame(menu.id, "property-surface",
       <div id:menu.id, class:"property-menu", role:"menu", ['aria-label']:menu.label,
         style:"left:" ++ string(menu.x) ++ "px;top:" ++ string(menu.y) ++ "px",
@@ -419,7 +422,7 @@ on property_command(req) {
     dialog = saved.dialog
   } else if (req.action == "save_as") { dialog = files.save_as_dialog(session, req.node)^ }
   else if (req.action == "source") {
-    emit("edit_switch", src.source_view(session, doc.text, sess.is_dirty(session, doc)))
+    emit("edit_switch", src.source_view(session, doc.text, sess.is_dirty(session, doc), ~.embedded))
   }
   else if (req.action == "add") { dialog = {kind: 'add_property', first: req.first, container: req.kind} }
   else if (req.action == "add_element") { dialog = {kind: 'add_element', first: req.first} }
@@ -471,7 +474,7 @@ on edit_dialog(req) {
     {session: session, doc: doc, status: status, dialog: dialog, after_save: after_save})^
   if ((result.navigation != null)^) {
     session = result.session; status = result.status; dialog = result.dialog; after_save = result.after_save
-    emit("viewer_navigation", {entry:result.navigation, node:req.node})
+    emit("viewer_navigation", files.navigation_result(result.navigation, req.node, session)^)
     return
   }
   if ((result.source_text != null)^) {
@@ -498,7 +501,7 @@ on editor_navigate(evt) {
     doc = result.doc; undo = result.undo; redo = result.redo
   }
   let decision = files.navigation_decision(evt.target, session, doc, evt.detail)^
-  if (decision.navigate) { emit("viewer_navigation", {entry:evt.detail, node:evt.target}); return }
+  if (decision.navigate) { emit("viewer_navigation", files.navigation_result(evt.detail, evt.target, session)^); return }
   dialog = decision.dialog
 }
 on keydown(evt) {
@@ -632,7 +635,7 @@ on keydown(evt) {
       if (not result.ok) { return 'prevent-default' }
       doc = result.doc; undo = result.undo; redo = result.redo
     }
-    emit("edit_switch", src.source_view(session, doc.text, sess.is_dirty(session, doc)))
+    emit("edit_switch", src.source_view(session, doc.text, sess.is_dirty(session, doc), ~.embedded))
     return 'prevent-default'
   }
 }
