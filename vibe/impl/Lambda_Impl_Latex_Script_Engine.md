@@ -34,6 +34,26 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Stream document mapping, 2026-11-26:** Constructor argument mode preserves
+  stream commands inside arguments; the older eager mode does not. The document
+  digester now admits stream and EOF operations only in the former mode
+  (S1.8, D10.2.2v2). Twenty-three complete ASTs captured from the retired native
+  engines cover file reads, closed streams, EOF, math, definitions, formatting
+  arguments and aliases. The old mode still rejects its confirmed nested-command
+  mismatch. The focused stream and EOF GTests pass, as does the new comparison
+  in interpreter and JIT with forced GC and freed-memory poisoning. Other
+  operation-specific source-mapping guards remain in place.
+
+- **Current suite and performance investigation, 2026-11-26:** The broader
+  document run passed 83 of 86 cases; the corpus and bundled-package cases hit
+  their 60-second limits, and the table case still reports six CSV failures
+  behind the expl3 source-mapping guards. One optimized release measurement
+  of the bundled fixture took 53.26 seconds on the current Script versus
+  51.27 seconds at `64ecd0563`, with both outputs matching the golden. Sampling
+  identifies repeated external map-shape fingerprinting during TeX expansion;
+  its safe optimization and the corpus timeout remain open. The generated-table
+  and stream fixes below do not qualify removal of the expl3 guards.
+
 - **Generated table headers, 2026-11-26:** The digester now accepts generated
   character-only table width and column groups when each reconstructed byte
   and adjacency is verified (D10.2.2v2). Five complete trees, including

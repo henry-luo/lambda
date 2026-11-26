@@ -4123,9 +4123,10 @@ pub fn digest(expanded: map) Digested^ {
         {ast: null, issue: "latex-digest-unsupported", unsupported: "random or timer source mapping"}
     else if (expanded.raw_inline_other_seen == true)
         {ast: null, issue: "latex-digest-unsupported", unsupported: "raw inline source mapping"}
-    else if (expanded.input_stream_state_seen == true)
+    // Legacy eager constructor expansion loses stream commands inside arguments.
+    else if (expanded.input_stream_state_seen == true and not expanded.constructor_argument_mode)
         {ast: null, issue: "latex-digest-unsupported", unsupported: "input stream command source mapping"}
-    else if (expanded.input_eof_seen == true)
+    else if (expanded.input_eof_seen == true and not expanded.constructor_argument_mode)
         {ast: null, issue: "latex-digest-unsupported", unsupported: "input EOF conditional source mapping"}
     else if (expanded.expl3_dynamic_read_seen == true)
         {ast: null, issue: "latex-digest-unsupported", unsupported: "expl3 dynamic read source mapping"}
