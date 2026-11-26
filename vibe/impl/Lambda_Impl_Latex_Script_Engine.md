@@ -74,9 +74,13 @@ The existing native engine design and historical Phase IV work are in
   slices the complete source at character offsets, and the runtime's Unicode
   substring path recounts and rescans it (S1.8, D10.2.2v2). A temporary
   character-array cache increased both 32,001-character cases to about
-  4.65 seconds, so it was not applied. A lower-overhead indexed-source design
-  and representative document measurements remain open. The probe and the
-  uncommitted experiment are under `temp/latex-retirement/`.
+  4.65 seconds, so it was not applied. A second prototype reduced the isolated
+  Unicode probe to 0.87 seconds and preserved one complete algebra tree in
+  36.21 seconds versus 40.52 seconds for its control, but differed on malformed
+  UTF-8. Full validation at each line regressed the ASCII probe, and inconsistent
+  invalid-text length and slice boundaries are recorded as LI-124. No reader
+  optimization has been applied. The probes and uncommitted experiments are
+  under `temp/latex-retirement/`.
 
 - **External shape fingerprint cost, 2026-11-26:** Input now combines pointer
   identities as words instead of hashing each pointer byte; collision matches
