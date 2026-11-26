@@ -1,13 +1,16 @@
 // Experimental native-compatible reconstruction of emitted TeX tokens.
 import utf8: lambda.io.utf8
+import scan: lambda.io.source_scan
 import reader: .reader
 pub type Segment = {out_start: int, length: int, src_start: int, synthesized: bool}
 pub type Fragment = {span: bool, direct: bool, adjacent: bool, gap: string?, body: string?}
 pub type Reconstruction = {text: string, segments: Segment[], definition_spans: map[],
     issue: string?, prev_valid: bool, prev_file?: int?, prev_seq?: int?, prev_end: int,
     track_tokens?: bool, token_spans?: map[], failed_index?: int}
+type Builder = {chunks: map?, length: int, definition_spans: map?, token_spans: map?,
+    track_tokens: bool, issue: string?, failed_index?: int, previous: map,
+    odd_slashes: bool, control_word_end: bool}
 
-fn utf8_length(text: string) int^ => len(binary(text)^)
 // The source remains immutable throughout reconstruction and digestion.
 pub fn cache_sources(sources: map[]) array^ => [for (source in sources)
     {*:source, reconstruct_bytes:binary(source.data) ^ { null }}]
@@ -55,28 +58,44 @@ fn canonical(token: map) string | null | error {
     else if (token.value == "_") "\\_" else if (token.value == "%") "\\%"
     else if (token.value == "~") "\\textasciitilde{}" else token.value
 }
-fn letter(c: string) bool => c != "" and ((c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or c == "@")
-fn ending_letters(text: string, i: int) int => if (i > 0 and letter(reader.text_span(text, i - 1, i))) ending_letters(text, i - 1) else i
-pub fn slash_count(text: string, i: int, count: int = 0) int => if (i > 0 and reader.text_span(text, i - 1, i) == "\\")
-    slash_count(text, i - 1, count + 1) else count
-fn needs_separator(text: string, next: string) bool {
-    let end = len(text);
-    let begin = ending_letters(text, end);
-    next != "" and letter(reader.text_span(next, 0, 1)) and begin < end and slash_count(text, begin) % 2 == 1
+fn letter_byte(byte: int) bool => scan.ascii_alpha(byte) or byte == 64
+fn suffix_start(bytes: binary?, end: int, word: bool) int^ {
+    var at = end;
+    while (at > 0) {
+        let byte = bytes[at - 1];
+        if ((if (word) not letter_byte(byte) else byte != 92)^) { break }
+        at = at - 1
+    }
+    return at
 }
-// The last segment already records the byte length of the complete prefix.
-fn output_length(st: Reconstruction) int {
-    let size = len(st.segments);
-    if (size == 0) 0 else st.segments[size - 1].out_start + st.segments[size - 1].length
+
+pub fn slash_count(text: string, i: int, count: int = 0) int^ {
+    if (i <= 0 or i > len(text)) count
+    else {
+        let prefix = binary(reader.text_span(text, 0, i))^;
+        let size = len(prefix);
+        count + size - suffix_start(prefix, size, false)^
+    }
 }
-fn append(st: Reconstruction, data: string, src: int?, synthetic: bool) Reconstruction^ {
-    if (data == "") st else {*:st, text: st.text ++ data,
-        // Keep the verified segment contract as reconstructed output grows.
-        segments: st.segments ++ [{out_start: output_length(st), length: utf8_length(data)^,
-            src_start: src, synthesized: synthetic}]}
+
+fn append(st: Builder, data: string, src: int?, synthetic: bool) Builder^ {
+    if (data == "") st
+    else {
+        let bytes = binary(data)^;
+        let length = len(bytes);
+        let word_start = suffix_start(bytes, length, true)^;
+        let slashes = word_start - suffix_start(bytes, word_start, false)^;
+        // A suffix reaching the chunk boundary inherits the preceding escape state.
+        let odd = (slashes % 2 == 1) != (slashes == word_start and st.odd_slashes);
+        let ends_in_letters = word_start < length;
+        let segment: Segment = {out_start:st.length, length:length, src_start:src, synthesized:synthetic};
+        {*:st, chunks:scan.add(st.chunks,{text:data,segment:segment}), length:st.length + length,
+            odd_slashes:not ends_in_letters and odd,
+            control_word_end:ends_in_letters and (odd or (word_start == 0 and st.control_word_end))}
+    }
 }
-fn separate(st: Reconstruction, data: string, origin: int?) Reconstruction^ {
-    if (not needs_separator(st.text, data)) st
+fn separate(st: Builder, data: string, origin: int?) Builder^ {
+    if (not st.control_word_end or not letter_byte(ord(reader.text_span(data, 0, 1)) or 0)) st
     else if (origin == null) {*:st, issue: "tex-reconstruct-missing-origin"}
     else append(st, " ", origin, true)
 }
@@ -102,20 +121,21 @@ pub fn effective_source_token(item: map) map => if (item.echo_span == null) item
     seq:item.echo_span.first_seq, last_seq:item.echo_span.last_seq,
     read_offset:item.read_offset, emit_origin:item.emit_origin}
 
-fn rebuild(st: Reconstruction, tokens: map[], sources: map[], main: int, index: int) Reconstruction^ {
+fn rebuild(st: Builder, tokens: map[], sources: map[], main: int, index: int) Builder^ {
     if (st.issue != null or index >= len(tokens)) st
     else {
         let item = tokens[index];
         let echo = item.echo_span;
         // echoed spans from other sources retain their main-file emission origin.
         let t = effective_source_token(item);
-        let piece = source_fragment(t,sources,st.prev_valid,st.prev_file,st.prev_seq,st.prev_end)^;
+        let previous = st.previous;
+        let piece = source_fragment(t,sources,previous.prev_valid,previous.prev_file,previous.prev_seq,previous.prev_end)^;
         let span = piece.span;
         let direct = piece.direct;
         let adjacent = piece.adjacent;
         let gap = piece.gap;
         let emission = if (t.emit_origin != null) t.emit_origin else t.read_offset;
-        let gap_origin = if (t.file == main) st.prev_end else emission;
+        let gap_origin = if (t.file == main) previous.prev_end else emission;
         let gap_state = if (gap == null or (gap != "" and gap_origin == null))
             {*:st, issue: "tex-reconstruct-missing-origin"}
             else append(st, gap, gap_origin, t.file != main)^;
@@ -127,39 +147,51 @@ fn rebuild(st: Reconstruction, tokens: map[], sources: map[], main: int, index: 
             else if (adjacent) gap_state else separate(gap_state, body, emission)^;
         let appended = if (before.issue != null) before else append(before, body, origin, not main_direct)^;
         let after = if (item.kind != "source-span" or appended.issue != null) appended
-            else {*:appended, definition_spans: appended.definition_spans ++ [
-                {start: output_length(before), end: output_length(appended),
-                    value: body, catcodes: item.catcodes}]};
+            else {*:appended, definition_spans: scan.add(appended.definition_spans,
+                {start:before.length, end:appended.length, value:body, catcodes:item.catcodes})};
         let count = if (item.reconstruct_text != null) item.reconstruct_count
             else if (echo == null) 1 else item.echo_count;
         // spans exclude gaps; coalesced output has no interior token positions.
         let marked = if (after.issue != null or st.track_tokens != true) after else
-            {*:after, token_spans: after.token_spans ++ [{index: index, count: count,
-                start: output_length(before), end: output_length(appended)}]};
+            {*:after, token_spans: scan.add(after.token_spans, {index:index, count:count,
+                start:before.length, end:appended.length})};
         if (marked.issue != null) {*:marked, failed_index: index}
-        else rebuild({*:marked, prev_valid: direct, prev_file: t.file, prev_seq: if (span) t.last_seq else t.seq,
-            prev_end: t.end}, tokens, sources, main, index + count)
+        else rebuild({*:marked, previous:{prev_valid:direct, prev_file:t.file, prev_seq:if (span) t.last_seq else t.seq,
+            prev_end:t.end}}, tokens, sources, main, index + count)
+    }
+}
+
+fn append_tail(built: Builder, result: map, sources: map[]) Builder^ {
+    let tail = result.trailing_source;
+    if (built.issue != null or tail == null or tail.text == "") built
+    else {
+        let previous = built.previous;
+        let adjacent = previous.prev_valid and previous.prev_file == tail.file and
+            result.input.reader.seq + 1 == previous.prev_seq + 1;
+        let gap = if (adjacent and tail.start > previous.prev_end)
+            source_text(sources, tail.file, previous.prev_end, tail.start)^ else "";
+        let with_gap = if (gap == null) {*:built, issue: "tex-reconstruct-source-range"}
+            else append(built, gap, previous.prev_end, false)^;
+        let before = if (adjacent) with_gap else separate(with_gap, tail.text, tail.start)^;
+        if (before.issue != null) before else append(before, tail.text, tail.start, false)
     }
 }
 
 pub fn reconstruct(result: map, track_tokens: bool = false) Reconstruction^ {
-    // Token spans repeatedly address the same source bytes; convert each source once.
     let sources = cache_sources(result.sources)^;
-    let built = rebuild({text: "", segments: [], definition_spans: [], issue: null, prev_valid: false, prev_end: 0,
-            *:if (track_tokens) {track_tokens: true, token_spans: []} else {}},
+    let built = rebuild({chunks:null, length:0, definition_spans:null, token_spans:null, track_tokens:track_tokens,
+            issue:null, previous:{prev_valid:false, prev_end:0}, odd_slashes:false, control_word_end:false},
         result.output, sources, result.main_file, 0)^;
-    let tail = result.trailing_source;
-    if (built.issue != null or tail == null or tail.text == "") built
-    else {
-        let adjacent = built.prev_valid and built.prev_file == tail.file and
-            result.input.reader.seq + 1 == built.prev_seq + 1;
-        let gap = if (adjacent and tail.start > built.prev_end)
-            source_text(sources, tail.file, built.prev_end, tail.start)^ else "";
-        let with_gap = if (gap == null) {*:built, issue: "tex-reconstruct-source-range"}
-            else append(built, gap, built.prev_end, false)^;
-        let before = if (adjacent) with_gap else separate(with_gap, tail.text, tail.start)^;
-        if (before.issue != null) before else append(before, tail.text, tail.start, false)
-    }
+    let completed = append_tail(built, result, sources)^;
+    // Materialize the collected fragments once, in emission order.
+    let chunks = scan.finish(completed.chunks)^;
+    let previous = completed.previous;
+    {text:join([for (chunk in chunks) chunk.text], ""),
+        segments:[for (chunk in chunks) chunk.segment], definition_spans:scan.finish(completed.definition_spans)^,
+        issue:completed.issue, prev_valid:previous.prev_valid, prev_end:previous.prev_end,
+        *:if (track_tokens) {track_tokens:true, token_spans:scan.finish(completed.token_spans)^} else {},
+        *:if ('prev_file' at previous) {prev_file:previous.prev_file, prev_seq:previous.prev_seq} else {},
+        *:if (completed.failed_index != null) {failed_index:completed.failed_index} else {}}
 }
 
 // Appended segments have increasing output offsets, so locate the last match.

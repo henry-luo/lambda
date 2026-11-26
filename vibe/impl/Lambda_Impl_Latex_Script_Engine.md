@@ -34,6 +34,37 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Headless LaTeX performance, 2026-11-26:** The reader splits physical lines
+  once, retaining each terminator and the byte and code-point cursors. TeX
+  still applies the current category codes during token reads (S1.6, S2.5.8,
+  D10.2.2v2). The showcase's line scan dropped from 1.61s to 0.013s. Output
+  reconstruction accumulates fragments and span records through the shared
+  source builder and materializes them once. The control-word suffix state
+  carries escape parity across fragments. The isolated release showcase fell
+  from 12.87s to 6.73s and the math-intensive view from 8.97s to 6.53s.
+  Mixed line endings, UTF-8 raw spans and reconstructed segment boundaries
+  have focused goldens. The original iframe replay with the full showcase
+  passes. The normal release baseline takes 15.74s and 14.84s for the two
+  LaTeX views with seven View workers. With `LAMBDA_RADIANT_VIEW_TEST_JOBS=3`,
+  those views take 8.37s and 7.89s, and all seven targeted cases finish under
+  ten seconds. Evidence is in `temp/radiant-under-10/`.
+
+- **Iframe load and kernel resource retries, 2026-11-26:** Profiling the
+  showcase found 15 attempts that repeatedly expanded the same kernel as new
+  package resources arrived. A preload is now reusable only when it completes
+  with resource requests enabled and no captures supplied. The host keeps one
+  precisely rooted snapshot per profile, and each attempt binds its current
+  authorized captures (D6.3.3, D6.4.2, D10.2.2v2, D11.1.2). The full
+  showcase exceeded the navigation replay's ten-second assertion budget
+  before the subsequent reader and reconstruction changes.
+  The parent-click replay uses a focused scrollable document that loads two
+  packages and checks both iframe commits. The full showcase has its own View
+  smoke case. Both View cases pass in the Radiant baseline. Six resource
+  authority cases and the capture-reuse golden pass in interpreter and JIT.
+  The kernel-message golden's first group reports the same pre-existing
+  mismatch with both release builds. Evidence is in
+  `temp/radiant-three-failures/`.
+
 - **Generated table headers, 2026-11-26:** The digester now accepts generated
   character-only table width and column groups when each reconstructed byte
   and adjacency is verified (D10.2.2v2). Five complete trees, including

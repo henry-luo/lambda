@@ -14,8 +14,11 @@ fn expand_once(source, configured, budget, preload = null) any^ {
     let cached = if (preload is map) if (configured.script_expl3 == true) preload.expl3 else preload.ordinary else null;
     if (configured.ini == true)
         expansion.expand(stream.from_reader(reader.reader(source)), budget, configured)
-    else if (cached is map and configured.kernel_source is string)
-        profile.expand_with_kernel(source, configured.kernel_source, configured, budget, cached)
+    else if (cached is map and configured.kernel_source is string) {
+        // bind this attempt's captures when resuming the resource-free kernel.
+        let bound = {*:cached, resources:configured.resources, resource_requests:configured.resource_requests == true};
+        profile.expand_with_kernel(source, configured.kernel_source, configured, budget, bound)
+    }
     else profile.expand(source, configured, budget)
 }
 
@@ -65,7 +68,9 @@ pub fn host_capture(options: map, scope: string, name: string, data, no_base = f
 fn reusable_preload(loaded) bool^ => loaded is map and loaded.issue == null and len(loaded.resources_seen) == 0
 
 fn host_preload_options(options: map, math: bool) map =>
-    {*:options, *:if (math) {math_mode:true} else {}, echo_definitions:not math, auto_expl3:true}
+    // a lookup during preload must request a resource even if a caller supplied it.
+    {*:options, *:if (math) {math_mode:true} else {}, echo_definitions:not math, auto_expl3:true,
+        resources:{local:{},bundled:{}}, resource_requests:true}
 
 pub fn host_kernel_preload(options: map, math: bool) any^ {
     if (options.ini == true or not (options.kernel_source is string)) null

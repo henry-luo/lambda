@@ -11,5 +11,7 @@
     }],
   issues: ["tex-resource-needed", "tex-resource-needed", "tex-resource-needed"],
   text: "World  ",
-  issue: null
+  issue: null,
+  repeated: "Again  ",
+  resource_probe_requires_captures: true
 }

@@ -964,7 +964,10 @@ view <document_pane> () any^ state preview_mode: "view", property_filter: "", pr
         } else if (is_pdf_document(~.file["extension"])) {
           let preview = selected_preview(~.file);
           <section id:"pdf-preview", class:"rendered-preview pdf-preview",
-            apply(preview)>
+            // keep the renderer's page and text-run attributes through the preview.
+            if (name(preview) == 'html') {
+              <div class:"document-body", *[for (body in content(preview)^ where name(body)^ == 'body') *content(body)^]>
+            } else preview>
         } else if (document_format(~.file["extension"]) == "rtf") {
           let preview = selected_preview(~.file);
           <section id:"rtf-preview", class:"rendered-preview rtf-preview",

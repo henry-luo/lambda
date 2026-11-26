@@ -2293,9 +2293,11 @@ TEST(RadiantViewTest, ExplicitLayoutTimerWindowOverridesTheEnvironmentIncludingZ
     test_radiant_view_ensure_temp_dir();
     const char* page = "temp/test_layout_timer_window.html";
     const char* output = "temp/test_layout_timer_window.json";
-    const char* document = "<!doctype html><body><p id='status'>capture-now-ready</p><p id='clock'></p><p id='zero'>zero-pending</p><script>"
-        "document.getElementById('clock').textContent='capture-clock-'+performance.now();"
-        "(function repeat(){setTimeout(repeat,0);})();"
+    const char* document = "<!doctype html><body><p id='status'>capture-now-ready</p><p id='clock'></p>"
+        "<p id='zero'>zero-pending</p><p id='ticks'></p><script>"
+        "var ticks=0;function repeat(){setTimeout(repeat,0);"
+        "if(performance.now()===0&&ticks<7)document.getElementById('ticks').textContent='zero-ticks-'+(++ticks); }"
+        "document.getElementById('clock').textContent='capture-clock-'+performance.now()+'-'+typeof setTimeout(repeat,0);"
         "setTimeout(function(){setTimeout(function(){document.getElementById('zero').textContent='zero-nested-'+performance.now();},0);},0);"
         "setTimeout(function(){document.getElementById('status').textContent='timer-fired';},100);</script></body>";
     FILE* file = fopen(page, "wb"); ASSERT_NE(file, nullptr);
@@ -2312,8 +2314,11 @@ TEST(RadiantViewTest, ExplicitLayoutTimerWindowOverridesTheEnvironmentIncludingZ
         shell_result_free(&result);
         EXPECT_TRUE(test_radiant_view_file_contains(output, window ? "capture-now-ready" : "timer-fired"));
         EXPECT_FALSE(test_radiant_view_file_contains(output, window ? "timer-fired" : "capture-now-ready"));
-        EXPECT_TRUE(test_radiant_view_file_contains(output, "capture-clock-0"));
+        EXPECT_TRUE(test_radiant_view_file_contains(output, "capture-clock-0-number"));
         EXPECT_TRUE(test_radiant_view_file_contains(output, "zero-nested-0"));
+        if (window && strcmp(window, "0") == 0) {
+            EXPECT_TRUE(test_radiant_view_file_contains(output, "zero-ticks-6"));
+        }
         EXPECT_FALSE(test_radiant_view_file_contains(output, "zero-pending"));
     }
     remove(page); remove(output);
@@ -3507,7 +3512,8 @@ TEST(RadiantViewTest, LambdaLoadedDocumentsReleaseNativeStorageAtExit) {
 }
 
 TEST(RadiantViewTest, LatexIframeNavigationAcceptsParentClickWithoutScroll) {
-    const char* page = "test/html/index.html";
+    // exercise parent hit testing after the iframe commits a scrollable LaTeX document.
+    const char* page = "test/html/latex_navigation.html";
     const char* events = "test/html/latex_navigation_events.json";
     ASSERT_TRUE(test_radiant_view_file_readable(page));
     ASSERT_TRUE(test_radiant_view_file_readable(events));
