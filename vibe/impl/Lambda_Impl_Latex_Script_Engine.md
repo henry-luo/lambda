@@ -34,6 +34,14 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **External shape fingerprint cost, 2026-11-26:** Input now combines pointer
+  identities as words instead of hashing each pointer byte; collision matches
+  still check the complete shape (D3.4.3, D9.1.3v2). The 96-case MarkBuilder
+  suite passes against the candidate. Two release bundled-fixture comparisons
+  took 53.43/49.82 and 52.24/48.17 seconds for control/candidate, with exact
+  golden output. These are individual measurements, not a statistical
+  benchmark. The corpus timeout remains open; see LI-123 in the input ledger.
+
 - **Stream whitespace in math, 2026-11-26:** A broader 48-case retired-engine
   comparison found that `readline` can emit a category-12 carriage return
   inside math. The native math scanner ignores the reconstructed whitespace;

@@ -6,6 +6,22 @@ remain in the [active issue ledger](Lib_Input_Issue_Ledger.md).
 
 ## Fixed issues
 
+<a id="li-123"></a>
+
+### LI-123 — External shape fingerprints hashed pointer identities byte by byte
+
+**Fixed 2026-11-26.** Profiling TeX expansion found that the external-parent
+shape fingerprint repeatedly hashed each pointer byte, increasing the cost of
+map transitions (D3.4.3, D9.1.3v2). Input now combines each pointer as one
+word using the shared hash helper. Fingerprint collisions still undergo the
+existing full structural comparison. The complete 96-case MarkBuilder suite
+passes against the candidate input archive, including the transition-tree and
+cross-document lifetime cases. Two release control/candidate runs of the
+bundled LaTeX fixture took 53.43/49.82 and 52.24/48.17 seconds respectively,
+each matching the golden. These are individual measurements, not a statistical
+benchmark; the separate corpus timeout remains open. Evidence is under
+`temp/latex-retirement/hash-experiment/`.
+
 <a id="li-122"></a>
 
 ### LI-122 — Archive member names were lost during automatic format detection
