@@ -1,10 +1,10 @@
 import profile: lambda.doc.latex.tex_engine.profile
 import digest: lambda.doc.latex.tex_engine.digest
-let kernel = input(sys.lambda.home ++ "/package/doc/latex/tex_engine/kernel.tex", "text")^;
+import compare: ._tex_expl3_compare
+let kernel = compare.kernel;
 import reconstruct: lambda.doc.latex.tex_engine.reconstruct
-fn matches(source) any^ {
-    let result = profile.expand_with_kernel(source, kernel,
-        {script_expl3: true, echo_definitions: true, adapters: [], resources: {local: {}, bundled: {}}}, 100000)^;
+fn matches(source, fresh = false) any^ {
+    let result = compare.expand(source, fresh)^;
     let rebuilt = reconstruct.reconstruct(result)^;
     let native = parse(source, {type: "tex"})^;
     {issue: result.issue, reconstruct_issue: rebuilt.issue, matches: rebuilt.text == native.text,
@@ -53,11 +53,10 @@ let sources = [
  "\\ExplSyntaxOn\\edef\\x{\\tl_to_str:n{\\foo}}\\edef\\y{\\x}\\y\\ExplSyntaxOff",
  "\\ExplSyntaxOn\\edef\\x{\\tl_to_str:n{A}}\\edef\\y{[\\x]}\\y\\ExplSyntaxOff"
 ];
-[for (source in sources) matches(source)^]
+[for (source in sources) matches(source,source==sources[0])^]
 
 fn safe_digestion(source) any^ {
-    let result = profile.expand_with_kernel(source, kernel,
-        {script_expl3: true, echo_definitions: true, adapters: [], resources: {local: {}, bundled: {}}}, 100000)^;
+    let result = compare.expand(source)^;
     let parsed = digest.digest(result)^;
     if (parsed.ast != null) parsed.ast == (parse(source, {type: "latex"})^)
     else parsed.issue == "latex-digest-unsupported"

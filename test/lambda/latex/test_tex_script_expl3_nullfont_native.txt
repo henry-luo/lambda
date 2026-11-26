@@ -1,0 +1,29 @@
+[{
+    text: "45",
+    diagnostics: []
+  }, {
+    text: "-1",
+    diagnostics: []
+  }, {
+    text: "9",
+    diagnostics: []
+  }, {
+    text: "0.0pt",
+    diagnostics: []
+  }, {
+    text: "0.0pt",
+    diagnostics: [{
+        code: "tex-font-params",
+        message: "Font nullfont has only 7 fontdimen parameters",
+        offset: 28,
+        line: 1
+      }]
+  }, {
+    text: "0.0pt",
+    diagnostics: [{
+        code: "tex-font-params",
+        message: "Font nullfont has only 7 fontdimen parameters",
+        offset: 28,
+        line: 1
+      }]
+  }]

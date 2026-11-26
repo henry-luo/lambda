@@ -1,0 +1,771 @@
+{
+  "cases": [
+    {
+      "source": "\\begin{document}\\textbf{A\\begin{quote}B\\end{quote}C}D\\end{document}",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "textbf",
+                    "source_offset": 16,
+                    "_": [
+                      "A",
+                      {
+                        "$": "quote",
+                        "source_offset": 25,
+                        "_": [
+                          {
+                            "$": "paragraph",
+                            "_": [
+                              "B"
+                            ]
+                          }
+                        ]
+                      },
+                      "C"
+                    ]
+                  },
+                  "D"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}\\textit{A\\begin{quote}B\\end{quote}C}\\end{document}",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "textit",
+                    "source_offset": 16,
+                    "_": [
+                      "A",
+                      {
+                        "$": "quote",
+                        "source_offset": 25,
+                        "_": [
+                          {
+                            "$": "paragraph",
+                            "_": [
+                              "B"
+                            ]
+                          }
+                        ]
+                      },
+                      "C"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}\\mystery{A\\begin{quote}B\\end{quote}C}D\\end{document}",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "mystery",
+                    "source_offset": 16,
+                    "argument_groups": [
+                      {
+                        "kind": "required",
+                        "raw": "A\\begin{quote}B\\end{quote}C",
+                        "start": 24,
+                        "end": 53
+                      }
+                    ],
+                    "_": [
+                      "A",
+                      {
+                        "$": "quote",
+                        "source_offset": 26,
+                        "_": [
+                          {
+                            "$": "paragraph",
+                            "_": [
+                              "B"
+                            ]
+                          }
+                        ]
+                      },
+                      "C"
+                    ]
+                  },
+                  "D"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\title{A\\begin{quote}B\\end{quote}C}\\begin{document}D\\end{document}",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "title",
+            "source_offset": 0,
+            "argument_groups": [
+              {
+                "kind": "required",
+                "raw": "A\\begin{quote}B\\end{quote}C",
+                "start": 6,
+                "end": 35
+              }
+            ],
+            "_": [
+              "A",
+              {
+                "$": "quote",
+                "source_offset": 8,
+                "_": [
+                  {
+                    "$": "paragraph",
+                    "_": [
+                      "B"
+                    ]
+                  }
+                ]
+              },
+              "C"
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 35,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "D"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}{A\\begin{quote}B\\end{quote}C}D\\end{document}",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "curly_group",
+                    "_": [
+                      "A",
+                      {
+                        "$": "quote",
+                        "source_offset": 18,
+                        "_": [
+                          {
+                            "$": "paragraph",
+                            "_": [
+                              "B"
+                            ]
+                          }
+                        ]
+                      },
+                      "C"
+                    ]
+                  },
+                  "D"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}\\textbf{A\\begin{outer}B\\begin{inner}C\\end{inner}D\\end{outer}E}\\end{document}",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "textbf",
+                    "source_offset": 16,
+                    "_": [
+                      "A",
+                      {
+                        "$": "outer",
+                        "source_offset": 25,
+                        "_": [
+                          {
+                            "$": "paragraph",
+                            "_": [
+                              "B"
+                            ]
+                          },
+                          {
+                            "$": "inner",
+                            "source_offset": 39,
+                            "_": [
+                              {
+                                "$": "paragraph",
+                                "_": [
+                                  "C"
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "$": "paragraph",
+                            "_": [
+                              "D"
+                            ]
+                          }
+                        ]
+                      },
+                      "E"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}\\textbf{\\begin{quote}\\textit{X}\\end{quote}}\\end{document}",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "textbf",
+                    "source_offset": 16,
+                    "_": [
+                      {
+                        "$": "quote",
+                        "source_offset": 24,
+                        "_": [
+                          {
+                            "$": "paragraph",
+                            "_": [
+                              {
+                                "$": "textit",
+                                "source_offset": 37,
+                                "_": [
+                                  "X"
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}A\\begin{quote}B\\end{quote}C\\end{document}",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "A"
+                ]
+              },
+              {
+                "$": "quote",
+                "source_offset": 17,
+                "_": [
+                  {
+                    "$": "paragraph",
+                    "_": [
+                      "B"
+                    ]
+                  }
+                ]
+              },
+              {
+                "$": "paragraph",
+                "_": [
+                  "C"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}\\textbf{A\\begin {quote}B\\end{quote}C}\\end{document}",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "textbf",
+                    "source_offset": 16,
+                    "_": [
+                      "A ",
+                      {
+                        "$": "curly_group",
+                        "_": [
+                          "quote"
+                        ]
+                      },
+                      "B",
+                      {
+                        "$": "curly_group",
+                        "_": [
+                          "quote"
+                        ]
+                      },
+                      "C"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}\\textbf{A\\begin  {quote}B\\end {quote}C}\\end{document}",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "textbf",
+                    "source_offset": 16,
+                    "_": [
+                      "A  ",
+                      {
+                        "$": "curly_group",
+                        "_": [
+                          "quote"
+                        ]
+                      },
+                      "B ",
+                      {
+                        "$": "curly_group",
+                        "_": [
+                          "quote"
+                        ]
+                      },
+                      "C"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}\\mystery{A\\begin\t{quote}B\\end{quote}C}\\end{document}",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "mystery",
+                    "source_offset": 16,
+                    "argument_groups": [
+                      {
+                        "kind": "required",
+                        "raw": "A\\begin\t{quote}B\\end{quote}C",
+                        "start": 24,
+                        "end": 54
+                      }
+                    ],
+                    "_": [
+                      "A\t",
+                      {
+                        "$": "curly_group",
+                        "_": [
+                          "quote"
+                        ]
+                      },
+                      "B",
+                      {
+                        "$": "curly_group",
+                        "_": [
+                          "quote"
+                        ]
+                      },
+                      "C"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}\\mystery{A\\begin \n\n{quote}B\\end{quote}C}\\end{document}",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "mystery",
+                    "source_offset": 16,
+                    "argument_groups": [
+                      {
+                        "kind": "required",
+                        "raw": "A\\begin \n\n{quote}B\\end{quote}C",
+                        "start": 24,
+                        "end": 56
+                      }
+                    ],
+                    "_": [
+                      "A ",
+                      "parbreak",
+                      {
+                        "$": "curly_group",
+                        "_": [
+                          "quote"
+                        ]
+                      },
+                      "B",
+                      {
+                        "$": "curly_group",
+                        "_": [
+                          "quote"
+                        ]
+                      },
+                      "C"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}\\mystery{A\\begin%comment\n{quote}B\\end{quote}C}\\end{document}",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "mystery",
+                    "source_offset": 16,
+                    "argument_groups": [
+                      {
+                        "kind": "required",
+                        "raw": "A\\begin%comment\n{quote}B\\end{quote}C",
+                        "start": 24,
+                        "end": 62
+                      }
+                    ],
+                    "_": [
+                      "A",
+                      {
+                        "$": "curly_group",
+                        "_": [
+                          "quote"
+                        ]
+                      },
+                      "B",
+                      {
+                        "$": "curly_group",
+                        "_": [
+                          "quote"
+                        ]
+                      },
+                      "C"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}\\textbf{A\\begin{quote}[x]B\\end{quote}C}\\end{document}",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "textbf",
+                    "source_offset": 16,
+                    "_": [
+                      "A",
+                      {
+                        "$": "quote",
+                        "source_offset": 25,
+                        "_": [
+                          {
+                            "$": "paragraph",
+                            "_": [
+                              "[x]B"
+                            ]
+                          }
+                        ]
+                      },
+                      "C"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}\\textbf{A\\begin{equation}B\\end{equation}C}\\end{document}",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "textbf",
+                    "source_offset": 16,
+                    "_": [
+                      "A",
+                      {
+                        "$": "equation",
+                        "source_offset": 25,
+                        "source": "B",
+                        "ast": {
+                          "$": "math",
+                          "_": [
+                            "B"
+                          ]
+                        }
+                      },
+                      "C"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\newenvironment{mine}{A}{B}\\begin{document}\\textbf{X\\begin{mine}Y\\end{mine}Z}\\end{document}",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              {
+                "$": "newenvironment",
+                "source_offset": 0,
+                "argument_groups": [
+                  {
+                    "kind": "required",
+                    "raw": "mine",
+                    "start": 15,
+                    "end": 21
+                  },
+                  {
+                    "kind": "required",
+                    "raw": "A",
+                    "start": 21,
+                    "end": 24
+                  },
+                  {
+                    "kind": "required",
+                    "raw": "B",
+                    "start": 24,
+                    "end": 27
+                  }
+                ],
+                "_": [
+                  "mine",
+                  {
+                    "$": "curly_group",
+                    "_": [
+                      "A"
+                    ]
+                  },
+                  {
+                    "$": "curly_group",
+                    "_": [
+                      "B"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 27,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "textbf",
+                    "source_offset": 43,
+                    "_": [
+                      "XAYBZ"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}\\textbf{A\\begin{quote}B\\end{other}C}\\end{document}",
+      "latex": null
+    },
+    {
+      "source": "\\begin{document}\\textbf{A\\begin{document}B\\end{document}C}\\end{document}",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "textbf",
+                    "source_offset": 16,
+                    "_": [
+                      "A",
+                      {
+                        "$": "document",
+                        "source_offset": 25,
+                        "_": [
+                          {
+                            "$": "paragraph",
+                            "_": [
+                              "B"
+                            ]
+                          }
+                        ]
+                      },
+                      "C"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

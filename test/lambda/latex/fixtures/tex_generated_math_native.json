@@ -1,0 +1,1849 @@
+{
+  "cases": [
+    {
+      "source": "\\def\\m{\\mathbb{R}}\\begin{document}$\\m^n$\\end{document}",
+      "tex": {
+        "text": "\\def\\m{\\mathbb{R}}\\begin{document}$\\mathbb{R}^n$\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              {
+                "$": "def",
+                "source_offset": 0,
+                "argument_groups": [
+                  {
+                    "kind": "required",
+                    "raw": "\\m",
+                    "start": 4,
+                    "end": 6
+                  },
+                  {
+                    "kind": "required",
+                    "raw": "\\mathbb{R}",
+                    "start": 6,
+                    "end": 18
+                  }
+                ],
+                "_": [
+                  "\\m",
+                  {
+                    "$": "curly_group",
+                    "_": [
+                      {
+                        "$": "mathbb",
+                        "source_offset": 7,
+                        "argument_groups": [
+                          {
+                            "kind": "required",
+                            "raw": "R",
+                            "start": 14,
+                            "end": 17
+                          }
+                        ],
+                        "_": [
+                          "R"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 18,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "inline_math",
+                    "source_offset": 35,
+                    "source": "\\mathbb{R}^n",
+                    "ast": {
+                      "$": "math",
+                      "_": [
+                        {
+                          "$": "subsup",
+                          "base": {
+                            "$": "style_command",
+                            "cmd": "\\mathbb",
+                            "arg": {
+                              "$": "group",
+                              "_": [
+                                "R"
+                              ]
+                            }
+                          },
+                          "sup": "n"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\def\\m{<}\\begin{document}$a\\m=b$\\end{document}",
+      "tex": {
+        "text": "\\def\\m{<}\\begin{document}$a<=b$\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              {
+                "$": "def",
+                "source_offset": 0,
+                "argument_groups": [
+                  {
+                    "kind": "required",
+                    "raw": "\\m",
+                    "start": 4,
+                    "end": 6
+                  },
+                  {
+                    "kind": "required",
+                    "raw": "<",
+                    "start": 6,
+                    "end": 9
+                  }
+                ],
+                "_": [
+                  "\\m",
+                  {
+                    "$": "curly_group",
+                    "_": [
+                      "<"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 9,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "inline_math",
+                    "source_offset": 26,
+                    "source": "a<=b",
+                    "ast": {
+                      "$": "math",
+                      "_": [
+                        "a",
+                        {
+                          "$": "relation",
+                          "value": "<="
+                        },
+                        "b"
+                      ]
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\def\\m{=}\\begin{document}$a<\\m b$\\end{document}",
+      "tex": {
+        "text": "\\def\\m{=}\\begin{document}$a<=b$\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              {
+                "$": "def",
+                "source_offset": 0,
+                "argument_groups": [
+                  {
+                    "kind": "required",
+                    "raw": "\\m",
+                    "start": 4,
+                    "end": 6
+                  },
+                  {
+                    "kind": "required",
+                    "raw": "=",
+                    "start": 6,
+                    "end": 9
+                  }
+                ],
+                "_": [
+                  "\\m",
+                  {
+                    "$": "curly_group",
+                    "_": [
+                      "="
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 9,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "inline_math",
+                    "source_offset": 26,
+                    "source": "a<=b",
+                    "ast": {
+                      "$": "math",
+                      "_": [
+                        "a",
+                        {
+                          "$": "relation",
+                          "value": "<="
+                        },
+                        "b"
+                      ]
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\def\\m{.}\\begin{document}$\\m\\m\\m$\\end{document}",
+      "tex": {
+        "text": "\\def\\m{.}\\begin{document}$...$\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              {
+                "$": "def",
+                "source_offset": 0,
+                "argument_groups": [
+                  {
+                    "kind": "required",
+                    "raw": "\\m",
+                    "start": 4,
+                    "end": 6
+                  },
+                  {
+                    "kind": "required",
+                    "raw": ".",
+                    "start": 6,
+                    "end": 9
+                  }
+                ],
+                "_": [
+                  "\\m",
+                  {
+                    "$": "curly_group",
+                    "_": [
+                      "."
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 9,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "inline_math",
+                    "source_offset": 26,
+                    "source": "...",
+                    "ast": {
+                      "$": "math",
+                      "_": [
+                        {
+                          "$": "raw_math_text",
+                          "value": "..."
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\def\\m{\\{}\\begin{document}$\\m\\}$\\end{document}",
+      "tex": {
+        "text": "\\def\\m{\\{}\\begin{document}$\\{\\}$\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              {
+                "$": "def",
+                "source_offset": 0,
+                "argument_groups": [
+                  {
+                    "kind": "required",
+                    "raw": "\\m",
+                    "start": 4,
+                    "end": 6
+                  },
+                  {
+                    "kind": "required",
+                    "raw": "\\{",
+                    "start": 6,
+                    "end": 10
+                  }
+                ],
+                "_": [
+                  "\\m",
+                  {
+                    "$": "curly_group",
+                    "_": [
+                      "{"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 10,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "inline_math",
+                    "source_offset": 27,
+                    "source": "\\{\\}",
+                    "ast": {
+                      "$": "math",
+                      "_": [
+                        {
+                          "$": "escaped_symbol",
+                          "value": "{}"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\def\\m{\\operatorname}\\begin{document}$\\m*{lim}$\\end{document}",
+      "tex": {
+        "text": "\\def\\m{\\operatorname}\\begin{document}$\\operatorname*{lim}$\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              {
+                "$": "def",
+                "source_offset": 0,
+                "argument_groups": [
+                  {
+                    "kind": "required",
+                    "raw": "\\m",
+                    "start": 4,
+                    "end": 6
+                  },
+                  {
+                    "kind": "required",
+                    "raw": "\\operatorname",
+                    "start": 6,
+                    "end": 21
+                  }
+                ],
+                "_": [
+                  "\\m",
+                  {
+                    "$": "curly_group",
+                    "_": [
+                      {
+                        "$": "operatorname",
+                        "source_offset": 7,
+                        "argument_groups": []
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 21,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "inline_math",
+                    "source_offset": 38,
+                    "source": "\\operatorname*{lim}",
+                    "ast": {
+                      "$": "math",
+                      "_": [
+                        {
+                          "$": "style_command",
+                          "cmd": "\\operatorname",
+                          "limits": true,
+                          "arg": {
+                            "$": "group",
+                            "_": [
+                              [
+                                "l",
+                                "i",
+                                "m"
+                              ]
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\def\\m{!12}\\begin{document}$\\m$\\end{document}",
+      "tex": {
+        "text": "\\def\\m{!12}\\begin{document}$!12$\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              {
+                "$": "def",
+                "source_offset": 0,
+                "argument_groups": [
+                  {
+                    "kind": "required",
+                    "raw": "\\m",
+                    "start": 4,
+                    "end": 6
+                  },
+                  {
+                    "kind": "required",
+                    "raw": "!12",
+                    "start": 6,
+                    "end": 11
+                  }
+                ],
+                "_": [
+                  "\\m",
+                  {
+                    "$": "curly_group",
+                    "_": [
+                      "!12"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 11,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "inline_math",
+                    "source_offset": 28,
+                    "source": "!12",
+                    "ast": {
+                      "$": "math",
+                      "_": [
+                        {
+                          "$": "raw_math_text",
+                          "value": "!12"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\def\\m{}\\begin{document}$a<\\m=b$\\end{document}",
+      "tex": {
+        "text": "\\def\\m{}\\begin{document}$a<=b$\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              {
+                "$": "def",
+                "source_offset": 0,
+                "argument_groups": [
+                  {
+                    "kind": "required",
+                    "raw": "\\m",
+                    "start": 4,
+                    "end": 6
+                  },
+                  {
+                    "kind": "required",
+                    "raw": "",
+                    "start": 6,
+                    "end": 8
+                  }
+                ],
+                "_": [
+                  "\\m",
+                  {
+                    "$": "curly_group"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 8,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "inline_math",
+                    "source_offset": 25,
+                    "source": "a<=b",
+                    "ast": {
+                      "$": "math",
+                      "_": [
+                        "a",
+                        {
+                          "$": "relation",
+                          "value": "<="
+                        },
+                        "b"
+                      ]
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\def\\m{\\frac{1}{2}}\\begin{document}\\(\\m+1\\)\\end{document}",
+      "tex": {
+        "text": "\\def\\m{\\frac{1}{2}}\\begin{document}\\(\\frac{1}{2}+1\\)\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              {
+                "$": "def",
+                "source_offset": 0,
+                "argument_groups": [
+                  {
+                    "kind": "required",
+                    "raw": "\\m",
+                    "start": 4,
+                    "end": 6
+                  },
+                  {
+                    "kind": "required",
+                    "raw": "\\frac{1}{2}",
+                    "start": 6,
+                    "end": 19
+                  }
+                ],
+                "_": [
+                  "\\m",
+                  {
+                    "$": "curly_group",
+                    "_": [
+                      {
+                        "$": "frac",
+                        "source_offset": 7,
+                        "argument_groups": [
+                          {
+                            "kind": "required",
+                            "raw": "1",
+                            "start": 12,
+                            "end": 15
+                          },
+                          {
+                            "kind": "required",
+                            "raw": "2",
+                            "start": 15,
+                            "end": 18
+                          }
+                        ],
+                        "_": [
+                          [
+                            "1",
+                            "2"
+                          ]
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 19,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "inline_math",
+                    "source_offset": 37,
+                    "source": "\\frac{1}{2}+1",
+                    "ast": {
+                      "$": "math",
+                      "_": [
+                        {
+                          "$": "fraction",
+                          "cmd": "\\frac",
+                          "numer": {
+                            "$": "group",
+                            "_": [
+                              "1"
+                            ]
+                          },
+                          "denom": {
+                            "$": "group",
+                            "_": [
+                              "2"
+                            ]
+                          }
+                        },
+                        {
+                          "$": "operator",
+                          "value": "+"
+                        },
+                        "1"
+                      ]
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\def\\m{\\left(x\\right)}\\begin{document}$$\\m$$\\end{document}",
+      "tex": {
+        "text": "\\def\\m{\\left(x\\right)}\\begin{document}$$\\left(x\\right)$$\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              {
+                "$": "def",
+                "source_offset": 0,
+                "argument_groups": [
+                  {
+                    "kind": "required",
+                    "raw": "\\m",
+                    "start": 4,
+                    "end": 6
+                  },
+                  {
+                    "kind": "required",
+                    "raw": "\\left(x\\right)",
+                    "start": 6,
+                    "end": 22
+                  }
+                ],
+                "_": [
+                  "\\m",
+                  {
+                    "$": "curly_group",
+                    "_": [
+                      {
+                        "$": "left",
+                        "source_offset": 7,
+                        "argument_groups": []
+                      },
+                      "(x",
+                      {
+                        "$": "right",
+                        "source_offset": 14,
+                        "argument_groups": []
+                      },
+                      ")"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 22,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "display_math",
+                    "source_offset": 40,
+                    "source": "\\left(x\\right)",
+                    "ast": {
+                      "$": "math",
+                      "_": [
+                        {
+                          "$": "delimiter_group",
+                          "left": "(",
+                          "right": ")",
+                          "_": [
+                            "x"
+                          ]
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\catcode`\\^=12 \\def\\m{a^2}\\catcode`\\^=7 \\begin{document}$\\m$\\end{document}",
+      "tex": {
+        "text": "\\def\\m{a^2}\\begin{document}$a\\textasciicircum{}2$\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              {
+                "$": "def",
+                "source_offset": 15,
+                "argument_groups": [
+                  {
+                    "kind": "required",
+                    "raw": "\\m",
+                    "start": 19,
+                    "end": 21
+                  },
+                  {
+                    "kind": "required",
+                    "raw": "a^2",
+                    "start": 21,
+                    "end": 40
+                  }
+                ],
+                "_": [
+                  "\\m",
+                  {
+                    "$": "curly_group",
+                    "_": [
+                      "a^2"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 40,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "inline_math",
+                    "source_offset": 57,
+                    "source": "a\\textasciicircum{}2",
+                    "ast": {
+                      "$": "math",
+                      "_": [
+                        "a",
+                        {
+                          "$": "command",
+                          "name": "textasciicircum",
+                          "_": [
+                            {
+                              "$": "group"
+                            }
+                          ]
+                        },
+                        "2"
+                      ]
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\catcode`!=8 \\def\\m{a!2}\\catcode`!=12 \\begin{document}$\\m$\\end{document}",
+      "tex": {
+        "text": "\\def\\m{a!2}\\begin{document}$a_2$\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              {
+                "$": "def",
+                "source_offset": 13,
+                "argument_groups": [
+                  {
+                    "kind": "required",
+                    "raw": "\\m",
+                    "start": 17,
+                    "end": 19
+                  },
+                  {
+                    "kind": "required",
+                    "raw": "a!2",
+                    "start": 19,
+                    "end": 38
+                  }
+                ],
+                "_": [
+                  "\\m",
+                  {
+                    "$": "curly_group",
+                    "_": [
+                      "a!2"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 38,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "inline_math",
+                    "source_offset": 55,
+                    "source": "a_2",
+                    "ast": {
+                      "$": "math",
+                      "_": [
+                        {
+                          "$": "subsup",
+                          "base": "a",
+                          "sub": "2"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "local": {
+    "source": "test/lambda/latex/fixtures/local_packages/script-math-gen-main.tex",
+    "tex": {
+      "text": "\\def\\m{\\mathbb{R}}\\begin{document}A $\\mathbb{R}^2$  B $\\mathbb{R} ^n$\\end{document}",
+      "messages": [
+        "\\z@=\\dimen10",
+        "\\p@=\\dimen11",
+        "\\maxdimen=\\dimen12",
+        "\\z@skip=\\skip10",
+        "\\hideskip=\\skip11",
+        "\\@tempdima=\\dimen13",
+        "\\@tempdimb=\\dimen14",
+        "\\@tempdimc=\\dimen15",
+        "\\@tempcnta=\\count23",
+        "\\@tempcntb=\\count24",
+        "\\@tempskipa=\\skip12",
+        "\\@tempskipb=\\skip13",
+        "\\@temptokena=\\toks10",
+        "\\@tempboxa=\\box10",
+        "\\voidb@x=\\box11",
+        "\\textwidth=\\dimen16",
+        "\\textheight=\\dimen17",
+        "\\linewidth=\\dimen18",
+        "\\columnwidth=\\dimen19",
+        "\\columnsep=\\dimen20",
+        "\\columnseprule=\\dimen21",
+        "\\marginparwidth=\\dimen22",
+        "\\marginparsep=\\dimen23",
+        "\\marginparpush=\\dimen24",
+        "\\oddsidemargin=\\dimen25",
+        "\\evensidemargin=\\dimen26",
+        "\\topmargin=\\dimen27",
+        "\\headheight=\\dimen28",
+        "\\headsep=\\dimen29",
+        "\\footskip=\\dimen30",
+        "\\paperwidth=\\dimen31",
+        "\\paperheight=\\dimen32",
+        "\\fboxsep=\\dimen33",
+        "\\fboxrule=\\dimen34",
+        "\\arraycolsep=\\dimen35",
+        "\\tabcolsep=\\dimen36",
+        "\\arrayrulewidth=\\dimen37",
+        "\\doublerulesep=\\dimen38",
+        "\\labelwidth=\\dimen39",
+        "\\labelsep=\\dimen40",
+        "\\itemindent=\\dimen41",
+        "\\listparindent=\\dimen42",
+        "\\leftmargin=\\dimen43",
+        "\\rightmargin=\\dimen44",
+        "\\unitlength=\\dimen45",
+        "\\jot=\\dimen46",
+        "\\abovecaptionskip=\\skip14",
+        "\\belowcaptionskip=\\skip15",
+        "\\smallskipamount=\\skip16",
+        "\\medskipamount=\\skip17",
+        "\\bigskipamount=\\skip18",
+        "\\topsep=\\skip19",
+        "\\itemsep=\\skip20",
+        "\\parsep=\\skip21",
+        "\\partopsep=\\skip22",
+        "\\floatsep=\\skip23",
+        "\\textfloatsep=\\skip24",
+        "\\intextsep=\\skip25"
+      ],
+      "diagnostics": [],
+      "packages": []
+    },
+    "latex": {
+      "$": "latex_document",
+      "_": [
+        {
+          "$": "paragraph",
+          "_": [
+            {
+              "$": "def",
+              "source_offset": 0,
+              "argument_groups": [
+                {
+                  "kind": "required",
+                  "raw": "\\m",
+                  "start": 4,
+                  "end": 6
+                },
+                {
+                  "kind": "required",
+                  "raw": "\\mathbb{R}",
+                  "start": 6,
+                  "end": 18
+                }
+              ],
+              "_": [
+                "\\m",
+                {
+                  "$": "curly_group",
+                  "_": [
+                    {
+                      "$": "mathbb",
+                      "source_offset": 7,
+                      "argument_groups": [
+                        {
+                          "kind": "required",
+                          "raw": "R",
+                          "start": 14,
+                          "end": 17
+                        }
+                      ],
+                      "_": [
+                        "R"
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "$": "document",
+          "source_offset": 18,
+          "_": [
+            {
+              "$": "paragraph",
+              "_": [
+                "A ",
+                {
+                  "$": "inline_math",
+                  "source_offset": 72,
+                  "source": "\\mathbb{R}^2",
+                  "ast": {
+                    "$": "math",
+                    "_": [
+                      {
+                        "$": "subsup",
+                        "base": {
+                          "$": "style_command",
+                          "cmd": "\\mathbb",
+                          "arg": {
+                            "$": "group",
+                            "_": [
+                              "R"
+                            ]
+                          }
+                        },
+                        "sup": "2"
+                      }
+                    ]
+                  }
+                },
+                "  B ",
+                {
+                  "$": "inline_math",
+                  "source_offset": 113,
+                  "source": "\\mathbb{R} ^n",
+                  "ast": {
+                    "$": "math",
+                    "_": [
+                      {
+                        "$": "subsup",
+                        "base": {
+                          "$": "style_command",
+                          "cmd": "\\mathbb",
+                          "arg": {
+                            "$": "group",
+                            "_": [
+                              "R"
+                            ]
+                          }
+                        },
+                        "sup": "n"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

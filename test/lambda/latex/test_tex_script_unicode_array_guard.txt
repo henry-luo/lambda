@@ -1,0 +1,54 @@
+[[{
+      text: "",
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 codepoint font identity"
+    }, {
+      text: "",
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 codepoint font identity"
+    }, {
+      text: "",
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 font format"
+    }, {
+      text: "",
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 font format"
+    }, {
+      text: "Y/N",
+      issue: null,
+      unsupported: null
+    }, {
+      text: "Y",
+      issue: null,
+      unsupported: null
+    }], [{
+      text: "",
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 codepoint font identity"
+    }, {
+      text: "",
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 codepoint font identity"
+    }, {
+      text: "",
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 font format"
+    }, {
+      text: "",
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 font format"
+    }, {
+      text: "Y/N",
+      issue: null,
+      unsupported: null
+    }, {
+      text: "Y",
+      issue: null,
+      unsupported: null
+    }]]
+{
+  issue: "tex-unsupported-primitive",
+  unsupported: "expl3 fp array initialization",
+  preserved: true
+}

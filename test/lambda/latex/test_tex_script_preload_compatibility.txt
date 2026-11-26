@@ -1,0 +1,39 @@
+{
+  constructor: {
+    text: "\\textbf{\\__kernel_tl_set:Nx\\s__seq{\\s__seq}B}",
+    messages: [],
+    diagnostics: [{
+        code: "tex-macro-mismatch",
+        message: "Use of \\??? doesn't match its definition",
+        offset: 65,
+        line: 1
+      }],
+    issue: null
+  },
+  constructor_matches_fresh: true,
+  legacy_matches_fresh: true,
+  spoof_matches_fresh: true,
+  public_matches: true
+}
+{
+  same_options_reuse: "C"
+}
+{
+  different_kernel: "B"
+}
+{
+  different_resource: "B  ",
+  issue: null
+}
+{
+  rebound_resource: "B",
+  issue: null
+}
+{
+  previously_missing: "B",
+  diagnostics: []
+}
+{
+  previously_missing_requested: "B",
+  diagnostics: []
+}

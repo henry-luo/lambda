@@ -1,6 +1,6 @@
 {
   cases: 38,
-  guarded: 2,
+  guarded: 0,
   supported: true,
   text: true,
   messages: true,

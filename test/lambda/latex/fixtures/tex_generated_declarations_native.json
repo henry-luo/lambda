@@ -1,0 +1,1730 @@
+{
+  "cases": [
+    {
+      "tex": {
+        "text": "\\def\\n{article}\\documentclass{article}\\begin{document}A\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              {
+                "$": "def",
+                "source_offset": 0,
+                "argument_groups": [
+                  {
+                    "kind": "required",
+                    "raw": "\\n",
+                    "start": 4,
+                    "end": 6
+                  },
+                  {
+                    "kind": "required",
+                    "raw": "article",
+                    "start": 6,
+                    "end": 33
+                  }
+                ],
+                "_": [
+                  "\\n",
+                  {
+                    "$": "curly_group",
+                    "_": [
+                      "article"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "$": "documentclass",
+            "source_offset": 33,
+            "argument_groups": [
+              {
+                "kind": "required",
+                "raw": "article",
+                "start": 33,
+                "end": 33
+              }
+            ],
+            "_": [
+              "article"
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 33,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "A"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "source": "\\def\\n{article}\\documentclass{\\n}\\begin{document}A\\end{document}"
+    },
+    {
+      "tex": {
+        "text": "\\def\\n{xcolor}\\usepackage{xcolor}\\begin{document}A\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              {
+                "$": "def",
+                "source_offset": 0,
+                "argument_groups": [
+                  {
+                    "kind": "required",
+                    "raw": "\\n",
+                    "start": 4,
+                    "end": 6
+                  },
+                  {
+                    "kind": "required",
+                    "raw": "xcolor",
+                    "start": 6,
+                    "end": 29
+                  }
+                ],
+                "_": [
+                  "\\n",
+                  {
+                    "$": "curly_group",
+                    "_": [
+                      "xcolor"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "$": "usepackage",
+            "source_offset": 29,
+            "argument_groups": [
+              {
+                "kind": "required",
+                "raw": "xcolor",
+                "start": 29,
+                "end": 29
+              }
+            ],
+            "_": [
+              "xcolor"
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 29,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "A"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "source": "\\def\\n{xcolor}\\usepackage{\\n}\\begin{document}A\\end{document}"
+    },
+    {
+      "tex": {
+        "text": "\\def\\n{xcolor}\\usepackage*[draft]{xcolor}\\begin{document}A\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              {
+                "$": "def",
+                "source_offset": 0,
+                "argument_groups": [
+                  {
+                    "kind": "required",
+                    "raw": "\\n",
+                    "start": 4,
+                    "end": 6
+                  },
+                  {
+                    "kind": "required",
+                    "raw": "xcolor",
+                    "start": 6,
+                    "end": 14
+                  }
+                ],
+                "_": [
+                  "\\n",
+                  {
+                    "$": "curly_group",
+                    "_": [
+                      "xcolor"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "$": "usepackage",
+            "source_offset": 14,
+            "starred": true,
+            "argument_groups": [
+              {
+                "kind": "optional",
+                "raw": "draft",
+                "start": 26,
+                "end": 33
+              },
+              {
+                "kind": "required",
+                "raw": "xcolor",
+                "start": 33,
+                "end": 37
+              }
+            ],
+            "_": [
+              {
+                "$": "brack_group",
+                "_": [
+                  "draft"
+                ]
+              },
+              "xcolor"
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 37,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "A"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "source": "\\def\\n{xcolor}\\usepackage*[draft]{\\n}\\begin{document}A\\end{document}"
+    },
+    {
+      "tex": {
+        "text": "\\def\\n{}\\usepackage*{}\\begin{document}A\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              {
+                "$": "def",
+                "source_offset": 0,
+                "argument_groups": [
+                  {
+                    "kind": "required",
+                    "raw": "\\n",
+                    "start": 4,
+                    "end": 6
+                  },
+                  {
+                    "kind": "required",
+                    "raw": "",
+                    "start": 6,
+                    "end": 8
+                  }
+                ],
+                "_": [
+                  "\\n",
+                  {
+                    "$": "curly_group"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "$": "usepackage",
+            "source_offset": 8,
+            "starred": true,
+            "argument_groups": [
+              {
+                "kind": "required",
+                "raw": "",
+                "start": 20,
+                "end": 24
+              }
+            ],
+            "_": [
+              {
+                "$": "curly_group"
+              }
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 24,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "A"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "source": "\\def\\n{}\\usepackage*{\\n}\\begin{document}A\\end{document}"
+    },
+    {
+      "tex": {
+        "text": "\\def\\n{}\\usepackage*[draft]{}\\begin{document}A\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              {
+                "$": "def",
+                "source_offset": 0,
+                "argument_groups": [
+                  {
+                    "kind": "required",
+                    "raw": "\\n",
+                    "start": 4,
+                    "end": 6
+                  },
+                  {
+                    "kind": "required",
+                    "raw": "",
+                    "start": 6,
+                    "end": 8
+                  }
+                ],
+                "_": [
+                  "\\n",
+                  {
+                    "$": "curly_group"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "$": "usepackage",
+            "source_offset": 8,
+            "starred": true,
+            "argument_groups": [
+              {
+                "kind": "optional",
+                "raw": "draft",
+                "start": 20,
+                "end": 27
+              },
+              {
+                "kind": "required",
+                "raw": "",
+                "start": 27,
+                "end": 31
+              }
+            ],
+            "_": [
+              {
+                "$": "brack_group",
+                "_": [
+                  "draft"
+                ]
+              },
+              {
+                "$": "curly_group"
+              }
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 31,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "A"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "source": "\\def\\n{}\\usepackage*[draft]{\\n}\\begin{document}A\\end{document}"
+    },
+    {
+      "tex": {
+        "text": "\\def\\n{é}\\usepackage[É ]{é}\\begin{document}A\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              {
+                "$": "def",
+                "source_offset": 0,
+                "argument_groups": [
+                  {
+                    "kind": "required",
+                    "raw": "\\n",
+                    "start": 4,
+                    "end": 6
+                  },
+                  {
+                    "kind": "required",
+                    "raw": "é",
+                    "start": 6,
+                    "end": 30
+                  }
+                ],
+                "_": [
+                  "\\n",
+                  {
+                    "$": "curly_group",
+                    "_": [
+                      "é"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "$": "usepackage",
+            "source_offset": 30,
+            "argument_groups": [
+              {
+                "kind": "optional",
+                "raw": "É ",
+                "start": 30,
+                "end": 30
+              },
+              {
+                "kind": "required",
+                "raw": "é",
+                "start": 30,
+                "end": 30
+              }
+            ],
+            "_": [
+              {
+                "$": "brack_group",
+                "_": [
+                  "É "
+                ]
+              },
+              "é"
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 30,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "A"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "source": "\\def\\n{é}\\usepackage[É ]{\\n}\\begin{document}A\\end{document}"
+    },
+    {
+      "tex": {
+        "text": "\\def\\f{\\documentclass{article}}\\documentclass{article}\\begin{document}A\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              {
+                "$": "def",
+                "source_offset": 0,
+                "argument_groups": [
+                  {
+                    "kind": "required",
+                    "raw": "\\f",
+                    "start": 4,
+                    "end": 6
+                  },
+                  {
+                    "kind": "required",
+                    "raw": "\\documentclass{article}",
+                    "start": 6,
+                    "end": 33
+                  }
+                ],
+                "_": [
+                  "\\f",
+                  {
+                    "$": "curly_group",
+                    "_": [
+                      {
+                        "$": "documentclass",
+                        "source_offset": 7,
+                        "argument_groups": [
+                          {
+                            "kind": "required",
+                            "raw": "article",
+                            "start": 21,
+                            "end": 30
+                          }
+                        ],
+                        "_": [
+                          "article"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "$": "documentclass",
+            "source_offset": 33,
+            "argument_groups": [
+              {
+                "kind": "required",
+                "raw": "article",
+                "start": 33,
+                "end": 33
+              }
+            ],
+            "_": [
+              "article"
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 33,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "A"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "source": "\\def\\f{\\documentclass{article}}\\f\\begin{document}A\\end{document}"
+    },
+    {
+      "tex": {
+        "text": "\\def\\f{\\usepackage{xcolor}}\\usepackage{xcolor}\\begin{document}A\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              {
+                "$": "def",
+                "source_offset": 0,
+                "argument_groups": [
+                  {
+                    "kind": "required",
+                    "raw": "\\f",
+                    "start": 4,
+                    "end": 6
+                  },
+                  {
+                    "kind": "required",
+                    "raw": "\\usepackage{xcolor}",
+                    "start": 6,
+                    "end": 29
+                  }
+                ],
+                "_": [
+                  "\\f",
+                  {
+                    "$": "curly_group",
+                    "_": [
+                      {
+                        "$": "usepackage",
+                        "source_offset": 7,
+                        "argument_groups": [
+                          {
+                            "kind": "required",
+                            "raw": "xcolor",
+                            "start": 18,
+                            "end": 26
+                          }
+                        ],
+                        "_": [
+                          "xcolor"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "$": "usepackage",
+            "source_offset": 29,
+            "argument_groups": [
+              {
+                "kind": "required",
+                "raw": "xcolor",
+                "start": 29,
+                "end": 29
+              }
+            ],
+            "_": [
+              "xcolor"
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 29,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "A"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "source": "\\def\\f{\\usepackage{xcolor}}\\f\\begin{document}A\\end{document}"
+    },
+    {
+      "tex": {
+        "text": "\\def\\n{B}\\title{ABC}\\begin{document}A\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              {
+                "$": "def",
+                "source_offset": 0,
+                "argument_groups": [
+                  {
+                    "kind": "required",
+                    "raw": "\\n",
+                    "start": 4,
+                    "end": 6
+                  },
+                  {
+                    "kind": "required",
+                    "raw": "B",
+                    "start": 6,
+                    "end": 9
+                  }
+                ],
+                "_": [
+                  "\\n",
+                  {
+                    "$": "curly_group",
+                    "_": [
+                      "B"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "$": "title",
+            "source_offset": 9,
+            "argument_groups": [
+              {
+                "kind": "required",
+                "raw": "ABC",
+                "start": 15,
+                "end": 22
+              }
+            ],
+            "_": [
+              "ABC"
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 22,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "A"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "source": "\\def\\n{B}\\title{A\\n C}\\begin{document}A\\end{document}"
+    },
+    {
+      "tex": {
+        "text": "\\def\\n{X}\\author{X}\\date{X}\\begin{document}A\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              {
+                "$": "def",
+                "source_offset": 0,
+                "argument_groups": [
+                  {
+                    "kind": "required",
+                    "raw": "\\n",
+                    "start": 4,
+                    "end": 6
+                  },
+                  {
+                    "kind": "required",
+                    "raw": "X",
+                    "start": 6,
+                    "end": 9
+                  }
+                ],
+                "_": [
+                  "\\n",
+                  {
+                    "$": "curly_group",
+                    "_": [
+                      "X"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "$": "author",
+            "source_offset": 9,
+            "argument_groups": [
+              {
+                "kind": "required",
+                "raw": "X",
+                "start": 16,
+                "end": 20
+              }
+            ],
+            "_": [
+              "X"
+            ]
+          },
+          {
+            "$": "date",
+            "source_offset": 20,
+            "argument_groups": [
+              {
+                "kind": "required",
+                "raw": "X",
+                "start": 25,
+                "end": 29
+              }
+            ],
+            "_": [
+              "X"
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 29,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "A"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "source": "\\def\\n{X}\\author{\\n}\\date{\\n}\\begin{document}A\\end{document}"
+    },
+    {
+      "tex": {
+        "text": "\\def\\n{xcolor}\\def\\o{draft}\\usepackage[\\o ]{xcolor}\\begin{document}A\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              {
+                "$": "def",
+                "source_offset": 0,
+                "argument_groups": [
+                  {
+                    "kind": "required",
+                    "raw": "\\n",
+                    "start": 4,
+                    "end": 6
+                  },
+                  {
+                    "kind": "required",
+                    "raw": "xcolor",
+                    "start": 6,
+                    "end": 14
+                  }
+                ],
+                "_": [
+                  "\\n",
+                  {
+                    "$": "curly_group",
+                    "_": [
+                      "xcolor"
+                    ]
+                  }
+                ]
+              },
+              {
+                "$": "def",
+                "source_offset": 14,
+                "argument_groups": [
+                  {
+                    "kind": "required",
+                    "raw": "\\o",
+                    "start": 18,
+                    "end": 20
+                  },
+                  {
+                    "kind": "required",
+                    "raw": "draft",
+                    "start": 20,
+                    "end": 46
+                  }
+                ],
+                "_": [
+                  "\\o",
+                  {
+                    "$": "curly_group",
+                    "_": [
+                      "draft"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "$": "usepackage",
+            "source_offset": 46,
+            "argument_groups": [
+              {
+                "kind": "optional",
+                "raw": "\\o ",
+                "start": 46,
+                "end": 46
+              },
+              {
+                "kind": "required",
+                "raw": "xcolor",
+                "start": 46,
+                "end": 46
+              }
+            ],
+            "_": [
+              {
+                "$": "brack_group",
+                "_": [
+                  {
+                    "$": "o",
+                    "source_offset": 46,
+                    "argument_groups": []
+                  },
+                  " "
+                ]
+              },
+              "xcolor"
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 46,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "A"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "source": "\\def\\n{xcolor}\\def\\o{draft}\\usepackage[\\o]{\\n}\\begin{document}A\\end{document}"
+    }
+  ],
+  "local": {
+    "tex": {
+      "text": "\\documentclass{article}\\usepackage{amsmath}\n\\usepackage{xcolor}\\begin{document}A\\end{document}\n",
+      "messages": [
+        "\\z@=\\dimen10",
+        "\\p@=\\dimen11",
+        "\\maxdimen=\\dimen12",
+        "\\z@skip=\\skip10",
+        "\\hideskip=\\skip11",
+        "\\@tempdima=\\dimen13",
+        "\\@tempdimb=\\dimen14",
+        "\\@tempdimc=\\dimen15",
+        "\\@tempcnta=\\count23",
+        "\\@tempcntb=\\count24",
+        "\\@tempskipa=\\skip12",
+        "\\@tempskipb=\\skip13",
+        "\\@temptokena=\\toks10",
+        "\\@tempboxa=\\box10",
+        "\\voidb@x=\\box11",
+        "\\textwidth=\\dimen16",
+        "\\textheight=\\dimen17",
+        "\\linewidth=\\dimen18",
+        "\\columnwidth=\\dimen19",
+        "\\columnsep=\\dimen20",
+        "\\columnseprule=\\dimen21",
+        "\\marginparwidth=\\dimen22",
+        "\\marginparsep=\\dimen23",
+        "\\marginparpush=\\dimen24",
+        "\\oddsidemargin=\\dimen25",
+        "\\evensidemargin=\\dimen26",
+        "\\topmargin=\\dimen27",
+        "\\headheight=\\dimen28",
+        "\\headsep=\\dimen29",
+        "\\footskip=\\dimen30",
+        "\\paperwidth=\\dimen31",
+        "\\paperheight=\\dimen32",
+        "\\fboxsep=\\dimen33",
+        "\\fboxrule=\\dimen34",
+        "\\arraycolsep=\\dimen35",
+        "\\tabcolsep=\\dimen36",
+        "\\arrayrulewidth=\\dimen37",
+        "\\doublerulesep=\\dimen38",
+        "\\labelwidth=\\dimen39",
+        "\\labelsep=\\dimen40",
+        "\\itemindent=\\dimen41",
+        "\\listparindent=\\dimen42",
+        "\\leftmargin=\\dimen43",
+        "\\rightmargin=\\dimen44",
+        "\\unitlength=\\dimen45",
+        "\\jot=\\dimen46",
+        "\\abovecaptionskip=\\skip14",
+        "\\belowcaptionskip=\\skip15",
+        "\\smallskipamount=\\skip16",
+        "\\medskipamount=\\skip17",
+        "\\bigskipamount=\\skip18",
+        "\\topsep=\\skip19",
+        "\\itemsep=\\skip20",
+        "\\parsep=\\skip21",
+        "\\partopsep=\\skip22",
+        "\\floatsep=\\skip23",
+        "\\textfloatsep=\\skip24",
+        "\\intextsep=\\skip25"
+      ],
+      "diagnostics": [],
+      "packages": [
+        "script-decl-base",
+        "script-decl-require"
+      ]
+    },
+    "latex": {
+      "$": "latex_document",
+      "tex_diagnostics": [],
+      "tex_packages": [
+        "script-decl-base",
+        "script-decl-require"
+      ],
+      "_": [
+        {
+          "$": "documentclass",
+          "source_offset": 33,
+          "argument_groups": [
+            {
+              "kind": "required",
+              "raw": "article",
+              "start": 33,
+              "end": 33
+            }
+          ],
+          "_": [
+            "article"
+          ]
+        },
+        {
+          "$": "usepackage",
+          "source_offset": 33,
+          "argument_groups": [
+            {
+              "kind": "required",
+              "raw": "amsmath",
+              "start": 44,
+              "end": 53
+            }
+          ],
+          "_": [
+            "amsmath"
+          ]
+        },
+        {
+          "$": "paragraph",
+          "_": [
+            "\n"
+          ]
+        },
+        {
+          "$": "usepackage",
+          "source_offset": 87,
+          "argument_groups": [
+            {
+              "kind": "required",
+              "raw": "xcolor",
+              "start": 87,
+              "end": 87
+            }
+          ],
+          "_": [
+            "xcolor"
+          ]
+        },
+        {
+          "$": "document",
+          "source_offset": 87,
+          "_": [
+            {
+              "$": "paragraph",
+              "_": [
+                "A"
+              ]
+            }
+          ]
+        },
+        {
+          "$": "paragraph",
+          "_": [
+            "\n"
+          ]
+        }
+      ]
+    },
+    "source": "test/lambda/latex/fixtures/local_packages/script-decl-main.tex"
+  }
+}

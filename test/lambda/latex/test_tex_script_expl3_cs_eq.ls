@@ -1,13 +1,14 @@
 import profile: lambda.doc.latex.tex_engine.profile
 import reconstruct: lambda.doc.latex.tex_engine.reconstruct
 import digest: lambda.doc.latex.tex_engine.digest
-let kernel=input(sys.lambda.home ++ "/package/doc/latex/tex_engine/kernel.tex","text")^;
-fn check(source) any^ {
- let r=profile.expand_with_kernel(source,kernel,{script_expl3:true,echo_definitions:true,adapters:[],resources:{local:{},bundled:{}}},100000)^;
+import compare: ._tex_expl3_compare
+let kernel=compare.kernel;
+fn check(source, fresh = false) any^ {
+ let r=compare.expand(source,fresh)^;
  let n=parse(source,{type:"tex"})^;let b=reconstruct.reconstruct(r)^;
  {issue:r.issue,reconstruct_issue:b.issue,text_match:b.text==n.text,messages_match:r.messages==n.messages,diagnostics_match:r.diagnostic_records==n.diagnostics}
 }
-[for(source in [
+let sources = [
   "\\ExplSyntaxOn\\meaning\\cs_if_eq:NNTF/\\meaning\\cs_if_eq:NNT/\\meaning\\cs_if_eq:NNF/\\meaning\\cs_if_eq_p:NN\\ExplSyntaxOff",
   "\\ExplSyntaxOn\\show\\cs_if_eq:NNTF\\show\\cs_if_eq_p:NN\\ExplSyntaxOff",
   "\\ExplSyntaxOn\\cs_if_eq:NNTF\\foo\\bar{Y}{N}\\ExplSyntaxOff",
@@ -38,10 +39,11 @@ fn check(source) any^ {
   "\\ExplSyntaxOn\\cs_if_eq:NNTF\\unknown\\undefined{Y}{N}\\ExplSyntaxOff",
   "\\ExplSyntaxOn\\cs_if_eq:NNTF\\c_zero_int\\c_one_int{Y}{N}\\ExplSyntaxOff",
   "\\ExplSyntaxOn\\cs_if_eq:NNTF\\cs_if_eq:NNTF\\cs_if_eq:NNTF{Y}{N}\\ExplSyntaxOff"
-]) check(source)^]
+];
+[for(source in sources) check(source,source==sources[0])^]
 
 fn guarded(source) any^ {
- let r=profile.expand_with_kernel(source,kernel,{script_expl3:true,echo_definitions:true,adapters:[],resources:{local:{},bundled:{}}},100000)^;
+ let r=compare.expand(source)^;
  let d=digest.digest(r)^;
  d.ast==null and d.issue=="latex-digest-unsupported" and d.unsupported=="expl3 control-sequence equality source mapping"
 }

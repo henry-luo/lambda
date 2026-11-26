@@ -1,0 +1,401 @@
+[[{
+      text: "0.0pt\\relaxX",
+      messages: ["\\z@=\\dimen10", "\\p@=\\dimen11", "\\maxdimen=\\dimen12", "\\z@skip=\\skip10", "\\hideskip=\\skip11", "\\@tempdima=\\dimen13", "\\@tempdimb=\\dimen14", "\\@tempdimc=\\dimen15", "\\@tempcnta=\\count23", "\\@tempcntb=\\count24", "\\@tempskipa=\\skip12", "\\@tempskipb=\\skip13", "\\@temptokena=\\toks10", "\\@tempboxa=\\box10", "\\voidb@x=\\box11", "\\textwidth=\\dimen16", "\\textheight=\\dimen17", "\\linewidth=\\dimen18", "\\columnwidth=\\dimen19", "\\columnsep=\\dimen20", "\\columnseprule=\\dimen21", "\\marginparwidth=\\dimen22", "\\marginparsep=\\dimen23", "\\marginparpush=\\dimen24", "\\oddsidemargin=\\dimen25", "\\evensidemargin=\\dimen26", "\\topmargin=\\dimen27", "\\headheight=\\dimen28", "\\headsep=\\dimen29", "\\footskip=\\dimen30", "\\paperwidth=\\dimen31", "\\paperheight=\\dimen32", "\\fboxsep=\\dimen33", "\\fboxrule=\\dimen34", "\\arraycolsep=\\dimen35", "\\tabcolsep=\\dimen36", "\\arrayrulewidth=\\dimen37", "\\doublerulesep=\\dimen38", "\\labelwidth=\\dimen39", "\\labelsep=\\dimen40", "\\itemindent=\\dimen41", "\\listparindent=\\dimen42", "\\leftmargin=\\dimen43", "\\rightmargin=\\dimen44", "\\unitlength=\\dimen45", "\\jot=\\dimen46", "\\abovecaptionskip=\\skip14", "\\belowcaptionskip=\\skip15", "\\smallskipamount=\\skip16", "\\medskipamount=\\skip17", "\\bigskipamount=\\skip18", "\\topsep=\\skip19", "\\itemsep=\\skip20", "\\parsep=\\skip21", "\\partopsep=\\skip22", "\\floatsep=\\skip23", "\\textfloatsep=\\skip24", "\\intextsep=\\skip25"],
+      diagnostics: [{
+          code: "tex-font-params",
+          message: "Font cmr10 has only 8 fontdimen parameters",
+          offset: 92,
+          line: 1
+        }],
+      issue: null
+    }, {
+      text: "0.0pt\\relaxX",
+      messages: ["\\z@=\\dimen10", "\\p@=\\dimen11", "\\maxdimen=\\dimen12", "\\z@skip=\\skip10", "\\hideskip=\\skip11", "\\@tempdima=\\dimen13", "\\@tempdimb=\\dimen14", "\\@tempdimc=\\dimen15", "\\@tempcnta=\\count23", "\\@tempcntb=\\count24", "\\@tempskipa=\\skip12", "\\@tempskipb=\\skip13", "\\@temptokena=\\toks10", "\\@tempboxa=\\box10", "\\voidb@x=\\box11", "\\textwidth=\\dimen16", "\\textheight=\\dimen17", "\\linewidth=\\dimen18", "\\columnwidth=\\dimen19", "\\columnsep=\\dimen20", "\\columnseprule=\\dimen21", "\\marginparwidth=\\dimen22", "\\marginparsep=\\dimen23", "\\marginparpush=\\dimen24", "\\oddsidemargin=\\dimen25", "\\evensidemargin=\\dimen26", "\\topmargin=\\dimen27", "\\headheight=\\dimen28", "\\headsep=\\dimen29", "\\footskip=\\dimen30", "\\paperwidth=\\dimen31", "\\paperheight=\\dimen32", "\\fboxsep=\\dimen33", "\\fboxrule=\\dimen34", "\\arraycolsep=\\dimen35", "\\tabcolsep=\\dimen36", "\\arrayrulewidth=\\dimen37", "\\doublerulesep=\\dimen38", "\\labelwidth=\\dimen39", "\\labelsep=\\dimen40", "\\itemindent=\\dimen41", "\\listparindent=\\dimen42", "\\leftmargin=\\dimen43", "\\rightmargin=\\dimen44", "\\unitlength=\\dimen45", "\\jot=\\dimen46", "\\abovecaptionskip=\\skip14", "\\belowcaptionskip=\\skip15", "\\smallskipamount=\\skip16", "\\medskipamount=\\skip17", "\\bigskipamount=\\skip18", "\\topsep=\\skip19", "\\itemsep=\\skip20", "\\parsep=\\skip21", "\\partopsep=\\skip22", "\\floatsep=\\skip23", "\\textfloatsep=\\skip24", "\\intextsep=\\skip25"],
+      diagnostics: [{
+          code: "tex-font-params",
+          message: "Font cmr10 has only 8 fontdimen parameters",
+          offset: 93,
+          line: 1
+        }],
+      issue: null
+    }, {
+      text: "0.0pt\\relaxX",
+      messages: ["\\z@=\\dimen10", "\\p@=\\dimen11", "\\maxdimen=\\dimen12", "\\z@skip=\\skip10", "\\hideskip=\\skip11", "\\@tempdima=\\dimen13", "\\@tempdimb=\\dimen14", "\\@tempdimc=\\dimen15", "\\@tempcnta=\\count23", "\\@tempcntb=\\count24", "\\@tempskipa=\\skip12", "\\@tempskipb=\\skip13", "\\@temptokena=\\toks10", "\\@tempboxa=\\box10", "\\voidb@x=\\box11", "\\textwidth=\\dimen16", "\\textheight=\\dimen17", "\\linewidth=\\dimen18", "\\columnwidth=\\dimen19", "\\columnsep=\\dimen20", "\\columnseprule=\\dimen21", "\\marginparwidth=\\dimen22", "\\marginparsep=\\dimen23", "\\marginparpush=\\dimen24", "\\oddsidemargin=\\dimen25", "\\evensidemargin=\\dimen26", "\\topmargin=\\dimen27", "\\headheight=\\dimen28", "\\headsep=\\dimen29", "\\footskip=\\dimen30", "\\paperwidth=\\dimen31", "\\paperheight=\\dimen32", "\\fboxsep=\\dimen33", "\\fboxrule=\\dimen34", "\\arraycolsep=\\dimen35", "\\tabcolsep=\\dimen36", "\\arrayrulewidth=\\dimen37", "\\doublerulesep=\\dimen38", "\\labelwidth=\\dimen39", "\\labelsep=\\dimen40", "\\itemindent=\\dimen41", "\\listparindent=\\dimen42", "\\leftmargin=\\dimen43", "\\rightmargin=\\dimen44", "\\unitlength=\\dimen45", "\\jot=\\dimen46", "\\abovecaptionskip=\\skip14", "\\belowcaptionskip=\\skip15", "\\smallskipamount=\\skip16", "\\medskipamount=\\skip17", "\\bigskipamount=\\skip18", "\\topsep=\\skip19", "\\itemsep=\\skip20", "\\parsep=\\skip21", "\\partopsep=\\skip22", "\\floatsep=\\skip23", "\\textfloatsep=\\skip24", "\\intextsep=\\skip25"],
+      diagnostics: [{
+          code: "tex-font-params",
+          message: "Font cmr10 has only 8 fontdimen parameters",
+          offset: 92,
+          line: 1
+        }],
+      issue: null
+    }, {
+      text: "\\relaxX",
+      messages: ["\\z@=\\dimen10", "\\p@=\\dimen11", "\\maxdimen=\\dimen12", "\\z@skip=\\skip10", "\\hideskip=\\skip11", "\\@tempdima=\\dimen13", "\\@tempdimb=\\dimen14", "\\@tempdimc=\\dimen15", "\\@tempcnta=\\count23", "\\@tempcntb=\\count24", "\\@tempskipa=\\skip12", "\\@tempskipb=\\skip13", "\\@temptokena=\\toks10", "\\@tempboxa=\\box10", "\\voidb@x=\\box11", "\\textwidth=\\dimen16", "\\textheight=\\dimen17", "\\linewidth=\\dimen18", "\\columnwidth=\\dimen19", "\\columnsep=\\dimen20", "\\columnseprule=\\dimen21", "\\marginparwidth=\\dimen22", "\\marginparsep=\\dimen23", "\\marginparpush=\\dimen24", "\\oddsidemargin=\\dimen25", "\\evensidemargin=\\dimen26", "\\topmargin=\\dimen27", "\\headheight=\\dimen28", "\\headsep=\\dimen29", "\\footskip=\\dimen30", "\\paperwidth=\\dimen31", "\\paperheight=\\dimen32", "\\fboxsep=\\dimen33", "\\fboxrule=\\dimen34", "\\arraycolsep=\\dimen35", "\\tabcolsep=\\dimen36", "\\arrayrulewidth=\\dimen37", "\\doublerulesep=\\dimen38", "\\labelwidth=\\dimen39", "\\labelsep=\\dimen40", "\\itemindent=\\dimen41", "\\listparindent=\\dimen42", "\\leftmargin=\\dimen43", "\\rightmargin=\\dimen44", "\\unitlength=\\dimen45", "\\jot=\\dimen46", "\\abovecaptionskip=\\skip14", "\\belowcaptionskip=\\skip15", "\\smallskipamount=\\skip16", "\\medskipamount=\\skip17", "\\bigskipamount=\\skip18", "\\topsep=\\skip19", "\\itemsep=\\skip20", "\\parsep=\\skip21", "\\partopsep=\\skip22", "\\floatsep=\\skip23", "\\textfloatsep=\\skip24", "\\intextsep=\\skip25"],
+      diagnostics: [{
+          code: "tex-font-params",
+          message: "Font cmr10 has only 8 fontdimen parameters",
+          offset: 88,
+          line: 1
+        }],
+      issue: null
+    }, {
+      text: "\\relaxX",
+      messages: ["\\z@=\\dimen10", "\\p@=\\dimen11", "\\maxdimen=\\dimen12", "\\z@skip=\\skip10", "\\hideskip=\\skip11", "\\@tempdima=\\dimen13", "\\@tempdimb=\\dimen14", "\\@tempdimc=\\dimen15", "\\@tempcnta=\\count23", "\\@tempcntb=\\count24", "\\@tempskipa=\\skip12", "\\@tempskipb=\\skip13", "\\@temptokena=\\toks10", "\\@tempboxa=\\box10", "\\voidb@x=\\box11", "\\textwidth=\\dimen16", "\\textheight=\\dimen17", "\\linewidth=\\dimen18", "\\columnwidth=\\dimen19", "\\columnsep=\\dimen20", "\\columnseprule=\\dimen21", "\\marginparwidth=\\dimen22", "\\marginparsep=\\dimen23", "\\marginparpush=\\dimen24", "\\oddsidemargin=\\dimen25", "\\evensidemargin=\\dimen26", "\\topmargin=\\dimen27", "\\headheight=\\dimen28", "\\headsep=\\dimen29", "\\footskip=\\dimen30", "\\paperwidth=\\dimen31", "\\paperheight=\\dimen32", "\\fboxsep=\\dimen33", "\\fboxrule=\\dimen34", "\\arraycolsep=\\dimen35", "\\tabcolsep=\\dimen36", "\\arrayrulewidth=\\dimen37", "\\doublerulesep=\\dimen38", "\\labelwidth=\\dimen39", "\\labelsep=\\dimen40", "\\itemindent=\\dimen41", "\\listparindent=\\dimen42", "\\leftmargin=\\dimen43", "\\rightmargin=\\dimen44", "\\unitlength=\\dimen45", "\\jot=\\dimen46", "\\abovecaptionskip=\\skip14", "\\belowcaptionskip=\\skip15", "\\smallskipamount=\\skip16", "\\medskipamount=\\skip17", "\\bigskipamount=\\skip18", "\\topsep=\\skip19", "\\itemsep=\\skip20", "\\parsep=\\skip21", "\\partopsep=\\skip22", "\\floatsep=\\skip23", "\\textfloatsep=\\skip24", "\\intextsep=\\skip25"],
+      diagnostics: [{
+          code: "tex-font-params",
+          message: "Font cmr10 has only 8 fontdimen parameters",
+          offset: 89,
+          line: 1
+        }],
+      issue: null
+    }, {
+      text: "\\relaxX",
+      messages: ["\\z@=\\dimen10", "\\p@=\\dimen11", "\\maxdimen=\\dimen12", "\\z@skip=\\skip10", "\\hideskip=\\skip11", "\\@tempdima=\\dimen13", "\\@tempdimb=\\dimen14", "\\@tempdimc=\\dimen15", "\\@tempcnta=\\count23", "\\@tempcntb=\\count24", "\\@tempskipa=\\skip12", "\\@tempskipb=\\skip13", "\\@temptokena=\\toks10", "\\@tempboxa=\\box10", "\\voidb@x=\\box11", "\\textwidth=\\dimen16", "\\textheight=\\dimen17", "\\linewidth=\\dimen18", "\\columnwidth=\\dimen19", "\\columnsep=\\dimen20", "\\columnseprule=\\dimen21", "\\marginparwidth=\\dimen22", "\\marginparsep=\\dimen23", "\\marginparpush=\\dimen24", "\\oddsidemargin=\\dimen25", "\\evensidemargin=\\dimen26", "\\topmargin=\\dimen27", "\\headheight=\\dimen28", "\\headsep=\\dimen29", "\\footskip=\\dimen30", "\\paperwidth=\\dimen31", "\\paperheight=\\dimen32", "\\fboxsep=\\dimen33", "\\fboxrule=\\dimen34", "\\arraycolsep=\\dimen35", "\\tabcolsep=\\dimen36", "\\arrayrulewidth=\\dimen37", "\\doublerulesep=\\dimen38", "\\labelwidth=\\dimen39", "\\labelsep=\\dimen40", "\\itemindent=\\dimen41", "\\listparindent=\\dimen42", "\\leftmargin=\\dimen43", "\\rightmargin=\\dimen44", "\\unitlength=\\dimen45", "\\jot=\\dimen46", "\\abovecaptionskip=\\skip14", "\\belowcaptionskip=\\skip15", "\\smallskipamount=\\skip16", "\\medskipamount=\\skip17", "\\bigskipamount=\\skip18", "\\topsep=\\skip19", "\\itemsep=\\skip20", "\\parsep=\\skip21", "\\partopsep=\\skip22", "\\floatsep=\\skip23", "\\textfloatsep=\\skip24", "\\intextsep=\\skip25"],
+      diagnostics: [{
+          code: "tex-font-params",
+          message: "Font cmr10 has only 8 fontdimen parameters",
+          offset: 88,
+          line: 1
+        }],
+      issue: null
+    }, {
+      text: "0.0001pt\\relaxX",
+      messages: ["\\z@=\\dimen10", "\\p@=\\dimen11", "\\maxdimen=\\dimen12", "\\z@skip=\\skip10", "\\hideskip=\\skip11", "\\@tempdima=\\dimen13", "\\@tempdimb=\\dimen14", "\\@tempdimc=\\dimen15", "\\@tempcnta=\\count23", "\\@tempcntb=\\count24", "\\@tempskipa=\\skip12", "\\@tempskipb=\\skip13", "\\@temptokena=\\toks10", "\\@tempboxa=\\box10", "\\voidb@x=\\box11", "\\textwidth=\\dimen16", "\\textheight=\\dimen17", "\\linewidth=\\dimen18", "\\columnwidth=\\dimen19", "\\columnsep=\\dimen20", "\\columnseprule=\\dimen21", "\\marginparwidth=\\dimen22", "\\marginparsep=\\dimen23", "\\marginparpush=\\dimen24", "\\oddsidemargin=\\dimen25", "\\evensidemargin=\\dimen26", "\\topmargin=\\dimen27", "\\headheight=\\dimen28", "\\headsep=\\dimen29", "\\footskip=\\dimen30", "\\paperwidth=\\dimen31", "\\paperheight=\\dimen32", "\\fboxsep=\\dimen33", "\\fboxrule=\\dimen34", "\\arraycolsep=\\dimen35", "\\tabcolsep=\\dimen36", "\\arrayrulewidth=\\dimen37", "\\doublerulesep=\\dimen38", "\\labelwidth=\\dimen39", "\\labelsep=\\dimen40", "\\itemindent=\\dimen41", "\\listparindent=\\dimen42", "\\leftmargin=\\dimen43", "\\rightmargin=\\dimen44", "\\unitlength=\\dimen45", "\\jot=\\dimen46", "\\abovecaptionskip=\\skip14", "\\belowcaptionskip=\\skip15", "\\smallskipamount=\\skip16", "\\medskipamount=\\skip17", "\\bigskipamount=\\skip18", "\\topsep=\\skip19", "\\itemsep=\\skip20", "\\parsep=\\skip21", "\\partopsep=\\skip22", "\\floatsep=\\skip23", "\\textfloatsep=\\skip24", "\\intextsep=\\skip25"],
+      diagnostics: [],
+      issue: null
+    }, {
+      text: "0.0pt\\relaxX",
+      messages: ["\\z@=\\dimen10", "\\p@=\\dimen11", "\\maxdimen=\\dimen12", "\\z@skip=\\skip10", "\\hideskip=\\skip11", "\\@tempdima=\\dimen13", "\\@tempdimb=\\dimen14", "\\@tempdimc=\\dimen15", "\\@tempcnta=\\count23", "\\@tempcntb=\\count24", "\\@tempskipa=\\skip12", "\\@tempskipb=\\skip13", "\\@temptokena=\\toks10", "\\@tempboxa=\\box10", "\\voidb@x=\\box11", "\\textwidth=\\dimen16", "\\textheight=\\dimen17", "\\linewidth=\\dimen18", "\\columnwidth=\\dimen19", "\\columnsep=\\dimen20", "\\columnseprule=\\dimen21", "\\marginparwidth=\\dimen22", "\\marginparsep=\\dimen23", "\\marginparpush=\\dimen24", "\\oddsidemargin=\\dimen25", "\\evensidemargin=\\dimen26", "\\topmargin=\\dimen27", "\\headheight=\\dimen28", "\\headsep=\\dimen29", "\\footskip=\\dimen30", "\\paperwidth=\\dimen31", "\\paperheight=\\dimen32", "\\fboxsep=\\dimen33", "\\fboxrule=\\dimen34", "\\arraycolsep=\\dimen35", "\\tabcolsep=\\dimen36", "\\arrayrulewidth=\\dimen37", "\\doublerulesep=\\dimen38", "\\labelwidth=\\dimen39", "\\labelsep=\\dimen40", "\\itemindent=\\dimen41", "\\listparindent=\\dimen42", "\\leftmargin=\\dimen43", "\\rightmargin=\\dimen44", "\\unitlength=\\dimen45", "\\jot=\\dimen46", "\\abovecaptionskip=\\skip14", "\\belowcaptionskip=\\skip15", "\\smallskipamount=\\skip16", "\\medskipamount=\\skip17", "\\bigskipamount=\\skip18", "\\topsep=\\skip19", "\\itemsep=\\skip20", "\\parsep=\\skip21", "\\partopsep=\\skip22", "\\floatsep=\\skip23", "\\textfloatsep=\\skip24", "\\intextsep=\\skip25"],
+      diagnostics: [{
+          code: "tex-font-params",
+          message: "Font cmr10 has only 8 fontdimen parameters",
+          offset: 96,
+          line: 1
+        }],
+      issue: null
+    }, {
+      text: "0.0pt\\relaxX",
+      messages: ["\\z@=\\dimen10", "\\p@=\\dimen11", "\\maxdimen=\\dimen12", "\\z@skip=\\skip10", "\\hideskip=\\skip11", "\\@tempdima=\\dimen13", "\\@tempdimb=\\dimen14", "\\@tempdimc=\\dimen15", "\\@tempcnta=\\count23", "\\@tempcntb=\\count24", "\\@tempskipa=\\skip12", "\\@tempskipb=\\skip13", "\\@temptokena=\\toks10", "\\@tempboxa=\\box10", "\\voidb@x=\\box11", "\\textwidth=\\dimen16", "\\textheight=\\dimen17", "\\linewidth=\\dimen18", "\\columnwidth=\\dimen19", "\\columnsep=\\dimen20", "\\columnseprule=\\dimen21", "\\marginparwidth=\\dimen22", "\\marginparsep=\\dimen23", "\\marginparpush=\\dimen24", "\\oddsidemargin=\\dimen25", "\\evensidemargin=\\dimen26", "\\topmargin=\\dimen27", "\\headheight=\\dimen28", "\\headsep=\\dimen29", "\\footskip=\\dimen30", "\\paperwidth=\\dimen31", "\\paperheight=\\dimen32", "\\fboxsep=\\dimen33", "\\fboxrule=\\dimen34", "\\arraycolsep=\\dimen35", "\\tabcolsep=\\dimen36", "\\arrayrulewidth=\\dimen37", "\\doublerulesep=\\dimen38", "\\labelwidth=\\dimen39", "\\labelsep=\\dimen40", "\\itemindent=\\dimen41", "\\listparindent=\\dimen42", "\\leftmargin=\\dimen43", "\\rightmargin=\\dimen44", "\\unitlength=\\dimen45", "\\jot=\\dimen46", "\\abovecaptionskip=\\skip14", "\\belowcaptionskip=\\skip15", "\\smallskipamount=\\skip16", "\\medskipamount=\\skip17", "\\bigskipamount=\\skip18", "\\topsep=\\skip19", "\\itemsep=\\skip20", "\\parsep=\\skip21", "\\partopsep=\\skip22", "\\floatsep=\\skip23", "\\textfloatsep=\\skip24", "\\intextsep=\\skip25"],
+      diagnostics: [{
+          code: "tex-font-params",
+          message: "Font cmr10 has only 7 fontdimen parameters",
+          offset: 71,
+          line: 1
+        }],
+      issue: null
+    }, {
+      text: "0.0pt\\relaxX",
+      messages: ["\\z@=\\dimen10", "\\p@=\\dimen11", "\\maxdimen=\\dimen12", "\\z@skip=\\skip10", "\\hideskip=\\skip11", "\\@tempdima=\\dimen13", "\\@tempdimb=\\dimen14", "\\@tempdimc=\\dimen15", "\\@tempcnta=\\count23", "\\@tempcntb=\\count24", "\\@tempskipa=\\skip12", "\\@tempskipb=\\skip13", "\\@temptokena=\\toks10", "\\@tempboxa=\\box10", "\\voidb@x=\\box11", "\\textwidth=\\dimen16", "\\textheight=\\dimen17", "\\linewidth=\\dimen18", "\\columnwidth=\\dimen19", "\\columnsep=\\dimen20", "\\columnseprule=\\dimen21", "\\marginparwidth=\\dimen22", "\\marginparsep=\\dimen23", "\\marginparpush=\\dimen24", "\\oddsidemargin=\\dimen25", "\\evensidemargin=\\dimen26", "\\topmargin=\\dimen27", "\\headheight=\\dimen28", "\\headsep=\\dimen29", "\\footskip=\\dimen30", "\\paperwidth=\\dimen31", "\\paperheight=\\dimen32", "\\fboxsep=\\dimen33", "\\fboxrule=\\dimen34", "\\arraycolsep=\\dimen35", "\\tabcolsep=\\dimen36", "\\arrayrulewidth=\\dimen37", "\\doublerulesep=\\dimen38", "\\labelwidth=\\dimen39", "\\labelsep=\\dimen40", "\\itemindent=\\dimen41", "\\listparindent=\\dimen42", "\\leftmargin=\\dimen43", "\\rightmargin=\\dimen44", "\\unitlength=\\dimen45", "\\jot=\\dimen46", "\\abovecaptionskip=\\skip14", "\\belowcaptionskip=\\skip15", "\\smallskipamount=\\skip16", "\\medskipamount=\\skip17", "\\bigskipamount=\\skip18", "\\topsep=\\skip19", "\\itemsep=\\skip20", "\\parsep=\\skip21", "\\partopsep=\\skip22", "\\floatsep=\\skip23", "\\textfloatsep=\\skip24", "\\intextsep=\\skip25"],
+      diagnostics: [{
+          code: "tex-font-params",
+          message: "Font cmr10 has only 7 fontdimen parameters",
+          offset: 72,
+          line: 1
+        }],
+      issue: null
+    }, {
+      text: "0.0pt\\relaxX",
+      messages: ["\\z@=\\dimen10", "\\p@=\\dimen11", "\\maxdimen=\\dimen12", "\\z@skip=\\skip10", "\\hideskip=\\skip11", "\\@tempdima=\\dimen13", "\\@tempdimb=\\dimen14", "\\@tempdimc=\\dimen15", "\\@tempcnta=\\count23", "\\@tempcntb=\\count24", "\\@tempskipa=\\skip12", "\\@tempskipb=\\skip13", "\\@temptokena=\\toks10", "\\@tempboxa=\\box10", "\\voidb@x=\\box11", "\\textwidth=\\dimen16", "\\textheight=\\dimen17", "\\linewidth=\\dimen18", "\\columnwidth=\\dimen19", "\\columnsep=\\dimen20", "\\columnseprule=\\dimen21", "\\marginparwidth=\\dimen22", "\\marginparsep=\\dimen23", "\\marginparpush=\\dimen24", "\\oddsidemargin=\\dimen25", "\\evensidemargin=\\dimen26", "\\topmargin=\\dimen27", "\\headheight=\\dimen28", "\\headsep=\\dimen29", "\\footskip=\\dimen30", "\\paperwidth=\\dimen31", "\\paperheight=\\dimen32", "\\fboxsep=\\dimen33", "\\fboxrule=\\dimen34", "\\arraycolsep=\\dimen35", "\\tabcolsep=\\dimen36", "\\arrayrulewidth=\\dimen37", "\\doublerulesep=\\dimen38", "\\labelwidth=\\dimen39", "\\labelsep=\\dimen40", "\\itemindent=\\dimen41", "\\listparindent=\\dimen42", "\\leftmargin=\\dimen43", "\\rightmargin=\\dimen44", "\\unitlength=\\dimen45", "\\jot=\\dimen46", "\\abovecaptionskip=\\skip14", "\\belowcaptionskip=\\skip15", "\\smallskipamount=\\skip16", "\\medskipamount=\\skip17", "\\bigskipamount=\\skip18", "\\topsep=\\skip19", "\\itemsep=\\skip20", "\\parsep=\\skip21", "\\partopsep=\\skip22", "\\floatsep=\\skip23", "\\textfloatsep=\\skip24", "\\intextsep=\\skip25"],
+      diagnostics: [{
+          code: "tex-font-params",
+          message: "Font cmr10 has only 7 fontdimen parameters",
+          offset: 71,
+          line: 1
+        }],
+      issue: null
+    }, {
+      text: "\\relaxX",
+      messages: ["\\z@=\\dimen10", "\\p@=\\dimen11", "\\maxdimen=\\dimen12", "\\z@skip=\\skip10", "\\hideskip=\\skip11", "\\@tempdima=\\dimen13", "\\@tempdimb=\\dimen14", "\\@tempdimc=\\dimen15", "\\@tempcnta=\\count23", "\\@tempcntb=\\count24", "\\@tempskipa=\\skip12", "\\@tempskipb=\\skip13", "\\@temptokena=\\toks10", "\\@tempboxa=\\box10", "\\voidb@x=\\box11", "\\textwidth=\\dimen16", "\\textheight=\\dimen17", "\\linewidth=\\dimen18", "\\columnwidth=\\dimen19", "\\columnsep=\\dimen20", "\\columnseprule=\\dimen21", "\\marginparwidth=\\dimen22", "\\marginparsep=\\dimen23", "\\marginparpush=\\dimen24", "\\oddsidemargin=\\dimen25", "\\evensidemargin=\\dimen26", "\\topmargin=\\dimen27", "\\headheight=\\dimen28", "\\headsep=\\dimen29", "\\footskip=\\dimen30", "\\paperwidth=\\dimen31", "\\paperheight=\\dimen32", "\\fboxsep=\\dimen33", "\\fboxrule=\\dimen34", "\\arraycolsep=\\dimen35", "\\tabcolsep=\\dimen36", "\\arrayrulewidth=\\dimen37", "\\doublerulesep=\\dimen38", "\\labelwidth=\\dimen39", "\\labelsep=\\dimen40", "\\itemindent=\\dimen41", "\\listparindent=\\dimen42", "\\leftmargin=\\dimen43", "\\rightmargin=\\dimen44", "\\unitlength=\\dimen45", "\\jot=\\dimen46", "\\abovecaptionskip=\\skip14", "\\belowcaptionskip=\\skip15", "\\smallskipamount=\\skip16", "\\medskipamount=\\skip17", "\\bigskipamount=\\skip18", "\\topsep=\\skip19", "\\itemsep=\\skip20", "\\parsep=\\skip21", "\\partopsep=\\skip22", "\\floatsep=\\skip23", "\\textfloatsep=\\skip24", "\\intextsep=\\skip25"],
+      diagnostics: [{
+          code: "tex-font-params",
+          message: "Font cmr10 has only 7 fontdimen parameters",
+          offset: 67,
+          line: 1
+        }],
+      issue: null
+    }, {
+      text: "\\relaxX",
+      messages: ["\\z@=\\dimen10", "\\p@=\\dimen11", "\\maxdimen=\\dimen12", "\\z@skip=\\skip10", "\\hideskip=\\skip11", "\\@tempdima=\\dimen13", "\\@tempdimb=\\dimen14", "\\@tempdimc=\\dimen15", "\\@tempcnta=\\count23", "\\@tempcntb=\\count24", "\\@tempskipa=\\skip12", "\\@tempskipb=\\skip13", "\\@temptokena=\\toks10", "\\@tempboxa=\\box10", "\\voidb@x=\\box11", "\\textwidth=\\dimen16", "\\textheight=\\dimen17", "\\linewidth=\\dimen18", "\\columnwidth=\\dimen19", "\\columnsep=\\dimen20", "\\columnseprule=\\dimen21", "\\marginparwidth=\\dimen22", "\\marginparsep=\\dimen23", "\\marginparpush=\\dimen24", "\\oddsidemargin=\\dimen25", "\\evensidemargin=\\dimen26", "\\topmargin=\\dimen27", "\\headheight=\\dimen28", "\\headsep=\\dimen29", "\\footskip=\\dimen30", "\\paperwidth=\\dimen31", "\\paperheight=\\dimen32", "\\fboxsep=\\dimen33", "\\fboxrule=\\dimen34", "\\arraycolsep=\\dimen35", "\\tabcolsep=\\dimen36", "\\arrayrulewidth=\\dimen37", "\\doublerulesep=\\dimen38", "\\labelwidth=\\dimen39", "\\labelsep=\\dimen40", "\\itemindent=\\dimen41", "\\listparindent=\\dimen42", "\\leftmargin=\\dimen43", "\\rightmargin=\\dimen44", "\\unitlength=\\dimen45", "\\jot=\\dimen46", "\\abovecaptionskip=\\skip14", "\\belowcaptionskip=\\skip15", "\\smallskipamount=\\skip16", "\\medskipamount=\\skip17", "\\bigskipamount=\\skip18", "\\topsep=\\skip19", "\\itemsep=\\skip20", "\\parsep=\\skip21", "\\partopsep=\\skip22", "\\floatsep=\\skip23", "\\textfloatsep=\\skip24", "\\intextsep=\\skip25"],
+      diagnostics: [{
+          code: "tex-font-params",
+          message: "Font cmr10 has only 7 fontdimen parameters",
+          offset: 68,
+          line: 1
+        }],
+      issue: null
+    }, {
+      text: "\\relaxX",
+      messages: ["\\z@=\\dimen10", "\\p@=\\dimen11", "\\maxdimen=\\dimen12", "\\z@skip=\\skip10", "\\hideskip=\\skip11", "\\@tempdima=\\dimen13", "\\@tempdimb=\\dimen14", "\\@tempdimc=\\dimen15", "\\@tempcnta=\\count23", "\\@tempcntb=\\count24", "\\@tempskipa=\\skip12", "\\@tempskipb=\\skip13", "\\@temptokena=\\toks10", "\\@tempboxa=\\box10", "\\voidb@x=\\box11", "\\textwidth=\\dimen16", "\\textheight=\\dimen17", "\\linewidth=\\dimen18", "\\columnwidth=\\dimen19", "\\columnsep=\\dimen20", "\\columnseprule=\\dimen21", "\\marginparwidth=\\dimen22", "\\marginparsep=\\dimen23", "\\marginparpush=\\dimen24", "\\oddsidemargin=\\dimen25", "\\evensidemargin=\\dimen26", "\\topmargin=\\dimen27", "\\headheight=\\dimen28", "\\headsep=\\dimen29", "\\footskip=\\dimen30", "\\paperwidth=\\dimen31", "\\paperheight=\\dimen32", "\\fboxsep=\\dimen33", "\\fboxrule=\\dimen34", "\\arraycolsep=\\dimen35", "\\tabcolsep=\\dimen36", "\\arrayrulewidth=\\dimen37", "\\doublerulesep=\\dimen38", "\\labelwidth=\\dimen39", "\\labelsep=\\dimen40", "\\itemindent=\\dimen41", "\\listparindent=\\dimen42", "\\leftmargin=\\dimen43", "\\rightmargin=\\dimen44", "\\unitlength=\\dimen45", "\\jot=\\dimen46", "\\abovecaptionskip=\\skip14", "\\belowcaptionskip=\\skip15", "\\smallskipamount=\\skip16", "\\medskipamount=\\skip17", "\\bigskipamount=\\skip18", "\\topsep=\\skip19", "\\itemsep=\\skip20", "\\parsep=\\skip21", "\\partopsep=\\skip22", "\\floatsep=\\skip23", "\\textfloatsep=\\skip24", "\\intextsep=\\skip25"],
+      diagnostics: [{
+          code: "tex-font-params",
+          message: "Font cmr10 has only 7 fontdimen parameters",
+          offset: 67,
+          line: 1
+        }],
+      issue: null
+    }, {
+      text: "0.0pt\\relaxX",
+      messages: ["\\z@=\\dimen10", "\\p@=\\dimen11", "\\maxdimen=\\dimen12", "\\z@skip=\\skip10", "\\hideskip=\\skip11", "\\@tempdima=\\dimen13", "\\@tempdimb=\\dimen14", "\\@tempdimc=\\dimen15", "\\@tempcnta=\\count23", "\\@tempcntb=\\count24", "\\@tempskipa=\\skip12", "\\@tempskipb=\\skip13", "\\@temptokena=\\toks10", "\\@tempboxa=\\box10", "\\voidb@x=\\box11", "\\textwidth=\\dimen16", "\\textheight=\\dimen17", "\\linewidth=\\dimen18", "\\columnwidth=\\dimen19", "\\columnsep=\\dimen20", "\\columnseprule=\\dimen21", "\\marginparwidth=\\dimen22", "\\marginparsep=\\dimen23", "\\marginparpush=\\dimen24", "\\oddsidemargin=\\dimen25", "\\evensidemargin=\\dimen26", "\\topmargin=\\dimen27", "\\headheight=\\dimen28", "\\headsep=\\dimen29", "\\footskip=\\dimen30", "\\paperwidth=\\dimen31", "\\paperheight=\\dimen32", "\\fboxsep=\\dimen33", "\\fboxrule=\\dimen34", "\\arraycolsep=\\dimen35", "\\tabcolsep=\\dimen36", "\\arrayrulewidth=\\dimen37", "\\doublerulesep=\\dimen38", "\\labelwidth=\\dimen39", "\\labelsep=\\dimen40", "\\itemindent=\\dimen41", "\\listparindent=\\dimen42", "\\leftmargin=\\dimen43", "\\rightmargin=\\dimen44", "\\unitlength=\\dimen45", "\\jot=\\dimen46", "\\abovecaptionskip=\\skip14", "\\belowcaptionskip=\\skip15", "\\smallskipamount=\\skip16", "\\medskipamount=\\skip17", "\\bigskipamount=\\skip18", "\\topsep=\\skip19", "\\itemsep=\\skip20", "\\parsep=\\skip21", "\\partopsep=\\skip22", "\\floatsep=\\skip23", "\\textfloatsep=\\skip24", "\\intextsep=\\skip25"],
+      diagnostics: [{
+          code: "tex-font-params",
+          message: "Font cmr10 has only 7 fontdimen parameters",
+          offset: 67,
+          line: 1
+        }, {
+          code: "tex-font-params",
+          message: "Font cmr10 has only 7 fontdimen parameters",
+          offset: 94,
+          line: 1
+        }],
+      issue: null
+    }, {
+      text: "0.0pt\\relaxX",
+      messages: ["\\z@=\\dimen10", "\\p@=\\dimen11", "\\maxdimen=\\dimen12", "\\z@skip=\\skip10", "\\hideskip=\\skip11", "\\@tempdima=\\dimen13", "\\@tempdimb=\\dimen14", "\\@tempdimc=\\dimen15", "\\@tempcnta=\\count23", "\\@tempcntb=\\count24", "\\@tempskipa=\\skip12", "\\@tempskipb=\\skip13", "\\@temptokena=\\toks10", "\\@tempboxa=\\box10", "\\voidb@x=\\box11", "\\textwidth=\\dimen16", "\\textheight=\\dimen17", "\\linewidth=\\dimen18", "\\columnwidth=\\dimen19", "\\columnsep=\\dimen20", "\\columnseprule=\\dimen21", "\\marginparwidth=\\dimen22", "\\marginparsep=\\dimen23", "\\marginparpush=\\dimen24", "\\oddsidemargin=\\dimen25", "\\evensidemargin=\\dimen26", "\\topmargin=\\dimen27", "\\headheight=\\dimen28", "\\headsep=\\dimen29", "\\footskip=\\dimen30", "\\paperwidth=\\dimen31", "\\paperheight=\\dimen32", "\\fboxsep=\\dimen33", "\\fboxrule=\\dimen34", "\\arraycolsep=\\dimen35", "\\tabcolsep=\\dimen36", "\\arrayrulewidth=\\dimen37", "\\doublerulesep=\\dimen38", "\\labelwidth=\\dimen39", "\\labelsep=\\dimen40", "\\itemindent=\\dimen41", "\\listparindent=\\dimen42", "\\leftmargin=\\dimen43", "\\rightmargin=\\dimen44", "\\unitlength=\\dimen45", "\\jot=\\dimen46", "\\abovecaptionskip=\\skip14", "\\belowcaptionskip=\\skip15", "\\smallskipamount=\\skip16", "\\medskipamount=\\skip17", "\\bigskipamount=\\skip18", "\\topsep=\\skip19", "\\itemsep=\\skip20", "\\parsep=\\skip21", "\\partopsep=\\skip22", "\\floatsep=\\skip23", "\\textfloatsep=\\skip24", "\\intextsep=\\skip25"],
+      diagnostics: [{
+          code: "tex-font-params",
+          message: "Font cmr10 has only 7 fontdimen parameters",
+          offset: 75,
+          line: 1
+        }],
+      issue: null
+    }, {
+      text: "0.0ptX ",
+      messages: ["\\z@=\\dimen10", "\\p@=\\dimen11", "\\maxdimen=\\dimen12", "\\z@skip=\\skip10", "\\hideskip=\\skip11", "\\@tempdima=\\dimen13", "\\@tempdimb=\\dimen14", "\\@tempdimc=\\dimen15", "\\@tempcnta=\\count23", "\\@tempcntb=\\count24", "\\@tempskipa=\\skip12", "\\@tempskipb=\\skip13", "\\@temptokena=\\toks10", "\\@tempboxa=\\box10", "\\voidb@x=\\box11", "\\textwidth=\\dimen16", "\\textheight=\\dimen17", "\\linewidth=\\dimen18", "\\columnwidth=\\dimen19", "\\columnsep=\\dimen20", "\\columnseprule=\\dimen21", "\\marginparwidth=\\dimen22", "\\marginparsep=\\dimen23", "\\marginparpush=\\dimen24", "\\oddsidemargin=\\dimen25", "\\evensidemargin=\\dimen26", "\\topmargin=\\dimen27", "\\headheight=\\dimen28", "\\headsep=\\dimen29", "\\footskip=\\dimen30", "\\paperwidth=\\dimen31", "\\paperheight=\\dimen32", "\\fboxsep=\\dimen33", "\\fboxrule=\\dimen34", "\\arraycolsep=\\dimen35", "\\tabcolsep=\\dimen36", "\\arrayrulewidth=\\dimen37", "\\doublerulesep=\\dimen38", "\\labelwidth=\\dimen39", "\\labelsep=\\dimen40", "\\itemindent=\\dimen41", "\\listparindent=\\dimen42", "\\leftmargin=\\dimen43", "\\rightmargin=\\dimen44", "\\unitlength=\\dimen45", "\\jot=\\dimen46", "\\abovecaptionskip=\\skip14", "\\belowcaptionskip=\\skip15", "\\smallskipamount=\\skip16", "\\medskipamount=\\skip17", "\\bigskipamount=\\skip18", "\\topsep=\\skip19", "\\itemsep=\\skip20", "\\parsep=\\skip21", "\\partopsep=\\skip22", "\\floatsep=\\skip23", "\\textfloatsep=\\skip24", "\\intextsep=\\skip25"],
+      diagnostics: [{
+          code: "tex-font-params",
+          message: "Font nullfont has only 7 fontdimen parameters",
+          offset: 15,
+          line: 1
+        }],
+      issue: null
+    }, {
+      text: "0.0ptX ",
+      messages: ["\\z@=\\dimen10", "\\p@=\\dimen11", "\\maxdimen=\\dimen12", "\\z@skip=\\skip10", "\\hideskip=\\skip11", "\\@tempdima=\\dimen13", "\\@tempdimb=\\dimen14", "\\@tempdimc=\\dimen15", "\\@tempcnta=\\count23", "\\@tempcntb=\\count24", "\\@tempskipa=\\skip12", "\\@tempskipb=\\skip13", "\\@temptokena=\\toks10", "\\@tempboxa=\\box10", "\\voidb@x=\\box11", "\\textwidth=\\dimen16", "\\textheight=\\dimen17", "\\linewidth=\\dimen18", "\\columnwidth=\\dimen19", "\\columnsep=\\dimen20", "\\columnseprule=\\dimen21", "\\marginparwidth=\\dimen22", "\\marginparsep=\\dimen23", "\\marginparpush=\\dimen24", "\\oddsidemargin=\\dimen25", "\\evensidemargin=\\dimen26", "\\topmargin=\\dimen27", "\\headheight=\\dimen28", "\\headsep=\\dimen29", "\\footskip=\\dimen30", "\\paperwidth=\\dimen31", "\\paperheight=\\dimen32", "\\fboxsep=\\dimen33", "\\fboxrule=\\dimen34", "\\arraycolsep=\\dimen35", "\\tabcolsep=\\dimen36", "\\arrayrulewidth=\\dimen37", "\\doublerulesep=\\dimen38", "\\labelwidth=\\dimen39", "\\labelsep=\\dimen40", "\\itemindent=\\dimen41", "\\listparindent=\\dimen42", "\\leftmargin=\\dimen43", "\\rightmargin=\\dimen44", "\\unitlength=\\dimen45", "\\jot=\\dimen46", "\\abovecaptionskip=\\skip14", "\\belowcaptionskip=\\skip15", "\\smallskipamount=\\skip16", "\\medskipamount=\\skip17", "\\bigskipamount=\\skip18", "\\topsep=\\skip19", "\\itemsep=\\skip20", "\\parsep=\\skip21", "\\partopsep=\\skip22", "\\floatsep=\\skip23", "\\textfloatsep=\\skip24", "\\intextsep=\\skip25"],
+      diagnostics: [{
+          code: "tex-font-params",
+          message: "Font nullfont has only 7 fontdimen parameters",
+          offset: 15,
+          line: 1
+        }],
+      issue: null
+    }, {
+      text: "0.0ptX ",
+      messages: ["\\z@=\\dimen10", "\\p@=\\dimen11", "\\maxdimen=\\dimen12", "\\z@skip=\\skip10", "\\hideskip=\\skip11", "\\@tempdima=\\dimen13", "\\@tempdimb=\\dimen14", "\\@tempdimc=\\dimen15", "\\@tempcnta=\\count23", "\\@tempcntb=\\count24", "\\@tempskipa=\\skip12", "\\@tempskipb=\\skip13", "\\@temptokena=\\toks10", "\\@tempboxa=\\box10", "\\voidb@x=\\box11", "\\textwidth=\\dimen16", "\\textheight=\\dimen17", "\\linewidth=\\dimen18", "\\columnwidth=\\dimen19", "\\columnsep=\\dimen20", "\\columnseprule=\\dimen21", "\\marginparwidth=\\dimen22", "\\marginparsep=\\dimen23", "\\marginparpush=\\dimen24", "\\oddsidemargin=\\dimen25", "\\evensidemargin=\\dimen26", "\\topmargin=\\dimen27", "\\headheight=\\dimen28", "\\headsep=\\dimen29", "\\footskip=\\dimen30", "\\paperwidth=\\dimen31", "\\paperheight=\\dimen32", "\\fboxsep=\\dimen33", "\\fboxrule=\\dimen34", "\\arraycolsep=\\dimen35", "\\tabcolsep=\\dimen36", "\\arrayrulewidth=\\dimen37", "\\doublerulesep=\\dimen38", "\\labelwidth=\\dimen39", "\\labelsep=\\dimen40", "\\itemindent=\\dimen41", "\\listparindent=\\dimen42", "\\leftmargin=\\dimen43", "\\rightmargin=\\dimen44", "\\unitlength=\\dimen45", "\\jot=\\dimen46", "\\abovecaptionskip=\\skip14", "\\belowcaptionskip=\\skip15", "\\smallskipamount=\\skip16", "\\medskipamount=\\skip17", "\\bigskipamount=\\skip18", "\\topsep=\\skip19", "\\itemsep=\\skip20", "\\parsep=\\skip21", "\\partopsep=\\skip22", "\\floatsep=\\skip23", "\\textfloatsep=\\skip24", "\\intextsep=\\skip25"],
+      diagnostics: [{
+          code: "tex-font-params",
+          message: "Font cmr10 has only 7 fontdimen parameters",
+          offset: 70,
+          line: 2
+        }],
+      issue: null
+    }, {
+      text: "0.0ptX ",
+      messages: ["\\z@=\\dimen10", "\\p@=\\dimen11", "\\maxdimen=\\dimen12", "\\z@skip=\\skip10", "\\hideskip=\\skip11", "\\@tempdima=\\dimen13", "\\@tempdimb=\\dimen14", "\\@tempdimc=\\dimen15", "\\@tempcnta=\\count23", "\\@tempcntb=\\count24", "\\@tempskipa=\\skip12", "\\@tempskipb=\\skip13", "\\@temptokena=\\toks10", "\\@tempboxa=\\box10", "\\voidb@x=\\box11", "\\textwidth=\\dimen16", "\\textheight=\\dimen17", "\\linewidth=\\dimen18", "\\columnwidth=\\dimen19", "\\columnsep=\\dimen20", "\\columnseprule=\\dimen21", "\\marginparwidth=\\dimen22", "\\marginparsep=\\dimen23", "\\marginparpush=\\dimen24", "\\oddsidemargin=\\dimen25", "\\evensidemargin=\\dimen26", "\\topmargin=\\dimen27", "\\headheight=\\dimen28", "\\headsep=\\dimen29", "\\footskip=\\dimen30", "\\paperwidth=\\dimen31", "\\paperheight=\\dimen32", "\\fboxsep=\\dimen33", "\\fboxrule=\\dimen34", "\\arraycolsep=\\dimen35", "\\tabcolsep=\\dimen36", "\\arrayrulewidth=\\dimen37", "\\doublerulesep=\\dimen38", "\\labelwidth=\\dimen39", "\\labelsep=\\dimen40", "\\itemindent=\\dimen41", "\\listparindent=\\dimen42", "\\leftmargin=\\dimen43", "\\rightmargin=\\dimen44", "\\unitlength=\\dimen45", "\\jot=\\dimen46", "\\abovecaptionskip=\\skip14", "\\belowcaptionskip=\\skip15", "\\smallskipamount=\\skip16", "\\medskipamount=\\skip17", "\\bigskipamount=\\skip18", "\\topsep=\\skip19", "\\itemsep=\\skip20", "\\parsep=\\skip21", "\\partopsep=\\skip22", "\\floatsep=\\skip23", "\\textfloatsep=\\skip24", "\\intextsep=\\skip25"],
+      diagnostics: [{
+          code: "tex-font-params",
+          message: "Font cmr10 has only 7 fontdimen parameters",
+          offset: 81,
+          line: 1
+        }],
+      issue: null
+    }], [{
+      text: "0.0pt\\relaxX",
+      messages: ["\\z@=\\dimen10", "\\p@=\\dimen11", "\\maxdimen=\\dimen12", "\\z@skip=\\skip10", "\\hideskip=\\skip11", "\\@tempdima=\\dimen13", "\\@tempdimb=\\dimen14", "\\@tempdimc=\\dimen15", "\\@tempcnta=\\count23", "\\@tempcntb=\\count24", "\\@tempskipa=\\skip12", "\\@tempskipb=\\skip13", "\\@temptokena=\\toks10", "\\@tempboxa=\\box10", "\\voidb@x=\\box11", "\\textwidth=\\dimen16", "\\textheight=\\dimen17", "\\linewidth=\\dimen18", "\\columnwidth=\\dimen19", "\\columnsep=\\dimen20", "\\columnseprule=\\dimen21", "\\marginparwidth=\\dimen22", "\\marginparsep=\\dimen23", "\\marginparpush=\\dimen24", "\\oddsidemargin=\\dimen25", "\\evensidemargin=\\dimen26", "\\topmargin=\\dimen27", "\\headheight=\\dimen28", "\\headsep=\\dimen29", "\\footskip=\\dimen30", "\\paperwidth=\\dimen31", "\\paperheight=\\dimen32", "\\fboxsep=\\dimen33", "\\fboxrule=\\dimen34", "\\arraycolsep=\\dimen35", "\\tabcolsep=\\dimen36", "\\arrayrulewidth=\\dimen37", "\\doublerulesep=\\dimen38", "\\labelwidth=\\dimen39", "\\labelsep=\\dimen40", "\\itemindent=\\dimen41", "\\listparindent=\\dimen42", "\\leftmargin=\\dimen43", "\\rightmargin=\\dimen44", "\\unitlength=\\dimen45", "\\jot=\\dimen46", "\\abovecaptionskip=\\skip14", "\\belowcaptionskip=\\skip15", "\\smallskipamount=\\skip16", "\\medskipamount=\\skip17", "\\bigskipamount=\\skip18", "\\topsep=\\skip19", "\\itemsep=\\skip20", "\\parsep=\\skip21", "\\partopsep=\\skip22", "\\floatsep=\\skip23", "\\textfloatsep=\\skip24", "\\intextsep=\\skip25"],
+      diagnostics: [{
+          code: "tex-font-params",
+          message: "Font cmr10 has only 8 fontdimen parameters",
+          offset: 92,
+          line: 1
+        }],
+      issue: null
+    }, {
+      text: "0.0pt\\relaxX",
+      messages: ["\\z@=\\dimen10", "\\p@=\\dimen11", "\\maxdimen=\\dimen12", "\\z@skip=\\skip10", "\\hideskip=\\skip11", "\\@tempdima=\\dimen13", "\\@tempdimb=\\dimen14", "\\@tempdimc=\\dimen15", "\\@tempcnta=\\count23", "\\@tempcntb=\\count24", "\\@tempskipa=\\skip12", "\\@tempskipb=\\skip13", "\\@temptokena=\\toks10", "\\@tempboxa=\\box10", "\\voidb@x=\\box11", "\\textwidth=\\dimen16", "\\textheight=\\dimen17", "\\linewidth=\\dimen18", "\\columnwidth=\\dimen19", "\\columnsep=\\dimen20", "\\columnseprule=\\dimen21", "\\marginparwidth=\\dimen22", "\\marginparsep=\\dimen23", "\\marginparpush=\\dimen24", "\\oddsidemargin=\\dimen25", "\\evensidemargin=\\dimen26", "\\topmargin=\\dimen27", "\\headheight=\\dimen28", "\\headsep=\\dimen29", "\\footskip=\\dimen30", "\\paperwidth=\\dimen31", "\\paperheight=\\dimen32", "\\fboxsep=\\dimen33", "\\fboxrule=\\dimen34", "\\arraycolsep=\\dimen35", "\\tabcolsep=\\dimen36", "\\arrayrulewidth=\\dimen37", "\\doublerulesep=\\dimen38", "\\labelwidth=\\dimen39", "\\labelsep=\\dimen40", "\\itemindent=\\dimen41", "\\listparindent=\\dimen42", "\\leftmargin=\\dimen43", "\\rightmargin=\\dimen44", "\\unitlength=\\dimen45", "\\jot=\\dimen46", "\\abovecaptionskip=\\skip14", "\\belowcaptionskip=\\skip15", "\\smallskipamount=\\skip16", "\\medskipamount=\\skip17", "\\bigskipamount=\\skip18", "\\topsep=\\skip19", "\\itemsep=\\skip20", "\\parsep=\\skip21", "\\partopsep=\\skip22", "\\floatsep=\\skip23", "\\textfloatsep=\\skip24", "\\intextsep=\\skip25"],
+      diagnostics: [{
+          code: "tex-font-params",
+          message: "Font cmr10 has only 8 fontdimen parameters",
+          offset: 93,
+          line: 1
+        }],
+      issue: null
+    }, {
+      text: "0.0pt\\relaxX",
+      messages: ["\\z@=\\dimen10", "\\p@=\\dimen11", "\\maxdimen=\\dimen12", "\\z@skip=\\skip10", "\\hideskip=\\skip11", "\\@tempdima=\\dimen13", "\\@tempdimb=\\dimen14", "\\@tempdimc=\\dimen15", "\\@tempcnta=\\count23", "\\@tempcntb=\\count24", "\\@tempskipa=\\skip12", "\\@tempskipb=\\skip13", "\\@temptokena=\\toks10", "\\@tempboxa=\\box10", "\\voidb@x=\\box11", "\\textwidth=\\dimen16", "\\textheight=\\dimen17", "\\linewidth=\\dimen18", "\\columnwidth=\\dimen19", "\\columnsep=\\dimen20", "\\columnseprule=\\dimen21", "\\marginparwidth=\\dimen22", "\\marginparsep=\\dimen23", "\\marginparpush=\\dimen24", "\\oddsidemargin=\\dimen25", "\\evensidemargin=\\dimen26", "\\topmargin=\\dimen27", "\\headheight=\\dimen28", "\\headsep=\\dimen29", "\\footskip=\\dimen30", "\\paperwidth=\\dimen31", "\\paperheight=\\dimen32", "\\fboxsep=\\dimen33", "\\fboxrule=\\dimen34", "\\arraycolsep=\\dimen35", "\\tabcolsep=\\dimen36", "\\arrayrulewidth=\\dimen37", "\\doublerulesep=\\dimen38", "\\labelwidth=\\dimen39", "\\labelsep=\\dimen40", "\\itemindent=\\dimen41", "\\listparindent=\\dimen42", "\\leftmargin=\\dimen43", "\\rightmargin=\\dimen44", "\\unitlength=\\dimen45", "\\jot=\\dimen46", "\\abovecaptionskip=\\skip14", "\\belowcaptionskip=\\skip15", "\\smallskipamount=\\skip16", "\\medskipamount=\\skip17", "\\bigskipamount=\\skip18", "\\topsep=\\skip19", "\\itemsep=\\skip20", "\\parsep=\\skip21", "\\partopsep=\\skip22", "\\floatsep=\\skip23", "\\textfloatsep=\\skip24", "\\intextsep=\\skip25"],
+      diagnostics: [{
+          code: "tex-font-params",
+          message: "Font cmr10 has only 8 fontdimen parameters",
+          offset: 92,
+          line: 1
+        }],
+      issue: null
+    }, {
+      text: "\\relaxX",
+      messages: ["\\z@=\\dimen10", "\\p@=\\dimen11", "\\maxdimen=\\dimen12", "\\z@skip=\\skip10", "\\hideskip=\\skip11", "\\@tempdima=\\dimen13", "\\@tempdimb=\\dimen14", "\\@tempdimc=\\dimen15", "\\@tempcnta=\\count23", "\\@tempcntb=\\count24", "\\@tempskipa=\\skip12", "\\@tempskipb=\\skip13", "\\@temptokena=\\toks10", "\\@tempboxa=\\box10", "\\voidb@x=\\box11", "\\textwidth=\\dimen16", "\\textheight=\\dimen17", "\\linewidth=\\dimen18", "\\columnwidth=\\dimen19", "\\columnsep=\\dimen20", "\\columnseprule=\\dimen21", "\\marginparwidth=\\dimen22", "\\marginparsep=\\dimen23", "\\marginparpush=\\dimen24", "\\oddsidemargin=\\dimen25", "\\evensidemargin=\\dimen26", "\\topmargin=\\dimen27", "\\headheight=\\dimen28", "\\headsep=\\dimen29", "\\footskip=\\dimen30", "\\paperwidth=\\dimen31", "\\paperheight=\\dimen32", "\\fboxsep=\\dimen33", "\\fboxrule=\\dimen34", "\\arraycolsep=\\dimen35", "\\tabcolsep=\\dimen36", "\\arrayrulewidth=\\dimen37", "\\doublerulesep=\\dimen38", "\\labelwidth=\\dimen39", "\\labelsep=\\dimen40", "\\itemindent=\\dimen41", "\\listparindent=\\dimen42", "\\leftmargin=\\dimen43", "\\rightmargin=\\dimen44", "\\unitlength=\\dimen45", "\\jot=\\dimen46", "\\abovecaptionskip=\\skip14", "\\belowcaptionskip=\\skip15", "\\smallskipamount=\\skip16", "\\medskipamount=\\skip17", "\\bigskipamount=\\skip18", "\\topsep=\\skip19", "\\itemsep=\\skip20", "\\parsep=\\skip21", "\\partopsep=\\skip22", "\\floatsep=\\skip23", "\\textfloatsep=\\skip24", "\\intextsep=\\skip25"],
+      diagnostics: [{
+          code: "tex-font-params",
+          message: "Font cmr10 has only 8 fontdimen parameters",
+          offset: 88,
+          line: 1
+        }],
+      issue: null
+    }, {
+      text: "\\relaxX",
+      messages: ["\\z@=\\dimen10", "\\p@=\\dimen11", "\\maxdimen=\\dimen12", "\\z@skip=\\skip10", "\\hideskip=\\skip11", "\\@tempdima=\\dimen13", "\\@tempdimb=\\dimen14", "\\@tempdimc=\\dimen15", "\\@tempcnta=\\count23", "\\@tempcntb=\\count24", "\\@tempskipa=\\skip12", "\\@tempskipb=\\skip13", "\\@temptokena=\\toks10", "\\@tempboxa=\\box10", "\\voidb@x=\\box11", "\\textwidth=\\dimen16", "\\textheight=\\dimen17", "\\linewidth=\\dimen18", "\\columnwidth=\\dimen19", "\\columnsep=\\dimen20", "\\columnseprule=\\dimen21", "\\marginparwidth=\\dimen22", "\\marginparsep=\\dimen23", "\\marginparpush=\\dimen24", "\\oddsidemargin=\\dimen25", "\\evensidemargin=\\dimen26", "\\topmargin=\\dimen27", "\\headheight=\\dimen28", "\\headsep=\\dimen29", "\\footskip=\\dimen30", "\\paperwidth=\\dimen31", "\\paperheight=\\dimen32", "\\fboxsep=\\dimen33", "\\fboxrule=\\dimen34", "\\arraycolsep=\\dimen35", "\\tabcolsep=\\dimen36", "\\arrayrulewidth=\\dimen37", "\\doublerulesep=\\dimen38", "\\labelwidth=\\dimen39", "\\labelsep=\\dimen40", "\\itemindent=\\dimen41", "\\listparindent=\\dimen42", "\\leftmargin=\\dimen43", "\\rightmargin=\\dimen44", "\\unitlength=\\dimen45", "\\jot=\\dimen46", "\\abovecaptionskip=\\skip14", "\\belowcaptionskip=\\skip15", "\\smallskipamount=\\skip16", "\\medskipamount=\\skip17", "\\bigskipamount=\\skip18", "\\topsep=\\skip19", "\\itemsep=\\skip20", "\\parsep=\\skip21", "\\partopsep=\\skip22", "\\floatsep=\\skip23", "\\textfloatsep=\\skip24", "\\intextsep=\\skip25"],
+      diagnostics: [{
+          code: "tex-font-params",
+          message: "Font cmr10 has only 8 fontdimen parameters",
+          offset: 89,
+          line: 1
+        }],
+      issue: null
+    }, {
+      text: "\\relaxX",
+      messages: ["\\z@=\\dimen10", "\\p@=\\dimen11", "\\maxdimen=\\dimen12", "\\z@skip=\\skip10", "\\hideskip=\\skip11", "\\@tempdima=\\dimen13", "\\@tempdimb=\\dimen14", "\\@tempdimc=\\dimen15", "\\@tempcnta=\\count23", "\\@tempcntb=\\count24", "\\@tempskipa=\\skip12", "\\@tempskipb=\\skip13", "\\@temptokena=\\toks10", "\\@tempboxa=\\box10", "\\voidb@x=\\box11", "\\textwidth=\\dimen16", "\\textheight=\\dimen17", "\\linewidth=\\dimen18", "\\columnwidth=\\dimen19", "\\columnsep=\\dimen20", "\\columnseprule=\\dimen21", "\\marginparwidth=\\dimen22", "\\marginparsep=\\dimen23", "\\marginparpush=\\dimen24", "\\oddsidemargin=\\dimen25", "\\evensidemargin=\\dimen26", "\\topmargin=\\dimen27", "\\headheight=\\dimen28", "\\headsep=\\dimen29", "\\footskip=\\dimen30", "\\paperwidth=\\dimen31", "\\paperheight=\\dimen32", "\\fboxsep=\\dimen33", "\\fboxrule=\\dimen34", "\\arraycolsep=\\dimen35", "\\tabcolsep=\\dimen36", "\\arrayrulewidth=\\dimen37", "\\doublerulesep=\\dimen38", "\\labelwidth=\\dimen39", "\\labelsep=\\dimen40", "\\itemindent=\\dimen41", "\\listparindent=\\dimen42", "\\leftmargin=\\dimen43", "\\rightmargin=\\dimen44", "\\unitlength=\\dimen45", "\\jot=\\dimen46", "\\abovecaptionskip=\\skip14", "\\belowcaptionskip=\\skip15", "\\smallskipamount=\\skip16", "\\medskipamount=\\skip17", "\\bigskipamount=\\skip18", "\\topsep=\\skip19", "\\itemsep=\\skip20", "\\parsep=\\skip21", "\\partopsep=\\skip22", "\\floatsep=\\skip23", "\\textfloatsep=\\skip24", "\\intextsep=\\skip25"],
+      diagnostics: [{
+          code: "tex-font-params",
+          message: "Font cmr10 has only 8 fontdimen parameters",
+          offset: 88,
+          line: 1
+        }],
+      issue: null
+    }, {
+      text: "0.0001pt\\relaxX",
+      messages: ["\\z@=\\dimen10", "\\p@=\\dimen11", "\\maxdimen=\\dimen12", "\\z@skip=\\skip10", "\\hideskip=\\skip11", "\\@tempdima=\\dimen13", "\\@tempdimb=\\dimen14", "\\@tempdimc=\\dimen15", "\\@tempcnta=\\count23", "\\@tempcntb=\\count24", "\\@tempskipa=\\skip12", "\\@tempskipb=\\skip13", "\\@temptokena=\\toks10", "\\@tempboxa=\\box10", "\\voidb@x=\\box11", "\\textwidth=\\dimen16", "\\textheight=\\dimen17", "\\linewidth=\\dimen18", "\\columnwidth=\\dimen19", "\\columnsep=\\dimen20", "\\columnseprule=\\dimen21", "\\marginparwidth=\\dimen22", "\\marginparsep=\\dimen23", "\\marginparpush=\\dimen24", "\\oddsidemargin=\\dimen25", "\\evensidemargin=\\dimen26", "\\topmargin=\\dimen27", "\\headheight=\\dimen28", "\\headsep=\\dimen29", "\\footskip=\\dimen30", "\\paperwidth=\\dimen31", "\\paperheight=\\dimen32", "\\fboxsep=\\dimen33", "\\fboxrule=\\dimen34", "\\arraycolsep=\\dimen35", "\\tabcolsep=\\dimen36", "\\arrayrulewidth=\\dimen37", "\\doublerulesep=\\dimen38", "\\labelwidth=\\dimen39", "\\labelsep=\\dimen40", "\\itemindent=\\dimen41", "\\listparindent=\\dimen42", "\\leftmargin=\\dimen43", "\\rightmargin=\\dimen44", "\\unitlength=\\dimen45", "\\jot=\\dimen46", "\\abovecaptionskip=\\skip14", "\\belowcaptionskip=\\skip15", "\\smallskipamount=\\skip16", "\\medskipamount=\\skip17", "\\bigskipamount=\\skip18", "\\topsep=\\skip19", "\\itemsep=\\skip20", "\\parsep=\\skip21", "\\partopsep=\\skip22", "\\floatsep=\\skip23", "\\textfloatsep=\\skip24", "\\intextsep=\\skip25"],
+      diagnostics: [],
+      issue: null
+    }, {
+      text: "0.0pt\\relaxX",
+      messages: ["\\z@=\\dimen10", "\\p@=\\dimen11", "\\maxdimen=\\dimen12", "\\z@skip=\\skip10", "\\hideskip=\\skip11", "\\@tempdima=\\dimen13", "\\@tempdimb=\\dimen14", "\\@tempdimc=\\dimen15", "\\@tempcnta=\\count23", "\\@tempcntb=\\count24", "\\@tempskipa=\\skip12", "\\@tempskipb=\\skip13", "\\@temptokena=\\toks10", "\\@tempboxa=\\box10", "\\voidb@x=\\box11", "\\textwidth=\\dimen16", "\\textheight=\\dimen17", "\\linewidth=\\dimen18", "\\columnwidth=\\dimen19", "\\columnsep=\\dimen20", "\\columnseprule=\\dimen21", "\\marginparwidth=\\dimen22", "\\marginparsep=\\dimen23", "\\marginparpush=\\dimen24", "\\oddsidemargin=\\dimen25", "\\evensidemargin=\\dimen26", "\\topmargin=\\dimen27", "\\headheight=\\dimen28", "\\headsep=\\dimen29", "\\footskip=\\dimen30", "\\paperwidth=\\dimen31", "\\paperheight=\\dimen32", "\\fboxsep=\\dimen33", "\\fboxrule=\\dimen34", "\\arraycolsep=\\dimen35", "\\tabcolsep=\\dimen36", "\\arrayrulewidth=\\dimen37", "\\doublerulesep=\\dimen38", "\\labelwidth=\\dimen39", "\\labelsep=\\dimen40", "\\itemindent=\\dimen41", "\\listparindent=\\dimen42", "\\leftmargin=\\dimen43", "\\rightmargin=\\dimen44", "\\unitlength=\\dimen45", "\\jot=\\dimen46", "\\abovecaptionskip=\\skip14", "\\belowcaptionskip=\\skip15", "\\smallskipamount=\\skip16", "\\medskipamount=\\skip17", "\\bigskipamount=\\skip18", "\\topsep=\\skip19", "\\itemsep=\\skip20", "\\parsep=\\skip21", "\\partopsep=\\skip22", "\\floatsep=\\skip23", "\\textfloatsep=\\skip24", "\\intextsep=\\skip25"],
+      diagnostics: [{
+          code: "tex-font-params",
+          message: "Font cmr10 has only 8 fontdimen parameters",
+          offset: 96,
+          line: 1
+        }],
+      issue: null
+    }, {
+      text: "0.0pt\\relaxX",
+      messages: ["\\z@=\\dimen10", "\\p@=\\dimen11", "\\maxdimen=\\dimen12", "\\z@skip=\\skip10", "\\hideskip=\\skip11", "\\@tempdima=\\dimen13", "\\@tempdimb=\\dimen14", "\\@tempdimc=\\dimen15", "\\@tempcnta=\\count23", "\\@tempcntb=\\count24", "\\@tempskipa=\\skip12", "\\@tempskipb=\\skip13", "\\@temptokena=\\toks10", "\\@tempboxa=\\box10", "\\voidb@x=\\box11", "\\textwidth=\\dimen16", "\\textheight=\\dimen17", "\\linewidth=\\dimen18", "\\columnwidth=\\dimen19", "\\columnsep=\\dimen20", "\\columnseprule=\\dimen21", "\\marginparwidth=\\dimen22", "\\marginparsep=\\dimen23", "\\marginparpush=\\dimen24", "\\oddsidemargin=\\dimen25", "\\evensidemargin=\\dimen26", "\\topmargin=\\dimen27", "\\headheight=\\dimen28", "\\headsep=\\dimen29", "\\footskip=\\dimen30", "\\paperwidth=\\dimen31", "\\paperheight=\\dimen32", "\\fboxsep=\\dimen33", "\\fboxrule=\\dimen34", "\\arraycolsep=\\dimen35", "\\tabcolsep=\\dimen36", "\\arrayrulewidth=\\dimen37", "\\doublerulesep=\\dimen38", "\\labelwidth=\\dimen39", "\\labelsep=\\dimen40", "\\itemindent=\\dimen41", "\\listparindent=\\dimen42", "\\leftmargin=\\dimen43", "\\rightmargin=\\dimen44", "\\unitlength=\\dimen45", "\\jot=\\dimen46", "\\abovecaptionskip=\\skip14", "\\belowcaptionskip=\\skip15", "\\smallskipamount=\\skip16", "\\medskipamount=\\skip17", "\\bigskipamount=\\skip18", "\\topsep=\\skip19", "\\itemsep=\\skip20", "\\parsep=\\skip21", "\\partopsep=\\skip22", "\\floatsep=\\skip23", "\\textfloatsep=\\skip24", "\\intextsep=\\skip25"],
+      diagnostics: [{
+          code: "tex-font-params",
+          message: "Font cmr10 has only 7 fontdimen parameters",
+          offset: 71,
+          line: 1
+        }],
+      issue: null
+    }, {
+      text: "0.0pt\\relaxX",
+      messages: ["\\z@=\\dimen10", "\\p@=\\dimen11", "\\maxdimen=\\dimen12", "\\z@skip=\\skip10", "\\hideskip=\\skip11", "\\@tempdima=\\dimen13", "\\@tempdimb=\\dimen14", "\\@tempdimc=\\dimen15", "\\@tempcnta=\\count23", "\\@tempcntb=\\count24", "\\@tempskipa=\\skip12", "\\@tempskipb=\\skip13", "\\@temptokena=\\toks10", "\\@tempboxa=\\box10", "\\voidb@x=\\box11", "\\textwidth=\\dimen16", "\\textheight=\\dimen17", "\\linewidth=\\dimen18", "\\columnwidth=\\dimen19", "\\columnsep=\\dimen20", "\\columnseprule=\\dimen21", "\\marginparwidth=\\dimen22", "\\marginparsep=\\dimen23", "\\marginparpush=\\dimen24", "\\oddsidemargin=\\dimen25", "\\evensidemargin=\\dimen26", "\\topmargin=\\dimen27", "\\headheight=\\dimen28", "\\headsep=\\dimen29", "\\footskip=\\dimen30", "\\paperwidth=\\dimen31", "\\paperheight=\\dimen32", "\\fboxsep=\\dimen33", "\\fboxrule=\\dimen34", "\\arraycolsep=\\dimen35", "\\tabcolsep=\\dimen36", "\\arrayrulewidth=\\dimen37", "\\doublerulesep=\\dimen38", "\\labelwidth=\\dimen39", "\\labelsep=\\dimen40", "\\itemindent=\\dimen41", "\\listparindent=\\dimen42", "\\leftmargin=\\dimen43", "\\rightmargin=\\dimen44", "\\unitlength=\\dimen45", "\\jot=\\dimen46", "\\abovecaptionskip=\\skip14", "\\belowcaptionskip=\\skip15", "\\smallskipamount=\\skip16", "\\medskipamount=\\skip17", "\\bigskipamount=\\skip18", "\\topsep=\\skip19", "\\itemsep=\\skip20", "\\parsep=\\skip21", "\\partopsep=\\skip22", "\\floatsep=\\skip23", "\\textfloatsep=\\skip24", "\\intextsep=\\skip25"],
+      diagnostics: [{
+          code: "tex-font-params",
+          message: "Font cmr10 has only 7 fontdimen parameters",
+          offset: 72,
+          line: 1
+        }],
+      issue: null
+    }, {
+      text: "0.0pt\\relaxX",
+      messages: ["\\z@=\\dimen10", "\\p@=\\dimen11", "\\maxdimen=\\dimen12", "\\z@skip=\\skip10", "\\hideskip=\\skip11", "\\@tempdima=\\dimen13", "\\@tempdimb=\\dimen14", "\\@tempdimc=\\dimen15", "\\@tempcnta=\\count23", "\\@tempcntb=\\count24", "\\@tempskipa=\\skip12", "\\@tempskipb=\\skip13", "\\@temptokena=\\toks10", "\\@tempboxa=\\box10", "\\voidb@x=\\box11", "\\textwidth=\\dimen16", "\\textheight=\\dimen17", "\\linewidth=\\dimen18", "\\columnwidth=\\dimen19", "\\columnsep=\\dimen20", "\\columnseprule=\\dimen21", "\\marginparwidth=\\dimen22", "\\marginparsep=\\dimen23", "\\marginparpush=\\dimen24", "\\oddsidemargin=\\dimen25", "\\evensidemargin=\\dimen26", "\\topmargin=\\dimen27", "\\headheight=\\dimen28", "\\headsep=\\dimen29", "\\footskip=\\dimen30", "\\paperwidth=\\dimen31", "\\paperheight=\\dimen32", "\\fboxsep=\\dimen33", "\\fboxrule=\\dimen34", "\\arraycolsep=\\dimen35", "\\tabcolsep=\\dimen36", "\\arrayrulewidth=\\dimen37", "\\doublerulesep=\\dimen38", "\\labelwidth=\\dimen39", "\\labelsep=\\dimen40", "\\itemindent=\\dimen41", "\\listparindent=\\dimen42", "\\leftmargin=\\dimen43", "\\rightmargin=\\dimen44", "\\unitlength=\\dimen45", "\\jot=\\dimen46", "\\abovecaptionskip=\\skip14", "\\belowcaptionskip=\\skip15", "\\smallskipamount=\\skip16", "\\medskipamount=\\skip17", "\\bigskipamount=\\skip18", "\\topsep=\\skip19", "\\itemsep=\\skip20", "\\parsep=\\skip21", "\\partopsep=\\skip22", "\\floatsep=\\skip23", "\\textfloatsep=\\skip24", "\\intextsep=\\skip25"],
+      diagnostics: [{
+          code: "tex-font-params",
+          message: "Font cmr10 has only 7 fontdimen parameters",
+          offset: 71,
+          line: 1
+        }],
+      issue: null
+    }, {
+      text: "\\relaxX",
+      messages: ["\\z@=\\dimen10", "\\p@=\\dimen11", "\\maxdimen=\\dimen12", "\\z@skip=\\skip10", "\\hideskip=\\skip11", "\\@tempdima=\\dimen13", "\\@tempdimb=\\dimen14", "\\@tempdimc=\\dimen15", "\\@tempcnta=\\count23", "\\@tempcntb=\\count24", "\\@tempskipa=\\skip12", "\\@tempskipb=\\skip13", "\\@temptokena=\\toks10", "\\@tempboxa=\\box10", "\\voidb@x=\\box11", "\\textwidth=\\dimen16", "\\textheight=\\dimen17", "\\linewidth=\\dimen18", "\\columnwidth=\\dimen19", "\\columnsep=\\dimen20", "\\columnseprule=\\dimen21", "\\marginparwidth=\\dimen22", "\\marginparsep=\\dimen23", "\\marginparpush=\\dimen24", "\\oddsidemargin=\\dimen25", "\\evensidemargin=\\dimen26", "\\topmargin=\\dimen27", "\\headheight=\\dimen28", "\\headsep=\\dimen29", "\\footskip=\\dimen30", "\\paperwidth=\\dimen31", "\\paperheight=\\dimen32", "\\fboxsep=\\dimen33", "\\fboxrule=\\dimen34", "\\arraycolsep=\\dimen35", "\\tabcolsep=\\dimen36", "\\arrayrulewidth=\\dimen37", "\\doublerulesep=\\dimen38", "\\labelwidth=\\dimen39", "\\labelsep=\\dimen40", "\\itemindent=\\dimen41", "\\listparindent=\\dimen42", "\\leftmargin=\\dimen43", "\\rightmargin=\\dimen44", "\\unitlength=\\dimen45", "\\jot=\\dimen46", "\\abovecaptionskip=\\skip14", "\\belowcaptionskip=\\skip15", "\\smallskipamount=\\skip16", "\\medskipamount=\\skip17", "\\bigskipamount=\\skip18", "\\topsep=\\skip19", "\\itemsep=\\skip20", "\\parsep=\\skip21", "\\partopsep=\\skip22", "\\floatsep=\\skip23", "\\textfloatsep=\\skip24", "\\intextsep=\\skip25"],
+      diagnostics: [{
+          code: "tex-font-params",
+          message: "Font cmr10 has only 7 fontdimen parameters",
+          offset: 67,
+          line: 1
+        }],
+      issue: null
+    }, {
+      text: "\\relaxX",
+      messages: ["\\z@=\\dimen10", "\\p@=\\dimen11", "\\maxdimen=\\dimen12", "\\z@skip=\\skip10", "\\hideskip=\\skip11", "\\@tempdima=\\dimen13", "\\@tempdimb=\\dimen14", "\\@tempdimc=\\dimen15", "\\@tempcnta=\\count23", "\\@tempcntb=\\count24", "\\@tempskipa=\\skip12", "\\@tempskipb=\\skip13", "\\@temptokena=\\toks10", "\\@tempboxa=\\box10", "\\voidb@x=\\box11", "\\textwidth=\\dimen16", "\\textheight=\\dimen17", "\\linewidth=\\dimen18", "\\columnwidth=\\dimen19", "\\columnsep=\\dimen20", "\\columnseprule=\\dimen21", "\\marginparwidth=\\dimen22", "\\marginparsep=\\dimen23", "\\marginparpush=\\dimen24", "\\oddsidemargin=\\dimen25", "\\evensidemargin=\\dimen26", "\\topmargin=\\dimen27", "\\headheight=\\dimen28", "\\headsep=\\dimen29", "\\footskip=\\dimen30", "\\paperwidth=\\dimen31", "\\paperheight=\\dimen32", "\\fboxsep=\\dimen33", "\\fboxrule=\\dimen34", "\\arraycolsep=\\dimen35", "\\tabcolsep=\\dimen36", "\\arrayrulewidth=\\dimen37", "\\doublerulesep=\\dimen38", "\\labelwidth=\\dimen39", "\\labelsep=\\dimen40", "\\itemindent=\\dimen41", "\\listparindent=\\dimen42", "\\leftmargin=\\dimen43", "\\rightmargin=\\dimen44", "\\unitlength=\\dimen45", "\\jot=\\dimen46", "\\abovecaptionskip=\\skip14", "\\belowcaptionskip=\\skip15", "\\smallskipamount=\\skip16", "\\medskipamount=\\skip17", "\\bigskipamount=\\skip18", "\\topsep=\\skip19", "\\itemsep=\\skip20", "\\parsep=\\skip21", "\\partopsep=\\skip22", "\\floatsep=\\skip23", "\\textfloatsep=\\skip24", "\\intextsep=\\skip25"],
+      diagnostics: [{
+          code: "tex-font-params",
+          message: "Font cmr10 has only 7 fontdimen parameters",
+          offset: 68,
+          line: 1
+        }],
+      issue: null
+    }, {
+      text: "\\relaxX",
+      messages: ["\\z@=\\dimen10", "\\p@=\\dimen11", "\\maxdimen=\\dimen12", "\\z@skip=\\skip10", "\\hideskip=\\skip11", "\\@tempdima=\\dimen13", "\\@tempdimb=\\dimen14", "\\@tempdimc=\\dimen15", "\\@tempcnta=\\count23", "\\@tempcntb=\\count24", "\\@tempskipa=\\skip12", "\\@tempskipb=\\skip13", "\\@temptokena=\\toks10", "\\@tempboxa=\\box10", "\\voidb@x=\\box11", "\\textwidth=\\dimen16", "\\textheight=\\dimen17", "\\linewidth=\\dimen18", "\\columnwidth=\\dimen19", "\\columnsep=\\dimen20", "\\columnseprule=\\dimen21", "\\marginparwidth=\\dimen22", "\\marginparsep=\\dimen23", "\\marginparpush=\\dimen24", "\\oddsidemargin=\\dimen25", "\\evensidemargin=\\dimen26", "\\topmargin=\\dimen27", "\\headheight=\\dimen28", "\\headsep=\\dimen29", "\\footskip=\\dimen30", "\\paperwidth=\\dimen31", "\\paperheight=\\dimen32", "\\fboxsep=\\dimen33", "\\fboxrule=\\dimen34", "\\arraycolsep=\\dimen35", "\\tabcolsep=\\dimen36", "\\arrayrulewidth=\\dimen37", "\\doublerulesep=\\dimen38", "\\labelwidth=\\dimen39", "\\labelsep=\\dimen40", "\\itemindent=\\dimen41", "\\listparindent=\\dimen42", "\\leftmargin=\\dimen43", "\\rightmargin=\\dimen44", "\\unitlength=\\dimen45", "\\jot=\\dimen46", "\\abovecaptionskip=\\skip14", "\\belowcaptionskip=\\skip15", "\\smallskipamount=\\skip16", "\\medskipamount=\\skip17", "\\bigskipamount=\\skip18", "\\topsep=\\skip19", "\\itemsep=\\skip20", "\\parsep=\\skip21", "\\partopsep=\\skip22", "\\floatsep=\\skip23", "\\textfloatsep=\\skip24", "\\intextsep=\\skip25"],
+      diagnostics: [{
+          code: "tex-font-params",
+          message: "Font cmr10 has only 7 fontdimen parameters",
+          offset: 67,
+          line: 1
+        }],
+      issue: null
+    }, {
+      text: "0.0pt\\relaxX",
+      messages: ["\\z@=\\dimen10", "\\p@=\\dimen11", "\\maxdimen=\\dimen12", "\\z@skip=\\skip10", "\\hideskip=\\skip11", "\\@tempdima=\\dimen13", "\\@tempdimb=\\dimen14", "\\@tempdimc=\\dimen15", "\\@tempcnta=\\count23", "\\@tempcntb=\\count24", "\\@tempskipa=\\skip12", "\\@tempskipb=\\skip13", "\\@temptokena=\\toks10", "\\@tempboxa=\\box10", "\\voidb@x=\\box11", "\\textwidth=\\dimen16", "\\textheight=\\dimen17", "\\linewidth=\\dimen18", "\\columnwidth=\\dimen19", "\\columnsep=\\dimen20", "\\columnseprule=\\dimen21", "\\marginparwidth=\\dimen22", "\\marginparsep=\\dimen23", "\\marginparpush=\\dimen24", "\\oddsidemargin=\\dimen25", "\\evensidemargin=\\dimen26", "\\topmargin=\\dimen27", "\\headheight=\\dimen28", "\\headsep=\\dimen29", "\\footskip=\\dimen30", "\\paperwidth=\\dimen31", "\\paperheight=\\dimen32", "\\fboxsep=\\dimen33", "\\fboxrule=\\dimen34", "\\arraycolsep=\\dimen35", "\\tabcolsep=\\dimen36", "\\arrayrulewidth=\\dimen37", "\\doublerulesep=\\dimen38", "\\labelwidth=\\dimen39", "\\labelsep=\\dimen40", "\\itemindent=\\dimen41", "\\listparindent=\\dimen42", "\\leftmargin=\\dimen43", "\\rightmargin=\\dimen44", "\\unitlength=\\dimen45", "\\jot=\\dimen46", "\\abovecaptionskip=\\skip14", "\\belowcaptionskip=\\skip15", "\\smallskipamount=\\skip16", "\\medskipamount=\\skip17", "\\bigskipamount=\\skip18", "\\topsep=\\skip19", "\\itemsep=\\skip20", "\\parsep=\\skip21", "\\partopsep=\\skip22", "\\floatsep=\\skip23", "\\textfloatsep=\\skip24", "\\intextsep=\\skip25"],
+      diagnostics: [{
+          code: "tex-font-params",
+          message: "Font cmr10 has only 7 fontdimen parameters",
+          offset: 67,
+          line: 1
+        }, {
+          code: "tex-font-params",
+          message: "Font cmr10 has only 7 fontdimen parameters",
+          offset: 94,
+          line: 1
+        }],
+      issue: null
+    }, {
+      text: "0.0pt\\relaxX",
+      messages: ["\\z@=\\dimen10", "\\p@=\\dimen11", "\\maxdimen=\\dimen12", "\\z@skip=\\skip10", "\\hideskip=\\skip11", "\\@tempdima=\\dimen13", "\\@tempdimb=\\dimen14", "\\@tempdimc=\\dimen15", "\\@tempcnta=\\count23", "\\@tempcntb=\\count24", "\\@tempskipa=\\skip12", "\\@tempskipb=\\skip13", "\\@temptokena=\\toks10", "\\@tempboxa=\\box10", "\\voidb@x=\\box11", "\\textwidth=\\dimen16", "\\textheight=\\dimen17", "\\linewidth=\\dimen18", "\\columnwidth=\\dimen19", "\\columnsep=\\dimen20", "\\columnseprule=\\dimen21", "\\marginparwidth=\\dimen22", "\\marginparsep=\\dimen23", "\\marginparpush=\\dimen24", "\\oddsidemargin=\\dimen25", "\\evensidemargin=\\dimen26", "\\topmargin=\\dimen27", "\\headheight=\\dimen28", "\\headsep=\\dimen29", "\\footskip=\\dimen30", "\\paperwidth=\\dimen31", "\\paperheight=\\dimen32", "\\fboxsep=\\dimen33", "\\fboxrule=\\dimen34", "\\arraycolsep=\\dimen35", "\\tabcolsep=\\dimen36", "\\arrayrulewidth=\\dimen37", "\\doublerulesep=\\dimen38", "\\labelwidth=\\dimen39", "\\labelsep=\\dimen40", "\\itemindent=\\dimen41", "\\listparindent=\\dimen42", "\\leftmargin=\\dimen43", "\\rightmargin=\\dimen44", "\\unitlength=\\dimen45", "\\jot=\\dimen46", "\\abovecaptionskip=\\skip14", "\\belowcaptionskip=\\skip15", "\\smallskipamount=\\skip16", "\\medskipamount=\\skip17", "\\bigskipamount=\\skip18", "\\topsep=\\skip19", "\\itemsep=\\skip20", "\\parsep=\\skip21", "\\partopsep=\\skip22", "\\floatsep=\\skip23", "\\textfloatsep=\\skip24", "\\intextsep=\\skip25"],
+      diagnostics: [{
+          code: "tex-font-params",
+          message: "Font cmr10 has only 7 fontdimen parameters",
+          offset: 75,
+          line: 1
+        }],
+      issue: null
+    }, {
+      text: "0.0ptX ",
+      messages: ["\\z@=\\dimen10", "\\p@=\\dimen11", "\\maxdimen=\\dimen12", "\\z@skip=\\skip10", "\\hideskip=\\skip11", "\\@tempdima=\\dimen13", "\\@tempdimb=\\dimen14", "\\@tempdimc=\\dimen15", "\\@tempcnta=\\count23", "\\@tempcntb=\\count24", "\\@tempskipa=\\skip12", "\\@tempskipb=\\skip13", "\\@temptokena=\\toks10", "\\@tempboxa=\\box10", "\\voidb@x=\\box11", "\\textwidth=\\dimen16", "\\textheight=\\dimen17", "\\linewidth=\\dimen18", "\\columnwidth=\\dimen19", "\\columnsep=\\dimen20", "\\columnseprule=\\dimen21", "\\marginparwidth=\\dimen22", "\\marginparsep=\\dimen23", "\\marginparpush=\\dimen24", "\\oddsidemargin=\\dimen25", "\\evensidemargin=\\dimen26", "\\topmargin=\\dimen27", "\\headheight=\\dimen28", "\\headsep=\\dimen29", "\\footskip=\\dimen30", "\\paperwidth=\\dimen31", "\\paperheight=\\dimen32", "\\fboxsep=\\dimen33", "\\fboxrule=\\dimen34", "\\arraycolsep=\\dimen35", "\\tabcolsep=\\dimen36", "\\arrayrulewidth=\\dimen37", "\\doublerulesep=\\dimen38", "\\labelwidth=\\dimen39", "\\labelsep=\\dimen40", "\\itemindent=\\dimen41", "\\listparindent=\\dimen42", "\\leftmargin=\\dimen43", "\\rightmargin=\\dimen44", "\\unitlength=\\dimen45", "\\jot=\\dimen46", "\\abovecaptionskip=\\skip14", "\\belowcaptionskip=\\skip15", "\\smallskipamount=\\skip16", "\\medskipamount=\\skip17", "\\bigskipamount=\\skip18", "\\topsep=\\skip19", "\\itemsep=\\skip20", "\\parsep=\\skip21", "\\partopsep=\\skip22", "\\floatsep=\\skip23", "\\textfloatsep=\\skip24", "\\intextsep=\\skip25"],
+      diagnostics: [{
+          code: "tex-font-params",
+          message: "Font nullfont has only 7 fontdimen parameters",
+          offset: 15,
+          line: 1
+        }],
+      issue: null
+    }, {
+      text: "0.0ptX ",
+      messages: ["\\z@=\\dimen10", "\\p@=\\dimen11", "\\maxdimen=\\dimen12", "\\z@skip=\\skip10", "\\hideskip=\\skip11", "\\@tempdima=\\dimen13", "\\@tempdimb=\\dimen14", "\\@tempdimc=\\dimen15", "\\@tempcnta=\\count23", "\\@tempcntb=\\count24", "\\@tempskipa=\\skip12", "\\@tempskipb=\\skip13", "\\@temptokena=\\toks10", "\\@tempboxa=\\box10", "\\voidb@x=\\box11", "\\textwidth=\\dimen16", "\\textheight=\\dimen17", "\\linewidth=\\dimen18", "\\columnwidth=\\dimen19", "\\columnsep=\\dimen20", "\\columnseprule=\\dimen21", "\\marginparwidth=\\dimen22", "\\marginparsep=\\dimen23", "\\marginparpush=\\dimen24", "\\oddsidemargin=\\dimen25", "\\evensidemargin=\\dimen26", "\\topmargin=\\dimen27", "\\headheight=\\dimen28", "\\headsep=\\dimen29", "\\footskip=\\dimen30", "\\paperwidth=\\dimen31", "\\paperheight=\\dimen32", "\\fboxsep=\\dimen33", "\\fboxrule=\\dimen34", "\\arraycolsep=\\dimen35", "\\tabcolsep=\\dimen36", "\\arrayrulewidth=\\dimen37", "\\doublerulesep=\\dimen38", "\\labelwidth=\\dimen39", "\\labelsep=\\dimen40", "\\itemindent=\\dimen41", "\\listparindent=\\dimen42", "\\leftmargin=\\dimen43", "\\rightmargin=\\dimen44", "\\unitlength=\\dimen45", "\\jot=\\dimen46", "\\abovecaptionskip=\\skip14", "\\belowcaptionskip=\\skip15", "\\smallskipamount=\\skip16", "\\medskipamount=\\skip17", "\\bigskipamount=\\skip18", "\\topsep=\\skip19", "\\itemsep=\\skip20", "\\parsep=\\skip21", "\\partopsep=\\skip22", "\\floatsep=\\skip23", "\\textfloatsep=\\skip24", "\\intextsep=\\skip25"],
+      diagnostics: [{
+          code: "tex-font-params",
+          message: "Font nullfont has only 7 fontdimen parameters",
+          offset: 15,
+          line: 1
+        }],
+      issue: null
+    }, {
+      text: "0.0ptX ",
+      messages: ["\\z@=\\dimen10", "\\p@=\\dimen11", "\\maxdimen=\\dimen12", "\\z@skip=\\skip10", "\\hideskip=\\skip11", "\\@tempdima=\\dimen13", "\\@tempdimb=\\dimen14", "\\@tempdimc=\\dimen15", "\\@tempcnta=\\count23", "\\@tempcntb=\\count24", "\\@tempskipa=\\skip12", "\\@tempskipb=\\skip13", "\\@temptokena=\\toks10", "\\@tempboxa=\\box10", "\\voidb@x=\\box11", "\\textwidth=\\dimen16", "\\textheight=\\dimen17", "\\linewidth=\\dimen18", "\\columnwidth=\\dimen19", "\\columnsep=\\dimen20", "\\columnseprule=\\dimen21", "\\marginparwidth=\\dimen22", "\\marginparsep=\\dimen23", "\\marginparpush=\\dimen24", "\\oddsidemargin=\\dimen25", "\\evensidemargin=\\dimen26", "\\topmargin=\\dimen27", "\\headheight=\\dimen28", "\\headsep=\\dimen29", "\\footskip=\\dimen30", "\\paperwidth=\\dimen31", "\\paperheight=\\dimen32", "\\fboxsep=\\dimen33", "\\fboxrule=\\dimen34", "\\arraycolsep=\\dimen35", "\\tabcolsep=\\dimen36", "\\arrayrulewidth=\\dimen37", "\\doublerulesep=\\dimen38", "\\labelwidth=\\dimen39", "\\labelsep=\\dimen40", "\\itemindent=\\dimen41", "\\listparindent=\\dimen42", "\\leftmargin=\\dimen43", "\\rightmargin=\\dimen44", "\\unitlength=\\dimen45", "\\jot=\\dimen46", "\\abovecaptionskip=\\skip14", "\\belowcaptionskip=\\skip15", "\\smallskipamount=\\skip16", "\\medskipamount=\\skip17", "\\bigskipamount=\\skip18", "\\topsep=\\skip19", "\\itemsep=\\skip20", "\\parsep=\\skip21", "\\partopsep=\\skip22", "\\floatsep=\\skip23", "\\textfloatsep=\\skip24", "\\intextsep=\\skip25"],
+      diagnostics: [{
+          code: "tex-font-params",
+          message: "Font cmr10 has only 7 fontdimen parameters",
+          offset: 70,
+          line: 2
+        }],
+      issue: null
+    }, {
+      text: "0.0ptX ",
+      messages: ["\\z@=\\dimen10", "\\p@=\\dimen11", "\\maxdimen=\\dimen12", "\\z@skip=\\skip10", "\\hideskip=\\skip11", "\\@tempdima=\\dimen13", "\\@tempdimb=\\dimen14", "\\@tempdimc=\\dimen15", "\\@tempcnta=\\count23", "\\@tempcntb=\\count24", "\\@tempskipa=\\skip12", "\\@tempskipb=\\skip13", "\\@temptokena=\\toks10", "\\@tempboxa=\\box10", "\\voidb@x=\\box11", "\\textwidth=\\dimen16", "\\textheight=\\dimen17", "\\linewidth=\\dimen18", "\\columnwidth=\\dimen19", "\\columnsep=\\dimen20", "\\columnseprule=\\dimen21", "\\marginparwidth=\\dimen22", "\\marginparsep=\\dimen23", "\\marginparpush=\\dimen24", "\\oddsidemargin=\\dimen25", "\\evensidemargin=\\dimen26", "\\topmargin=\\dimen27", "\\headheight=\\dimen28", "\\headsep=\\dimen29", "\\footskip=\\dimen30", "\\paperwidth=\\dimen31", "\\paperheight=\\dimen32", "\\fboxsep=\\dimen33", "\\fboxrule=\\dimen34", "\\arraycolsep=\\dimen35", "\\tabcolsep=\\dimen36", "\\arrayrulewidth=\\dimen37", "\\doublerulesep=\\dimen38", "\\labelwidth=\\dimen39", "\\labelsep=\\dimen40", "\\itemindent=\\dimen41", "\\listparindent=\\dimen42", "\\leftmargin=\\dimen43", "\\rightmargin=\\dimen44", "\\unitlength=\\dimen45", "\\jot=\\dimen46", "\\abovecaptionskip=\\skip14", "\\belowcaptionskip=\\skip15", "\\smallskipamount=\\skip16", "\\medskipamount=\\skip17", "\\bigskipamount=\\skip18", "\\topsep=\\skip19", "\\itemsep=\\skip20", "\\parsep=\\skip21", "\\partopsep=\\skip22", "\\floatsep=\\skip23", "\\textfloatsep=\\skip24", "\\intextsep=\\skip25"],
+      diagnostics: [{
+          code: "tex-font-params",
+          message: "Font cmr10 has only 7 fontdimen parameters",
+          offset: 81,
+          line: 1
+        }],
+      issue: null
+    }]]

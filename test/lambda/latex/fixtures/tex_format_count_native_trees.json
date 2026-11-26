@@ -1,0 +1,555 @@
+[
+  {
+    "$": "latex_document",
+    "_": [
+      {
+        "$": "document",
+        "source_offset": 13,
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              "A1264B"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "$": "latex_document",
+    "_": [
+      {
+        "$": "document",
+        "source_offset": 13,
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              "A",
+              {
+                "$": "curly_group",
+                "_": [
+                  "1264"
+                ]
+              },
+              "B"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "$": "latex_document",
+    "_": [
+      {
+        "$": "document",
+        "source_offset": 13,
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              "A",
+              {
+                "$": "textbf",
+                "source_offset": 30,
+                "_": [
+                  "1264"
+                ]
+              },
+              "B"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "$": "latex_document",
+    "_": [
+      {
+        "$": "document",
+        "source_offset": 13,
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              "A"
+            ]
+          },
+          {
+            "$": "section",
+            "source_offset": 30,
+            "title": {
+              "$": "curly_group",
+              "_": [
+                "1264"
+              ]
+            }
+          },
+          {
+            "$": "paragraph",
+            "_": [
+              "B"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "$": "latex_document",
+    "_": [
+      {
+        "$": "document",
+        "source_offset": 13,
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              "A-50000B"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "$": "latex_document",
+    "_": [
+      {
+        "$": "document",
+        "source_offset": 13,
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              "A",
+              {
+                "$": "curly_group",
+                "_": [
+                  "-50000"
+                ]
+              },
+              "B"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "$": "latex_document",
+    "_": [
+      {
+        "$": "document",
+        "source_offset": 13,
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              "A",
+              {
+                "$": "textbf",
+                "source_offset": 30,
+                "_": [
+                  "-50000"
+                ]
+              },
+              "B"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "$": "latex_document",
+    "_": [
+      {
+        "$": "document",
+        "source_offset": 13,
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              "A"
+            ]
+          },
+          {
+            "$": "section",
+            "source_offset": 30,
+            "title": {
+              "$": "curly_group",
+              "_": [
+                "-50000"
+              ]
+            }
+          },
+          {
+            "$": "paragraph",
+            "_": [
+              "B"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "$": "latex_document",
+    "_": [
+      {
+        "$": "document",
+        "source_offset": 13,
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              "A0B"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "$": "latex_document",
+    "_": [
+      {
+        "$": "document",
+        "source_offset": 13,
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              "A",
+              {
+                "$": "curly_group",
+                "_": [
+                  "0"
+                ]
+              },
+              "B"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "$": "latex_document",
+    "tex_diagnostics": [
+      {
+        "code": "tex-missing-number",
+        "message": "Missing number, treated as zero",
+        "offset": 64,
+        "line": 1
+      }
+    ],
+    "tex_packages": [],
+    "_": [
+      {
+        "$": "document",
+        "source_offset": 13,
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              "A",
+              {
+                "$": "textbf",
+                "source_offset": 30,
+                "_": [
+                  {
+                    "$": "global",
+                    "source_offset": 48,
+                    "argument_groups": []
+                  },
+                  {
+                    "$": "advance",
+                    "source_offset": 48,
+                    "argument_groups": []
+                  },
+                  {
+                    "$": "count",
+                    "source_offset": 48,
+                    "argument_groups": []
+                  },
+                  "10",
+                  {
+                    "$": "@ne",
+                    "source_offset": 48,
+                    "argument_groups": []
+                  },
+                  {
+                    "$": "allocationnumber",
+                    "source_offset": 48,
+                    "argument_groups": []
+                  },
+                  {
+                    "$": "count",
+                    "source_offset": 48,
+                    "argument_groups": []
+                  },
+                  "10",
+                  {
+                    "$": "global",
+                    "source_offset": 48,
+                    "argument_groups": []
+                  },
+                  {
+                    "$": "countdef",
+                    "source_offset": 48,
+                    "argument_groups": []
+                  },
+                  {
+                    "$": "l",
+                    "source_offset": 48,
+                    "argument_groups": []
+                  },
+                  "_my_int",
+                  {
+                    "$": "allocationnumber",
+                    "source_offset": 48,
+                    "argument_groups": []
+                  },
+                  {
+                    "$": "immediate",
+                    "source_offset": 48,
+                    "argument_groups": []
+                  },
+                  {
+                    "$": "write",
+                    "source_offset": 48,
+                    "argument_groups": []
+                  },
+                  {
+                    "$": "m@ne",
+                    "source_offset": 48,
+                    "argument_groups": [
+                      {
+                        "kind": "required",
+                        "raw": "\\textbackslash{}l\\_my\\_int=\\textbackslash{}count78",
+                        "start": 48,
+                        "end": 64
+                      }
+                    ],
+                    "_": [
+                      {
+                        "$": "textbackslash",
+                        "source_offset": 48,
+                        "argument_groups": [
+                          {
+                            "kind": "required",
+                            "raw": "",
+                            "start": 48,
+                            "end": 48
+                          }
+                        ],
+                        "_": [
+                          {
+                            "$": "curly_group"
+                          }
+                        ]
+                      },
+                      "l_my_int=",
+                      {
+                        "$": "textbackslash",
+                        "source_offset": 48,
+                        "argument_groups": [
+                          {
+                            "kind": "required",
+                            "raw": "",
+                            "start": 48,
+                            "end": 48
+                          }
+                        ],
+                        "_": [
+                          {
+                            "$": "curly_group"
+                          }
+                        ]
+                      },
+                      "count78"
+                    ]
+                  },
+                  "0",
+                  {
+                    "$": "l",
+                    "source_offset": 64,
+                    "argument_groups": []
+                  },
+                  "_my_int "
+                ]
+              },
+              "B"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "$": "latex_document",
+    "tex_diagnostics": [
+      {
+        "code": "tex-missing-number",
+        "message": "Missing number, treated as zero",
+        "offset": 65,
+        "line": 1
+      }
+    ],
+    "tex_packages": [],
+    "_": [
+      {
+        "$": "document",
+        "source_offset": 13,
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              "A"
+            ]
+          },
+          {
+            "$": "section",
+            "source_offset": 30,
+            "title": {
+              "$": "curly_group",
+              "_": [
+                {
+                  "$": "global",
+                  "source_offset": 49,
+                  "argument_groups": []
+                },
+                {
+                  "$": "advance",
+                  "source_offset": 49,
+                  "argument_groups": []
+                },
+                {
+                  "$": "count",
+                  "source_offset": 49,
+                  "argument_groups": []
+                },
+                "10",
+                {
+                  "$": "@ne",
+                  "source_offset": 49,
+                  "argument_groups": []
+                },
+                {
+                  "$": "allocationnumber",
+                  "source_offset": 49,
+                  "argument_groups": []
+                },
+                {
+                  "$": "count",
+                  "source_offset": 49,
+                  "argument_groups": []
+                },
+                "10",
+                {
+                  "$": "global",
+                  "source_offset": 49,
+                  "argument_groups": []
+                },
+                {
+                  "$": "countdef",
+                  "source_offset": 49,
+                  "argument_groups": []
+                },
+                {
+                  "$": "l",
+                  "source_offset": 49,
+                  "argument_groups": []
+                },
+                "_my_int",
+                {
+                  "$": "allocationnumber",
+                  "source_offset": 49,
+                  "argument_groups": []
+                },
+                {
+                  "$": "immediate",
+                  "source_offset": 49,
+                  "argument_groups": []
+                },
+                {
+                  "$": "write",
+                  "source_offset": 49,
+                  "argument_groups": []
+                },
+                {
+                  "$": "m@ne",
+                  "source_offset": 49,
+                  "argument_groups": [
+                    {
+                      "kind": "required",
+                      "raw": "\\textbackslash{}l\\_my\\_int=\\textbackslash{}count78",
+                      "start": 49,
+                      "end": 65
+                    }
+                  ],
+                  "_": [
+                    {
+                      "$": "textbackslash",
+                      "source_offset": 49,
+                      "argument_groups": [
+                        {
+                          "kind": "required",
+                          "raw": "",
+                          "start": 49,
+                          "end": 49
+                        }
+                      ],
+                      "_": [
+                        {
+                          "$": "curly_group"
+                        }
+                      ]
+                    },
+                    "l_my_int=",
+                    {
+                      "$": "textbackslash",
+                      "source_offset": 49,
+                      "argument_groups": [
+                        {
+                          "kind": "required",
+                          "raw": "",
+                          "start": 49,
+                          "end": 49
+                        }
+                      ],
+                      "_": [
+                        {
+                          "$": "curly_group"
+                        }
+                      ]
+                    },
+                    "count78"
+                  ]
+                },
+                "0",
+                {
+                  "$": "l",
+                  "source_offset": 65,
+                  "argument_groups": []
+                },
+                "_my_int "
+              ]
+            }
+          },
+          {
+            "$": "paragraph",
+            "_": [
+              "B"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+]
