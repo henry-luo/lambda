@@ -1661,6 +1661,7 @@ test-chat-clients: build
 
 # Keep the runtime-global and Lambda-adjacent gates explicit in the full Lambda lane.
 test-lambda-full: test-lambda-baseline
+	@$(MAKE) --no-print-directory test-math-corpus
 	@echo "Building focused suites assigned to the full Lambda gate..."
 	$(call run_make_with_error_summary,lambda-full-extra,debug_native,,$(LAMBDA_FULL_EXTRA_TEST_PROJECTS))
 	@echo "Running focused suites assigned to the full Lambda gate..."

@@ -8,6 +8,7 @@ pn main() {
   let custom = root ++ ".custom"
   let bad = root ++ ".invalid"
   let image = root ++ ".ppm"
+  let image_text = "P3\n1 1\n255\n255 0 0\n"
   let copy = root ++ "-copy"
   let copy_custom = root ++ "-copy.custom"
   let refused = root ++ "-copy.png"
@@ -15,11 +16,12 @@ pn main() {
   output("#!/bin/sh\necho hello\n", plain)^
   output("message = 雪\n", custom)^
   output(b'\x61628063', bad)^
-  output("P3\n1 1\n255\n255 0 0\n", image)^
+  output(image_text, image)^
   let plain_page = editor.open_document(plain, {}) ^ { null }
   let custom_page = editor.open_document(custom, {}) ^ { null }
   let invalid = editor.open_document(bad, {}) ^ { ^.message }
-  let media = editor.open_document(image, {}) ^ { ^.message }
+  // D10.2.6v2 treats this ASCII image as valid source text.
+  let media = editor.open_state(image, {})^
   let content = "hello\n"
   let loaded = src.descriptor.import_text(content)
   let plain_session = sess.new_session(plain, src.descriptor, content, loaded)
@@ -28,6 +30,7 @@ pn main() {
   let custom_copy = sess.save(custom_session, loaded.doc, copy_custom, false)
   let rejected = sess.save(plain_session, loaded.doc, refused, false)
   print(format([plain_page is element, custom_page is element,
-    contains(invalid, "not safely readable as text"), contains(media, "non-text document"),
+    contains(invalid, "not safely readable as UTF-8 text"),
+    media.mode == 'source' and media.session.disk_text == image_text,
     plain_copy.ok, custom_copy.ok, not rejected.ok and not exists(refused)], 'json')^ ++ "\n")
 }

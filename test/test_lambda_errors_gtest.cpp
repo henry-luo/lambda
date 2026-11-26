@@ -26,6 +26,8 @@
 #include "lib/file.h"
 #include "lib/strbuf.h"
 #include "test_eval_fixture.hpp"
+#include <signal.h>
+#include <stdlib.h>
 #include <string>
 #include <cstring>
 #ifndef _WIN32
@@ -465,7 +467,17 @@ TEST(ValueRepresentationTest, UnsupportedDirectTransitionFailsClosed) {
     MirEmitter emitter = {};
     MirValue lane = em_value(1, MIR_T_I64, LMD_TYPE_INT,
         VALUE_REP_INT_LANE, JIT_VALUE_NON_GC_SCALAR, &TYPE_INT);
+#ifdef __APPLE__
+    // Verify D2.3.5 at SIGABRT delivery. Darwin can stall while reaping a crash.
+    EXPECT_EXIT({
+        if (signal(SIGABRT, [](int received) { _Exit(received); }) == SIG_ERR) {
+            _Exit(EXIT_FAILURE);
+        }
+        em_require_rep(&emitter, lane, VALUE_REP_MACHINE_I64);
+    }, ::testing::ExitedWithCode(SIGABRT), "");
+#else
     EXPECT_DEATH(em_require_rep(&emitter, lane, VALUE_REP_MACHINE_I64), "");
+#endif
 }
 
 TEST(TypeContractMetadataTest, InternalTopExclusionsStayDistinctFromAny) {

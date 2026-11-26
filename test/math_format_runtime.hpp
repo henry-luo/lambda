@@ -13,11 +13,24 @@ struct MathFormatTestRuntime {
     Runtime runtime{};
     bool ready;
     MathFormatTestRuntime() {
+        lambda_home_init();
         runtime_init(&runtime);
         // runtime_init creates metadata; an evaluation establishes the heap and TLS.
         ready = run_script_mir(&runtime, "null\n", (char*)"<math-format-test>", false) != nullptr;
     }
     ~MathFormatTestRuntime() { runtime_cleanup(&runtime); }
+
+    String* roundtrip_tex_math(const char* source, String* type, String* flavor) {
+        if (!ready) return nullptr;
+        // D10.2.2v2: TeX math uses the runtime parser before Script formatting.
+        RootFrame roots(3);
+        Rooted<String*> text(roots, heap_strcpy(source, strlen(source)));
+        Rooted<Symbol*> notation(roots, heap_create_symbol(type->chars, type->len));
+        if (!text.get() || !notation.get()) return nullptr;
+        Rooted<Item> parsed(roots, fn_parse2({.item = s2it(text.get())}, {.item = y2it(notation.get())}));
+        if (get_type_id(parsed.get()) != LMD_TYPE_ELEMENT) return nullptr;
+        return format(parsed.get(), type, flavor, runtime_heap(&runtime)->pool);
+    }
 
     String* format(Item source, String* type, String* flavor, Pool* pool) {
         if (!ready) return nullptr;

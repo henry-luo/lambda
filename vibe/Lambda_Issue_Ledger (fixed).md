@@ -16,6 +16,47 @@
 > Semantic and design rulings remain cited by S# / D#; where no formal ruling
 > covers a point, the original vibe ledger ID is retained.
 
+## Exclusive test suites omit progress updates
+
+**Fixed 2026-11-25.** `test_lambda_gtest` took over six minutes to report
+all 2,514 cases in the baseline. Its workers kept writing results while the
+console showed only the start line. The runner gave the regular pool a
+heartbeat and ran exclusive suites in a separate loop without one.
+
+The same scheduler now runs each exclusive suite in a phase of its own.
+Heartbeats show elapsed time and the number of cases reported by completed
+batches. The runner contract suite passes 90/90. A native run showed the
+reported count advance from 0 to 148, 296, and 444 cases. Evidence is under
+`temp/lambda-errors-regression/`.
+
+## Carrier conversion death test stalls on Darwin
+
+**Fixed 2026-11-25.** D2.3.5 requires an unsupported carrier conversion to
+fail closed. The carrier transition death test reached `abort()` and then
+stalled in Darwin's fatal-signal handling. A standalone C `abort()` reproduced
+the stall. The test now verifies `SIGABRT` delivery in the Darwin child and
+exits from its signal handler. It passes in both GoogleTest death-test modes.
+
+The suite runner also waited for pipe closure after its watchdog killed the
+test group. A surviving descendant could keep the pipes open indefinitely.
+The timeout now closes the runner's read ends and completes the failed result.
+The new contract case reproduced the stall and passes with the fix. All 89
+runner contract checks and all 344 runtime cases pass. Evidence is under
+`temp/lambda-errors-regression/`.
+
+## Checked store diagnostics lose their message
+
+**Fixed 2026-11-25.** Under **S7.7.6v2**, a rejected checked store reports its
+skipped tail and partial-state boundary. `ledger_containment.ls` retained the
+expected control flow and emitted a bare `error[E201]`. The shell qualification
+reproduced the diagnostic on unmodified `cb10b30bab`; evidence is in
+`temp/shell-pipeline/baseline.log`.
+
+The length-aware formatter introduced in `dfd081189f` read zero bytes because
+`lambda_report_boundary_failure` supplied the borrowed message without its
+length. The producer now supplies both fields. The existing containment case
+verifies the complete message in `interp`, `jit`, and `auto`.
+
 <a id="lr09-37"></a>
 ## LR09-37 — Hot typed error handlers linked an unavailable predicate
 

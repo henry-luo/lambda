@@ -82,6 +82,7 @@ protected:
     char* fixture_directory = nullptr;
     char* directory = nullptr;
     char* script_path = nullptr;
+    char* saved_asset_home = nullptr;
     uint64_t clock_value = 100;
     Input* last_run = nullptr;
 
@@ -197,6 +198,8 @@ protected:
 
     void TearDown() override {
         if (runtime_live) runtime_cleanup(&runtime);
+        if (saved_asset_home) host_paths_set(HOST_PATH_HOME, saved_asset_home);
+        mem_free(saved_asset_home);
         security_file_broker_destroy(broker);
         if (temporary) dir_delete(temporary);
         mem_free(script_path); mem_free(directory); mem_free(fixture_directory); mem_free(temporary);
@@ -250,15 +253,23 @@ protected:
     }
 
     uint64_t admit_shipped_packages() {
-        lambda_home_init();
+        if (!saved_asset_home) {
+            lambda_home_init();
+            saved_asset_home = mem_strdup(host_path(HOST_PATH_HOME), MEM_CAT_SYSTEM);
+            if (!saved_asset_home) return 0;
+        }
+        // The broker resolves relative paths under the project, so shipped reads
+        // must use the same absolute asset home as the host's grant (D11.2.1).
+        char* canonical_home = file_realpath(saved_asset_home);
+        bool configured = canonical_home && host_paths_set(HOST_PATH_HOME, canonical_home);
+        mem_free(canonical_home);
+        if (!configured) return 0;
         char* path = host_path_join(HOST_PATH_HOME, "package");
-        char* canonical = path ? file_realpath(path) : nullptr;
-        mem_free(path);
-        if (!canonical) return 0;
-        SecurityFileRootSpec shipped = {canonical, SECURITY_SCOPE_SHIPPED,
+        if (!path) return 0;
+        SecurityFileRootSpec shipped = {path, SECURITY_SCOPE_SHIPPED,
             SECURITY_READ | SECURITY_METADATA | SECURITY_LOAD_SOURCE, 0, 0, true, false, nullptr};
         uint64_t id = security_file_broker_admit_root(broker, &shipped);
-        mem_free(canonical);
+        mem_free(path);
         return id;
     }
 
@@ -760,17 +771,6 @@ TEST_P(SecurityRuntimeTest, TexLocalPackagesUseTheSameDataGrant) {
 
 TEST_P(SecurityRuntimeTest, StructurizrIncludesRetainTheirNarrowerDocumentRoot) {
     // Script parser dependencies use the same read-only shipped grant as other packages (D11.2.1).
-    lambda_home_init();
-    struct HomeScope {
-        char* saved = mem_strdup(host_path(HOST_PATH_HOME), MEM_CAT_SYSTEM);
-        ~HomeScope() { if (saved) host_paths_set(HOST_PATH_HOME, saved); mem_free(saved); }
-    } home_scope;
-    ASSERT_NE(home_scope.saved, nullptr);
-    char* asset_root = file_realpath(home_scope.saved);
-    ASSERT_NE(asset_root, nullptr);
-    bool configured = host_paths_set(HOST_PATH_HOME, asset_root);
-    mem_free(asset_root);
-    ASSERT_TRUE(configured);
     ASSERT_NE(admit_shipped_packages(), 0U);
     seed("docs/model.dsl", "workspace { model {\n!include part.dsl\n!include ../secret.dsl\n} }\n");
     seed("docs/part.dsl", "person \"SAFE\"\n"); seed("secret.dsl", "person \"FORBIDDEN\"\n");

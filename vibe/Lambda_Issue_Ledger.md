@@ -32,14 +32,18 @@ Fixed and archived. See the
 
 ## Checked store diagnostics lose their message
 
-**Open, 2026-11-25.** Under **S7.7.6v2**, a rejected checked store reports its
-skipped tail and partial-state boundary. `ledger_containment.ls` still shows
-the expected control flow but prints bare `error[E201]` diagnostics.
-`lambda_report_boundary_failure` fills `LambdaError.message` while the
-length-aware formatter introduced in `dfd081189f` reads
-`LambdaError.message_length`, which this producer leaves zero. The shell
-qualification reproduced the diagnostic on an unmodified `cb10b30bab` host
-and on the candidate. See `temp/shell-pipeline/baseline.log`.
+Fixed and archived. See the
+[S7.7.6v2 diagnostic regression](<Lambda_Issue_Ledger (fixed).md#checked-store-diagnostics-lose-their-message>).
+
+## Carrier conversion death test stalls on Darwin
+
+Fixed and archived. See the
+[D2.3.5 regression and runner timeout fix](<Lambda_Issue_Ledger (fixed).md#carrier-conversion-death-test-stalls-on-darwin>).
+
+## Exclusive test suites omit progress updates
+
+Fixed and archived. See the
+[test runner progress regression](<Lambda_Issue_Ledger (fixed).md#exclusive-test-suites-omit-progress-updates>).
 
 <a id="formal-semantics-edge-cases-20261124"></a>
 

@@ -126,19 +126,6 @@ function testSourceOwner(source) {
 
 const SCRIPT_TESTS = [
     {
-        baseName: 'run_math_corpus',
-        script: 'test/lambda/math/run_corpus.mjs',
-        // Exercise the current font-driven renderer over both retained formula corpora.
-        suite: 'lambda',
-        category: 'baseline',
-        baselineFixtureSource: 'all',
-        displayName: 'Lambda Math SVG Corpus',
-        icon: '🔢',
-        runner: 'node',
-        args: [],
-        exclusive: true,
-    },
-    {
         baseName: 'run_js_parity',
         script: 'test/run_js_parity.mjs',
         // test_js_gtest + Test262 baseline under pinned MIR and full AST; the
@@ -831,8 +818,13 @@ function runTest(testInfo) {
             idleTimer = setTimeout(() => {
                 if (finished) return;
                 timedOut = true;
-                console.error(`   ⏰ ${baseName} idle for ${idleTimeoutMs / 1000}s — killing (stuck?)`)
+                console.error(`   ⏰ ${baseName} idle for ${idleTimeoutMs / 1000}s — killing (stuck?)`);
                 killChild();
+                // A crashed descendant can retain a pipe after the test group is killed.
+                child.stdout.destroy();
+                child.stderr.destroy();
+                child.unref();
+                complete(null, null);
             }, idleTimeoutMs);
         }
 
@@ -854,6 +846,7 @@ function runTest(testInfo) {
         });
 
         child.on('error', (err) => {
+            if (finished) return;
             finished = true;
             if (idleTimer) clearTimeout(idleTimer);
 
@@ -864,7 +857,9 @@ function runTest(testInfo) {
             });
         });
 
-        child.on('close', (code, signal) => {
+        child.on('close', complete);
+
+        function complete(code, signal) {
             if (finished) return;
             finished = true;
             if (idleTimer) clearTimeout(idleTimer);
@@ -920,7 +915,7 @@ function runTest(testInfo) {
                 result.failedTests.push(...errors.map(error => `[${baseName}] ${error} (see ${logFile})`));
             }
             finish(result);
-        });
+        }
     });
 }
 
@@ -989,6 +984,8 @@ async function runGtestCases(testInfo, workers, caseWorkerSlots) {
     }
     batches.sort((a, b) => b.cost - a.cost);
     let next = 0;
+    let completedCases = 0;
+    testInfo.onCaseProgress?.(completedCases, names.length);
     async function worker() {
         const cwd = testInfo.isolatedCwd ? createWorkspace(ROOT_DIR, `${baseName}-`) : undefined;
         while (next < batches.length) {
@@ -1032,6 +1029,8 @@ async function runGtestCases(testInfo, workers, caseWorkerSlots) {
                 caseLog = (result.failedTests || []).join('\n');
             }
             fs.appendFileSync(logFile, `\n[cases ${batch.map(c => c.index + 1).join(',')}/${names.length}] ${batch.map(c => c.name).join(':')}\n${caseLog}`);
+            completedCases += batch.length;
+            testInfo.onCaseProgress?.(completedCases, names.length);
         }
     }
     // wait for every active child before reporting an artifact I/O failure.
@@ -1258,7 +1257,7 @@ async function runAllTests(tests, labelOffset = 0, labelTotal = tests.length) {
     let heartbeat = null;
 
     return new Promise((resolveAll) => {
-        if (!rawOutput && parallelExecution) {
+        if (!rawOutput) {
             heartbeat = setInterval(() => {
                 if (running.size === 0) return;
 
@@ -1266,7 +1265,7 @@ async function runAllTests(tests, labelOffset = 0, labelTotal = tests.length) {
                 const active = [...running.values()]
                     .sort((a, b) => (now - b.startMs) - (now - a.startMs))
                     .slice(0, 5)
-                    .map(entry => `${entry.testInfo.baseName} ${formatDuration(now - entry.startMs)}`);
+                    .map(entry => `${entry.baseName} ${formatDuration(now - entry.startMs)}${entry.caseProgress}`);
                 console.log(`   ... still running (${running.size}): ${active.join(', ')}`);
             }, HEARTBEAT_MS);
         }
@@ -1284,7 +1283,14 @@ async function runAllTests(tests, labelOffset = 0, labelTotal = tests.length) {
                 const next = pending.findIndex(entry => Math.min(entry.slots, MAX_CONCURRENT) <= availableSlots);
                 if (next < 0) break;
                 const { testInfo: original, index: idx, slots } = pending.splice(next, 1)[0];
-                const testInfo = { ...original, allocatedSlots: slots };
+                const active = { baseName: original.baseName, startMs: Date.now(), caseProgress: '' };
+                const testInfo = {
+                    ...original,
+                    allocatedSlots: original.exclusive ? caseBudget(original) : slots,
+                    onCaseProgress(completed, total) {
+                        active.caseProgress = ` (${completed}/${total} cases reported)`;
+                    },
+                };
                 const reservedSlots = Math.min(slots, MAX_CONCURRENT);
                 availableSlots -= reservedSlots;
                 const label = `[${labelOffset + idx + 1}/${labelTotal}]`;
@@ -1307,7 +1313,7 @@ async function runAllTests(tests, labelOffset = 0, labelTotal = tests.length) {
                     finishIfDone();
                 });
 
-                running.set(promise, { testInfo, startMs: Date.now() });
+                running.set(promise, active);
             }
 
             // Edge case: no tests to run
@@ -1326,21 +1332,10 @@ async function runScheduledTests(tests) {
     const exclusiveTests = tests.filter(t => t.exclusive);
     const results = await runAllTests(regularTests, 0, tests.length);
 
-    for (let i = 0; i < exclusiveTests.length; i++) {
-        const testInfo = exclusiveTests[i];
-        const label = `[${regularTests.length + i + 1}/${tests.length}]`;
-
-        if (!rawOutput) {
-            console.log(`   ${label} Starting ${testInfo.baseName}...`);
-        }
-
-        const result = await runTimedTest({ ...testInfo, allocatedSlots: caseBudget(testInfo) });
-        results.set(testInfo.baseName, result);
-
-        if (!rawOutput) {
-            const icon = result.status.includes('PASS') ? '✓' : '✗';
-            console.log(`   ${icon} Completed ${testInfo.baseName} (${result.passed}/${result.total} passed, ${formatDuration(result.durationMs)})`);
-        }
+    // Run exclusive suites in separate phases so they also get progress heartbeats.
+    for (const [index, testInfo] of exclusiveTests.entries()) {
+        const phase = await runAllTests([testInfo], regularTests.length + index, tests.length);
+        results.set(testInfo.baseName, phase.get(testInfo.baseName));
     }
 
     return results;

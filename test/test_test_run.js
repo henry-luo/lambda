@@ -163,7 +163,17 @@ else if (name === process.env.FAKE_WAIT_TEST) setInterval(() => {
 }, 20);
 else if (process.env.FAKE_SUITE_TRACE_DIR) setTimeout(() => process.exit(0), 200);
 else if (workerCase && requestedScenario === 'parallel') setTimeout(() => process.exit(0), 200);
+else if (scenario === 'heartbeat') setTimeout(() => process.exit(0), 11000);
 else if (scenario === 'timeout') setInterval(() => {}, 1000);
+else if (scenario === 'timeout-held-pipe') {
+    // A descendant outside the test group can retain the runner's output pipes.
+    const descendant = require('child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 20000)'], {
+        detached: true, stdio: ['ignore', 'inherit', 'inherit'],
+    });
+    fs.writeFileSync(process.env.FAKE_DESCENDANT_PID, String(descendant.pid));
+    descendant.unref();
+    setInterval(() => {}, 1000);
+}
 else process.exit(scenario === 'exit' ? 7 : scenario === 'assertion' ? 1 : 0);
 `;
 const pdfInventory = JSON.parse(invoke(['--target=input', '--include-test=test_pdf_render_visual_gtest', '--list']).stdout);
@@ -237,6 +247,16 @@ try {
         const saved = JSON.parse(fs.readFileSync(path.join(output, 'test_lambda_gtest_results.json'), 'utf8'));
         assert.equal(saved.tests, 4);
         assert.equal(saved.failures, 0);
+    });
+    check('Exclusive Lambda batches report discovered case counts while running', () => {
+        const child = invoke(['--target=lambda', '--include-test=test_lambda_gtest', '--parallel'], {
+            LAMBDA_TEST_BIN_DIR: fixture, LAMBDA_TEST_OUTPUT_DIR: path.join(fixture, 'exclusive-heartbeat'),
+            LAMBDA_TEST_HEARTBEAT: '10', LAMBDA_TEST_IDLE_TIMEOUT: '14',
+            FAKE_TEST: 'test_lambda_gtest', FAKE_SCENARIO: 'heartbeat',
+        });
+        assert.equal(child.status, 0, child.stdout + child.stderr);
+        assert.match(child.stdout, /still running \(1\): test_lambda_gtest .*\(0\/4 cases reported\)/);
+        assert.match(child.stdout, /Completed test_lambda_gtest \(4\/4 passed/);
     });
     check('Lambda-owned baselines exclude sibling sources even with stale executables', () => {
         fs.writeFileSync(path.join(fixture, 'test_zip_gtest.exe'), fake, { mode: 0o755 });
@@ -434,6 +454,24 @@ try {
             assert.ok(summary.failed_test_names.some(t => t.includes('test_paged_media_gtest')));
         });
     }
+    if (process.platform !== 'win32') check('An idle timeout completes while a descendant still holds the output pipes', () => {
+        const pidFile = path.join(fixture, 'held-pipe.pid');
+        try {
+            const { child, summary } = runSelected(['test_paged_media_gtest', 'test_map_gtest'], 'timeout-held-pipe', [], {
+                FAKE_DESCENDANT_PID: pidFile,
+            });
+            assert.equal(child.status, 1, child.stderr);
+            assert.equal(summary.total_failed, 1);
+            assert.equal(summary.level2_c_tests.find(t => t.test === 'test_map_gtest').passed, 4);
+            assert.ok(summary.failed_test_names.some(name => name.includes('timed out')));
+            process.kill(Number(fs.readFileSync(pidFile, 'utf8')), 0);
+        } finally {
+            if (fs.existsSync(pidFile)) {
+                try { process.kill(Number(fs.readFileSync(pidFile, 'utf8')), 'SIGKILL'); }
+                catch (error) { if (error.code !== 'ESRCH') throw error; }
+            }
+        }
+    });
     for (const mode of ['open', 'write']) check(`A log ${mode} ENOSPC fails the suite and allows the next suite to run`, () => {
         const { child, summary } = runSelected(['test_paged_media_gtest', 'test_map_gtest'], 'log-io', [], {
             NODE_OPTIONS: `--require=${logFault}`, FAKE_LOG_FAULT_MODE: mode,

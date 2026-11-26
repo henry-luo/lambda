@@ -4,7 +4,7 @@
 
 // === createDocumentFragment ===
 var frag = document.createDocumentFragment();
-console.log(frag.tagName); // #DOCUMENT-FRAGMENT
+console.log(frag.nodeName); // #document-fragment
 var a = document.createElement("span");
 a.textContent = "A";
 var b = document.createElement("span");

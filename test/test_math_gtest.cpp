@@ -19,10 +19,10 @@ extern "C" {
 }
 #define LAMBDA_STATIC
 #include "../lambda/lambda-data.hpp"
+#include "lambda/input/input.hpp"
 
 extern "C" String* format_data(Item item, String* type, String* flavor, Pool* pool);
 #include "math_format_runtime.hpp"
-extern "C" Item input_from_source(char* source, Url* url, String* type, String* flavor);
 extern "C" char* read_text_file(const char* filename);
 // Use the existing function from lib/file.c
 extern "C" char* read_text_file(const char *filename);
@@ -367,52 +367,24 @@ bool test_math_expressions_roundtrip(
 ) {
     MathFormatTestRuntime runtime;
     bool all_passed = true;
+    bool tex_math = input_math_is_tex(input_format, input_flavor);
+    String* type = create_lambda_string(input_format);
+    String* flavor = create_lambda_string(input_flavor);
 
     for (int i = 0; i < num_cases; i++) {
         const char* original = test_cases[i];
-        // Successful round trips stay silent; failure branches retain input and result context.
-
-        // Create test URL
-        Url* test_url = url_parse("test://memory");
-        EXPECT_NE(test_url, nullptr) << "Failed to create test URL";
-        if (!test_url) {
-            all_passed = false;
-            continue;
+        Url* test_url = nullptr;
+        String* formatted = nullptr;
+        if (tex_math) {
+            formatted = runtime.roundtrip_tex_math(original, type, flavor);
+        } else {
+            test_url = url_parse("test://memory");
+            Input* input = test_url ? input_from_source(original, test_url, type, flavor) : nullptr;
+            if (input && !input->parse_failed) formatted = runtime.format(input->root, type, flavor, input->pool);
         }
-
-        // Create content copy for parsing
-        char* content_copy = strdup(original);
-        EXPECT_NE(content_copy, nullptr) << "Failed to duplicate test content";
-        if (!content_copy) {
-            url_destroy(test_url);
-            all_passed = false;
-            continue;
-        }
-
-        String* input_type = create_lambda_string(input_format);
-        String* input_flavor_str = create_lambda_string(input_flavor);
-
-        // Parse the math expression
-        Item parsed = input_from_source(content_copy, test_url, input_type, input_flavor_str);
-        Input* input = parsed.element ? (Input*)parsed.element : nullptr;
-
-        if (!input) {
-            printf("    ❌ Failed to parse: %s\n", original);
-            all_passed = false;
-            free(content_copy);
-            free(input_type);
-            free(input_flavor_str);
-            url_destroy(test_url);
-            continue;
-        }
-
-        // Format back to the same format
-        String* output_type = create_lambda_string(input_format);
-        String* output_flavor = create_lambda_string(input_flavor);
-        String* formatted = runtime.format(input->root, output_type, output_flavor, input->pool);
 
         if (!formatted) {
-            printf("    ❌ Failed to format back: %s\n", original);
+            ADD_FAILURE() << "Could not roundtrip: " << original;
             all_passed = false;
         } else {
             // Compare the results using semantic equivalence
@@ -426,15 +398,11 @@ bool test_math_expressions_roundtrip(
             }
         }
 
-        // Cleanup
-        free(content_copy);
-        free(input_type);
-        free(input_flavor_str);
-        free(output_type);
-        free(output_flavor);
-        url_destroy(test_url);
+        if (test_url) url_destroy(test_url);
     }
 
+    free(type);
+    free(flavor);
     return all_passed;
 }
 
@@ -673,8 +641,7 @@ TEST_F(MathRoundtripTest, IndexedMathFileTest) {
         String* input_flavor_str = create_lambda_string(input_flavor);
 
         char* content_copy = strdup(expr);
-        Item parsed = input_from_source(content_copy, test_url, input_type, input_flavor_str);
-        Input* input = parsed.element ? (Input*)parsed.element : nullptr;
+        Input* input = input_from_source(content_copy, test_url, input_type, input_flavor_str);
 
         if (!input) {
             printf("  Expr %zu: ❌ Parse failed: %s\n", i + 1, expr);
