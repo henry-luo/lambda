@@ -35,8 +35,8 @@
   diagnostics: []
 }
 {
-  issue: "tex-unsupported-primitive",
-  unsupported: "expl3 input stream globaldefs",
+  issue: null,
+  unsupported: null,
   text: "",
   diagnostics: []
 }

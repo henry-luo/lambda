@@ -486,6 +486,9 @@ function filterTests(tests) {
         // keep LaTeX discoverable for focused runs and the full Lambda gate.
         result = result.map(t => t.suite === 'lambda' && t.baseName === 'test_lambda_gtest'
             ? withGtestExclusions(t, ['AutoDiscovered/LambdaScriptTest.ExecuteAndCompare/latex_*']) : t);
+        // TeX security cases exercise the full document engine and run in the full Lambda gate.
+        result = result.map(t => t.suite === 'lambda' && t.baseName === 'test_security_runtime_gtest'
+            ? withGtestExclusions(t, ['*Tex*', '*InlineParsing*', '*CapturedMemberParsing*']) : t);
     }
     if (radiantBaseline) {
         // Keep the full inventory as the source of truth; the fast gate selects

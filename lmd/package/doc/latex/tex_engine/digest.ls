@@ -672,7 +672,10 @@ fn math_content(items, index = 0, out = [], run = []) any^ {
     else math_content(items, index + 1, [*flush_math_strings(out, run), items[index]], [])
 }
 
-fn math_nonspace(tokens, index) any^ => if (index < len(tokens) and tokens[index].kind == "char" and tokens[index].cat == 10)
+// Native math scans reconstructed bytes, including whitespace emitted with catcode 12 by readline.
+fn math_space(token) any^ => token.kind == "char" and (token.cat == 10 or
+    (token.value <= " " and contains([" ", "\t", "\r", "\n", chr(11), chr(12)], token.value)))
+fn math_nonspace(tokens, index) any^ => if (index < len(tokens) and math_space(tokens[index])^)
     math_nonspace(tokens, index + 1) else index
 
 // Math options contain math lists, including controls and nested groups.
@@ -1596,7 +1599,7 @@ fn math_atoms(tokens, index = 0, items = []) any^ {
     if (index >= len(tokens)) {items: items, issue: null}
     else {
         let token = tokens[index];
-        if (token.kind == "char" and token.cat == 10) math_atoms(tokens, index + 1, items)
+        if (math_space(token)^) math_atoms(tokens, index + 1, items)
         // a braced group is an atom and can itself carry scripts.
         else if (opening(token)) {
             let group = math_script_arg(tokens, index)^;
@@ -2219,7 +2222,7 @@ fn needs_output_mapping(tokens, sources, main_file, constructor_mode, index = 0,
             if (math.needed) true
             else needs_output_mapping(tokens,sources,main_file,constructor_mode,math.end,paren,generated,checked_paren)
         }
-        else if (token.kind == "control" and ((declaration_command(token)^ and token.direct != true and token.emit_origin != null) or
+        else if (token.kind == "control" and (((declaration_command(token)^ or token.emission_mapping == true) and token.direct != true and token.emit_origin != null) or
                 expanded_argument_sources(tokens,index + 1,token.file,sources)^)) true
         // generated inline stars require their reconstructed byte adjacency.
         else if (token.kind == "control" and inline_format_command(token.value) and index + 1 < len(tokens) and
@@ -2274,7 +2277,14 @@ fn mark_output_span(tokens,built,constructor_mode,span) any^ {
     let first=tokens[span.index]; let bytes=if (first.reconstruct_text == null) null else binary(first.reconstruct_text)^;
     let positions=if (bytes == null or first.reconstruct_count != span.count or len(bytes) != span.end - span.start)
         null else synthetic_positions(tokens,span,bytes,span.index,0)^;
-    if (span.count == 1) [marked_output(first,built,constructor_mode,span.start,span.end)]
+    if (span.count == 1) {
+        let marked = marked_output(first,built,constructor_mode,span.start,span.end);
+        let spelling = emitted_spelling(first);
+        // Generated commands enter the native parser only after their spelling is verified.
+        let verified = first.emission_mapping == true and first.direct != true and first.emit_origin != null and spelling != null and
+            slice(built.output_bytes,span.start,span.end) == binary(spelling)^;
+        [if (verified) {*:marked,output_synthetic_verified:true} else marked]
+    }
     else if (echo_positions_known(tokens,span)^) [for (i in span.index to span.index + span.count - 1)
         marked_output(tokens[i],built,constructor_mode,span.start + tokens[i].start - first.echo_span.start,
             span.start + tokens[i].end - first.echo_span.start)]
@@ -4123,9 +4133,10 @@ pub fn digest(expanded: map) Digested^ {
         {ast: null, issue: "latex-digest-unsupported", unsupported: "random or timer source mapping"}
     else if (expanded.raw_inline_other_seen == true)
         {ast: null, issue: "latex-digest-unsupported", unsupported: "raw inline source mapping"}
-    else if (expanded.input_stream_state_seen == true)
+    // Legacy eager constructor expansion loses stream commands inside arguments.
+    else if (expanded.input_stream_state_seen == true and not expanded.constructor_argument_mode)
         {ast: null, issue: "latex-digest-unsupported", unsupported: "input stream command source mapping"}
-    else if (expanded.input_eof_seen == true)
+    else if (expanded.input_eof_seen == true and not expanded.constructor_argument_mode)
         {ast: null, issue: "latex-digest-unsupported", unsupported: "input EOF conditional source mapping"}
     else if (expanded.expl3_dynamic_read_seen == true)
         {ast: null, issue: "latex-digest-unsupported", unsupported: "expl3 dynamic read source mapping"}

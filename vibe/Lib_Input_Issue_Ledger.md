@@ -15,6 +15,10 @@ Resolved records are in the [fixed issue ledger](<Lib_Input_Issue_Ledger (fixed)
 
 ## Open issues
 
+<a id="li-123"></a>
+
+- [LI-123 — External shape fingerprints hashed pointer identities byte by byte](<Lib_Input_Issue_Ledger (fixed).md#li-123>).
+
 <a id="li-121"></a>
 
 ### LI-121 — The isolated input check expects removed Premake targets

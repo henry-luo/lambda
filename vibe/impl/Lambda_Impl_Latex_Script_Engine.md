@@ -64,7 +64,89 @@ The existing native engine design and historical Phase IV work are in
   The kernel-message golden's first group reports the same pre-existing
   mismatch with both release builds. Evidence is in
   `temp/radiant-three-failures/`.
+- **Counter diagnostics and generated commands, 2026-11-26:** Counter errors
+  and exhausted register allocation now retain the native messages and source
+  locations, rather than only their codes (S1.8, D10.2.2v2). Generated counter
+  commands retain their invocation origin, and the digester admits their
+  source mapping only after checking the reconstructed spelling. Fourteen
+  diagnostic cases, eight complete diagnostic trees, one included-file tree,
+  and sixteen generated-command text/tree cases match the retired engines.
+  The previously failing counter GTest and eight focused reconstruction,
+  spacing, rule, table and new parity tests pass. Both new fixtures also pass
+  interpreter and JIT under forced GC and freed-memory poisoning. The counter
+  golden's two diagnostic AST expectations were updated after independent
+  full-tree comparison.
 
+- **Scoped expl3 input streams, 2026-11-26:** The input-stream free list and
+  allocated stream variable now follow TeX assignment scope under negative
+  `globaldefs`; physical open and close effects remain visible across group
+  boundaries (S1.8, D10.2.2v2). Eight TeX Live comparisons cover root and
+  nested groups, reuse, counter restoration and a later global override. The
+  new fixture passes interpreter and JIT under forced GC; six focused stream
+  and group GTests and the interpreter/JIT file-authority checks pass.
+  The broader counter fixture also failed against the pre-change Script
+  snapshot; its subsequent diagnostic and reconstruction fixes are recorded
+  above. Stream missing-file diagnostics remain open.
+
+- **Included environment definitions, 2026-11-26:** Twelve complete trees from
+  the retired native engines match Script for included multiline environment
+  definitions, blank lines, comments, CRLF and adjacent definitions
+  (S1.8, D10.2.2v2). The new golden fixture and existing foreign-definition
+  fixture pass; the new fixture also passes interpreter and JIT with forced GC
+  and freed-memory poisoning. The older report's original temporary fixture is
+  unavailable, so these comparisons qualify the tested cases without closing
+  that exact historical report.
+
+- **Unicode reader scaling, 2026-11-26:** A release-only reader probe took
+  0.16 seconds for 4,001 characters and 3.95 seconds for 32,001 characters
+  when the source contained one non-ASCII scalar; an otherwise comparable
+  32,001-character ASCII source took 0.67 seconds. The reader repeatedly
+  slices the complete source at character offsets, and the runtime's Unicode
+  substring path recounts and rescans it (S1.8, D10.2.2v2). A temporary
+  character-array cache increased both 32,001-character cases to about
+  4.65 seconds, so it was not applied. A lower-overhead indexed-source design
+  and representative document measurements remain open. The probe and the
+  uncommitted experiment are under `temp/latex-retirement/`.
+
+- **External shape fingerprint cost, 2026-11-26:** Input now combines pointer
+  identities as words instead of hashing each pointer byte; collision matches
+  still check the complete shape (D3.4.3, D9.1.3v2). The 96-case MarkBuilder
+  suite passes against the candidate. Two release bundled-fixture comparisons
+  took 53.43/49.82 and 52.24/48.17 seconds for control/candidate, with exact
+  golden output. The previously timed-out bundled GTest now passes with the
+  optimized release executable and unchanged 60-second limit. These are
+  individual measurements, not a statistical benchmark. The corpus timeout
+  remains open; see LI-123 in the input ledger.
+
+- **Stream whitespace in math, 2026-11-26:** A broader 48-case retired-engine
+  comparison found that `readline` can emit a category-12 carriage return
+  inside math. The native math scanner ignores the reconstructed whitespace;
+  Script formerly emitted punctuation. The digester now applies the native
+  whitespace rule to both math atoms and argument scanning (D10.2.2v2). The
+  comparison now matches, including six endline characters; the regression
+  fixture contains the independently captured native trees. Six focused math
+  and stream GTests pass; the stream fixture also passes interpreter and JIT
+  with forced GC and freed-memory poisoning.
+
+- **Stream document mapping, 2026-11-26:** Constructor argument mode preserves
+  stream commands inside arguments; the older eager mode does not. The document
+  digester now admits stream and EOF operations only in the former mode
+  (S1.8, D10.2.2v2). Twenty-three complete ASTs captured from the retired native
+  engines cover file reads, closed streams, EOF, math, definitions, formatting
+  arguments and aliases. The old mode still rejects its confirmed nested-command
+  mismatch. The focused stream and EOF GTests pass, as does the new comparison
+  in interpreter and JIT with forced GC and freed-memory poisoning. Other
+  operation-specific source-mapping guards remain in place.
+
+- **Current suite and performance investigation, 2026-11-26:** The broader
+  document run passed 83 of 86 cases; the corpus and bundled-package cases hit
+  their 60-second limits, and the table case still reports six CSV failures
+  behind the expl3 source-mapping guards. One optimized release measurement
+  of the bundled fixture took 53.26 seconds on the current Script versus
+  51.27 seconds at `64ecd0563`, with both outputs matching the golden. Sampling
+  identifies repeated external map-shape fingerprinting during TeX expansion;
+  its safe optimization and the corpus timeout remain open. The generated-table
+  and stream fixes below do not qualify removal of the expl3 guards.
 - **Generated table headers, 2026-11-26:** The digester now accepts generated
   character-only table width and column groups when each reconstructed byte
   and adjacency is verified (D10.2.2v2). Five complete trees, including
@@ -195,10 +277,9 @@ The existing native engine design and historical Phase IV work are in
   TeX Live comparisons cover raw/tokenized lines, EOF and no-value behavior,
   slot reuse, reopening, dynamic names, filename spacing and scoped/global
   reads. An authorized file and denied symlink pass the security runtime check
-  in interpreter and JIT. Missing-file diagnostics and negative `globaldefs`
-  pool scoping remain explicitly unsupported; the document digester still
-  rejects input-stream source mapping. Csvsimple's later blocker is recorded
-  in the current key-definition checkpoint above.
+  in interpreter and JIT. Missing-file diagnostics remain explicitly
+  unsupported. Later negative-`globaldefs` scoping, document mapping and the
+  csvsimple blocker are recorded in the current checkpoint above.
 
 - **Expl3 stream declarations and integer registers, 2026-11-26:** Script now
   creates closed input-stream variables with TeX's terminal-stream meaning and
