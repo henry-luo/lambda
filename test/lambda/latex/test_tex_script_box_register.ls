@@ -1,6 +1,9 @@
 import profile: lambda.doc.latex.tex_engine.profile
 import reconstruct: lambda.doc.latex.tex_engine.reconstruct
 let kernel=input("lmd/package/doc/latex/tex_engine/kernel.tex","text")^;
+let options={echo_definitions:true,constructor_argument_mode:false,adapters:[],resources:{local:{},bundled:{}}};
+// Each case resumes a fresh document from the same resource-free kernel.
+let preload=profile.preload_kernel(kernel,options,100000)^;
 let cases=[
  "\\setbox0=\\hbox{}\\ifvoid0 V\\else N\\fi",
  "\\setbox0=\\hbox{Hi}A\\copy0!\\box0!\\copy0 B",
@@ -65,7 +68,7 @@ let cases=[
  "\\setbox0=\\hbox{A}{\\setbox1=\\copy0{\\box0}\\copy1}\\ifvoid0 V\\else N\\fi",
  "\\setbox0=\\hbox{A}{\\setbox0=\\copy0\\global\\setbox0=\\copy0{\\setbox0=\\copy0\\box0}}\\copy0"];
 let results=[for(source in cases) {
- let ex=profile.expand_with_kernel(source,kernel,{echo_definitions:true,constructor_argument_mode:false,adapters:[],resources:{local:{},bundled:{}}},100000)^;
+ let ex=profile.expand_with_kernel(source,kernel,options,100000,if(source==cases[0]) null else preload)^;
  let tex=parse(source,{type:"tex"})^;
  {supported:ex.issue==null,text:reconstruct.reconstruct(ex)^.text==tex.text,
   messages:ex.messages==tex.messages,diagnostics:ex.diagnostic_records==tex.diagnostics}

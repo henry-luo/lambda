@@ -361,6 +361,16 @@ the ruling.
 
 ## Step 1 checkpoint — 2026-11-02
 
+**macOS presentation update (2026-11-26, D9.1.3v2 and D9.5.1).**
+RI-249 separates the presented image from the resizable Cocoa
+OpenGL drawable. The existing context composes the same page and GPU
+layers into a top-down IOSurface. A Core Animation layer retains the
+last completed frame at its original size until the presenter
+publishes the new one. Reusable IOSurfaces must be neither the
+displayed buffer nor in use by a compositor. The present check reads
+the actual GL output target before publication.
+[RI-249](<../Radiant_Issue_Ledger (fixed).md#ri-249>).
+
 ### What was built
 
 - **Core-profile windows.** `radiant_platform_create_window` applies

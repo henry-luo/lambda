@@ -92,14 +92,6 @@ static Item js_jube_namespace(const char* specifier) {
     return ItemNull;
 }
 
-static Item js_get_jube_crypto_namespace(void) { return js_jube_namespace("crypto"); }
-static Item js_get_jube_crypto_key_constructor(void) {
-    RootFrame roots(1);
-    Rooted<Item> module(roots, js_get_jube_crypto_namespace());
-    JS_RETURN_IF_ERROR(module.get());
-    Item* slot = js_realm_intrinsic_slot_existing(JS_REALM_SLOT_CRYPTO_KEY_CONSTRUCTOR, 0);
-    return slot ? *slot : make_js_undefined();
-}
 // node-core owns Buffer, but its global must exist before node-core activates.
 static Item js_get_jube_buffer_namespace(void) { return js_jube_namespace("buffer"); }
 
@@ -179,8 +171,6 @@ static Item js_install_host_global_group(Item target, JsHostGlobalGroup group);
 static const JsLazyGlobalSpec js_lazy_host_globals[] = {
     {"process", 7, js_get_profiled_process_object, false, false, JUBE_GLOBAL_NODE_ONLY},
     {"Buffer", 6, js_get_jube_buffer_namespace, true, false, JUBE_GLOBAL_NODE_ONLY},
-    {"crypto", 6, js_get_jube_crypto_namespace, false},
-    {"CryptoKey", 9, js_get_jube_crypto_key_constructor, false},
     {"Math", 4, js_get_math_object_value, false},
     {"JSON", 4, js_get_json_object_value, false},
     {"Intl", 4, js_get_intl_object_value, false},
@@ -363,7 +353,7 @@ static bool js_resolve_lazy_global_impl(Item object, Item key, Item* out_value, 
         value_root.set(spec->build());
         // The own slot, rather than a miss hook, owns lazy namespace identity.
         // Publish only after the whole object exists so re-entrant reads never
-        // observe a partially installed process/Buffer/crypto namespace.
+        // observe a partially installed process or Buffer namespace.
         // The marker already owns this global slot. Publishing through
         // OrdinarySet would inspect its descriptor, read the marker again,
         // and recursively re-enter this resolver before the slot changes
@@ -3586,7 +3576,7 @@ static Item build_process_versions(void) {
     js_set_key_cstr(versions_root.get(), "v8", make_string_item("0.0.0"));
     js_set_key_cstr(versions_root.get(), "uv", make_string_item("1.0.0"));
     js_set_key_cstr(versions_root.get(), "modules", make_string_item("115"));
-    // crypto uses mbedTLS; advertising an OpenSSL version would promise a removed provider.
+    // the native crypto provider is mbedTLS; never advertise OpenSSL.
     js_set_key_cstr(versions_root.get(), "zlib", make_string_item("1.3.0"));
     js_set_key_cstr(versions_root.get(), "napi", make_string_item("9"));
     return versions_root.get();

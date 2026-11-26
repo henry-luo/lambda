@@ -46,6 +46,13 @@ pub fn drawing_text(node) any^ => if (node.uri == A and node.tag == "t") text(no
 pub fn descendants(node, tag, ns) => [for (child in ((children(node,null,null)) ^ { [] }),
     found in (((if (child.tag == tag and child.uri == ns) [child] else []) ++ descendants(child,tag,ns)) ^ { [] })) found]
 pub fn collect(results, field) => [for (result in results, value in result[field]) value]
+// Only the saved content is displayable; control properties never render.
+pub fn saved_control(node) any^ {
+    let cached = children(node,"sdtContent")^;
+    if (len(cached) == 1 and all([for (child in children(node,null,null)^)
+        child.uri == W and contains(["sdtPr","sdtEndPr","sdtContent"],child.tag)])) cached[0]
+    else null
+}
 // shared traversal includes table cells, links and annotation blocks in reading order.
 pub fn model_nodes(nodes) => [for (node in nodes, found in (([node] ++ model_nodes(
     get(node,"children",[]) ++ get(node,"blocks",[]) ++ get(node,"rows",[]) ++ get(node,"cells",[]))) ^ { [] })) found]

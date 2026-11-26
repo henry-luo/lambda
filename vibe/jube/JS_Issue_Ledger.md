@@ -985,7 +985,7 @@ cancellation through the child load. All 36 focused loading checks and five
 MIR checks pass under **D8.4.4**. Two ordinary Comand captures on the
 preceding release each log four timer handoff failures and omit the video.
 Both repaired captures complete without those failures and show the
-background video alongside the geometry restored by RI-247. Mean error
+background video alongside the geometry restored by RI-254. Mean error
 against the same Chromium reference falls from 17.07% to 2.70% and 2.09%.
 The exact video also decodes from a local file and over loopback HTTP.
 Comand clears high severity in
@@ -1087,7 +1087,7 @@ unqualified; no capture-policy change is made (**D10.1.7 / D8.4.4**).
 
 **CSS-age follow-up, 2026-11-26:** the original CSS-age controls omitted
 pending rAF. Combining those paths exposed a native scheduler rebasing
-regression, now repaired as [RI-246](<../Radiant_Issue_Ledger (fixed).md#ri-246>).
+regression, now repaired as [RI-253](<../Radiant_Issue_Ledger (fixed).md#ri-253>).
 The shared pixel assertion now checks each frame fixture. Both elapsed
 script/image groups fail before repair and pass afterward in AST/MIR;
 Chromium controls also pass. The accumulated JS-layout gate passes630/630.
@@ -3794,7 +3794,7 @@ justify overriding the page styles. Evidence: `temp/online-visual-round203/`
 (`cookie-authored-shadow.html`, `cookie-tree-{before,after}.json`) under
 **D9.1.1v4 / D9.1.3v2**.
 
-The 2026-11-26 LI-124 and RI-248 repairs apply `:host` and `:host(...)` in
+The 2026-11-26 LI-125 and RI-255 repairs apply `:host` and `:host(...)` in
 the owning shadow stylesheet. A bare ordinary selector cannot see the host
 at that boundary. Host variables reach shadow descendants, and live class,
 attribute, CSSOM and media changes update the same cascade

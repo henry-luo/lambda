@@ -1,0 +1,4 @@
+let sources=["\\ExplSyntaxOn\\meaning\\l__intarray_loop_int/\\number\\l__intarray_loop_int\\ExplSyntaxOff", "\\ExplSyntaxOn\\number\\g__intarray_font_int/\\number\\count10\\ExplSyntaxOff", "\\ExplSyntaxOn\\meaning\\c__fp_leading_shift_int/\\number\\c__fp_leading_shift_int\\ExplSyntaxOff", "\\ExplSyntaxOn\\int_new:N\\l_my_int\\meaning\\l_my_int/\\number\\count10\\ExplSyntaxOff", "\\ExplSyntaxOn\\regex_match:nnTF{a}{a}{}{}\\number\\l__regex_min_state_int/\\number\\g__regex_case_int\\ExplSyntaxOff", "\\ExplSyntaxOn\\number\\allocationnumber\\ExplSyntaxOff", "\\ExplSyntaxOn\\newdimen\\x\\ExplSyntaxOff"];
+// The native oracle captured the supported text, messages and diagnostics.
+[for(source in sources) (let r=parse(source,{type:"tex"}) ^ {null},
+ if(r == null) null else {text:r.text,messages:r.messages,diagnostics:r.diagnostics})]

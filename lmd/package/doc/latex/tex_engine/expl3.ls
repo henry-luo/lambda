@@ -7,6 +7,7 @@ let CS_NEW = ["cs_new:Npn", "cs_new_protected:Npn"]
 let CS_LOCAL = ["cs_set:Npn", "cs_set_protected:Npn"]
 let CS_GLOBAL = ["cs_gset:Npn", "cs_gset_protected:Npn"]
 let CS_VARIANT = ["cs_generate_variant:Nn"]
+let REGEX_INTERNAL = ["__regex_if_match:nn"]
 let IOR_ACTION = ["ior_open:Nn", "ior_close:N", "ior_get:NN", "ior_str_get:NN"]
 let IOR_EOF = ["ior_if_eof:NTF", "ior_if_eof:NT", "ior_if_eof:NF", "ior_if_eof_p:N"]
 let KEYVAL_PARSE = ["keyval_parse:NNn", "keyval_parse:nnn"]
@@ -48,7 +49,7 @@ let INT_TEST = ["int_if_zero:nTF", "int_if_zero:nT", "int_if_zero:nF",
     "int_if_odd:nTF", "int_if_odd:nT", "int_if_odd:nF",
     "int_if_even:nTF", "int_if_even:nT", "int_if_even:nF"]
 
-pub fn exists(name) bool => contains(SEQ_EMPTY, name) or contains(INT_TEST, name) or contains(INT_COMPARE_EXPR, name) or contains(INT_COMPARE, name) or contains(INT_MATH, name) or contains(CS_NEW, name) or contains(CS_LOCAL, name) or
+pub fn exists(name) bool => contains(REGEX_INTERNAL, name) or contains(SEQ_EMPTY, name) or contains(INT_TEST, name) or contains(INT_COMPARE_EXPR, name) or contains(INT_COMPARE, name) or contains(INT_MATH, name) or contains(CS_NEW, name) or contains(CS_LOCAL, name) or
     contains(CS_GLOBAL, name) or contains(CS_VARIANT, name) or contains(IOR_ACTION, name) or contains(IOR_EOF, name) or contains(TL_NEW, name) or contains(TL_SET, name) or contains(TL_PUT, name) or contains(TL_REPLACE, name) or contains(TL_EMPTY, name) or contains(TL_BLANK, name) or contains(TL_EQUAL, name) or contains(TL_STRING, name) or contains(TL_COUNT, name) or
     contains(SEQ_NEW, name) or contains(SEQ_SET, name) or contains(SEQ_EXPAND, name) or
     contains(SEQ_SORT, name) or contains(SORT_RETURN, name) or contains(STR_COMPARE, name) or contains(TOKEN_EXPANDABLE, name) or contains(TEXT_CASE, name) or
@@ -59,6 +60,7 @@ pub fn keys_action(name) bool => contains(KEYS_ACTION, name)
 pub fn clist_map(name) bool => contains(CLIST_MAP, name)
 pub fn cs_definition(name) bool => contains(CS_NEW, name) or contains(CS_LOCAL, name) or contains(CS_GLOBAL, name)
 pub fn cs_variant(name) bool => contains(CS_VARIANT, name)
+pub fn regex_action(name) bool => contains(REGEX_INTERNAL, name)
 pub fn ior_action(name) bool => contains(IOR_ACTION, name)
 pub fn ior_eof(name) bool => contains(IOR_EOF, name)
 pub fn fresh(name) bool => contains(CS_NEW, name) or contains(TL_NEW, name) or contains(SEQ_NEW, name)

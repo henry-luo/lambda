@@ -164,6 +164,10 @@ These refine the proposal's illustrative sketches; the proposal body now states 
 
 ## 2l. Native resize presentation (2026-10-27)
 
+The implementation in §§2l–2m was superseded by
+[RI-248](<../Radiant_Issue_Ledger (fixed).md#ri-248>). Under D9.1.3v2,
+the live window turn presents the resized frame after repaint.
+
 **Done behavior.** `ui_context_resize_window_surface` presents the completed window image before replacing the CPU surface and marking the document for full repaint. The OpenGL texture retains its copied pixels after the old CPU allocation is released (D5.5.1); the final frame still uses the new viewport and existing layout/paint pipeline (S1.6). Headless runs skip native presentation. The native regression checks actual front-buffer pixels before the replacement CPU surface is painted, across growing, shrinking and repeated sizes; it fails before the repair and passes after.
 
 **Evidence.** A diagnostic on 81 native resizes found that macOS invalidates both OpenGL buffers on every size update, leaving the front buffer black for 61–86 ms (median 68 ms) until the completed layout was presented. After the repair, the retained image is ready in 0.7–2.3 ms (median 0.9 ms) and presents at the next display refresh (median 18 ms), before reflow. Samples, `buffer_comparison.txt` and the optimized `lambda-fixed.exe` are under `temp/window_flicker/`. macOS window screenshot access was unavailable, so the reproducer observes the application's own OpenGL buffers directly.

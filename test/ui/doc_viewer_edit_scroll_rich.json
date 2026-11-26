@@ -1,5 +1,5 @@
 {
-  "name": "embedded rich editor scrolls while the file tree and bars stay visible",
+  "name": "embedded rich editor scrolls while the file tree and toolbar stay visible",
   "html": "temp/view-pane-scroll-rich",
   "prepare": [
     "python3",
@@ -31,6 +31,11 @@
       "count": 1
     },
     {
+      "type": "assert_count",
+      "target": {"selector": ".viewer-edit-host .edit-status, .viewer-edit-host .edit-notice"},
+      "count": 0
+    },
+    {
       "type": "scroll",
       "x": 650,
       "y": 300,
@@ -59,10 +64,8 @@
       "expected_selector": ".edit-document-bar"
     },
     {
-      "type": "assert_hit_test",
-      "x": 1090,
-      "y": 694,
-      "expected_selector": ".edit-status"
+      "type": "assert_script",
+      "js": "Math.abs(document.querySelector('.edit-main').getBoundingClientRect().bottom - document.querySelector('.viewer-edit-host').getBoundingClientRect().bottom) < 1"
     }
   ]
 }

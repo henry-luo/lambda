@@ -99,9 +99,10 @@ Item scene3d_particles_commands(Scene3dParticles *state, Item batch) {
                 fabs(components.y) > 1e6 || fabs(components.z) > 1e6) return false;
             *result = {(float)components.x, (float)components.y, (float)components.z}; return true;
         };
-        if (!vector("position", &request.position) || !vector("velocity", &request.velocity))
-            return fail("particle commands: origins/velocities require three finite coordinates in [-1000000,1000000]");
-        request.positioned = !fields.get("position").isNull(); request.count = (unsigned)count; request.depth = (unsigned)depth;
+        if (!vector("position", &request.position) || !vector("velocity", &request.velocity) || !vector("rotation", &request.rotation))
+            return fail("particle commands: origins/velocities/rotations require three finite coordinates in [-1000000,1000000]");
+        request.positioned = !fields.get("position").isNull(); request.rotated = !fields.get("rotation").isNull();
+        request.count = (unsigned)count; request.depth = (unsigned)depth;
         if (request.count > PARTICLE_SPAWN_LIMIT - total) return fail("particle commands: batch spawn count exceeds 4096");
         total += request.count;
     }

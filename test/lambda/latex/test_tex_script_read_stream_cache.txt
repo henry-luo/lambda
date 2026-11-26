@@ -3,13 +3,13 @@
     text: true,
     messages: true,
     diagnostics: true,
-    guarded: true
+    tree: "guarded"
   }, {
     supported: true,
     text: true,
     messages: true,
     diagnostics: true,
-    guarded: true
+    tree: "native-match"
   }]
 [{
     issue: null,

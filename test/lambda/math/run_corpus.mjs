@@ -53,7 +53,7 @@ fn check(formula) {
     let parsed = parse(formula, {type: "math", flavor: "latex"}) ^ { ^ }
     // Reference snapshots were generated in display style, including bare formulas.
     let box = if (parsed is error) parsed else math.render_box(parsed, {display: true})
-    if (box is error) {error: string(box)}
+    if (box is error) {error: box.message or "math parse or render failed"}
     else {
         let html = format(box.element, 'html');
         {width: box.width, height: box.height, depth: box.depth,

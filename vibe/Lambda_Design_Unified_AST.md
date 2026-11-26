@@ -249,7 +249,7 @@ Semantic depth here is deliberately *shallow in the AST*: prototype chains, MRO,
 | `AST_EXPORT` | `declaration?; specifiers; source?; is_default` | `pub` modifier — builder normalizes `pub` decls to `AST_EXPORT{declaration}` | `EXPORT_DECLARATION`+`EXPORT_SPECIFIER` | `__all__` (advisory) / module fns |
 | `AST_SCRIPT` | (shared with L2) — the module root, bound to `ModuleDescriptor` in the registry | | | |
 
-Module *resolution* (paths, node_modules, package.json vs Lambda relative imports vs Python site rules) is per-profile; module *representation* (descriptor, namespace Item map, circular-import guard, live bindings §6.5) is shared.
+Module *resolution* (paths and profile-specific rules) is per-profile; module *representation* (descriptor, namespace Item map, circular-import guard, live bindings §6.5) is shared.
 
 ### 2.4 Coverage — how much of each language lands in core
 

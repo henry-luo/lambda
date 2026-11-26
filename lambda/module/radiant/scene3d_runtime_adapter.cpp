@@ -84,7 +84,7 @@ static Item scene3d_runtime_value(Scene3dRuntime* runtime, bool capabilities) {
                                    "particles_depth_ordering",
                                    "particles_texture_sheet", "particles_velocity_curves", "particles_billboards",
                                    "particles_cpu_trails", "particles_gpu_trails", "particles_trails",
-                                   "particles_spawn_commands", "particles_child_queues",
+                                   "particles_spawn_commands", "particles_spawn_rotation", "particles_child_queues",
                                    "audio_clips", "audio_sources", "audio_stereo", "audio_spatial_2d", "audio_spatial_3d",
                                    "audio_doppler", "audio_source_lowpass", "audio_source_meters",
                                    "audio_bus_routing", "audio_bus_sends", "audio_bus_solo", "audio_dsp_inserts", "audio_sidechain", "audio_dsp_tails",

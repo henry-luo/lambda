@@ -22,7 +22,7 @@ fn graphic(node, value, options) {
     let rank = len([for (layer in peers where layer.order < placement.order) layer])
     let layer_style = if (placement.absolute != true) "" else
         "z-index:" ++ string(if (placement.behind) rank-len(peers) else rank+1) ++ ";" ++
-        "margin-left:" ++ string(0.0-c.get(options,"anchor_indent",0.0)) ++ "px;"
+        (if (placement.page) "" else "margin-left:" ++ string(0.0-c.get(options,"anchor_indent",0.0)) ++ "px;")
     let contents = if (node.crop == null) value else <span class:"docx-image-crop",style:node.crop.box,value>;
     if (placement == null) contents else <span class:"docx-anchor",style:(placement.box ++ layer_style),contents>
 }
@@ -56,11 +56,12 @@ fn inline_node(node, options) any^ {
     else if (node.kind == "page-break") <br class:"docx-page-break">
     else <br>
 }
-fn inline_nodes(nodes, options) array^ => [for (node in nodes) inline_node(node,options)^]
+fn inline_nodes(nodes, options) array^ => [for (node in nodes where node.placement.page != true) inline_node(node,options)^]
 fn paragraph(node, options) array^ {
     let descendants = c.model_nodes(node.children)
-    let anchored = any([for (child in descendants) child.placement.absolute == true])
+    let anchored = any([for (child in descendants) child.placement.absolute == true and child.placement.page != true])
     let empty = all([for (child in descendants) child.kind == "text" and child.text == "" or
+        child.placement.page == true or
         anchored and (child.placement.absolute == true or contains(["link","bookmark"],child.kind))])
     let opts = {*:options,anchor_indent:if (options.presentation == "source" and node.list == null)
         c.get(node.props,"left",0.0) else 0.0}
@@ -199,9 +200,12 @@ fn plain_text(blocks, options) => join([for (node in blocks)
     } else join([for (row in node.rows) join([for (cell in row.cells where cell.merge != "continue")
         (let text = plain_text(cell.blocks,options), if (ends_with(text,"\n\n")) slice(text,0,len(text)-2) else text)],"\t") ++ "\n"],"")],"")
 pub fn render(model, options, include_serialized: bool, stream = null) map^ {
-    let layers = [for (node in ((c.model_nodes(model.blocks ++ model.annotations)) ^ { [] })
-        where node.placement.absolute == true) node.placement]
+    let graphics = [for (node in ((c.model_nodes(model.blocks ++ model.annotations)) ^ { [] })
+        where node.placement.absolute == true) node]
+    let layers = [for (node in graphics) node.placement]
     let opts = {*:options,annotations:model.annotations,layers:layers}
+    // Page anchors share the article's origin and stacking context, regardless of paragraph indents.
+    let page_drawings = [for (node in graphics where node.placement.page == true) inline_node(node,opts)^]
     let blocks = render_blocks(model.blocks,0,if (stream == null) {} else stream.counters,opts)^
     let notes = [for (note in (if (stream == null or stream.done) model.annotations else []),
         let rendered = render_blocks(note.blocks,0,{},opts)^)
@@ -211,11 +215,12 @@ pub fn render(model, options, include_serialized: bool, stream = null) map^ {
         <section class:("docx-" ++ kind ++ "s"),<ol *[for (note in group)
             <li id:(options.id_prefix ++ note.key),*note.nodes>]>>]
     let root_style = (if (options.presentation == "source") model.page_style else "") ++
-        (if (len(layers) > 0) "position:relative;z-index:0;" else "")
+        (if (len(layers) > 0) "position:relative;z-index:0;" else "") ++
+        (if (len(page_drawings) > 0) "max-width:none;" else "")
     let document = <article class:"docx-document",*:presentation.attributes(root_style),
         *:if (stream==null) {} else {id:"docx-preview-flow",
             [ "data-preview-paper" ]:if (stream.paper_known) model.page_style else null},
-        *(blocks.nodes ++ sections)>;
+        *(page_drawings ++ blocks.nodes ++ sections)>;
     let diagnostics = blocks.diagnostics ++ c.collect(notes,"diagnostics");
     // The viewer consumes the document tree directly.
     if (include_serialized) {

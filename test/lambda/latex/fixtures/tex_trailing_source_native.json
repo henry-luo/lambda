@@ -1,0 +1,713 @@
+{
+  "cases": [
+    {
+      "source": "\\begin{document}X\\end{document}",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "X"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}X\\end{document}tail",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "X"
+                ]
+              }
+            ]
+          },
+          {
+            "$": "paragraph",
+            "_": [
+              "tail"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}X\\end{document} ",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "X"
+                ]
+              }
+            ]
+          },
+          {
+            "$": "paragraph",
+            "_": [
+              " "
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}X\\end{document}\n",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "X"
+                ]
+              }
+            ]
+          },
+          {
+            "$": "paragraph",
+            "_": [
+              "\n"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}X\\end{document}\n\n",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "X"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}X\\end{document}%comment\n",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "X"
+                ]
+              }
+            ]
+          },
+          {
+            "$": "paragraph"
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\begin{document}X\\end{document}\\ExplSyntaxOff",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 13,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "X"
+                ]
+              }
+            ]
+          },
+          {
+            "$": "paragraph",
+            "_": [
+              {
+                "$": "ExplSyntaxOff",
+                "source_offset": 44,
+                "argument_groups": []
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}X\\end{document}",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "X"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}X\\end{document}a",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "X"
+                ]
+              }
+            ]
+          },
+          {
+            "$": "paragraph",
+            "_": [
+              "a"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}X\\end{document}a b",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "X"
+                ]
+              }
+            ]
+          },
+          {
+            "$": "paragraph",
+            "_": [
+              "a b"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}X\\end{document} ",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "X"
+                ]
+              }
+            ]
+          },
+          {
+            "$": "paragraph",
+            "_": [
+              " "
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}X\\end{document}\n",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "X"
+                ]
+              }
+            ]
+          },
+          {
+            "$": "paragraph",
+            "_": [
+              "\n"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}X\\end{document}\n\n",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "X"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}X\\end{document}\n\n\n",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "X"
+                ]
+              }
+            ]
+          },
+          {
+            "$": "paragraph",
+            "_": [
+              "\n"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}X\\end{document}a\n\nb",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "X"
+                ]
+              }
+            ]
+          },
+          {
+            "$": "paragraph",
+            "_": [
+              "a"
+            ]
+          },
+          {
+            "$": "paragraph",
+            "_": [
+              "b"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}X\\end{document}a\n\n\nb",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "X"
+                ]
+              }
+            ]
+          },
+          {
+            "$": "paragraph",
+            "_": [
+              "a"
+            ]
+          },
+          {
+            "$": "paragraph",
+            "_": [
+              "\nb"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}X\\end{document} \n\nx",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "X"
+                ]
+              }
+            ]
+          },
+          {
+            "$": "paragraph",
+            "_": [
+              " "
+            ]
+          },
+          {
+            "$": "paragraph",
+            "_": [
+              "x"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}X\\end{document}x\n\n ",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "X"
+                ]
+              }
+            ]
+          },
+          {
+            "$": "paragraph",
+            "_": [
+              "x"
+            ]
+          },
+          {
+            "$": "paragraph",
+            "_": [
+              " "
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}X\\end{document}a\r\nb",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "X"
+                ]
+              }
+            ]
+          },
+          {
+            "$": "paragraph",
+            "_": [
+              "a\r\nb"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}X\\end{document}a\r\n\r\nb",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "X"
+                ]
+              }
+            ]
+          },
+          {
+            "$": "paragraph",
+            "_": [
+              "a\r\n\r\nb"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}X\\end{document}a\n  \nb",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "X"
+                ]
+              }
+            ]
+          },
+          {
+            "$": "paragraph",
+            "_": [
+              "a\n  \nb"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}X\\end{document} \t  ",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "X"
+                ]
+              }
+            ]
+          },
+          {
+            "$": "paragraph",
+            "_": [
+              " \t  "
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}X\\end{document}é Ω 🙃",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "X"
+                ]
+              }
+            ]
+          },
+          {
+            "$": "paragraph",
+            "_": [
+              "é Ω 🙃"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}X\\end{document}[a]& #_^~",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "X"
+                ]
+              }
+            ]
+          },
+          {
+            "$": "paragraph",
+            "_": [
+              "[a]& #_^~"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}X\\end{document}!?:;",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "X"
+                ]
+              }
+            ]
+          },
+          {
+            "$": "paragraph",
+            "_": [
+              "!?:;"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}X\\end{document}a\n\nb\n\nc",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "X"
+                ]
+              }
+            ]
+          },
+          {
+            "$": "paragraph",
+            "_": [
+              "a"
+            ]
+          },
+          {
+            "$": "paragraph",
+            "_": [
+              "b"
+            ]
+          },
+          {
+            "$": "paragraph",
+            "_": [
+              "c"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}X\\end{document}\n\n\n\n",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "X"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

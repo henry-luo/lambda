@@ -128,18 +128,12 @@
       "mods_str": "super"
     },
     {
-      "type": "assert_text",
-      "target": {
-        "selector": ".tok-heading"
-      },
-      "contains": "Heading 293"
+      "type": "assert_script",
+      "js": "Array.from(document.querySelectorAll('.tok-heading')).some(token => token.textContent.includes('Heading 299'))"
     },
     {
-      "type": "assert_text",
-      "target": {
-        "selector": ".tok-strong"
-      },
-      "contains": "bold 293"
+      "type": "assert_script",
+      "js": "Array.from(document.querySelectorAll('.tok-strong')).some(token => token.textContent.includes('bold 299'))"
     },
     {
       "type": "key_combo",

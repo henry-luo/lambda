@@ -7,8 +7,17 @@
     {
       "type": "click",
       "target": {
-        "selector": ".property-toolbar_add"
+        "selector": "#property-row-0"
       }
+    },
+    {
+      "type": "key_combo",
+      "key": "F10",
+      "mods_str": "shift"
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
     },
     {
       "type": "type",

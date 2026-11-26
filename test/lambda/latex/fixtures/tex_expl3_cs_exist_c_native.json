@@ -1,0 +1,178 @@
+{
+  "cases": [
+    {
+      "source": "\\ExplSyntaxOn\\meaning\\cs_if_exist:cTF/\\meaning\\cs_if_exist:cT/\\meaning\\cs_if_exist:cF/\\meaning\\cs_if_exist_p:c\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\textbackslash{}long macro:\\#1->\\textbackslash{}if\\_cs\\_exist:w \\#1\\textbackslash{}cs\\_end: \\textbackslash{}\\_\\_cs\\_if\\_exist\\_c\\_aux:w \\textbackslash{}fi: \\textbackslash{}use\\_none:n \\{\\#1\\}\\textbackslash{}if\\_false: \\textbackslash{}\\_\\_prg\\_TF\\_true:w \\textbackslash{}fi: \\textbackslash{}use\\_ii:nn /\\textbackslash{}long macro:\\#1->\\textbackslash{}if\\_cs\\_exist:w \\#1\\textbackslash{}cs\\_end: \\textbackslash{}\\_\\_cs\\_if\\_exist\\_c\\_aux:w \\textbackslash{}fi: \\textbackslash{}use\\_none:n \\{\\#1\\}\\textbackslash{}if\\_false: \\textbackslash{}\\_\\_prg\\_T\\_true:w \\textbackslash{}fi: \\textbackslash{}use\\_none:n /\\textbackslash{}long macro:\\#1->\\textbackslash{}if\\_cs\\_exist:w \\#1\\textbackslash{}cs\\_end: \\textbackslash{}\\_\\_cs\\_if\\_exist\\_c\\_aux:w \\textbackslash{}fi: \\textbackslash{}use\\_none:n \\{\\#1\\}\\textbackslash{}if\\_false: \\textbackslash{}\\_\\_prg\\_F\\_true:w \\textbackslash{}fi: \\textbackslash{}use:n /\\textbackslash{}long macro:\\#1->\\textbackslash{}if\\_cs\\_exist:w \\#1\\textbackslash{}cs\\_end: \\textbackslash{}\\_\\_cs\\_if\\_exist\\_c\\_aux:w \\textbackslash{}fi: \\textbackslash{}use\\_none:n \\{\\#1\\}\\textbackslash{}if\\_false: \\textbackslash{}\\_\\_prg\\_p\\_true:w \\textbackslash{}fi: \\textbackslash{}c\\_false\\_bool ",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\show\\cs_if_exist:cTF\\show\\cs_if_exist_p:c\\ExplSyntaxOff",
+      "tex": {
+        "text": "",
+        "messages": [
+          "> \\cs_if_exist:cTF=\\long macro:#1->\\if_cs_exist:w #1\\cs_end: \\__cs_if_exist_c_aux:w \\fi: \\use_none:n {#1}\\if_false: \\__prg_TF_true:w \\fi: \\use_ii:nn .",
+          "> \\cs_if_exist_p:c=\\long macro:#1->\\if_cs_exist:w #1\\cs_end: \\__cs_if_exist_c_aux:w \\fi: \\use_none:n {#1}\\if_false: \\__prg_p_true:w \\fi: \\c_false_bool ."
+        ],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\cs_if_exist:cTF{missing}{Y}{N}\\ExplSyntaxOff",
+      "tex": {
+        "text": "N",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\cs_if_exist:cTF{relax}{Y}{N}\\ExplSyntaxOff",
+      "tex": {
+        "text": "N",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\cs_if_exist:cTF{scan_stop:}{Y}{N}\\ExplSyntaxOff",
+      "tex": {
+        "text": "N",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\def\\foo{A}\\cs_if_exist:cTF{foo}{Y}{N}\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\def\\foo{A}Y",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\def\\foo{A}\\def\\name{foo}\\cs_if_exist:cTF{\\name}{Y}{N}\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\def\\foo{A}\\def\\name{foo}Y",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\def\\foo{A}\\cs_if_exist:cT{foo}{Y}\\cs_if_exist:cF{missing}{Y}\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\def\\foo{A}YY",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\def\\foo{A}\\int_eval:n{\\cs_if_exist_p:c{foo}+\\cs_if_exist_p:c{missing}}\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\def\\foo{A}1",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\cs_if_exist:cTF{missing}{Y}{N}\\ifcsname missing\\endcsname Y\\else N\\fi\\ExplSyntaxOff",
+      "tex": {
+        "text": "NN",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\expandafter\\let\\csname foo\\endcsname\\relax\\cs_if_exist:cTF{foo}{Y}{N}\\ExplSyntaxOff",
+      "tex": {
+        "text": "N",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\def\\foo{A}\\edef\\z{\\cs_if_exist:cTF{foo}{Y}{N}}\\z\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\def\\foo{A}Y",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\let\\q\\cs_if_exist:cTF\\q{missing}{Y}{N}\\ExplSyntaxOff",
+      "tex": {
+        "text": "N",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\def\\foo{A}\\afterassignment X\\cs_if_exist:cTF{foo}{Y}{N}\\def\\bar{B}\\bar\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\def\\foo{A}YXB",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\cs_if_exist:cTF{c_zero_int}{Y}{N}\\ExplSyntaxOff",
+      "tex": {
+        "text": "Y",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\cs_if_exist:cTF{l_tmpa_tl}{Y}{N}\\ExplSyntaxOff",
+      "tex": {
+        "text": "Y",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\def\\foo{A}\\tl_if_exist:cTF{foo}{Y}{N}\\tl_if_exist:cT{foo}{T}\\tl_if_exist:cF{missing}{F}\\int_eval:n{\\tl_if_exist_p:c{foo}}\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\def\\foo{A}YTF1",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\ifx\\tl_if_exist:cTF\\cs_if_exist:cTF Y\\else N\\fi\\ifx\\tl_if_exist:cT\\cs_if_exist:cT Y\\else N\\fi\\ifx\\tl_if_exist:cF\\cs_if_exist:cF Y\\else N\\fi\\ifx\\tl_if_exist_p:c\\cs_if_exist_p:c Y\\else N\\fi\\ExplSyntaxOff",
+      "tex": {
+        "text": "YYYY",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    }
+  ],
+  "local": {
+    "source": "test/lambda/latex/fixtures/local_packages/script_cs_exist_c_main.tex",
+    "tex": {
+      "text": "\\def\\prefix{l_test}found",
+      "messages": [],
+      "diagnostics": [],
+      "packages": []
+    }
+  }
+}

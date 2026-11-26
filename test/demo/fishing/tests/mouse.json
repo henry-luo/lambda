@@ -1,0 +1,151 @@
+{
+  "name": "FishingClickCastsDragOrbitsClickReels",
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  },
+  "events": [
+    {
+      "type": "wait",
+      "ms": 1000
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#cove",
+        "offset_x": 640,
+        "offset_y": 300
+      }
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#cove",
+        "offset_x": 640,
+        "offset_y": 300
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 300
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#fishing"
+      },
+      "attribute": "data-mode",
+      "equals": "to-fish"
+    },
+    {
+      "type": "wait",
+      "ms": 3000
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#fishing"
+      },
+      "attribute": "data-mode",
+      "equals": "wait"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/fishing-mouse-before.png"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#cove",
+        "offset_x": 500,
+        "offset_y": 500
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#cove",
+        "offset_x": 600,
+        "offset_y": 460
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#cove",
+        "offset_x": 760,
+        "offset_y": 420
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#cove",
+        "offset_x": 900,
+        "offset_y": 380
+      }
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#cove",
+        "offset_x": 900,
+        "offset_y": 380
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 1200
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#fishing"
+      },
+      "attribute": "data-mode",
+      "equals": "wait"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/fishing-mouse-orbit.png"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#cove",
+        "offset_x": 640,
+        "offset_y": 300
+      }
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#cove",
+        "offset_x": 640,
+        "offset_y": 300
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 300
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#fishing"
+      },
+      "attribute": "data-mode",
+      "equals": "reel"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#cove",
+      "fields": {
+        "runtime_faulted": 0
+      }
+    }
+  ]
+}

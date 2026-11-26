@@ -181,7 +181,7 @@
         }
       ],
       "resolved_at": "2026-11-26T13:15:46.323Z",
-      "resolution": "LI-125 and RI-041 restore Craft’s torn-paper artwork. It appears in both ordinary pairs at 1.53% mean error and 1.92% changed area. The wordmark and button contrast differ.",
+      "resolution": "LI-126 and RI-041 restore Craft’s torn-paper artwork. It appears in both ordinary pairs at 1.53% mean error and 1.92% changed area. The wordmark and button contrast differ.",
       "resolution_evidence": "comparison/repairs.html#round-218",
       "resolved_previous_manual_major_remaining": "Large paper decorations still lack their authored URL image masks (RI-041), although heading, action and product panel are present.",
       "resolved_capture_settle_ms": 1000
@@ -864,7 +864,7 @@
     {
       "label": "saas_landing_342",
       "url": "https://teachable.com/",
-      "manual_major_remaining": "LI-124 and RI-248 restore the consent panel background, typography and button. The ordinary native panel still covers the lower offer area, where current Chromium shows the primary action without a panel. Retain high at 17.30% mean error and 35.60% changed area while the consent state and remaining hero differences are unresolved.",
+      "manual_major_remaining": "LI-125 and RI-255 restore the consent panel background, typography and button. The ordinary native panel still covers the lower offer area, where current Chromium shows the primary action without a panel. Retain high at 17.30% mean error and 35.60% changed area while the consent state and remaining hero differences are unresolved.",
       "reviewed_at": "2026-11-24T13:29:24.734Z",
       "evidence": "comparison/repairs.html#round-179",
       "rechecks": [
@@ -872,7 +872,7 @@
           "rechecked_at": "2026-11-26T08:54:20.771Z",
           "evidence": "comparison/repairs.html#round-207",
           "previous_manual_major_remaining": "Main navigation, heading, actions and product media now render. RI-227 repairs the consent notice width and fixed positioning, but missing :host custom-property styles leave transparent fill and unstyled text/buttons overlapping the product interface. Retain this large overlay defect under JS13-L2.",
-          "manual_major_remaining": "LI-124 and RI-248 restore the consent panel background, typography and button. The ordinary native panel still covers the lower offer area, where current Chromium shows the primary action without a panel. Retain high at 17.30% mean error and 35.60% changed area while the consent state and remaining hero differences are unresolved."
+          "manual_major_remaining": "LI-125 and RI-255 restore the consent panel background, typography and button. The ordinary native panel still covers the lower offer area, where current Chromium shows the primary action without a panel. Retain high at 17.30% mean error and 35.60% changed area while the consent state and remaining hero differences are unresolved."
         }
       ]
     },
@@ -971,7 +971,7 @@
         }
       ],
       "resolved_at": "2026-11-26T08:54:20.678Z",
-      "resolution": "LI-124 and RI-248 apply the consent host positioning and inheritance from its own shadow stylesheet. The ordinary paired capture restores the full consent panel at the reference position with a 1.45% mean difference. Clear the major omission.",
+      "resolution": "LI-125 and RI-255 apply the consent host positioning and inheritance from its own shadow stylesheet. The ordinary paired capture restores the full consent panel at the reference position with a 1.45% mean difference. Clear the major omission.",
       "resolution_evidence": "comparison/repairs.html#round-207",
       "resolved_previous_manual_major_remaining": "JS13-L83 restores the hero through default-stream branching. JS13-L84/L85 repair consent configuration decoding and inherited message listeners. The panel now exists and is visible in the post-script tree, but its :host-scoped fixed positioning is unsupported (JS13-L2): it remains below the viewport. Retain manual high for the large missing consent panel; no full SDK or shadow-scope conformance claim.",
       "resolved_capture_settle_ms": 1000
@@ -983,7 +983,7 @@
       "reviewed_at": "2026-11-25T13:36:32.950Z",
       "evidence": "comparison/repairs.html#round-202",
       "resolved_at": "2026-11-26T08:54:20.727Z",
-      "resolution": "Both ordinary captures navigate from Bento to Linktree. LI-124 and RI-248 restore the full consent panel in the native viewport with a 1.14% mean difference. Clear the major omission.",
+      "resolution": "Both ordinary captures navigate from Bento to Linktree. LI-125 and RI-255 restore the full consent panel in the native viewport with a 1.14% mean difference. Clear the major omission.",
       "resolution_evidence": "comparison/repairs.html#round-207",
       "resolved_previous_manual_major_remaining": "Bento now redirects to Linktree. Shared stream/startup repairs restore the heading, copy, actions and large portrait; the large consent panel remains absent, matching the known host-scoped cascade gap (JS13-L2). Retain manual high despite the cleared automatic broad-difference flag.",
       "resolved_capture_settle_ms": 1000

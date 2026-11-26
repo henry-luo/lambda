@@ -7,9 +7,7 @@ This proposal covers **Node.js-specific features beyond standard JavaScript**. C
 This track focuses on:
 - **Node.js built-in modules** (`node:fs`, `node:path`, `node:os`, etc.)
 - **Node.js globals** (`process`, `Buffer`, `__dirname`, `__filename`, `require`)
-- **npm package management** (resolution, installation, `node_modules` layout)
 - **CommonJS `require()` interop** with ES modules
-- **`package.json` semantics** (exports, main, type, bin, scripts)
 
 ### What This Track Does NOT Cover
 - JS language features (covered by Transpile_Js1–Js28)
@@ -25,22 +23,18 @@ Lambda uses a **language subcommand** convention for polyglot operations:
 |---------|----------|----------|
 | `lambda js` | JavaScript | Universal abbreviation |
 | `lambda ts` | TypeScript | Universal abbreviation |
-| `lambda node` | Node.js (npm ecosystem) | Already a short word |
+| `lambda node` | Node.js | Already a short word |
 | `lambda py` | Python | Standard (`py` is official on Windows) |
 | `lambda rb` | Ruby | Standard (`.rb` file extension) |
 | `lambda sh` | Bash / Shell | Standard (`sh` binary and extension) |
 
-The `node` subcommand manages npm packages and Node.js-specific features:
+The `node` subcommand runs JavaScript with Node.js compatibility features:
 
 ```bash
-lambda node install              # Install npm dependencies
-lambda node run app.js           # Run with Node.js compat layer
-lambda node task start           # Run package.json script
+lambda node run app.js
 ```
 
-Automatic language detection (`lambda run file.js`) still works — the language subcommand is only needed for language-specific operations like package management.
-
-Lock file: `lambda-node.lock` (hyphenated, scoped to the node ecosystem).
+Automatic language detection (`lambda run file.js`) still works.
 
 ## 3. Current State
 
@@ -66,7 +60,7 @@ Lambda's JS runtime already implements partial Node.js support:
 | `process` global              | ✅ Full         | argv, env, exit, exitCode, cwd, platform, arch, pid, ppid, version, versions, hrtime, nextTick, memoryUsage, cpuUsage, umask, uptime, title, stdout, stderr, on('exit'/'uncaughtException')                                                                                 |
 | `Buffer`                      | ✅ Full         | Extended Uint8Array: alloc, allocUnsafe, allocUnsafeSlow, from, concat, endian read/write, variable-width read/write, BigInt64 read/write, static compare, includes, subarray, toJSON, swap16/32/64, instance methods via prototype (buf.toString(), buf.readUInt8(), etc.) |
 | `__dirname` / `__filename`    | ✅              | Set per-module during transpilation                                                                                                                                                                                                                                         |
-| `require()`                   | ✅ Full         | CJS require with source wrapping (`module.exports`), resolves relative + bare specifiers via `npm_resolve_module()`                                                                                                                                                         |
+| `require()`                   | ✅ Full         | CJS require with source wrapping (`module.exports`)                                                                                                                                                         |
 | ES Modules                    | ✅              | import/export with module registry                                                                                                                                                                                                                                          |
 | `node:dns`                    | ✅ Full         | `js_dns.cpp` — lookup (async), lookupSync (sync), resolve                                                                                                                                                                                                                   |
 | `node:zlib`                   | ✅ Full         | `node_zlib_module.cpp` over the host Jube codec provider — gzipSync, gunzipSync, deflateSync, inflateSync, deflateRawSync, inflateRawSync, brotli stubs                                                                                                                                    |
@@ -76,10 +70,6 @@ Lambda's JS runtime already implements partial Node.js support:
 | `node:tls`                    | ✅ Full         | `js_tls.cpp` — connect, createServer, createSecureContext, TLSSocket (wraps mbedTLS via serve/tls_handler)                                                                                                                                                                  |
 | `node:http`                   | ✅ Full         | `js_http.cpp` — createServer, request, get, IncomingMessage, ServerResponse (writeHead/write/end/setHeader), STATUS_CODES, METHODS                                                                                                                                          |
 | `node:https`                  | ✅ Full         | `js_https.cpp` — createServer, request, get (thin wrapper over http + tls)                                                                                                                                                                                                  |
-| npm packages                  | ✅ Phase 2 done | `lambda node install`, semver resolution, `node_modules/` layout, `lambda-node.lock`                                                                                                                                                                                        |
-| npm bare specifier resolution | ✅ Phase 3      | `npm_resolve_module()` integrated into `jm_resolve_module_path()`, conditional exports support                                                                                                                                                                              |
-| `lambda node task`            | ✅ Phase 3      | Runs `package.json` scripts via `shell_exec_line`, prepends `node_modules/.bin` to PATH                                                                                                                                                                                     |
-| `lambda node exec`            | ✅ Phase 3      | Runs package binaries from `node_modules/.bin`, auto-installs if missing                                                                                                                                                                                                    |
 
 ### Existing C Library Foundations
 
@@ -96,11 +86,11 @@ Lambda already has C libraries that map directly to Node.js module functionality
 
 ## 4. Node.js Built-in Modules — Tiered Implementation Plan
 
-Modules are prioritized by how many npm packages depend on them (based on npm ecosystem analysis and Deno/Bun experience).
+Modules are prioritized by common Node.js application usage and runtime comparisons.
 
-### Tier 1: Critical (required by 80%+ of npm packages)
+### Tier 1: Commonly Used
 
-These modules are needed to run the vast majority of npm packages.
+These modules support common Node.js applications.
 
 #### `node:fs` — Complete File System
 
@@ -297,7 +287,7 @@ Extend Uint8Array with Node.js Buffer semantics.
 
 Provides Readable, Writable, Duplex, Transform, PassThrough stream classes with EventEmitter-style on/emit and push/pull model. `pipeline()` and `Readable.from()` included.
 
-Required by `fs.createReadStream`, HTTP, and many npm packages.
+Required by `fs.createReadStream`, HTTP, and many Node.js libraries.
 
 | Type | Priority | Status |
 |------|----------|--------|
@@ -437,193 +427,7 @@ Small module, can be pure JS.
 | `AbortController` / `AbortSignal` | 🔲 | |
 | `performance` | 🔲 | `uv_hrtime` backed |
 
-## 6. npm Compatibility
-
-### 6.1 Design Philosophy
-
-Lambda should support running npm packages **without requiring Node.js to be installed**. The approach draws on lessons from Deno and Bun:
-
-| Aspect          | Node.js                     | Deno                   | Bun                  | **Lambda (proposed)**            |
-| --------------- | --------------------------- | ---------------------- | -------------------- | -------------------------------- |
-| Package source  | npm registry                | npm registry + JSR     | npm registry         | npm registry                     |
-| Specifier style | bare `"lodash"`             | `npm:lodash@4`         | bare `"lodash"`      | bare `"lodash"` (package.json)   |
-| Install step    | `npm install`               | Auto on first run      | `bun install`        | `lambda node install`            |
-| node_modules    | Nested (npm) or flat (pnpm) | Global cache (default) | Flat + symlinks      | **Flat + symlinks** (pnpm-style) |
-| Lock file       | `package-lock.json`         | `deno.lock`            | `bun.lockb` (binary) | `lambda-node.lock` (JSON)        |
-| Config file     | `package.json`              | `deno.json`            | `package.json`       | `package.json`                   |
-
-### 6.2 `node_modules` Layout: Flat + Symlinks (pnpm Model)
-
-**Recommendation: Follow pnpm's content-addressable flat layout**, not npm's nested layout or Deno's global cache-only approach.
-
-#### Why Not Nested (npm v2 style)?
-- Massive disk usage from duplicate packages
-- Deep directory trees hit OS path length limits on Windows
-- Slow installation
-
-#### Why Not Fully Flat (npm v3+ hoisted)?
-- Phantom dependencies: packages can accidentally import undeclared dependencies that were hoisted
-- Non-deterministic: different install orders can produce different layouts
-- Version conflicts result in occasional nesting anyway
-
-#### Why Not Global Cache Only (Deno style)?
-- Many npm packages hard-code paths relative to `node_modules`
-- PostInstall scripts expect `node_modules` to exist
-- Build tools (webpack, vite, esbuild) probe `node_modules`
-
-#### Why pnpm-Style Flat + Symlinks?
-
-```
-node_modules/
-├── .lambda/                        # content-addressable store (flat)
-│   ├── lodash@4.17.21/
-│   │   └── node_modules/
-│   │       └── lodash/             # actual package files
-│   ├── express@4.18.2/
-│   │   └── node_modules/
-│   │       ├── express/            # actual package files
-│   │       ├── body-parser -> ../../body-parser@1.20.2/node_modules/body-parser
-│   │       └── cookie -> ../../cookie@0.6.0/node_modules/cookie
-│   ├── body-parser@1.20.2/
-│   │   └── node_modules/
-│   │       └── body-parser/        # actual files
-│   └── cookie@0.6.0/
-│       └── node_modules/
-│           └── cookie/             # actual files
-├── lodash -> .lambda/lodash@4.17.21/node_modules/lodash       # symlink
-└── express -> .lambda/express@4.18.2/node_modules/express     # symlink
-```
-
-**Benefits:**
-1. **No phantom dependencies** — only declared dependencies are symlinked to the top level
-2. **No duplication** — each version of a package exists exactly once in `.lambda/`
-3. **Deterministic** — same `package.json` + `lambda-node.lock` always produces same layout
-4. **Efficient** — symlinks are cheap; global cache can be added later for cross-project sharing
-5. **Compatible** — packages resolve their own dependencies via their local `node_modules/` symlinks
-6. **Battle-tested** — pnpm has proven this works with the entire npm ecosystem
-
-### 6.3 Global Package Cache
-
-In addition to per-project `node_modules/`, implement a global cache for downloaded tarballs:
-
-```
-~/.lambda/
-├── cache/
-│   ├── registry.npmjs.org/
-│   │   ├── lodash/
-│   │   │   ├── 4.17.21.tgz          # downloaded tarball
-│   │   │   └── 4.17.21/             # extracted contents
-│   │   └── express/
-│   │       ├── 4.18.2.tgz
-│   │       └── 4.18.2/
-│   └── metadata/
-│       ├── lodash.json               # package metadata cache
-│       └── express.json
-└── config.json                       # registry URL, auth tokens
-```
-
-**Resolution flow:**
-1. Check global cache for exact version
-2. If not cached, fetch tarball from registry
-3. Extract to cache
-4. Create symlink structure in project's `node_modules/`
-
-### 6.4 Package Resolution Algorithm
-
-Implement the Node.js module resolution algorithm with these extensions:
-
-```
-resolve(specifier, parent_path):
-  1. If specifier starts with "node:" → return built-in module
-  2. If specifier starts with "/" or "./" or "../" → resolve as file/directory
-  3. If specifier is bare (e.g. "lodash"):
-     a. Check package.json "imports" field (self-referencing)
-     b. Walk up from parent_path, checking each node_modules/:
-        - Check package.json "exports" field (conditional exports)
-        - Check "main" field
-        - Check index.js / index.json
-  4. Error: MODULE_NOT_FOUND
-```
-
-**Conditional exports support** (critical for modern packages):
-```json
-{
-  "exports": {
-    ".": {
-      "import": "./dist/esm/index.js",
-      "require": "./dist/cjs/index.js",
-      "default": "./dist/esm/index.js"
-    },
-    "./utils": "./dist/utils.js"
-  }
-}
-```
-
-Lambda should resolve with conditions: `["lambda", "node", "import", "default"]` — matching Deno's approach of including a runtime-specific condition alongside standard Node.js conditions.
-
-### 6.5 Lock File Format
-
-`lambda-node.lock` — JSON format for human readability and easy diffing (unlike Bun's binary lockb):
-
-```json
-{
-  "version": 1,
-  "packages": {
-    "lodash@4.17.21": {
-      "resolved": "https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz",
-      "integrity": "sha512-v2kDEe57leczF...",
-      "dependencies": {}
-    },
-    "express@4.18.2": {
-      "resolved": "https://registry.npmjs.org/express/-/express-4.18.2.tgz",
-      "integrity": "sha512-...",
-      "dependencies": {
-        "body-parser": "1.20.2",
-        "cookie": "0.6.0"
-      }
-    }
-  }
-}
-```
-
-### 6.6 `package.json` Support
-
-Lambda reads but does not require `package.json`. All high-priority fields are implemented in `npm_package_json.cpp`.
-
-| Field | Purpose | Priority | Status |
-|-------|---------|----------|--------|
-| `name` | Package identity | High | ✅ |
-| `version` | Package version | High | ✅ |
-| `main` | CJS entry point | High | ✅ |
-| `module` | ESM entry point (de facto) | High | ✅ |
-| `type` | `"module"` or `"commonjs"` | High | ✅ |
-| `exports` | Conditional exports map | High | ✅ |
-| `imports` | Self-referencing imports | Medium | ✅ |
-| `dependencies` | Runtime dependencies | High | ✅ |
-| `devDependencies` | Dev-only dependencies | Medium | ✅ |
-| `scripts` | Run via `lambda node task` | Medium | ✅ |
-| `bin` | CLI executables | Medium |
-| `files` | Published file whitelist | Low |
-| `engines` | Version constraints | Low (advisory) |
-| `peerDependencies` | Peer dep declarations | Medium |
-
-### 6.7 CLI Commands
-
-```bash
-lambda node install                # ✅ Install all dependencies from package.json
-lambda node install lodash         # ✅ Add a dependency
-lambda node install -D jest        # ✅ Add dev dependency
-lambda node uninstall lodash       # ✅ Remove a dependency
-lambda node task                   # ✅ List available scripts from package.json
-lambda node task <script>          # ✅ Run a script from package.json
-lambda node exec <pkg>             # ✅ Run package binary (like npx)
-lambda node info <pkg>             # 🔲 Show dependency tree
-lambda node outdated               # 🔲 Check for newer versions
-lambda node update                 # 🔲 Update to latest within semver range
-```
-
-### 6.8 CommonJS / ESM Interop
-
+## 6. CommonJS / ESM Interop
 | Scenario | Behavior | Status |
 |----------|----------|--------|
 | ESM imports ESM | Standard ES module resolution | ✅ Done |
@@ -632,7 +436,6 @@ lambda node update                 # 🔲 Update to latest within semver range
 | CJS requires ESM | Supported if ESM has no top-level await (match Node.js 22+) | ✅ Done (via `js_require()` fallback to ESM path) |
 | `.mjs` file | Always ESM regardless of package.json | ✅ Recognized by `jm_resolve_module_path()` |
 | `.cjs` file | Always CJS regardless of package.json | ✅ Recognized + wrapped by `js_require()` |
-| `.js` file | Check nearest package.json `"type"` field | ✅ `npm_resolve_module()` checks `is_esm` |
 
 ## 7. Architecture
 
@@ -641,26 +444,18 @@ lambda node update                 # 🔲 Update to latest within semver range
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
 │                        Lambda CLI                                     │
-│  lambda node install │ lambda node run app.js │ lambda node task start    │
+│                     lambda node run app.js                             │
 └────────┬─────────────────┬──────────────────┬────────────────────────┘
          │                 │                  │
-    ┌────▼────┐     ┌──────▼──────┐    ┌──────▼──────┐
-    │ Package │     │ Module      │    │ Script      │
-    │ Manager │     │ Resolver    │    │ Runner      │
-    │ (npm)   │     │ (CJS+ESM)  │    │(package.json│
-    └────┬────┘     └──────┬──────┘    │  scripts)   │
-         │                 │           └─────────────┘
-    ┌────▼────┐     ┌──────▼──────┐
-    │ Registry│     │ Module      │
-    │ Client  │     │ Registry    │        (existing module_registry.cpp)
-    │ (HTTP)  │     │             │
-    └────┬────┘     └──────┬──────┘
-         │                 │
-    ┌────▼────┐     ┌──────▼──────┐
-    │ Global  │     │ Node.js     │
-    │ Cache   │     │ Built-in    │
-    │ (~/.λ/) │     │ Modules     │
-    └─────────┘     └──────┬──────┘
+    ┌──────────────┐     ┌──────────────────┐
+    │ CJS / ESM    │────▶│ Module Registry  │
+    │ Resolver     │     │                  │
+    └──────────────┘     └────────┬─────────┘
+                                  │
+                         ┌────────▼─────────┐
+                         │ Node.js Built-in │
+                         │ Modules          │
+                         └──────────────────┘
                            │
               ┌────────────┼────────────────┐
               │            │                │
@@ -685,16 +480,7 @@ lambda/js/                           # Phase 1 — all ✅
 ├── polyfills/
 │   └── events.js           ✅       # EventEmitter (pure JS)
 │
-lambda/module/npm/                          # Phase 2-3 — all ✅
-├── npm_registry.cpp        ✅       # HTTP client for registry API
-├── npm_resolver.cpp        ✅       # Dependency resolution (semver)
-├── npm_installer.cpp       ✅       # Download, extract, link
-├── npm_lockfile.cpp        ✅       # lambda-node.lock read/write
-├── npm_package_json.cpp    ✅       # package.json parser
-├── npm_resolve_module.cpp  ✅       # Node.js module resolution algorithm
-└── semver.cpp              ✅       # Semver parsing and matching
-│
-lambda/js/                           # Phase 4 — extended modules
+lambda/js/                           # Phase 3 — extended modules
 ├── js_stream.cpp           ✅       # node:stream (Readable, Writable, Duplex, Transform, PassThrough, pipeline)
 ├── js_crypto.cpp           ✅       # node:crypto (extended: HMAC, randomBytes, randomUUID, createHash, createHmac, timingSafeEqual)
 ├── js_child_process.cpp    ✅       # node:child_process (extended: spawn async, spawnSync)
@@ -767,37 +553,16 @@ Wire existing C libraries to JS module objects. All built-in modules implemented
 | `node:timers` / `node:console` | Small | ✅ Done — registered as importable aliases |
 | Module dispatcher (`node:` prefix) | Small | ✅ Done — `js_module_get()` handles 21 modules |
 
-### Phase 2: npm Package Manager — ✅ COMPLETE
+### Phase 2: CommonJS / ES Modules — ✅ CORE COMPLETE
 
-Full npm package manager with 32/32 semver tests passing.
-
-| Task | Effort | Status |
-|------|--------|--------|
-| Registry HTTP client | Medium | ✅ Done — `npm_registry.cpp` via `http_fetch()` |
-| Semver parser & matcher | Medium | ✅ Done — `semver.cpp` (32/32 tests) |
-| Dependency tree resolver | Large | ✅ Done — `npm_resolver.cpp` |
-| Tarball download & extract | Medium | ✅ Done — `npm_installer.cpp` |
-| Flat symlink layout installer | Medium | ✅ Done — pnpm-style `.lambda/` store |
-| `lambda-node.lock` read/write | Small | ✅ Done — `npm_lockfile.cpp` |
-| `package.json` field support | Medium | ✅ Done — `npm_package_json.cpp` (all fields) |
-| `lambda node install` CLI command | Small | ✅ Done — install/uninstall in `main.cpp` |
-| Node.js module resolution | Medium | ✅ Done — `npm_resolve_module.cpp` with conditional exports |
-
-### Phase 3: Interop & Ecosystem — ✅ CORE COMPLETE
-
-CJS/ESM interop infrastructure implemented. `require()` works with local modules and bare specifiers. CLI task/exec commands operational.
+CJS/ESM interop supports local modules. Built-in modules remain available through the module registry.
 
 | Task | Effort | Status |
 |------|--------|--------|
 | CJS/ESM interop (full) | Large | ✅ Done — `js_require()` wraps CJS source with `module.exports` pattern, detects `.cjs`/`.mjs` extensions |
-| `require()` with node_modules walk | Medium | ✅ Done — `jm_resolve_module_path()` calls `npm_resolve_module()` for bare specifiers, built-in bypass list prevents polyfill shadowing |
-| Conditional exports resolution | Medium | ✅ Done — `npm_resolve_exports()` with conditions `["lambda", "node", "import", "default"]` |
-| `lambda node task` (scripts runner) | Small | ✅ Done — parses `package.json` scripts, runs via `shell_exec_line`, prepends `node_modules/.bin` to PATH |
-| `lambda node exec` (npx equivalent) | Medium | ✅ Done — runs binaries from `node_modules/.bin`, auto-installs if not found |
 | Express hello-world server | — | ✅ Achievable — `node:http` + `node:stream` implemented |
-| 20+ npm packages pass tests | — | 🔲 Remaining — needs ecosystem validation |
 
-### Phase 4: Extended Modules (Tier 2) — ✅ COMPLETE
+### Phase 3: Extended Modules (Tier 2) — ✅ COMPLETE
 
 All Tier 2 extended modules implemented. 23 built-in modules registered in `js_module_get()` (added http, https), 589/589 baseline tests passing.
 
@@ -815,7 +580,7 @@ All Tier 2 extended modules implemented. 23 built-in modules registered in `js_m
 | `node:readline`                      | Small  | ✅ Done — `js_readline.cpp`, createInterface, question, close, on |
 | Module dispatcher update             | Small  | ✅ Done — 11 new modules added to `js_module_get()` + builtin bypass list (21 total) |
 
-### Phase 5: HTTP & Server — ✅ COMPLETE
+### Phase 4: HTTP & Server — ✅ COMPLETE
 
 | Task                                 | Effort | Status           |
 | ------------------------------------ | ------ | ---------------------- |
@@ -831,9 +596,6 @@ All Tier 2 extended modules implemented. 23 built-in modules registered in `js_m
 test/test_js_node_path.cpp     # node:path — join, resolve, dirname, basename, etc.
 test/test_js_node_os.cpp       # node:os — platform, arch, cpus, memory
 test/test_js_node_buffer.cpp   # Buffer — from, alloc, toString, encoding
-test/test_npm_semver.cpp       # Semver parsing and range matching
-test/test_npm_resolver.cpp     # Dependency tree resolution
-test/test_npm_installer.cpp    # Symlink layout creation
 ```
 
 ### Integration Tests (Lambda scripts)
@@ -843,68 +605,16 @@ test/lambda/node_path.js       # const path = require('path'); assert(path.join(
 test/lambda/node_os.js         # import os from 'node:os'; assert(os.platform() !== undefined)
 test/lambda/node_fs_ext.js     # fs.realpathSync, fs.accessSync, fs.rmSync
 test/lambda/node_buffer.js     # Buffer.from('hello').toString('hex') === '68656c6c6f'
-test/lambda/module/npm_install.js     # Install lodash, require it, verify it works
-test/lambda/module/npm_resolve.js     # Package resolution with exports field
 ```
 
-### Compatibility Testing
-
-Run selected test suites from real npm packages:
-- `lodash` — pure JS utility library (baseline)
-- `minimist` — argument parser (small, pure JS)
-- `chalk` — terminal colors (conditional exports, ESM)
-- `semver` — semver range parser (dogfooding)
-- `express` (stretch goal) — HTTP framework (streams, http, path, fs)
-
-## 10. Reference Analysis: Deno vs Bun Approaches
-
-### What to Learn from Deno
-
-| Aspect | Deno's Approach | Lambda Takeaway |
-|--------|----------------|-----------------|
-| `npm:` specifier | Inline in import: `import x from "npm:chalk@5"` | Skip — use package.json like Bun/Node |
-| Global cache | Default: no local node_modules | Use global cache for tarballs, but always create local node_modules |
-| `node:` prefix | Required for built-in modules | Support both `"fs"` and `"node:fs"` (match Node.js) |
-| Built-in modules | JS polyfills for most | Mix: C-backed where we have libs, JS polyfills for pure logic |
-| Lock file | JSON `deno.lock` | JSON `lambda-node.lock` (good for diffing) |
-| Permissions | `--allow-read`, `--allow-net` | Consider for future; not Phase 1 |
-
-### What to Learn from Bun
-
-| Aspect | Bun's Approach | Lambda Takeaway |
-|--------|---------------|-----------------|
-| Install speed | Binary lockfile, global cache, hard links | Global tarball cache; symlinks over hard links (simpler) |
-| node_modules | Flat + symlinks | Adopt this (pnpm-style) |
-| package.json first | Native support | Match this — package.json is the single config |
-| CJS/ESM interop | Transparent, automatic | Match this behavior |
-| Built-in modules | 90%+ native in Zig/C++ | Match where we have C backing |
-| Workspaces | Supported | Phase 2+ |
-
-### Key Decision Summary
-
-| Decision | Choice | Rationale |
-|----------|--------|-----------|
-| node_modules layout | Flat + symlinks (pnpm) | No phantoms, no duplication, deterministic |
-| Config file | `package.json` | npm ecosystem compatibility; no new format |
-| Lock file | `lambda-node.lock` (JSON) | Human-readable, diffable, simple to implement |
-| Global cache | `~/.lambda/cache/` | Avoid re-downloading across projects |
-| Built-in modules style | `"node:fs"` and `"fs"` both work | Maximum Node.js compat |
-| CJS detection | File extension + package.json `type` | Match Node.js 22+ behavior |
-| Native addons | ❌ Not supported | Complexity too high; covers 95% of packages without them |
-
-## 11. Risks & Mitigations
+## 10. Risks & Mitigations
 
 | Risk | Impact | Mitigation |
 |------|--------|-----------|
-| npm ecosystem is vast; many edge cases | Medium | Focus on top-100 packages; use test suites from real packages |
 | Streams are complex and ubiquitous | High | Start with Web Streams (Js15), layer Node streams on top |
-| CJS/ESM interop has subtle edge cases | High | Match Node.js 22+ behavior exactly; test with real packages |
-| Some packages probe `node_modules` paths | Medium | pnpm-style layout preserves expected structure |
-| Native addons won't work | Low | Affects ~5% of packages; document unsupported |
-| Semver range resolution is non-trivial | Medium | Port from well-tested reference implementation |
-| Performance of package manager | Low | Cache aggressively; symlinks are essentially free |
+| CJS/ESM interop has subtle edge cases | High | Match Node.js 22+ behavior exactly; test with local fixtures |
 
-## 12. Success Criteria
+## 11. Success Criteria
 
 **Phase 1 complete when:** ✅ ACHIEVED
 - ✅ `import path from "node:path"` works with all `path.*` methods
@@ -914,18 +624,8 @@ Run selected test suites from real npm packages:
 - ✅ EventEmitter on/emit/off works correctly
 - ✅ All Tier 1 modules pass targeted test suites (589/589 baseline)
 
-**Phase 2 complete when:** ✅ ACHIEVED
-- ✅ `lambda node install` reads `package.json`, downloads from npm, creates `node_modules/`
-- ✅ `const lodash = require("lodash")` works after install
-- ✅ `lambda-node.lock` is generated and deterministic
-- ✅ Conditional exports resolve correctly (32/32 semver tests)
-- ✅ CJS/ESM interop handles `import cjs from "./file.cjs"` and `require("./esm.mjs")`
-
-**Phase 3 — core infrastructure complete, ecosystem validation remaining:**
-- ✅ `require()` loads CJS modules with `module.exports` wrapping
-- ✅ Bare specifier resolution via `npm_resolve_module()` with `node_modules` walk
-- ✅ `lambda node task` runs scripts from `package.json`
-- ✅ `lambda node exec` runs package binaries (npx equivalent)
-- ✅ Built-in modules bypass npm polyfills (10-module static list)
+**Phase 2: CommonJS / ES Modules — ✅ CORE COMPLETE**
+- ✅ `require()` wraps CJS source with `module.exports`
+- ✅ Local CJS/ESM interop is supported
+- ✅ Built-in modules remain available through the module registry
 - ✅ Express hello-world server achievable (`node:http` + `node:stream` implemented)
-- 🔲 At least 20 popular pure-JS npm packages pass their own test suites

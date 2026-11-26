@@ -61,7 +61,9 @@ pub let descriptor = {
 // ---------------------------------------------------------------------------
 
 let LINE_H = 20.0
+let TOP_PAD = 4.0
 let HSCROLL_H = 12.0
+let VSCROLL_W = 12.0
 // rows rendered before the viewport is measured
 let DEFAULT_ROWS = 48
 let OVERSCAN = 2
@@ -74,10 +76,10 @@ let MEASURE_TEXT = "00000000000000000000"
 let TEXT_PAD = 14.0
 
 fn new_view() => {handle: null, top: 0, row: 0, rows: DEFAULT_ROWS, cols: 0, wrap: false, left: 0,
-                  char_w: 0.0, width: 0.0, height: 0.0, width_sample: null}
+                  char_w: 0.0, width: 0.0, pane_width: 0.0, height: 0.0, width_sample: null}
 
 // Rendered rows for a surface `height` pixels tall.
-fn rows_for(height) any^ => max(1, int(height / LINE_H) + OVERSCAN)
+fn rows_for(height) any^ => max(1, int((height - TOP_PAD) / LINE_H)) + OVERSCAN
 
 fn visible(vw) any^ =>
   max(1, (if (max_left(vw) > 0) rows_for(vw.height - HSCROLL_H) else vw.rows) - OVERSCAN)
@@ -129,9 +131,25 @@ fn row_step(b, vw, line, row, n) any^ {
 fn row_before(p, q) => p.line < q.line or (p.line == q.line and p.row < q.row)
 
 // Scrolling stops when the document's last row reaches the bottom.
+fn vertical_end(b, vw) any^ {
+  let n = visible(vw)
+  if (not wrapping(vw)) {line: max(0, b.count - n), row: 0}
+  else {
+    let l = b.count - 1
+    row_step(b, vw, l, line_rows(b, vw, l) - 1, 1 - n)
+  }
+}
+
+fn vertical_overflow(b, vw) any^ {
+  if (b.count > visible(vw)) true
+  else {
+    let end = vertical_end(b, vw)
+    end.line > 0 or end.row > 0
+  }
+}
+
 fn clamped(b, vw, p) {
-  let l = b.count - 1
-  let stop = row_step(b, vw, l, line_rows(b, vw, l) - 1, 1 - visible(vw))
+  let stop = vertical_end(b, vw)
   let q = if (row_before(stop, p)) stop else p
   {*: vw, top: q.line, row: q.row}
 }
@@ -197,15 +215,18 @@ fn follow_left(b, vw, p) any^ {
   }
 }
 
-// The thumb uses the widest rendered line. Selection-only renders and
-// horizontal gestures reuse the sample for the current window.
+// A partial window can extend the known width, but only a whole-file sample
+// can prove that a former widest line is gone.
 fn sample_width(b, vw) any^ {
   let sample = vw.width_sample
   if (vw.wrap or vw.cols <= 0 or
       (sample != null and sample.version == b.version and sample.top == vw.top and sample.rows == vw.rows)) vw
   else {
     let widths = [for (t in (buf.lines(b, vw.top, vw.rows))^) display_len(t)]
-    {*: vw, width_sample: {version: b.version, top: vw.top, rows: vw.rows, cols: max(widths)}}
+    let widest = max(widths) or 0
+    let whole_file = vw.top == 0 and b.count <= vw.rows
+    let cols = if (sample == null or whole_file) widest else max(sample.cols, widest);
+    {*: vw, width_sample: {version: b.version, top: vw.top, rows: vw.rows, cols: cols}}
   }
 }
 
@@ -216,7 +237,16 @@ fn scrolled_left(vw, n) {
   let left = min(max(0, vw.left + n), max_left(vw))
   if (left == vw.left) vw else {*: vw, left: left}
 }
-fn constrain_left(b, vw) any^ => scrolled_left(sample_width(b, vw), 0)
+fn with_width(vw, width) =>
+  {*: vw, width: width, cols: if (vw.char_w > 0.0) max(1, int((width - TEXT_PAD) / vw.char_w)) else vw.cols}
+
+fn fit_width(b, vw) any^ {
+  // Measure overflow with the full width first so the track cannot make itself necessary.
+  let wide = sample_width(b, with_width(vw, vw.pane_width))
+  if (vertical_overflow(b, wide)) with_width(wide, max(0.0, wide.pane_width - VSCROLL_W)) else wide
+}
+
+fn constrain_left(b, vw) any^ => scrolled_left(fit_width(b, vw), 0)
 
 fn viewport_moved(a, b) => a.top != b.top or a.row != b.row or a.left != b.left
 
@@ -297,18 +327,20 @@ fn line_number(b, vw, l) any^ {
             string(l + 1)>
 }
 
-fn gutter(b, vw) =>
+fn gutter(b, vw, readonly) =>
   <div class: "src-gutter", ["aria-hidden"]: "true", ["data-lines"]: string(b.count),
     <div style: shift_style(vw),
-      *[for (l in ((vw.top to vw.top + window_count(b, vw) - 1) ^ { [] })) line_number(b, vw, l)]
+      if (readonly and b.count == 1 and not b.final_newline and buf.line_len(b, 0) == 0) null
+      else *[for (l in ((vw.top to vw.top + window_count(b, vw) - 1) ^ { [] })) line_number(b, vw, l)]
     >
   >
 
 // The scrollbar shows where the window is; a press on the track pages.
-fn scrollbar(b, vw) {
+fn scrollbar(b, vw) any^ {
+  if (vw.height <= 0.0 or not vertical_overflow(b, vw)) { return null }
   let span = max(1, b.count)
   let top = vw.top
-  let shown = min(1.0, float(vw.rows) / float(span));
+  let shown = min(1.0, float(visible(vw)) / float(span));
   <div class: "src-scroll", ["aria-hidden"]: "true",
     <div class: "src-thumb",
       style: "top: " ++ string(100.0 * float(top) / float(span)) ++ "%; height: " ++
@@ -930,7 +962,7 @@ let source_css = "
   .src-text.src-wrap .edit-doc > div { height: auto; min-height: 20px; white-space: pre-wrap;
                                       word-break: break-all; }
   .src-measure { position: absolute; left: 0; top: 0; visibility: hidden; white-space: pre; }
-  .src-scroll { flex: none; position: relative; width: 12px; background: #f6f8fa;
+  .src-scroll { flex: none; position: relative; box-sizing: border-box; width: 12px; background: #f6f8fa;
                 border-left: 1px solid #d8dee4; cursor: default; }
   .src-hscroll { flex: none; position: relative; height: 12px; box-sizing: border-box; background: #f6f8fa;
                  border-top: 1px solid #d8dee4; cursor: default; }
@@ -957,15 +989,15 @@ pub let surface_css = source_css ++ syn.css
 // The source surface as the edit application's body. Opening highlights the
 // first window at once: at the top of the file the parse starts at line 0 with
 // no restart scan, so it costs one pass 2 whatever the file's size.
-pub fn app(session, b, status) =>
-  apply(<source_app session: session, buf: b, status: status, readonly:false,
+pub fn app(session, b, status, embedded = false, modes = null) =>
+  apply(<source_app session:session, buf:b, status:status, readonly:false, embedded:embedded, modes:modes,
                     hs: exact(new_highlight(session.path), b, new_view())>, {mode: "edit"})
 
 // The viewer supplies its already-decoded text, including archive members.
 pub fn readonly(path, text) {
   let b = buf.from_text(text)
   let session = sess.new_session(path, descriptor, text, {doc:b, envelope:null});
-  apply(<source_app session:session, buf:b, status:"", readonly:true,
+  apply(<source_app session:session, buf:b, status:"", readonly:true, embedded:false,
                     hs:exact(new_highlight(path), b, new_view())>, {mode:"edit"})
 }
 
@@ -976,7 +1008,7 @@ pub fn readonly(path, text) {
 // ---------------------------------------------------------------------------
 
 // The source view of `text` for the file `session` edits.
-pub fn source_view(session, text, dirty) {
+pub fn source_view(session, text, dirty, quiet = false) {
   let doc = buf.from_text(text)
   let saved = if (dirty) buf.from_text(session.disk_text) else doc
   // dirty state compares buffer versions (same_doc): the unsaved text is one
@@ -984,7 +1016,7 @@ pub fn source_view(session, text, dirty) {
   let current = if (dirty) {*: doc, version: saved.version + 1} else doc
   let s = {*: sess.new_session(session.path, descriptor, session.disk_text, {doc: saved, envelope: null}),
            rich_format: session.rich_format};
-  {mode: 'source', session: s, doc: current, status: "Source view."}
+  {mode: 'source', session: s, doc: current, status: if (quiet) "" else "Source view."}
 }
 
 pub fn reloaded_view(session, text, status) =>
@@ -1016,17 +1048,18 @@ pn rich_view(session, b) {
 
 // The surface's rows, and its width in characters from the measuring span's
 // advance (soft wrap): on mount and whenever the window resizes.
-fn measured(vw, root) {
+fn measured(b, vw, root) any^ {
   let surface = dom.get_element_by_id(root, "src-pane")
   let r = if (surface == null) null else dom.bounding_box(surface)
+  let track = dom.query_selector(root, ".src-scroll")
+  let t = if (track == null) null else dom.bounding_box(track)
   let probe = dom.get_element_by_id(root, "src-measure")
   let m = if (probe == null) null else dom.bounding_box(probe)
   let char_w = if (m != null and m.width > 0) m.width / float(MEASURE_CHARS) else 0.0
-  {*: vw, rows: if (r != null and r.height > 0) rows_for(r.height) else vw.rows,
-   cols: if (r != null and char_w > 0.0) max(1, int((r.width - TEXT_PAD) / char_w)) else vw.cols,
-   width: if (r == null) vw.width else r.width,
-   height: if (r == null) vw.height else r.height,
-   char_w: if (char_w > 0.0) char_w else vw.char_w}
+  fit_width(b, {*: vw, rows: if (r != null and r.height > 0) rows_for(r.height) else vw.rows,
+    pane_width: if (r == null) vw.pane_width else r.width + (if (t == null) 0.0 else t.width),
+    height: if (r == null) vw.height else r.height,
+    char_w: if (char_w > 0.0) char_w else vw.char_w})
 }
 
 // Bind the surface once and measure it.
@@ -1035,7 +1068,12 @@ pn mounted(b, vw, node, rev) {
   let root = dom.root_node(node)
   let surface = dom.get_element_by_id(root, "edit-surface")
   if (surface == null) { return vw }
-  {*: constrain_left(b, measured(vw, root)), handle: dom.bind_model_edit_surface(surface, rev)}
+  let body = source_body(node)
+  // The document body gets resize directly. An embedded editor subscribes for its own geometry.
+  if (body != null and dom.closest(dom.parent_node(body), "body") != null) {
+    dom.watch_window(body, "resize", true)
+  }
+  {*: scrolled_left(measured(b, vw, root), 0), handle: dom.bind_model_edit_surface(surface, rev)}
 }
 
 // Put the native selection where the model has it once this render lands;
@@ -1057,11 +1095,13 @@ edit <source_app> state session: ~.session, b: ~.buf, status: ~.status, sel: car
                          rev: 0, comp: null, hs: ~.hs, frame: 0, wheel_px: 0.0, wheel_dx: 0.0, drag: null, dialog: null,
                          after_save: null, selection_drag: null, selection_frame: 0 {
   let dirty = sess.is_dirty(session, b);
-  <body class: "edit-app edit-format-source",
-    if (not ~.readonly) tools.toolbar(files.file_label(session, dirty, true), history_probe(hist), dirty, null, [],
-                  if (session.rich_format != null) tools.rich_view_group else []) else null;
+  <body class: "edit-app edit-format-source" ++ (if (~.embedded or ~.readonly) "" else " edit-source-compact"),
+    if (not ~.readonly) tools.toolbar(files.file_label(session, dirty, true, ~.modes),
+                  history_probe(hist), dirty, null, [],
+                  if (~.modes == null and session.rich_format != null) tools.rich_view_group else []) else null;
+    if (~.embedded) files.status_notice(status) else null;
     <div class: "src-main",
-      gutter(b, vw);
+      gutter(b, vw, ~.readonly);
       <div id: "src-pane", class: "src-pane",
         <div id: "src-viewport", class: "src-viewport",
           <div id: "edit-surface", class: if (vw.wrap) "src-text src-wrap" else "src-text", contenteditable: "true",
@@ -1075,7 +1115,7 @@ edit <source_app> state session: ~.session, b: ~.buf, status: ~.status, sel: car
       <span id: "src-measure", class: "src-measure", ["aria-hidden"]: "true", MEASURE_TEXT>
       if (hs.find != null) find_bar(hs.find) else null
     >
-    if (~.readonly) null else status_line(b, sel, hs, status, dirty)
+    if (~.readonly or ~.embedded) null else status_line(b, sel, hs, status, dirty)
     if (~.readonly) null else files.dialog_view(dialog, session)
   >
 }
@@ -1180,7 +1220,7 @@ on edit_dialog(req) {
     {session: session, doc: b, status: status, dialog: dialog, after_save: after_save})^
   if ((filed.navigation != null)^) {
     session = filed.session; status = filed.status; dialog = filed.dialog; after_save = filed.after_save
-    emit("viewer_navigation", {entry:filed.navigation, node:req.node})
+    emit("viewer_navigation", files.navigation_result(filed.navigation, req.node, session)^)
     return
   }
   session = filed.session
@@ -1203,7 +1243,7 @@ on edit_dialog(req) {
 on editor_navigate(evt) {
   if ((dialog != null)^) { return }
   let decision = files.navigation_decision(evt.target, session, b, evt.detail)^
-  if (decision.navigate) { emit("viewer_navigation", {entry:evt.detail, node:evt.target}); return }
+  if (decision.navigate) { emit("viewer_navigation", files.navigation_result(evt.detail, evt.target, session)^); return }
   dialog = decision.dialog
 }
 on keydown(evt) {
@@ -1339,7 +1379,7 @@ on wheel(evt) {
   let dx = wheel_dx + float(evt.deltaX or 0)
   let cols = if (vw.char_w > 0.0) int(dx / vw.char_w) else 0
   wheel_dx = dx - float(cols) * vw.char_w
-  let next = scrolled_left(sample_width(b, scrolled(b, vw, step.lines)), cols)
+  let next = scrolled_left(fit_width(b, scrolled(b, vw, step.lines)), cols)
   if (viewport_moved(vw, next)^) {
     vw = next
     frame = request_exact(evt.target, hs, b, vw, frame)
@@ -1396,7 +1436,7 @@ on source_selection_frame(evt) {
   let dx = if (speed.x == 0.0) 0.0 else d.dx + elapsed * speed.x
   let cols = if (vw.char_w > 0.0) int(dx / vw.char_w) else 0
   let vertical = if (step.lines == 0) vw else scrolled(b, vw, step.lines)
-  let next = scrolled_left(sample_width(b, vertical), cols)
+  let next = scrolled_left(fit_width(b, vertical), cols)
   if ((viewport_moved(vw, next) or head != sel.head)^) {
     sel = {anchor: d.anchor, head: head, goal: null}
     vw = next
@@ -1557,7 +1597,7 @@ on render(evt) {
 // The rendered rows and wrap width follow the window size.
 on resize(evt) {
   if ((vw.handle == null)^) { return }
-  let next = measured(vw, dom.root_node(evt.target))
+  let next = measured(b, vw, dom.root_node(evt.target))
   // retain the viewport's origin when the caret is off-screen after manual scrolling.
   let row = if (wrapping(next)) min(vw.row * vw.cols div next.cols, line_rows(b, next, vw.top) - 1) else 0
   vw = constrain_left(b, clamped(b, next, {line: vw.top, row: row}))

@@ -1,0 +1,121 @@
+[{
+    name: "true",
+    issue: null,
+    unsupported: null,
+    diagnostics: [],
+    text: "T",
+    matches: true
+  }, {
+    name: "false",
+    issue: null,
+    unsupported: null,
+    diagnostics: [],
+    text: "F",
+    matches: true
+  }, {
+    name: "expression",
+    issue: null,
+    unsupported: null,
+    diagnostics: [],
+    text: "T",
+    matches: true
+  }, {
+    name: "local",
+    issue: null,
+    unsupported: null,
+    diagnostics: [],
+    text: "{T}F",
+    matches: true
+  }, {
+    name: "global",
+    issue: null,
+    unsupported: null,
+    diagnostics: [],
+    text: "{T}T",
+    matches: true
+  }, {
+    name: "globaldefs-positive",
+    issue: null,
+    unsupported: null,
+    diagnostics: [],
+    text: "{}T",
+    matches: true
+  }, {
+    name: "globaldefs-negative",
+    issue: null,
+    unsupported: null,
+    diagnostics: [],
+    text: "{}F",
+    matches: true
+  }, {
+    name: "predicate",
+    issue: null,
+    unsupported: null,
+    diagnostics: [],
+    text: "T",
+    matches: true
+  }, {
+    name: "string-predicate-true",
+    issue: null,
+    unsupported: null,
+    diagnostics: [],
+    text: "T",
+    matches: true
+  }, {
+    name: "string-predicate-false",
+    issue: null,
+    unsupported: null,
+    diagnostics: [],
+    text: "F",
+    matches: true
+  }, {
+    name: "predicate-token-true",
+    issue: null,
+    unsupported: null,
+    diagnostics: [],
+    text: "macro:->\\c_true_bool ",
+    matches: true
+  }, {
+    name: "predicate-token-false",
+    issue: null,
+    unsupported: null,
+    diagnostics: [],
+    text: "macro:->\\c_false_bool ",
+    matches: true
+  }, {
+    name: "predicate-eof",
+    issue: null,
+    unsupported: null,
+    diagnostics: [],
+    text: "macro:->\\c_true_bool ",
+    matches: true
+  }, {
+    name: "predicate-expandable",
+    issue: null,
+    unsupported: null,
+    diagnostics: [],
+    text: "macro:->\\c_true_bool ",
+    matches: true
+  }, {
+    name: "after-assignment",
+    issue: null,
+    unsupported: null,
+    diagnostics: [],
+    text: "AT",
+    matches: true
+  }, {
+    name: "meaning",
+    issue: null,
+    unsupported: null,
+    diagnostics: [],
+    text: "\\protected\\long macro:#1#2->\\exp_last_unbraced:NNNf \\tex_chardef:D #1={\\bool_if_p:n {#2}}",
+    matches: true
+  }]
+{
+  issue: "latex-digest-unsupported",
+  unsupported: "expl3 boolean expression source mapping"
+}
+{
+  issue: "tex-unsupported-primitive",
+  unsupported: "constructor argument expl3 assignment"
+}

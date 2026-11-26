@@ -60,11 +60,3 @@ struct JsPermissionPolicy {
     bool wasi = false;
     ArrayList* grants = NULL;
 };
-
-// Native crypto handles are Node module resources, not JavaScript realm
-// metadata. The fixed live-context registries are paid only by Node sessions.
-// JSCU24: live native contexts are owned by the session's generation-checked
-// resource table and named by rid, so no fixed handle tables live here.
-struct JsCryptoNativeState {
-    bool pseudo_random_warning_emitted;
-};

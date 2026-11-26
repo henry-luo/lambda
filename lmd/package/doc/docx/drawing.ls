@@ -1,11 +1,11 @@
-// Column/paragraph anchors lower to floats or layered no-wrap boxes; page placement remains diagnosed.
+// Anchors lower to floats or layered no-wrap boxes when their reference frame is known.
 import c: .common
 import theme: .theme
 
 fn offset(node) => if (node == null) null else int(c.text(node)) ^ { null }
 fn zero_attribute(node, key) any^ => c.attr(node,key,"") == null or c.as_int(c.attr(node,key,""),null) == 0
 
-pub fn placement(node, width, height) any^ {
+pub fn placement(node, width, height, page = null) any^ {
     let anchor = c.first(c.descendants(node,"anchor",c.WP))
     let h = c.child(anchor,"positionH",c.WP)
     let v = c.child(anchor,"positionV",c.WP)
@@ -23,11 +23,14 @@ pub fn placement(node, width, height) any^ {
     let column_start = align == "" and h_offset != null and h_offset/9525.0 <= gaps[3]
     let vertical = (v_offset == null and c.text(c.child(v,"align",c.WP)) == "top") or
         (v_offset != null and c.child(v,"align",c.WP) == null)
-    let relative = anchor != null and width > 0 and
-        not contains(["1","true"],c.attr(anchor,"simplePos","")) and
-        c.attr(h,"relativeFrom","") == "column" and c.attr(v,"relativeFrom","") == "paragraph"
+    let positioned = anchor != null and width > 0 and
+        not contains(["1","true"],c.attr(anchor,"simplePos",""))
+    let relative = positioned and c.attr(h,"relativeFrom","") == "column" and
+        c.attr(v,"relativeFrom","") == "paragraph"
+    let on_page = page != null and positioned and c.attr(h,"relativeFrom","") == "page" and
+        c.attr(v,"relativeFrom","") == "page"
     let layer = c.as_int(c.attr(anchor,"relativeHeight",""),-1)
-    let absolute = relative and height > 0 and h_offset != null and v_offset != null and
+    let absolute = (relative or on_page) and height > 0 and h_offset != null and v_offset != null and
         c.child(h,"align",c.WP) == null and c.child(v,"align",c.WP) == null and
         c.child(anchor,"wrapNone",c.WP) != null and layer >= 0 and layer <= 4294967295
     let supported = relative and
@@ -39,11 +42,18 @@ pub fn placement(node, width, height) any^ {
              align == "left" and contains(["bothSides","right","largest"],wrap) or
              align == "right" and contains(["bothSides","left","largest"],wrap)));
     if (anchor == null) {value:null,unsupported:false}
-    else if (absolute) {value:{absolute:true,order:layer,
-        behind:contains(["1","true"],c.attr(anchor,"behindDoc","")),
-        box:"position:absolute;display:block;left:" ++ string(h_offset/9525.0) ++ "px;top:" ++
-            string(v_offset/9525.0) ++ "px;width:" ++ string(width) ++ "px;height:" ++ string(height) ++ "px;",
-        image:"display:block;max-width:none;width:100%;height:100%;"},unsupported:false}
+    else if (absolute) {
+        let x = h_offset/9525.0
+        let y = v_offset/9525.0
+        // Page drawings can extend into the bleed area. Clip the drawing without clipping text flow.
+        let clip = if (on_page) "clip-path:inset(" ++ join([for (edge in
+            [0.0-y,x+width-page.width,y+height-page.height,0.0-x]) string(max(0.0,edge)) ++ "px"]," ") ++ ");" else "";
+        {value:{absolute:true,page:on_page,order:layer,
+            behind:contains(["1","true"],c.attr(anchor,"behindDoc","")),
+            box:"position:absolute;display:block;left:" ++ string(x) ++ "px;top:" ++
+                string(y) ++ "px;width:" ++ string(width) ++ "px;height:" ++ string(height) ++ "px;" ++ clip,
+            image:"display:block;max-width:none;width:100%;height:100%;"},unsupported:false}
+    }
     else if (not supported) {value:null,unsupported:true}
     else {
         // offsets place the picture, while the float's padding reserves its wrap distances.
@@ -64,15 +74,16 @@ pub fn placement(node, width, height) any^ {
 
 pub fn crop(node, width, height) {
     let rect = c.first(c.descendants(node,"srcRect",c.A))
-    let values = [for (side in ["l","t","r","b"]) c.as_int(c.attr(rect,side,""),
-        if (c.attr(rect,side,"") == null) 0 else -1)]
-    let x = 100000-values[0]-values[2]
-    let y = 100000-values[1]-values[3]
+    // Signed edges enlarge or shrink the sampled source rectangle. An invalid value is not an outset.
+    let values = [for (side in ["l","t","r","b"], let value = c.attr(rect,side,""))
+        if (value == null) 0 else c.as_int(value,null)]
+    let valid = all([for (v in values) v != null and v >= -100000 and v <= 100000])
+    let x = if (valid) 100000-values[0]-values[2] else 0
+    let y = if (valid) 100000-values[1]-values[3] else 0
     let supported = width > 0 and height > 0 and x > 0 and y > 0 and
-        all([for (v in values) v >= 0 and v <= 100000]) and
         len(c.descendants(node,"stretch",c.A)) == 1 and
         all([for (rect in c.descendants(node,"fillRect",c.A), side in ["l","t","r","b"]) zero_attribute(rect,side)]);
-    if (rect == null or all([for (v in values) v == 0])) {value:null,unsupported:false}
+    if (rect == null or valid and all([for (v in values) v == 0])) {value:null,unsupported:false}
     else if (not supported) {value:null,unsupported:true}
     else {value:{box:"position:relative;display:inline-block;overflow:hidden;width:" ++ string(width) ++
         "px;height:" ++ string(height) ++ "px;vertical-align:middle;",

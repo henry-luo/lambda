@@ -29,9 +29,9 @@
     actual: null,
     native: null
   }, {
-    issue: "latex-digest-unsupported",
-    unsupported: "post-document source mapping",
-    matches: null,
+    issue: null,
+    unsupported: null,
+    matches: true,
     actual: null,
     native: null
   }, {

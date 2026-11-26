@@ -6,7 +6,7 @@
   "events": [
     {"type":"click", "target":{"selector":".tree-entry .tree-label"}},
     {"type":"click", "target":{"selector":".tab-edit"}},
-    {"type":"click", "target":{"selector":".edit-btn-view_source"}},
+    {"type":"click", "target":{"selector":".viewer-edit-host .tab-source"}},
     {"type":"click", "target":{"text":"row 000"}},
     {"type":"key_combo", "key":"ArrowDown", "mods_str":"super"},
     {"type":"assert_text", "target":{"selector":"#edit-surface"}, "contains":"row 299"},

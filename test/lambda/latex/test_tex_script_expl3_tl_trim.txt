@@ -1,0 +1,96 @@
+[{
+    name: "edges",
+    issue: null,
+    unsupported: null,
+    diagnostics: [],
+    text: "name",
+    matches: true
+  }, {
+    name: "inside",
+    issue: null,
+    unsupported: null,
+    diagnostics: [],
+    text: "a b",
+    matches: true
+  }, {
+    name: "groups",
+    issue: null,
+    unsupported: null,
+    diagnostics: [],
+    text: "{x } y",
+    matches: true
+  }, {
+    name: "protected",
+    issue: null,
+    unsupported: null,
+    diagnostics: [],
+    text: "\\foo ",
+    matches: true
+  }, {
+    name: "empty",
+    issue: null,
+    unsupported: null,
+    diagnostics: [],
+    text: "",
+    matches: true
+  }, {
+    name: "nested",
+    issue: null,
+    unsupported: null,
+    diagnostics: [],
+    text: "{ x }",
+    matches: true
+  }, {
+    name: "unchanged",
+    issue: null,
+    unsupported: null,
+    diagnostics: [],
+    text: "abc",
+    matches: true
+  }, {
+    name: "value",
+    issue: null,
+    unsupported: null,
+    diagnostics: [],
+    text: "abc",
+    matches: true
+  }, {
+    name: "local",
+    issue: null,
+    unsupported: null,
+    diagnostics: [],
+    text: "{abc} abc ",
+    matches: true
+  }, {
+    name: "global",
+    issue: null,
+    unsupported: null,
+    diagnostics: [],
+    text: "{}abc",
+    matches: true
+  }, {
+    name: "cat12-space",
+    issue: null,
+    unsupported: null,
+    diagnostics: [],
+    text: " x ",
+    matches: true
+  }, {
+    name: "meaning",
+    issue: null,
+    unsupported: null,
+    diagnostics: [],
+    text: "\\long macro:#1->\\__tl_trim_spaces:nn {\\__tl_trim_mark: #1}{\\__kernel_exp_not:w \\exp_after:wN }",
+    matches: true
+  }, {
+    name: "meaning-aux",
+    issue: null,
+    unsupported: null,
+    diagnostics: [],
+    text: "\\long macro:#1\\__tl_trim_mark:  #2\\__tl_trim_mark: #3->#3\\__tl_trim_spaces_auxi:w \\__tl_trim_mark: #2\\__tl_trim_mark:  {#1}",
+    matches: true
+  }]
+{
+  issue: "latex-digest-unsupported",
+  unsupported: "expl3 token trimming source mapping"
+}

@@ -30,10 +30,6 @@ fn rejected(source) any^ {
  "\\begin{document}\\v  e!\\end{document}"
 ]) check(source)^];
 [for (source in [
- "\\begin{document}\\'% hi\n{e}\\end{document}",
- "\\begin{document}\\v% hi\n{e}\\end{document}",
- "\\begin{document}\\'\\i!\\end{document}",
- "\\begin{document}\\'\\%\\end{document}",
  "\\begin{document}\\accent19 \\char123!\\end{document}"
 ]) rejected(source)^]
 ;

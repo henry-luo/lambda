@@ -49,16 +49,6 @@ assert.strictEqual(http.Server, HttpServer);
 assert.strictEqual(http.IncomingMessage, IncomingMessage);
 assert.strictEqual(typeof http.ServerResponse, 'function');
 
-const net = require('net');
-const net_first = net;
-const NetSocket = net.Socket;
-const NetServer = net.Server;
-gc();
-assert.strictEqual(require('net'), net_first);
-assert.strictEqual(net.Socket, NetSocket);
-assert.strictEqual(net.Server, NetServer);
-assert.strictEqual(typeof net.createConnection, 'function');
-
 const fs = require('fs');
 const fs_first = fs;
 const fs_promises = fs.promises;

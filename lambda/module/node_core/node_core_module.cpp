@@ -183,7 +183,6 @@ NODE_CORE_HOST_NAMESPACE(node_core_internal_async_context_frame_namespace, "inte
 NODE_CORE_HOST_NAMESPACE(node_core_internal_stream_add_abort_signal_namespace, "internal/streams/add-abort-signal")
 NODE_CORE_HOST_NAMESPACE(node_core_internal_stream_end_of_stream_namespace, "internal/streams/end-of-stream")
 NODE_CORE_HOST_NAMESPACE(node_core_internal_stream_state_namespace, "internal/streams/state")
-NODE_CORE_HOST_NAMESPACE(node_core_internal_crypto_util_namespace, "internal/crypto/util")
 NODE_CORE_HOST_NAMESPACE(node_core_internal_util_namespace, "internal/util")
 NODE_CORE_HOST_NAMESPACE(node_core_internal_util_inspect_namespace, "internal/util/inspect")
 NODE_CORE_HOST_NAMESPACE(node_core_internal_repl_namespace, "internal/repl")
@@ -405,7 +404,6 @@ static const char* const node_core_internal_stream_end_of_stream_specifiers[] = 
     "internal/streams/end-of-stream",
 };
 static const char* const node_core_internal_stream_state_specifiers[] = { "internal/streams/state" };
-static const char* const node_core_internal_crypto_util_specifiers[] = { "internal/crypto/util" };
 static const char* const node_core_internal_util_specifiers[] = { "internal/util" };
 static const char* const node_core_internal_util_inspect_specifiers[] = { "internal/util/inspect" };
 static const char* const node_core_internal_repl_specifiers[] = { "internal/repl" };
@@ -463,7 +461,6 @@ static const JubeNamespaceDef node_core_namespaces[] = {
     {node_core_internal_stream_add_abort_signal_specifiers, 1, node_core_internal_stream_add_abort_signal_namespace, NULL, 0},
     {node_core_internal_stream_end_of_stream_specifiers, 1, node_core_internal_stream_end_of_stream_namespace, NULL, 0},
     {node_core_internal_stream_state_specifiers, 1, node_core_internal_stream_state_namespace, NULL, 0},
-    {node_core_internal_crypto_util_specifiers, 1, node_core_internal_crypto_util_namespace, NULL, 0},
     {node_core_internal_util_specifiers, 1, node_core_internal_util_namespace, NULL, 0},
     {node_core_internal_util_inspect_specifiers, 1, node_core_internal_util_inspect_namespace, NULL, 0},
     {node_core_internal_repl_specifiers, 1, node_core_internal_repl_namespace, NULL, 0},

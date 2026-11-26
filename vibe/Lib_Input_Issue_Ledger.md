@@ -15,13 +15,28 @@ Resolved records are in the [fixed issue ledger](<Lib_Input_Issue_Ledger (fixed)
 
 ## Open issues
 
+<a id="li-126"></a>
+
+- [LI-126 — The CSS mask shorthand and its geometry had no property dispatch](<Lib_Input_Issue_Ledger (fixed).md#li-126>).
+
 <a id="li-125"></a>
 
-- [LI-125 — The CSS mask shorthand and its geometry had no property dispatch](<Lib_Input_Issue_Ledger (fixed).md#li-125>).
+- [LI-125 — CSS matching loses the meaning of shadow host selectors](<Lib_Input_Issue_Ledger (fixed).md#li-125>).
 
 <a id="li-124"></a>
 
-- [LI-124 — CSS matching loses the meaning of shadow host selectors](<Lib_Input_Issue_Ledger (fixed).md#li-124>).
+### LI-124 — Malformed UTF-8 text has inconsistent length and slice boundaries
+
+**Open, 2026-11-26.** Reading the two bytes `C3 78` as text produces a
+String for which `len(value)` is `2`, but `binary(slice(value, 0, 1))` is
+both bytes and `slice(value, 1, 2)` is empty. `utf8_count` counts
+non-continuation bytes, while `utf8_char_to_byte` advances by the leading
+byte's nominal width without checking its continuation. The text boundary
+must reject or consistently decode malformed UTF-8, and all text operations
+must agree on code-point boundaries (S2.5.8, D9.1.3v2). This blocks a safe
+fast path for the Script TeX reader; malformed cases can also stall its
+existing character scanner. Reproduction:
+`temp/latex-retirement/_invalid_core.ls` and `invalid-core.out`.
 
 <a id="li-123"></a>
 

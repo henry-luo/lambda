@@ -1,5 +1,63 @@
 # Editing viewer document formats
 
+## Viewer header and edit feedback — 2026-11-26
+
+The document header holds View, Edit, and Source in that order where the
+format and source permit each action. The current mode is highlighted.
+At narrow widths the actions sit below the file name within the header.
+The embedded editor uses the same controls and document row height in
+Edit and Source. Switching between those modes carries the current text
+and dirty state.
+Returning to a preview uses the editor's Save, Don't Save, and Cancel flow
+and reloads the selected mode from disk (D9.3.4, D10.2.5, S12.1.3v6).
+The preview and embedded editing surface use the space below their toolbars
+down to the bottom of the pane (D9.3.4, D10.2.5). Opening an editor from the
+viewer omits the routine opening message. Save feedback, source fallback
+reasons, and editing errors appear below the editor toolbar when present.
+[View and Source replay](../../test/ui/doc_viewer_direct_json.json).
+[Markdown mode switching replay](../../test/ui/doc_viewer_edit_markdown.json).
+
+## Rendered preview scrollbars — 2026-11-26
+
+The viewer keeps a scrollbar visible for each overflowing axis of a rendered
+preview. It reads the scrollport's committed extents when it renders or resizes
+and keeps positioned content in the preview's own stacking context so the
+tracks paint above it (D9.3.4, D9.5.6v2). The DOT replay checks both axes,
+horizontal thumb dragging, and hiding each bar as content fits.
+[Scrollbar replay](../../test/ui/doc_viewer_preview_scrollbars.json).
+
+## Property-tree context actions — 2026-11-26
+
+The property editor exposes Add and Delete through its row context menu
+(D9.3.4, D10.2.1). A container receives new children. A scalar receives
+new siblings through its containing collection. XML entries offer Add
+attribute and Add child element where the model permits them. Pending edits
+are committed before the menu resolves the row's current source positions.
+The menu shares placement, keyboard navigation, and focus restoration with
+the delimited grid. [TOML viewer replay](../../test/ui/doc_viewer_property_context_menu.json).
+
+## CSV and TSV grid actions — 2026-11-26
+
+The grid exposes row, column, and field actions through a context menu under
+D9.3.4 and D10.2.1. Numbered headers and cells set the action scope. The Row
+heading opens table-wide commands, including Add row in an empty file.
+Right-click or Shift+F10 opens the menu. The menu commits pending field edits
+before resolving source positions, and its actions reuse the existing format
+commands and document history. Escape restores focus to the originating field
+or heading when available. [Project viewer replay](../../test/ui/doc_viewer_csv_context_menu.json).
+
+## Source pane sizing — 2026-11-26
+
+The embedded source surface fills the pane below the header. The line-number
+gutter fills that height and shows numbers only for source lines, including
+blank lines in the file. A vertical track appears when the visible
+row capacity is too small. The capacity accounts for a horizontal track and
+the row count accounts for wrapping. The embedded surface subscribes to
+window resize events so the track and virtual window follow the pane geometry
+(D9.3.4, D10.2.1).
+The source-pane replay covers source-only files, the Source tab, an empty
+file, wrapping and resizing. [Source pane replay](../../test/ui/doc_viewer_source_pane.json).
+
 ## Direct PowerPoint and PDF views — 2026-11-26
 
 Direct PowerPoint opens use the retained Slides player, including its full-size

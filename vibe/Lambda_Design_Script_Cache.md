@@ -860,7 +860,7 @@ row owns a second source/artifact index.
 
 The companion direct-read sweep classified `radiant/cmd_layout.cpp` and
 `lambda/input/` documents, `js_require` JSON/package metadata, Node/JS
-filesystem APIs, npm manifests/tarballs, and generic HTTP transfer cache as
+filesystem APIs, and generic HTTP transfer cache as
 data or transport, not executable-language loader paths. They intentionally do
 not participate in D8.5.1 script admission. This is a source-level inventory
 proof for this tree; new executable loaders must terminate at one of the

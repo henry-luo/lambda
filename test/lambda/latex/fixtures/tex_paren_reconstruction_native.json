@@ -1,0 +1,1521 @@
+{
+  "cases": [
+    {
+      "source": "\\def\\a{(1,2)}\\begin{document}\\mystery\\a\\end{document}",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              {
+                "$": "def",
+                "source_offset": 0,
+                "argument_groups": [
+                  {
+                    "kind": "required",
+                    "raw": "\\a",
+                    "start": 4,
+                    "end": 6
+                  },
+                  {
+                    "kind": "required",
+                    "raw": "(1,2)",
+                    "start": 6,
+                    "end": 13
+                  }
+                ],
+                "_": [
+                  "\\a",
+                  {
+                    "$": "curly_group",
+                    "_": [
+                      "(1,2)"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 13,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "mystery",
+                    "source_offset": 29,
+                    "argument_groups": [
+                      {
+                        "kind": "parenthesized",
+                        "raw": "1,2",
+                        "start": 37,
+                        "end": 39
+                      }
+                    ],
+                    "_": [
+                      {
+                        "$": "paren_group",
+                        "_": [
+                          "1,2"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\def\\a{1,2}\\begin{document}\\mystery(\\a)\\end{document}",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              {
+                "$": "def",
+                "source_offset": 0,
+                "argument_groups": [
+                  {
+                    "kind": "required",
+                    "raw": "\\a",
+                    "start": 4,
+                    "end": 6
+                  },
+                  {
+                    "kind": "required",
+                    "raw": "1,2",
+                    "start": 6,
+                    "end": 11
+                  }
+                ],
+                "_": [
+                  "\\a",
+                  {
+                    "$": "curly_group",
+                    "_": [
+                      "1,2"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 11,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "mystery",
+                    "source_offset": 27,
+                    "argument_groups": [
+                      {
+                        "kind": "parenthesized",
+                        "raw": "1,2",
+                        "start": 35,
+                        "end": 39
+                      }
+                    ],
+                    "_": [
+                      {
+                        "$": "paren_group",
+                        "_": [
+                          "1,2"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\def\\a{1}\\def\\b{2}\\begin{document}\\mystery(\\a,\\b)\\end{document}",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              {
+                "$": "def",
+                "source_offset": 0,
+                "argument_groups": [
+                  {
+                    "kind": "required",
+                    "raw": "\\a",
+                    "start": 4,
+                    "end": 6
+                  },
+                  {
+                    "kind": "required",
+                    "raw": "1",
+                    "start": 6,
+                    "end": 9
+                  }
+                ],
+                "_": [
+                  "\\a",
+                  {
+                    "$": "curly_group",
+                    "_": [
+                      "1"
+                    ]
+                  }
+                ]
+              },
+              {
+                "$": "def",
+                "source_offset": 9,
+                "argument_groups": [
+                  {
+                    "kind": "required",
+                    "raw": "\\b",
+                    "start": 13,
+                    "end": 15
+                  },
+                  {
+                    "kind": "required",
+                    "raw": "2",
+                    "start": 15,
+                    "end": 18
+                  }
+                ],
+                "_": [
+                  "\\b",
+                  {
+                    "$": "curly_group",
+                    "_": [
+                      "2"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 18,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "mystery",
+                    "source_offset": 34,
+                    "argument_groups": [
+                      {
+                        "kind": "parenthesized",
+                        "raw": "1,2",
+                        "start": 42,
+                        "end": 49
+                      }
+                    ],
+                    "_": [
+                      {
+                        "$": "paren_group",
+                        "_": [
+                          "1,2"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\def\\a{(1,2)}\\begin{document}\\mystery\\a{X}\\end{document}",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              {
+                "$": "def",
+                "source_offset": 0,
+                "argument_groups": [
+                  {
+                    "kind": "required",
+                    "raw": "\\a",
+                    "start": 4,
+                    "end": 6
+                  },
+                  {
+                    "kind": "required",
+                    "raw": "(1,2)",
+                    "start": 6,
+                    "end": 13
+                  }
+                ],
+                "_": [
+                  "\\a",
+                  {
+                    "$": "curly_group",
+                    "_": [
+                      "(1,2)"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 13,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "mystery",
+                    "source_offset": 29,
+                    "argument_groups": [
+                      {
+                        "kind": "parenthesized",
+                        "raw": "1,2",
+                        "start": 37,
+                        "end": 39
+                      },
+                      {
+                        "kind": "required",
+                        "raw": "X",
+                        "start": 39,
+                        "end": 42
+                      }
+                    ],
+                    "_": [
+                      {
+                        "$": "paren_group",
+                        "_": [
+                          "1,2"
+                        ]
+                      },
+                      "X"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\def\\a{(1,2)}\\begin{document}\\mystery\\a[Q]{X}\\end{document}",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              {
+                "$": "def",
+                "source_offset": 0,
+                "argument_groups": [
+                  {
+                    "kind": "required",
+                    "raw": "\\a",
+                    "start": 4,
+                    "end": 6
+                  },
+                  {
+                    "kind": "required",
+                    "raw": "(1,2)",
+                    "start": 6,
+                    "end": 13
+                  }
+                ],
+                "_": [
+                  "\\a",
+                  {
+                    "$": "curly_group",
+                    "_": [
+                      "(1,2)"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 13,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "mystery",
+                    "source_offset": 29,
+                    "argument_groups": [
+                      {
+                        "kind": "parenthesized",
+                        "raw": "1,2",
+                        "start": 37,
+                        "end": 39
+                      },
+                      {
+                        "kind": "optional",
+                        "raw": "Q",
+                        "start": 39,
+                        "end": 42
+                      },
+                      {
+                        "kind": "required",
+                        "raw": "X",
+                        "start": 42,
+                        "end": 45
+                      }
+                    ],
+                    "_": [
+                      {
+                        "$": "paren_group",
+                        "_": [
+                          "1,2"
+                        ]
+                      },
+                      {
+                        "$": "brack_group",
+                        "_": [
+                          "Q"
+                        ]
+                      },
+                      "X"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\def\\a{(-1.25,+2)}\\begin{document}\\mystery\\a!\\end{document}",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              {
+                "$": "def",
+                "source_offset": 0,
+                "argument_groups": [
+                  {
+                    "kind": "required",
+                    "raw": "\\a",
+                    "start": 4,
+                    "end": 6
+                  },
+                  {
+                    "kind": "required",
+                    "raw": "(-1.25,+2)",
+                    "start": 6,
+                    "end": 18
+                  }
+                ],
+                "_": [
+                  "\\a",
+                  {
+                    "$": "curly_group",
+                    "_": [
+                      "(-1.25,+2)"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 18,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "mystery",
+                    "source_offset": 34,
+                    "argument_groups": [
+                      {
+                        "kind": "parenthesized",
+                        "raw": "-1.25,+2",
+                        "start": 42,
+                        "end": 44
+                      }
+                    ],
+                    "_": [
+                      {
+                        "$": "paren_group",
+                        "_": [
+                          "-1.25,+2"
+                        ]
+                      }
+                    ]
+                  },
+                  "!"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "é\\def\\a{(1,2)}\\begin{document}\\mystery\\a\\end{document}",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              "é",
+              {
+                "$": "def",
+                "source_offset": 2,
+                "argument_groups": [
+                  {
+                    "kind": "required",
+                    "raw": "\\a",
+                    "start": 6,
+                    "end": 8
+                  },
+                  {
+                    "kind": "required",
+                    "raw": "(1,2)",
+                    "start": 8,
+                    "end": 15
+                  }
+                ],
+                "_": [
+                  "\\a",
+                  {
+                    "$": "curly_group",
+                    "_": [
+                      "(1,2)"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 15,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "mystery",
+                    "source_offset": 31,
+                    "argument_groups": [
+                      {
+                        "kind": "parenthesized",
+                        "raw": "1,2",
+                        "start": 39,
+                        "end": 41
+                      }
+                    ],
+                    "_": [
+                      {
+                        "$": "paren_group",
+                        "_": [
+                          "1,2"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\def\\a{1,2}\\begin{document}\\mystery( \\a )\\end{document}",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              {
+                "$": "def",
+                "source_offset": 0,
+                "argument_groups": [
+                  {
+                    "kind": "required",
+                    "raw": "\\a",
+                    "start": 4,
+                    "end": 6
+                  },
+                  {
+                    "kind": "required",
+                    "raw": "1,2",
+                    "start": 6,
+                    "end": 11
+                  }
+                ],
+                "_": [
+                  "\\a",
+                  {
+                    "$": "curly_group",
+                    "_": [
+                      "1,2"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 11,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "mystery",
+                    "source_offset": 27,
+                    "argument_groups": [
+                      {
+                        "kind": "parenthesized",
+                        "raw": " 1,2",
+                        "start": 35,
+                        "end": 41
+                      }
+                    ],
+                    "_": [
+                      {
+                        "$": "paren_group",
+                        "_": [
+                          " 1,2"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\def\\a{(abc)}\\begin{document}\\mystery\\a\\end{document}",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              {
+                "$": "def",
+                "source_offset": 0,
+                "argument_groups": [
+                  {
+                    "kind": "required",
+                    "raw": "\\a",
+                    "start": 4,
+                    "end": 6
+                  },
+                  {
+                    "kind": "required",
+                    "raw": "(abc)",
+                    "start": 6,
+                    "end": 13
+                  }
+                ],
+                "_": [
+                  "\\a",
+                  {
+                    "$": "curly_group",
+                    "_": [
+                      "(abc)"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 13,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "mystery",
+                    "source_offset": 29,
+                    "argument_groups": []
+                  },
+                  "(abc)"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\def\\a{(abc)}\\begin{document}\\mystery\\a{X}\\end{document}",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              {
+                "$": "def",
+                "source_offset": 0,
+                "argument_groups": [
+                  {
+                    "kind": "required",
+                    "raw": "\\a",
+                    "start": 4,
+                    "end": 6
+                  },
+                  {
+                    "kind": "required",
+                    "raw": "(abc)",
+                    "start": 6,
+                    "end": 13
+                  }
+                ],
+                "_": [
+                  "\\a",
+                  {
+                    "$": "curly_group",
+                    "_": [
+                      "(abc)"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 13,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "mystery",
+                    "source_offset": 29,
+                    "argument_groups": [
+                      {
+                        "kind": "parenthesized",
+                        "raw": "abc",
+                        "start": 37,
+                        "end": 39
+                      },
+                      {
+                        "kind": "required",
+                        "raw": "X",
+                        "start": 39,
+                        "end": 42
+                      }
+                    ],
+                    "_": [
+                      {
+                        "$": "paren_group",
+                        "_": [
+                          "abc"
+                        ]
+                      },
+                      "X"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\def\\a{(1,2)}\\begin{document}\\textbf{\\mystery\\a}\\end{document}",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              {
+                "$": "def",
+                "source_offset": 0,
+                "argument_groups": [
+                  {
+                    "kind": "required",
+                    "raw": "\\a",
+                    "start": 4,
+                    "end": 6
+                  },
+                  {
+                    "kind": "required",
+                    "raw": "(1,2)",
+                    "start": 6,
+                    "end": 13
+                  }
+                ],
+                "_": [
+                  "\\a",
+                  {
+                    "$": "curly_group",
+                    "_": [
+                      "(1,2)"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 13,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "textbf",
+                    "source_offset": 29,
+                    "_": [
+                      {
+                        "$": "mystery",
+                        "source_offset": 37,
+                        "argument_groups": [
+                          {
+                            "kind": "parenthesized",
+                            "raw": "1,2",
+                            "start": 45,
+                            "end": 47
+                          }
+                        ],
+                        "_": [
+                          {
+                            "$": "paren_group",
+                            "_": [
+                              "1,2"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\def\\a{(1,2)}\\begin{document}\\mystery\\a\\mystery\\a\\end{document}",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              {
+                "$": "def",
+                "source_offset": 0,
+                "argument_groups": [
+                  {
+                    "kind": "required",
+                    "raw": "\\a",
+                    "start": 4,
+                    "end": 6
+                  },
+                  {
+                    "kind": "required",
+                    "raw": "(1,2)",
+                    "start": 6,
+                    "end": 13
+                  }
+                ],
+                "_": [
+                  "\\a",
+                  {
+                    "$": "curly_group",
+                    "_": [
+                      "(1,2)"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 13,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "mystery",
+                    "source_offset": 29,
+                    "argument_groups": [
+                      {
+                        "kind": "parenthesized",
+                        "raw": "1,2",
+                        "start": 37,
+                        "end": 39
+                      }
+                    ],
+                    "_": [
+                      {
+                        "$": "paren_group",
+                        "_": [
+                          "1,2"
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "$": "mystery",
+                    "source_offset": 39,
+                    "argument_groups": [
+                      {
+                        "kind": "parenthesized",
+                        "raw": "1,2",
+                        "start": 47,
+                        "end": 49
+                      }
+                    ],
+                    "_": [
+                      {
+                        "$": "paren_group",
+                        "_": [
+                          "1,2"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\def\\a{(1,2)}\\begin{document}\\mystery*\\a{X}\\end{document}",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              {
+                "$": "def",
+                "source_offset": 0,
+                "argument_groups": [
+                  {
+                    "kind": "required",
+                    "raw": "\\a",
+                    "start": 4,
+                    "end": 6
+                  },
+                  {
+                    "kind": "required",
+                    "raw": "(1,2)",
+                    "start": 6,
+                    "end": 13
+                  }
+                ],
+                "_": [
+                  "\\a",
+                  {
+                    "$": "curly_group",
+                    "_": [
+                      "(1,2)"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 13,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "mystery",
+                    "source_offset": 29,
+                    "starred": true,
+                    "argument_groups": [
+                      {
+                        "kind": "parenthesized",
+                        "raw": "1,2",
+                        "start": 38,
+                        "end": 40
+                      },
+                      {
+                        "kind": "required",
+                        "raw": "X",
+                        "start": 40,
+                        "end": 43
+                      }
+                    ],
+                    "_": [
+                      {
+                        "$": "paren_group",
+                        "_": [
+                          "1,2"
+                        ]
+                      },
+                      "X"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\def\\a{(1,2)}\\begin{document}\\mystery[Q]\\a\\end{document}",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              {
+                "$": "def",
+                "source_offset": 0,
+                "argument_groups": [
+                  {
+                    "kind": "required",
+                    "raw": "\\a",
+                    "start": 4,
+                    "end": 6
+                  },
+                  {
+                    "kind": "required",
+                    "raw": "(1,2)",
+                    "start": 6,
+                    "end": 13
+                  }
+                ],
+                "_": [
+                  "\\a",
+                  {
+                    "$": "curly_group",
+                    "_": [
+                      "(1,2)"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 13,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "mystery",
+                    "source_offset": 29,
+                    "argument_groups": [
+                      {
+                        "kind": "optional",
+                        "raw": "Q",
+                        "start": 37,
+                        "end": 40
+                      },
+                      {
+                        "kind": "parenthesized",
+                        "raw": "1,2",
+                        "start": 40,
+                        "end": 42
+                      }
+                    ],
+                    "_": [
+                      {
+                        "$": "brack_group",
+                        "_": [
+                          "Q"
+                        ]
+                      },
+                      {
+                        "$": "paren_group",
+                        "_": [
+                          "1,2"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\def\\a{(1,2)}\\begin{document}\\mystery{Q}\\a\\end{document}",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              {
+                "$": "def",
+                "source_offset": 0,
+                "argument_groups": [
+                  {
+                    "kind": "required",
+                    "raw": "\\a",
+                    "start": 4,
+                    "end": 6
+                  },
+                  {
+                    "kind": "required",
+                    "raw": "(1,2)",
+                    "start": 6,
+                    "end": 13
+                  }
+                ],
+                "_": [
+                  "\\a",
+                  {
+                    "$": "curly_group",
+                    "_": [
+                      "(1,2)"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 13,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "mystery",
+                    "source_offset": 29,
+                    "argument_groups": [
+                      {
+                        "kind": "required",
+                        "raw": "Q",
+                        "start": 37,
+                        "end": 40
+                      },
+                      {
+                        "kind": "parenthesized",
+                        "raw": "1,2",
+                        "start": 40,
+                        "end": 42
+                      }
+                    ],
+                    "_": [
+                      "Q",
+                      {
+                        "$": "paren_group",
+                        "_": [
+                          "1,2"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\def\\a{1}\\begin{document}\\mystery(\\a,\n2)\\end{document}",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              {
+                "$": "def",
+                "source_offset": 0,
+                "argument_groups": [
+                  {
+                    "kind": "required",
+                    "raw": "\\a",
+                    "start": 4,
+                    "end": 6
+                  },
+                  {
+                    "kind": "required",
+                    "raw": "1",
+                    "start": 6,
+                    "end": 9
+                  }
+                ],
+                "_": [
+                  "\\a",
+                  {
+                    "$": "curly_group",
+                    "_": [
+                      "1"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 9,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "mystery",
+                    "source_offset": 25,
+                    "argument_groups": [
+                      {
+                        "kind": "parenthesized",
+                        "raw": "1,\n2",
+                        "start": 33,
+                        "end": 40
+                      }
+                    ],
+                    "_": [
+                      {
+                        "$": "paren_group",
+                        "_": [
+                          "1,\n2"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\def\\a{(1,2)}\\mystery\\a",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              {
+                "$": "def",
+                "source_offset": 0,
+                "argument_groups": [
+                  {
+                    "kind": "required",
+                    "raw": "\\a",
+                    "start": 4,
+                    "end": 6
+                  },
+                  {
+                    "kind": "required",
+                    "raw": "(1,2)",
+                    "start": 6,
+                    "end": 13
+                  }
+                ],
+                "_": [
+                  "\\a",
+                  {
+                    "$": "curly_group",
+                    "_": [
+                      "(1,2)"
+                    ]
+                  }
+                ]
+              },
+              {
+                "$": "mystery",
+                "source_offset": 13,
+                "argument_groups": [
+                  {
+                    "kind": "parenthesized",
+                    "raw": "1,2",
+                    "start": 21,
+                    "end": 21
+                  }
+                ],
+                "_": [
+                  {
+                    "$": "paren_group",
+                    "_": [
+                      "1,2"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\def\\a{1,2}\\mystery(\\a)",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              {
+                "$": "def",
+                "source_offset": 0,
+                "argument_groups": [
+                  {
+                    "kind": "required",
+                    "raw": "\\a",
+                    "start": 4,
+                    "end": 6
+                  },
+                  {
+                    "kind": "required",
+                    "raw": "1,2",
+                    "start": 6,
+                    "end": 11
+                  }
+                ],
+                "_": [
+                  "\\a",
+                  {
+                    "$": "curly_group",
+                    "_": [
+                      "1,2"
+                    ]
+                  }
+                ]
+              },
+              {
+                "$": "mystery",
+                "source_offset": 11,
+                "argument_groups": [
+                  {
+                    "kind": "parenthesized",
+                    "raw": "1,2",
+                    "start": 19,
+                    "end": 23
+                  }
+                ],
+                "_": [
+                  {
+                    "$": "paren_group",
+                    "_": [
+                      "1,2"
+                    ]
+                  }
+                ]
+              },
+              " "
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\def\\a{(1,2}\\begin{document}\\mystery\\a\\end{document}",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              {
+                "$": "def",
+                "source_offset": 0,
+                "argument_groups": [
+                  {
+                    "kind": "required",
+                    "raw": "\\a",
+                    "start": 4,
+                    "end": 6
+                  },
+                  {
+                    "kind": "required",
+                    "raw": "(1,2",
+                    "start": 6,
+                    "end": 12
+                  }
+                ],
+                "_": [
+                  "\\a",
+                  {
+                    "$": "curly_group",
+                    "_": [
+                      "(1,2"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 12,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "mystery",
+                    "source_offset": 28,
+                    "argument_groups": []
+                  },
+                  "(1,2"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\def\\a{(1,2)}\\def\\m{\\mystery}\\begin{document}\\m\\a\\end{document}",
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              {
+                "$": "def",
+                "source_offset": 0,
+                "argument_groups": [
+                  {
+                    "kind": "required",
+                    "raw": "\\a",
+                    "start": 4,
+                    "end": 6
+                  },
+                  {
+                    "kind": "required",
+                    "raw": "(1,2)",
+                    "start": 6,
+                    "end": 13
+                  }
+                ],
+                "_": [
+                  "\\a",
+                  {
+                    "$": "curly_group",
+                    "_": [
+                      "(1,2)"
+                    ]
+                  }
+                ]
+              },
+              {
+                "$": "def",
+                "source_offset": 13,
+                "argument_groups": [
+                  {
+                    "kind": "required",
+                    "raw": "\\m",
+                    "start": 17,
+                    "end": 19
+                  },
+                  {
+                    "kind": "required",
+                    "raw": "\\mystery",
+                    "start": 19,
+                    "end": 29
+                  }
+                ],
+                "_": [
+                  "\\m",
+                  {
+                    "$": "curly_group",
+                    "_": [
+                      {
+                        "$": "mystery",
+                        "source_offset": 20,
+                        "argument_groups": []
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 29,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "mystery",
+                    "source_offset": 45,
+                    "argument_groups": [
+                      {
+                        "kind": "parenthesized",
+                        "raw": "1,2",
+                        "start": 47,
+                        "end": 49
+                      }
+                    ],
+                    "_": [
+                      {
+                        "$": "paren_group",
+                        "_": [
+                          "1,2"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,52 @@
+[<latex_document
+    <document source_offset: 0,
+      <paragraph
+        <accent command: "'", source_offset: 16,
+          <i source_offset: 18, argument_groups: []>>
+        "!">>>, <latex_document
+    <document source_offset: 0,
+      <paragraph
+        <accent command: "'", source_offset: 16,
+          "%">
+        "!">>>, <latex_document
+    <document source_offset: 0,
+      <paragraph
+        <accent command: "'", source_offset: 16,
+          "%">>>>, <latex_document
+    <document source_offset: 0,
+      <paragraph
+        <accent command: "'", source_offset: 16,
+          "$">>>>, <latex_document
+    <document source_offset: 0,
+      <paragraph
+        <accent command: "'", source_offset: 16,
+          "&">>>>, <latex_document
+    <document source_offset: 0,
+      <paragraph
+        <accent command: "v", source_offset: 16,
+          <j source_offset: 18, argument_groups: []>>
+        "!">>>, <latex_document
+    <document source_offset: 0,
+      <paragraph
+        <accent command: "~", source_offset: 16,
+          <foo source_offset: 18, argument_groups: []>>
+        "!">>>, <latex_document
+    <document source_offset: 0,
+      <paragraph
+        "é "
+        <accent command: "'", source_offset: 19,
+          <i source_offset: 21, argument_groups: []>>
+        "!">>>, <latex_document
+    <document source_offset: 0,
+      <paragraph
+        <curly_group
+          <accent command: "'", source_offset: 17,
+            <i source_offset: 19, argument_groups: []>>
+          "!">>>>, <latex_document
+    <document source_offset: 0,
+      <paragraph
+        <accent command: "'", source_offset: 16,
+          <accent command: "`", source_offset: 18,
+            <i source_offset: 20, argument_groups: []>>>
+        "!">>>]
+[true, true, true, true, true, true, true, true, true, true]

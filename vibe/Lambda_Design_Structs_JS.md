@@ -958,8 +958,9 @@ internal slot; lookups go through `jube_node_resource_user_data_for_session`
 with a kind check; session teardown closes remaining entries. The four
 tables and `JS_CRYPTO_MAX_LIVE_CONTEXTS` have no definition after this
 item. Hash, HMAC, sign/verify and cipher remain distinct resource kinds.
-Gate: `make test-jube-node-net-crypto-dynamic` and the crypto slice of
-`make node-baseline`, plus a case creating 5,000 live hashes.
+Historical gate: `make test-jube-node-net-crypto-dynamic` and the crypto slice
+of `make node-baseline`, plus a case creating 5,000 live hashes. The gate was
+retired with `node-net` and `node-crypto` under D9.4.1.
 
 **LANDED 2026-09-08 (JSCU24).** `JubeNodeResource` gained `bool is_handle` so
 the rid table can carry entries that are *not* user-visible handles;
@@ -991,7 +992,7 @@ and performs every subsequent store through `obj_root.get()`, returning the
 rooted handle. Hash, HMAC and cipher round-trips plus a 200-iteration churn
 now produce byte-identical results with and without forced GC.
 
-Verified: `make test-jube-node-net-crypto-dynamic` clean, `test262-baseline`
+Historical verification: `make test-jube-node-net-crypto-dynamic` clean, `test262-baseline`
 40261/40261 with 0 regressions, `test-gc-rooting-core` 107/107,
 `test-js-callable-catalog` clean, JS gtest 370/370, and the crypto Node slice
 at 65 pass / 67 pre-existing failures — identical to pristine, 0 regressed.

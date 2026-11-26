@@ -1,0 +1,29 @@
+[{
+    name: "g__regex_state_active_intarray",
+    text: "65536/0",
+    diagnostics: []
+  }, {
+    name: "g__regex_thread_info_intarray",
+    text: "65536/0",
+    diagnostics: []
+  }, {
+    name: "g__regex_submatch_prev_intarray",
+    text: "65536/0",
+    diagnostics: []
+  }, {
+    name: "g__regex_submatch_begin_intarray",
+    text: "65536/0",
+    diagnostics: []
+  }, {
+    name: "g__regex_submatch_end_intarray",
+    text: "65536/0",
+    diagnostics: []
+  }, {
+    name: "g__regex_submatch_case_intarray",
+    text: "65536/0",
+    diagnostics: []
+  }, {
+    name: "g__regex_balance_intarray",
+    text: "65536/0",
+    diagnostics: []
+  }]

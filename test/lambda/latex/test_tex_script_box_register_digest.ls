@@ -2,6 +2,9 @@ import profile: lambda.doc.latex.tex_engine.profile
 import digest: lambda.doc.latex.tex_engine.digest
 import reconstruct: lambda.doc.latex.tex_engine.reconstruct
 let kernel=input("lmd/package/doc/latex/tex_engine/kernel.tex","text")^;
+fn options(mode) => {echo_definitions:true,constructor_argument_mode:mode,adapters:[],resources:{local:{},bundled:{}}}
+// Both modes resume independent documents from their matching immutable kernels.
+let preloads=[for(mode in [false,true]) profile.preload_kernel(kernel,options(mode),100000)^];
 let cases=[
  "\\setbox0=\\hbox{}\\begin{document}X\\end{document}",
  "\\setbox0=\\hbox{Hi}\\begin{document}A\\copy0!\\box0!\\copy0 B\\end{document}",
@@ -23,12 +26,13 @@ let cases=[
  "\\begin{document}\\setbox0=\\hbox{\\def\\x{Q}\\x}\\copy0\\end{document}",
  "\\begin{document}\\setbox0=\\hbox{é Ω}\\copy0\\end{document}"];
 let results=[for(source in cases,mode in [false,true]) {
- let ex=profile.expand_with_kernel(source,kernel,{echo_definitions:true,constructor_argument_mode:mode,adapters:[],resources:{local:{},bundled:{}}},100000)^;
+ let ex=profile.expand_with_kernel(source,kernel,options(mode),100000,
+    if(source==cases[0]) null else if(mode) preloads[1] else preloads[0])^;
  let tex=parse(source,{type:"tex"})^;let native=parse(source,{type:"latex"})^;let d=digest.digest(ex)^;
- let guarded=contains(source,"\\hrule");
- {guarded:guarded,supported:ex.issue==null and if(guarded) d.issue=="latex-digest-unsupported" and d.unsupported=="box rule source mapping" else d.issue==null,
+ let guarded=d.issue=="latex-digest-unsupported" and d.unsupported=="box rule source mapping";
+ {guarded:guarded,supported:ex.issue==null and d.issue==null,
   text:reconstruct.reconstruct(ex)^.text==tex.text,messages:ex.messages==tex.messages,diagnostics:ex.diagnostic_records==tex.diagnostics,
-  tree:guarded or d.ast==native}
+  tree:d.ast==native}
 }];
 {cases:len(results),guarded:len([for(r in results where r.guarded) r]),supported:all([for(r in results) r.supported]),text:all([for(r in results) r.text]),
  messages:all([for(r in results) r.messages]),diagnostics:all([for(r in results) r.diagnostics]),tree:all([for(r in results) r.tree])};

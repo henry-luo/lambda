@@ -12,13 +12,8 @@
       "type": "click",
       "target": {
         "selector": "input[aria-label='Property name: catalog']"
-      }
-    },
-    {
-      "type": "click",
-      "target": {
-        "selector": ".property-toolbar_add"
-      }
+      },
+      "button": 1
     },
     {
       "type": "assert_count",

@@ -14,9 +14,9 @@ are unchanged. Full evidence is under `../../lambda/temp/kianhup-style/`.
 
 ## Fixed issues
 
-<a id="ri-251"></a>
+<a id="ri-258"></a>
 
-### RI-251 — A broad rebuild loses the input measurements of its completed container cascade
+### RI-258 — A broad rebuild loses the input measurements of its completed container cascade
 
 **Fixed, 2026-11-26.** Broad DOM reconciliation applied the new cascade
 against existing query container boxes, then reset their view resources.
@@ -36,9 +36,9 @@ in the preceding release. Its ordinary capture still times out (RI-031).
 Evidence is in `temp/online-visual-round244/`.
 [Regression](../test/online/render_relational_mutations.test.cjs).
 
-<a id="ri-250"></a>
+<a id="ri-257"></a>
 
-### RI-250 — SVG auto-height measurement ignores its resolved width
+### RI-257 — SVG auto-height measurement ignores its resolved width
 
 **Fixed, 2026-11-26.** An SVG with 777 × 358 presentation attributes used
 a CSS width of 576 px and a height percentage without a definite basis.
@@ -55,9 +55,9 @@ residual crop at the right edge during the card reveal (**D10.1.7**).
 [Regression](../test/online/render_svg_flex_ratio.test.cjs) ·
 [Round 214](../test/online/comparison/repairs.html#round-214).
 
-<a id="ri-249"></a>
+<a id="ri-256"></a>
 
-### RI-249 — Flex layout loses ratio-transferred height
+### RI-256 — Flex layout loses ratio-transferred height
 
 **Fixed, 2026-11-26.** A 240 px flex container with an 8:5 ratio and a short
 text child shrank to 20 px. In a nested column, its parent assigned 150 px
@@ -77,9 +77,9 @@ flex, growth, overflow, max-height, border-box sizing and nested text wrap.
 Both ordinary Refrakt captures restore the gallery and centered title at
 the existing frame (**D10.1.7**). [Round 213](../test/online/comparison/repairs.html#round-213).
 
-<a id="ri-248"></a>
+<a id="ri-255"></a>
 
-### RI-248 — Shadow stylesheets skip their own host
+### RI-255 — Shadow stylesheets skip their own host
 
 **Fixed, 2026-11-26.** The scoped stylesheet walk began at the shadow
 fragment. It matched the nodes inside the fragment and never collected
@@ -89,7 +89,7 @@ because the host's custom properties were missing.
 
 Full and per element cascades now apply the host's own shadow sheets before
 its descendants read inherited values. They use the source tree and
-declaration context from [LI-124](<Lib_Input_Issue_Ledger (fixed).md#li-124>)
+declaration context from [LI-125](<Lib_Input_Issue_Ledger (fixed).md#li-125>)
 under **D9.1.1v4 / D9.1.3v2 / D5.5.1**. The fixture checks fixed geometry,
 paint, a generated box, inherited values, and live class, attribute, CSSOM
 and media changes. It passes in AST, MIR and Chromium. All 15 selected
@@ -102,9 +102,9 @@ capture has no panel and shows the primary offer action. The current
 Lambda frame still rates high. Evidence is in
 `temp/online-visual-round235/` and [round 207](../test/online/comparison/repairs.html#round-207).
 
-<a id="ri-247"></a>
+<a id="ri-254"></a>
 
-### RI-247 — Nested flex height queries lose the percentage containing width
+### RI-254 — Nested flex height queries lose the percentage containing width
 
 **Fixed, 2026-11-26.** Native layout ownership **D9.1.3v2**, with selected
 measurement state governed by **D5.5.1**. Comand 524's hero column measures
@@ -146,9 +146,9 @@ captures. The earlier geometry repair and the timer repair are both present
 in the release that clears the page at 2.09% mean error (**D10.1.7**).
 [Round 208](../test/online/comparison/repairs.html#round-208).
 
-<a id="ri-246"></a>
+<a id="ri-253"></a>
 
-### RI-246 — Loading animation frames silently age held CSS effects
+### RI-253 — Loading animation frames silently age held CSS effects
 
 **Fixed, 2026-11-26.** The headless elapsed-load profile holds CSS age until
 its selected post-load interval, while JavaScript and host timelines advance.
@@ -182,6 +182,155 @@ Evidence: `temp/online-visual-round232/{maintained-css-age-before.log,
 scheduler-unit.log,focused-ast-chromium.log,focused-mir.log,baseline-js.json,
 lint.log,qualified-run,checkpoint.md}`. Final release SHA256:
 `01392e8090f48504a81b27cc7c3ce8f89b1844c94e0da70e96994ad1c266a98c`.
+
+<a id="ri-252"></a>
+
+### RI-252 — Demo tile hover triggers a full catalog layout
+
+**Fixed, 2026-11-26.** D9.1.1v4 and D9.5.6v2 place event handling in
+Lambda's host adapter and native layout and painting in Radiant. On the
+unnamed `lambda demo` page, the ancestor hover selectors for the Open pill
+sent every tile enter and exit through full layout, even though the rules
+only changed colors.
+
+The hover adapter now uses the existing retained paint refresh for
+paint-only selectors that reach their subject through child or descendant
+combinators. It matches against the old and new hover paths to refresh
+both tiles. Geometry-changing rules and selectors with broader effects
+still use the existing restyle path. The demo's border transition now
+uses a 90 ms ease-out.
+
+Across 32 native macOS pointer moves in release builds, the median to the
+first presented frame fell from 195 ms to 68 ms. The expected border
+color crossed the sampled pixel threshold after 259 ms before the fix
+and 68 ms after it. The headless profile showed eight hover reflows
+before the fix and only the initial layout after it. Fifteen focused
+headless replays passed, including scoped geometry and the extended
+descendant pixel fixture. A native demo replay also verified that the
+Open pills switch and clear when crossing between tiles.
+
+<a id="ri-251"></a>
+
+### RI-251 — Widening a window retains narrow flex and grid geometry
+
+**Fixed, 2026-11-26.** Radiant owns layout and its property storage under
+D9.1.3v2 and D5.5.1. Open `lambda demo`, narrow it below 760 CSS pixels,
+then widen it. The media query stops matching, but the hero still stacks
+its emblem above the title and the catalog keeps the sidebar above its
+contents. A minimal page reproduced the same stale flex direction, gap
+and explicit grid tracks.
+
+Full style resolution now restores the flex and grid container inputs
+from the allocation defaults before applying the current cascade. It
+releases the old grid templates and keeps the last committed baselines
+and used track text available until layout replaces them. The geometry
+regression fails on both returns to the wide viewport before the change
+and passes after it. All 151 tests in the native dynamic-layout suite pass.
+The release demo restores its wide geometry after both breakpoints in a
+native macOS window and headless. Eight additional headless replays and
+the native archive closure pass.
+
+<a id="ri-250"></a>
+
+### RI-250 — Demo window resizing repeats shadow and cascade work
+
+**Fixed, 2026-11-26.** Radiant owns native paint and layout under
+D9.1.3v2 and D9.5.6v2. In the unnamed `lambda demo`, changing the
+catalog width invalidated the shadow cache. Radiant blurred the whole
+panel, including its offscreen extent. Each viewport change also
+rematched the whole stylesheet between media-query breakpoints.
+
+Outer shadows now convolve identical straight spans once and reconstruct
+the original pixel image before applying the existing masks. The cascade
+compares media conditions at the old and new viewport sizes and retains
+the specified style when they agree. Layout still resolves lengths against
+the new viewport. Shadow roots and container-query documents retain the
+full recascade path.
+
+Across 40 distinct native resize steps in the release build, median
+resize-to-frame time was 47.7 ms before and 46.6 ms after. The 90th
+percentile fell from 180.4 ms to 82.3 ms and the maximum from 225.3 ms
+to 100.6 ms. Eight shadow captures at 1× and 2× matched pixel for pixel.
+Ten focused replays covered the demo's responsive layout, imported and
+nested media rules, observers, editors and clipping. Native Scene3D
+resize and the Radiant integer-cast lint also passed.
+
+<a id="ri-249"></a>
+
+### RI-249 — macOS clears the visible drawable during native resize
+
+**Fixed, 2026-11-26.** Radiant owns the native present and graphics
+resources under D9.1.3v2 and D9.5.1. After RI-248 removed the interim
+swap, a native probe still found black pixels in the NSGL front buffer
+after both growing and shrinking the window and before reflow. The
+drawable's storage is coupled to the window's size.
+
+On macOS the existing GL presenter now draws the completed frame into a
+separate IOSurface and publishes it through a non-animating Core
+Animation transaction. The layer keeps the completed image at the
+top left at its original pixel scale during reflow. A resized backing
+buffer becomes visible after paint and GPU composition finish. The
+presenter checks the native current GL context because nested Cocoa
+resize callbacks can restore it without updating GLFW's bookkeeping.
+
+The native regression verifies identical retained pixels after growth and
+shrink, followed by replacement with the completed frame at the new size.
+Native Markdown and GPU resize replays pass. Pixel checks across Markdown,
+Scene3D and WebGL presentations report no differences beyond tolerance.
+Fifteen native tests and ten focused UI tests pass.
+
+<a id="ri-248"></a>
+
+### RI-248 — Native resize presents a stale frame before repaint
+
+**Fixed, 2026-11-26.** Radiant owns native presentation under D9.1.1v4 and
+D9.1.3v2. Dragging a `lambda view` window edge showed the previous
+viewport's frame in the new drawable. The framebuffer resize helper
+explicitly presented the previous image before the window turn laid out,
+painted, and presented the new viewport.
+
+Framebuffer resize now allocates the new surface and invalidates paint. The
+existing live resize turn publishes the completed frame after reflow. The
+native regression checks that allocation leaves GL draw state untouched and
+that the new pixels reach the front buffer after repaint at each size.
+The draw-state check fails at all three sizes with the original resize code
+and passes with the fix. Ten focused UI cases and the layout integer-cast
+check pass.
+This supersedes the early swap recorded in
+[Proc Gen §2l–2m](impl/Lambda_Impl_Proc_Gen.md#2l-native-resize-presentation-2026-10-27).
+
+<a id="ri-247"></a>
+
+### RI-247 — Collapsed table borders spill out of scroll panes
+
+**Fixed, 2026-11-26.** Radiant owns native paint under D9.1.1v4,
+D9.1.2v2 and D9.1.3v2. Horizontal scrolling in the embedded CSV editor
+painted cell borders over the file sidebar. The raster table painter
+recorded resolved borders without the rectangular block clip. It now
+applies that clip when a cell's border paint can cross the viewport.
+
+The scroll replay checks both axes and the visible borders at the clip
+edges. Five pixels outside the pane failed before the fix. All nine
+assertions pass at 1× and 2×. The before-and-after replay in
+`test_tab.csv` changes only pixels in the sidebar where borders spilled.
+[`collapsed_table_overflow_clip.json`](../test/ui/collapsed_table_overflow_clip.json).
+
+<a id="ri-246"></a>
+
+### RI-246 — Rounded inline backgrounds spill past rectangular scroll clips
+
+**Fixed, 2026-11-26.** Radiant owns native paint under D9.1.1v4 and D9.1.3v2.
+In `lambda view AGENTS.md`, a rounded inline code background could extend
+from the scrollable preview into the bottom toolbar. The rounded background's
+vector fill bypassed the rectangular block clip.
+
+The raster text painter now records the rectangular clip around a rounded fill
+that can cross the clip boundary. The regression checks that the background
+stays visible inside the pane and stops at its bottom edge before scrolling
+and its top edge afterward. Both outside pixels failed before the fix. The
+case passes at 1× and 2× display scale. A headless capture of the default
+`AGENTS.md` viewer confirms that the fill stops at the toolbar boundary.
+[`inline_code_overflow_clip.json`](../test/ui/inline_code_overflow_clip.json).
 
 <a id="ri-244"></a>
 

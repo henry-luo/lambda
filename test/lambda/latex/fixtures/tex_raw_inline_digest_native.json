@@ -1,0 +1,3519 @@
+{
+  "cases": [
+    {
+      "source": "\\begin{document}A\\lstinline|abc|B\\end{document}",
+      "tex": {
+        "text": "\\begin{document}A\\lstinline|abc|B\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "A",
+                  {
+                    "$": "lstinline",
+                    "source_offset": 17,
+                    "raw_source": "\\lstinline|abc|",
+                    "_": [
+                      "abc"
+                    ]
+                  },
+                  "B"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}\\textbf{A\\lstinline|abc|B}\\end{document}",
+      "tex": {
+        "text": "\\begin{document}\\textbf{A\\lstinline|abc|B}\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "textbf",
+                    "source_offset": 16,
+                    "_": [
+                      "A",
+                      {
+                        "$": "lstinline",
+                        "source_offset": 25,
+                        "raw_source": "\\lstinline|abc|",
+                        "_": [
+                          "abc"
+                        ]
+                      },
+                      "B"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}A\\lstinline*|a b|B\\end{document}",
+      "tex": {
+        "text": "\\begin{document}A\\lstinline*|a b|B\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "A",
+                  {
+                    "$": "lstinline",
+                    "source_offset": 17,
+                    "starred": true,
+                    "raw_source": "\\lstinline*|a b|",
+                    "_": [
+                      "a b"
+                    ]
+                  },
+                  "B"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}\\textbf{A\\lstinline*|a b|B}\\end{document}",
+      "tex": {
+        "text": "\\begin{document}\\textbf{A\\lstinline*|a b|B}\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "textbf",
+                    "source_offset": 16,
+                    "_": [
+                      "A",
+                      {
+                        "$": "lstinline",
+                        "source_offset": 25,
+                        "starred": true,
+                        "raw_source": "\\lstinline*|a b|",
+                        "_": [
+                          "a b"
+                        ]
+                      },
+                      "B"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}A\\lstinline[language=C]|int x;|B\\end{document}",
+      "tex": {
+        "text": "\\begin{document}A\\lstinline[language=C]|int x;|B\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "A",
+                  {
+                    "$": "lstinline",
+                    "source_offset": 17,
+                    "options_raw": "language=C",
+                    "raw_source": "\\lstinline[language=C]|int x;|",
+                    "_": [
+                      "int x;"
+                    ]
+                  },
+                  "B"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}\\textbf{A\\lstinline[language=C]|int x;|B}\\end{document}",
+      "tex": {
+        "text": "\\begin{document}\\textbf{A\\lstinline[language=C]|int x;|B}\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "textbf",
+                    "source_offset": 16,
+                    "_": [
+                      "A",
+                      {
+                        "$": "lstinline",
+                        "source_offset": 25,
+                        "options_raw": "language=C",
+                        "raw_source": "\\lstinline[language=C]|int x;|",
+                        "_": [
+                          "int x;"
+                        ]
+                      },
+                      "B"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}A\\lstinline{a{b}c}B\\end{document}",
+      "tex": {
+        "text": "\\begin{document}A\\lstinline{a{b}c}B\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "A",
+                  {
+                    "$": "lstinline",
+                    "source_offset": 17,
+                    "raw_source": "\\lstinline{a{b}c}",
+                    "_": [
+                      "a{b}c"
+                    ]
+                  },
+                  "B"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}\\textbf{A\\lstinline{a{b}c}B}\\end{document}",
+      "tex": {
+        "text": "\\begin{document}\\textbf{A\\lstinline{a{b}c}B}\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "textbf",
+                    "source_offset": 16,
+                    "_": [
+                      "A",
+                      {
+                        "$": "lstinline",
+                        "source_offset": 25,
+                        "raw_source": "\\lstinline{a{b}c}",
+                        "_": [
+                          "a{b}c"
+                        ]
+                      },
+                      "B"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}A\\Verb|abc|B\\end{document}",
+      "tex": {
+        "text": "\\begin{document}A\\Verb|abc|B\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "A",
+                  {
+                    "$": "Verb",
+                    "source_offset": 17,
+                    "raw_source": "\\Verb|abc|",
+                    "_": [
+                      "abc"
+                    ]
+                  },
+                  "B"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}\\textbf{A\\Verb|abc|B}\\end{document}",
+      "tex": {
+        "text": "\\begin{document}\\textbf{A\\Verb|abc|B}\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "textbf",
+                    "source_offset": 16,
+                    "_": [
+                      "A",
+                      {
+                        "$": "Verb",
+                        "source_offset": 25,
+                        "raw_source": "\\Verb|abc|",
+                        "_": [
+                          "abc"
+                        ]
+                      },
+                      "B"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}A\\mint{python}|x|B\\end{document}",
+      "tex": {
+        "text": "\\begin{document}A\\mint{python}|x|B\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "A",
+                  {
+                    "$": "mint",
+                    "source_offset": 17,
+                    "language": "python",
+                    "raw_source": "\\mint{python}|x|",
+                    "_": [
+                      "x"
+                    ]
+                  },
+                  "B"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}\\textbf{A\\mint{python}|x|B}\\end{document}",
+      "tex": {
+        "text": "\\begin{document}\\textbf{A\\mint{python}|x|B}\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "textbf",
+                    "source_offset": 16,
+                    "_": [
+                      "A",
+                      {
+                        "$": "mint",
+                        "source_offset": 25,
+                        "language": "python",
+                        "raw_source": "\\mint{python}|x|",
+                        "_": [
+                          "x"
+                        ]
+                      },
+                      "B"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}A\\mintinline[breaklines]{python}{print(1)}B\\end{document}",
+      "tex": {
+        "text": "\\begin{document}A\\mintinline[breaklines]{python}{print(1)}B\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "A",
+                  {
+                    "$": "mintinline",
+                    "source_offset": 17,
+                    "options_raw": "breaklines",
+                    "language": "python",
+                    "raw_source": "\\mintinline[breaklines]{python}{print(1)}",
+                    "_": [
+                      "print(1)"
+                    ]
+                  },
+                  "B"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}\\textbf{A\\mintinline[breaklines]{python}{print(1)}B}\\end{document}",
+      "tex": {
+        "text": "\\begin{document}\\textbf{A\\mintinline[breaklines]{python}{print(1)}B}\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "textbf",
+                    "source_offset": 16,
+                    "_": [
+                      "A",
+                      {
+                        "$": "mintinline",
+                        "source_offset": 25,
+                        "options_raw": "breaklines",
+                        "language": "python",
+                        "raw_source": "\\mintinline[breaklines]{python}{print(1)}",
+                        "_": [
+                          "print(1)"
+                        ]
+                      },
+                      "B"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}A\\lstinline||B\\end{document}",
+      "tex": {
+        "text": "\\begin{document}A\\lstinline||B\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "A",
+                  {
+                    "$": "lstinline",
+                    "source_offset": 17,
+                    "raw_source": "\\lstinline||"
+                  },
+                  "B"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}\\textbf{A\\lstinline||B}\\end{document}",
+      "tex": {
+        "text": "\\begin{document}\\textbf{A\\lstinline||B}\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "textbf",
+                    "source_offset": 16,
+                    "_": [
+                      "A",
+                      {
+                        "$": "lstinline",
+                        "source_offset": 25,
+                        "raw_source": "\\lstinline||"
+                      },
+                      "B"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}A\\lstinline|}|B\\end{document}",
+      "tex": {
+        "text": "\\begin{document}A\\lstinline|}|B\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "A",
+                  {
+                    "$": "lstinline",
+                    "source_offset": 17,
+                    "raw_source": "\\lstinline|}|",
+                    "_": [
+                      "}"
+                    ]
+                  },
+                  "B"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}\\textbf{A\\lstinline|}|B}\\end{document}",
+      "tex": {
+        "text": "\\begin{document}\\textbf{A\\lstinline|}|B}\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": null
+    },
+    {
+      "source": "\\begin{document}A\\lstinline|%x|B\\end{document}",
+      "tex": {
+        "text": "\\begin{document}A\\lstinline|%x|B\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": null
+    },
+    {
+      "source": "\\begin{document}\\textbf{A\\lstinline|%x|B}\\end{document}",
+      "tex": {
+        "text": "\\begin{document}\\textbf{A\\lstinline|%x|B}\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": null
+    },
+    {
+      "source": "\\begin{document}A\\lstinline[foo={a[b]}]{x{y}z}B\\end{document}",
+      "tex": {
+        "text": "\\begin{document}A\\lstinline[foo={a[b]}]{x{y}z}B\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "A",
+                  {
+                    "$": "lstinline",
+                    "source_offset": 17,
+                    "options_raw": "foo={a[b]}",
+                    "raw_source": "\\lstinline[foo={a[b]}]{x{y}z}",
+                    "_": [
+                      "x{y}z"
+                    ]
+                  },
+                  "B"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}\\textbf{A\\lstinline[foo={a[b]}]{x{y}z}B}\\end{document}",
+      "tex": {
+        "text": "\\begin{document}\\textbf{A\\lstinline[foo={a[b]}]{x{y}z}B}\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "textbf",
+                    "source_offset": 16,
+                    "_": [
+                      "A",
+                      {
+                        "$": "lstinline",
+                        "source_offset": 25,
+                        "options_raw": "foo={a[b]}",
+                        "raw_source": "\\lstinline[foo={a[b]}]{x{y}z}",
+                        "_": [
+                          "x{y}z"
+                        ]
+                      },
+                      "B"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}A\\mintinline[foo={bar}]{python}|é猫|B\\end{document}",
+      "tex": {
+        "text": "\\begin{document}A\\mintinline[foo={bar}]{python}|é猫|B\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "A",
+                  {
+                    "$": "mintinline",
+                    "source_offset": 17,
+                    "options_raw": "foo={bar}",
+                    "language": "python",
+                    "raw_source": "\\mintinline[foo={bar}]{python}|é猫|",
+                    "_": [
+                      "é猫"
+                    ]
+                  },
+                  "B"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}\\textbf{A\\mintinline[foo={bar}]{python}|é猫|B}\\end{document}",
+      "tex": {
+        "text": "\\begin{document}\\textbf{A\\mintinline[foo={bar}]{python}|é猫|B}\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "textbf",
+                    "source_offset": 16,
+                    "_": [
+                      "A",
+                      {
+                        "$": "mintinline",
+                        "source_offset": 25,
+                        "options_raw": "foo={bar}",
+                        "language": "python",
+                        "raw_source": "\\mintinline[foo={bar}]{python}|é猫|",
+                        "_": [
+                          "é猫"
+                        ]
+                      },
+                      "B"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}A\\lstinline |a b|B\\end{document}",
+      "tex": {
+        "text": "\\begin{document}A\\lstinline |a b|B\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "A",
+                  {
+                    "$": "lstinline",
+                    "source_offset": 17,
+                    "raw_source": "\\lstinline |a ",
+                    "_": [
+                      "|a"
+                    ]
+                  },
+                  "b|B"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}\\textbf{A\\lstinline |a b|B}\\end{document}",
+      "tex": {
+        "text": "\\begin{document}\\textbf{A\\lstinline |a b|B}\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "textbf",
+                    "source_offset": 16,
+                    "_": [
+                      "A",
+                      {
+                        "$": "lstinline",
+                        "source_offset": 25,
+                        "raw_source": "\\lstinline |a ",
+                        "_": [
+                          "|a"
+                        ]
+                      },
+                      "b|B"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}A\\lstinline|\\end{document}|B\\end{document}",
+      "tex": {
+        "text": "\\begin{document}A\\lstinline|\\end{document}|B\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": null
+    },
+    {
+      "source": "\\begin{document}\\textbf{A\\lstinline|\\end{document}|B}\\end{document}",
+      "tex": {
+        "text": "\\begin{document}\\textbf{A\\lstinline|\\end{document}|B}\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": null
+    },
+    {
+      "source": "\\begin{document}A\\lstinline|\\verb+foo+|B\\end{document}",
+      "tex": {
+        "text": "\\begin{document}A\\lstinline|\\verb+foo+|B\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "A",
+                  {
+                    "$": "lstinline",
+                    "source_offset": 17,
+                    "raw_source": "\\lstinline|\\verb+foo+|",
+                    "_": [
+                      "\\verb+foo+"
+                    ]
+                  },
+                  "B"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}\\textbf{A\\lstinline|\\verb+foo+|B}\\end{document}",
+      "tex": {
+        "text": "\\begin{document}\\textbf{A\\lstinline|\\verb+foo+|B}\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "textbf",
+                    "source_offset": 16,
+                    "_": [
+                      "A",
+                      {
+                        "$": "lstinline",
+                        "source_offset": 25,
+                        "raw_source": "\\lstinline|\\verb+foo+|",
+                        "_": [
+                          "\\verb+foo+"
+                        ]
+                      },
+                      "B"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}A\\verb|x|\\lstinline|y|B\\end{document}",
+      "tex": {
+        "text": "\\begin{document}A\\verb|x|\\lstinline|y|B\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "A",
+                  {
+                    "$": "verb",
+                    "source_offset": 17,
+                    "raw_source": "\\verb|x|",
+                    "_": [
+                      "x"
+                    ]
+                  },
+                  {
+                    "$": "lstinline",
+                    "source_offset": 25,
+                    "raw_source": "\\lstinline|y|",
+                    "_": [
+                      "y"
+                    ]
+                  },
+                  "B"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}A\\mintinline{py}|x|\\verb|y|B\\end{document}",
+      "tex": {
+        "text": "\\begin{document}A\\mintinline{py}|x|\\verb|y|B\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "A",
+                  {
+                    "$": "mintinline",
+                    "source_offset": 17,
+                    "language": "py",
+                    "raw_source": "\\mintinline{py}|x|",
+                    "_": [
+                      "x"
+                    ]
+                  },
+                  {
+                    "$": "verb",
+                    "source_offset": 35,
+                    "raw_source": "\\verb|y|",
+                    "_": [
+                      "y"
+                    ]
+                  },
+                  "B"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\let\\q\\lstinline\\begin{document}A\\q|x|B\\end{document}",
+      "tex": {
+        "text": "\\begin{document}A\\q|x|B\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 16,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "A",
+                  {
+                    "$": "q",
+                    "source_offset": 33,
+                    "argument_groups": []
+                  },
+                  "|x|B"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}\\directlua{print(1)}\\lstinline|x|\\end{document}",
+      "tex": {
+        "text": "\\begin{document}\\directlua{print(1)}\\lstinline|x|\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "directlua",
+                    "source_offset": 16,
+                    "source": "print(1)"
+                  },
+                  {
+                    "$": "lstinline",
+                    "source_offset": 36,
+                    "raw_source": "\\lstinline|x|",
+                    "_": [
+                      "x"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}\\char92\\lstinline|x|\\char94 A\\end{document}",
+      "tex": {
+        "text": "\\begin{document}\\textbackslash{}\\lstinline|x|\\textasciicircum{}A\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  {
+                    "$": "textbackslash",
+                    "source_offset": 23,
+                    "argument_groups": [
+                      {
+                        "kind": "required",
+                        "raw": "",
+                        "start": 23,
+                        "end": 23
+                      }
+                    ],
+                    "_": [
+                      {
+                        "$": "curly_group"
+                      }
+                    ]
+                  },
+                  {
+                    "$": "lstinline",
+                    "source_offset": 23,
+                    "raw_source": "\\lstinline|x|",
+                    "_": [
+                      "x"
+                    ]
+                  },
+                  {
+                    "$": "textasciicircum",
+                    "source_offset": 43,
+                    "argument_groups": [
+                      {
+                        "kind": "required",
+                        "raw": "",
+                        "start": 43,
+                        "end": 44
+                      }
+                    ],
+                    "_": [
+                      {
+                        "$": "curly_group"
+                      }
+                    ]
+                  },
+                  "A"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\begin{document}\\begin{tabular}{c}\\mintinline{c}|x|\\end{tabular}\\end{document}",
+      "tex": {
+        "text": "\\begin{document}\\begin{tabular}{c}\\mintinline{c}|x|\\end{tabular}\\end{document}",
+        "messages": [
+          "\\z@=\\dimen10",
+          "\\p@=\\dimen11",
+          "\\maxdimen=\\dimen12",
+          "\\z@skip=\\skip10",
+          "\\hideskip=\\skip11",
+          "\\@tempdima=\\dimen13",
+          "\\@tempdimb=\\dimen14",
+          "\\@tempdimc=\\dimen15",
+          "\\@tempcnta=\\count23",
+          "\\@tempcntb=\\count24",
+          "\\@tempskipa=\\skip12",
+          "\\@tempskipb=\\skip13",
+          "\\@temptokena=\\toks10",
+          "\\@tempboxa=\\box10",
+          "\\voidb@x=\\box11",
+          "\\textwidth=\\dimen16",
+          "\\textheight=\\dimen17",
+          "\\linewidth=\\dimen18",
+          "\\columnwidth=\\dimen19",
+          "\\columnsep=\\dimen20",
+          "\\columnseprule=\\dimen21",
+          "\\marginparwidth=\\dimen22",
+          "\\marginparsep=\\dimen23",
+          "\\marginparpush=\\dimen24",
+          "\\oddsidemargin=\\dimen25",
+          "\\evensidemargin=\\dimen26",
+          "\\topmargin=\\dimen27",
+          "\\headheight=\\dimen28",
+          "\\headsep=\\dimen29",
+          "\\footskip=\\dimen30",
+          "\\paperwidth=\\dimen31",
+          "\\paperheight=\\dimen32",
+          "\\fboxsep=\\dimen33",
+          "\\fboxrule=\\dimen34",
+          "\\arraycolsep=\\dimen35",
+          "\\tabcolsep=\\dimen36",
+          "\\arrayrulewidth=\\dimen37",
+          "\\doublerulesep=\\dimen38",
+          "\\labelwidth=\\dimen39",
+          "\\labelsep=\\dimen40",
+          "\\itemindent=\\dimen41",
+          "\\listparindent=\\dimen42",
+          "\\leftmargin=\\dimen43",
+          "\\rightmargin=\\dimen44",
+          "\\unitlength=\\dimen45",
+          "\\jot=\\dimen46",
+          "\\abovecaptionskip=\\skip14",
+          "\\belowcaptionskip=\\skip15",
+          "\\smallskipamount=\\skip16",
+          "\\medskipamount=\\skip17",
+          "\\bigskipamount=\\skip18",
+          "\\topsep=\\skip19",
+          "\\itemsep=\\skip20",
+          "\\parsep=\\skip21",
+          "\\partopsep=\\skip22",
+          "\\floatsep=\\skip23",
+          "\\textfloatsep=\\skip24",
+          "\\intextsep=\\skip25"
+        ],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "document",
+            "source_offset": 0,
+            "_": [
+              {
+                "$": "tabular",
+                "source_offset": 16,
+                "columns": "c",
+                "_": [
+                  {
+                    "$": "paragraph",
+                    "_": [
+                      {
+                        "$": "mintinline",
+                        "source_offset": 34,
+                        "language": "c",
+                        "raw_source": "\\mintinline{c}|x|",
+                        "_": [
+                          "x"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "local": {
+    "source": "test/lambda/latex/fixtures/local_packages/script-inline-tree-main.tex",
+    "tex": {
+      "text": "\\begin{document}A\\textbf{X\\mintinline[foo]{py}|猫|Y}\\lstinline{a{b}c}\nB\\end{document}\n",
+      "messages": [
+        "\\z@=\\dimen10",
+        "\\p@=\\dimen11",
+        "\\maxdimen=\\dimen12",
+        "\\z@skip=\\skip10",
+        "\\hideskip=\\skip11",
+        "\\@tempdima=\\dimen13",
+        "\\@tempdimb=\\dimen14",
+        "\\@tempdimc=\\dimen15",
+        "\\@tempcnta=\\count23",
+        "\\@tempcntb=\\count24",
+        "\\@tempskipa=\\skip12",
+        "\\@tempskipb=\\skip13",
+        "\\@temptokena=\\toks10",
+        "\\@tempboxa=\\box10",
+        "\\voidb@x=\\box11",
+        "\\textwidth=\\dimen16",
+        "\\textheight=\\dimen17",
+        "\\linewidth=\\dimen18",
+        "\\columnwidth=\\dimen19",
+        "\\columnsep=\\dimen20",
+        "\\columnseprule=\\dimen21",
+        "\\marginparwidth=\\dimen22",
+        "\\marginparsep=\\dimen23",
+        "\\marginparpush=\\dimen24",
+        "\\oddsidemargin=\\dimen25",
+        "\\evensidemargin=\\dimen26",
+        "\\topmargin=\\dimen27",
+        "\\headheight=\\dimen28",
+        "\\headsep=\\dimen29",
+        "\\footskip=\\dimen30",
+        "\\paperwidth=\\dimen31",
+        "\\paperheight=\\dimen32",
+        "\\fboxsep=\\dimen33",
+        "\\fboxrule=\\dimen34",
+        "\\arraycolsep=\\dimen35",
+        "\\tabcolsep=\\dimen36",
+        "\\arrayrulewidth=\\dimen37",
+        "\\doublerulesep=\\dimen38",
+        "\\labelwidth=\\dimen39",
+        "\\labelsep=\\dimen40",
+        "\\itemindent=\\dimen41",
+        "\\listparindent=\\dimen42",
+        "\\leftmargin=\\dimen43",
+        "\\rightmargin=\\dimen44",
+        "\\unitlength=\\dimen45",
+        "\\jot=\\dimen46",
+        "\\abovecaptionskip=\\skip14",
+        "\\belowcaptionskip=\\skip15",
+        "\\smallskipamount=\\skip16",
+        "\\medskipamount=\\skip17",
+        "\\bigskipamount=\\skip18",
+        "\\topsep=\\skip19",
+        "\\itemsep=\\skip20",
+        "\\parsep=\\skip21",
+        "\\partopsep=\\skip22",
+        "\\floatsep=\\skip23",
+        "\\textfloatsep=\\skip24",
+        "\\intextsep=\\skip25"
+      ],
+      "diagnostics": [],
+      "packages": []
+    },
+    "latex": {
+      "$": "latex_document",
+      "_": [
+        {
+          "$": "document",
+          "source_offset": 0,
+          "_": [
+            {
+              "$": "paragraph",
+              "_": [
+                "A",
+                {
+                  "$": "textbf",
+                  "source_offset": 52,
+                  "_": [
+                    "X",
+                    {
+                      "$": "mintinline",
+                      "source_offset": 52,
+                      "options_raw": "foo",
+                      "language": "py",
+                      "raw_source": "\\mintinline[foo]{py}|猫|",
+                      "_": [
+                        "猫"
+                      ]
+                    },
+                    "Y"
+                  ]
+                },
+                {
+                  "$": "lstinline",
+                  "source_offset": 52,
+                  "raw_source": "\\lstinline{a{b}c}",
+                  "_": [
+                    "a{b}c"
+                  ]
+                },
+                "\nB"
+              ]
+            }
+          ]
+        },
+        {
+          "$": "paragraph",
+          "_": [
+            "\n"
+          ]
+        }
+      ]
+    }
+  }
+}

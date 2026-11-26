@@ -13,8 +13,8 @@
 Lambda has one host executable: `lambda.exe` (or `lambda` in a release
 bundle). Jube is the native-module system used to extend that host without
 recompiling a different runtime. It carries the Node.js compatibility modules
-(`node-core`, `node-fs`, `node-net`, `node-crypto`) that the standard bundle
-ships, and the `rdb-drivers` database module of the full bundle.
+(`node-core`, `node-fs`) that the standard bundle ships, and the
+`rdb-drivers` database module of the full bundle (D9.4.1).
 
 ## Modules and manifests
 
@@ -65,27 +65,11 @@ to modules (D9.4.6).
 The compatibility name `lambda-jube.exe` is a symlink to `lambda.exe`; it is
 not an independently compiled runtime.
 
-## Crypto provider
-
-The native host and `node-crypto` use mbedTLS/mbedCrypto (D11.1.2); neither links
-nor dynamically loads OpenSSL. The Node module retains native hashes, HMAC,
-ciphers, P-256/RSA signing and verification, and RSA key generation within the
-configured mbedCrypto limits. Its former foreign-provider DSA/EdDSA and RSA
-fallbacks are removed. DSA is unsupported; EdDSA requires native PSA support,
-which the selected mbedTLS 3.6 provider does not provide. Failed native parsing,
-generation or signing never selects another crypto provider.
-
-`process.binding('config').hasOpenSSL` is `false`, and `process.versions` has no
-`openssl` entry. Historical `ERR_OSSL_*` compatibility error-code strings remain;
-they do not imply a loaded provider. Full Node crypto compatibility is outside
-this profile. Independent test-fixture/certificate tools may use an external
-OpenSSL CLI; application cryptographic operations do not invoke it.
-
 ## Build and package commands
 
 ```sh
 make build                 # standard host
-make build-node-core       # external debug node-core module (likewise node-fs/-net/-crypto)
+make build-node-core       # external debug node-core module (likewise node-fs)
 make build-jube            # host + lambda-jube compatibility link
 
 make release               # release host

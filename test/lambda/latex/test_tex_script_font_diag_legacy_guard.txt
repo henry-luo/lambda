@@ -1,0 +1,37 @@
+[{
+    issue: "latex-digest-unsupported",
+    unsupported: "font parameter diagnostic source mapping"
+  }, {
+    issue: "latex-digest-unsupported",
+    unsupported: "font parameter diagnostic source mapping"
+  }, {
+    issue: "latex-digest-unsupported",
+    unsupported: "font parameter diagnostic source mapping"
+  }, {
+    issue: "latex-digest-unsupported",
+    unsupported: "font parameter diagnostic source mapping"
+  }, {
+    issue: "latex-digest-unsupported",
+    unsupported: "font parameter diagnostic source mapping"
+  }, {
+    issue: "latex-digest-unsupported",
+    unsupported: "font parameter diagnostic source mapping"
+  }, {
+    issue: "latex-digest-unsupported",
+    unsupported: "font parameter diagnostic source mapping"
+  }, {
+    issue: "latex-digest-unsupported",
+    unsupported: "font parameter diagnostic source mapping"
+  }, {
+    issue: "latex-digest-unsupported",
+    unsupported: "font parameter diagnostic source mapping"
+  }, {
+    issue: "latex-digest-unsupported",
+    unsupported: "font parameter diagnostic source mapping"
+  }, {
+    issue: "latex-digest-unsupported",
+    unsupported: "font parameter diagnostic source mapping"
+  }, {
+    issue: "latex-digest-unsupported",
+    unsupported: "font parameter diagnostic source mapping"
+  }]

@@ -20,29 +20,57 @@ observations still require re-verification. Add new Radiant issues here.
 
 ## Open issues
 
+<a id="ri-258"></a>
+
+- [RI-258 — A broad rebuild loses the input measurements of its completed container cascade](<Radiant_Issue_Ledger (fixed).md#ri-258>).
+
+<a id="ri-257"></a>
+
+- [RI-257 — SVG auto-height measurement ignores its resolved width](<Radiant_Issue_Ledger (fixed).md#ri-257>).
+
+<a id="ri-256"></a>
+
+- [RI-256 — Flex layout loses ratio-transferred height](<Radiant_Issue_Ledger (fixed).md#ri-256>).
+
+<a id="ri-255"></a>
+
+- [RI-255 — Shadow stylesheets skip their own host](<Radiant_Issue_Ledger (fixed).md#ri-255>).
+
+<a id="ri-254"></a>
+
+- [RI-254 — Nested flex height queries lose the percentage containing width](<Radiant_Issue_Ledger (fixed).md#ri-254>).
+
+<a id="ri-253"></a>
+
+- [RI-253 — Loading animation frames silently age held CSS effects](<Radiant_Issue_Ledger (fixed).md#ri-253>).
+
+<a id="ri-252"></a>
+
+- [RI-252 — Demo tile hover triggers a full catalog layout](<Radiant_Issue_Ledger (fixed).md#ri-252>).
+
 <a id="ri-251"></a>
 
-- [RI-251 — A broad rebuild loses the input measurements of its completed container cascade](<Radiant_Issue_Ledger (fixed).md#ri-251>).
+- [RI-251 — Widening a window retains narrow flex and grid geometry](<Radiant_Issue_Ledger (fixed).md#ri-251>).
 
 <a id="ri-250"></a>
 
-- [RI-250 — SVG auto-height measurement ignores its resolved width](<Radiant_Issue_Ledger (fixed).md#ri-250>).
+- [RI-250 — Demo window resizing repeats shadow and cascade work](<Radiant_Issue_Ledger (fixed).md#ri-250>).
 
 <a id="ri-249"></a>
 
-- [RI-249 — Flex layout loses ratio-transferred height](<Radiant_Issue_Ledger (fixed).md#ri-249>).
+- [RI-249 — macOS clears the visible drawable during native resize](<Radiant_Issue_Ledger (fixed).md#ri-249>).
 
 <a id="ri-248"></a>
 
-- [RI-248 — Shadow stylesheets skip their own host](<Radiant_Issue_Ledger (fixed).md#ri-248>).
+- [RI-248 — Native resize presents a stale frame before repaint](<Radiant_Issue_Ledger (fixed).md#ri-248>).
 
 <a id="ri-247"></a>
 
-- [RI-247 — Nested flex height queries lose the percentage containing width](<Radiant_Issue_Ledger (fixed).md#ri-247>).
+- [RI-247 — Collapsed table borders spill out of scroll panes](<Radiant_Issue_Ledger (fixed).md#ri-247>).
 
 <a id="ri-246"></a>
 
-- [RI-246 — Loading animation frames silently age held CSS effects](<Radiant_Issue_Ledger (fixed).md#ri-246>).
+- [RI-246 — Rounded inline backgrounds spill past rectangular scroll clips](<Radiant_Issue_Ledger (fixed).md#ri-246>).
 
 <a id="ri-245"></a>
 
@@ -1070,7 +1098,7 @@ flattens the subtree, then samples mask alpha or luminance in the owner’s
 coordinate space. An unavailable URL has zero coverage. The paint record
 uses a frame-local image handle, and the existing retained-list check
 rejects live mask payloads. Input shorthand and longhand admission is
-recorded in LI-125 (**D5.5.1 / D9.1.1v4 / D9.1.2v2 / D9.1.3v2**).
+recorded in LI-126 (**D5.5.1 / D9.1.1v4 / D9.1.2v2 / D9.1.3v2**).
 
 The callback fixture covers standalone SVG, WebP, repeat, rotation,
 stylesheet-relative resolution, shorthand priority, a failed request, and
@@ -1170,7 +1198,7 @@ The current macOS replay and its platform lookup control are recorded at
 ### RI-031 — Dock captures after redundant work is removed; layout cost remains
 
 **2026-11-26.** The current release still reaches the 150-second native
-deadline. RI-251 fixes a redundant full container-query probe. Stable broad
+deadline. RI-258 fixes a redundant full container-query probe. Stable broad
 rebuilds in the profiling run take about 8.5–8.8 seconds, down from
 14.5–15.5 seconds, while the saved geometry and live stylesheet controls
 retain correct query results. Subsequent startup turns still repeatedly

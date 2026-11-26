@@ -1,5 +1,5 @@
 {
-  "name": "Paint-only hover: border colors keep em widths and per-side winners, inherited color reaches descendants, shadows repaint",
+  "name": "Paint-only hover: border widths and per-side winners, descendant colors and shadow overflow",
   "html": "test/ui/hover_border_color_paint.html",
   "viewport": {"width": 320, "height": 220},
   "events": [
@@ -34,11 +34,15 @@
     {"type": "mouse_move", "target": {"selector": "#hit"}},
     {"type": "assert_pixel", "x": 22, "y": 160, "min_r": 0, "max_r": 5, "min_g": 0, "max_g": 5, "min_b": 250, "max_b": 255},
     {"type": "assert_pixel", "x": 100, "y": 136, "min_r": 0, "max_r": 5, "min_g": 250, "max_g": 255, "min_b": 0, "max_b": 5},
+    {"type": "assert_pixel", "x": 38, "y": 160, "max_r": 5, "min_g": 250, "max_b": 5},
+    {"type": "assert_pixel", "x": 28, "y": 148, "min_r": 250, "max_g": 5, "max_b": 5},
 
     {"type": "log", "message": "leave: red swatch border again and the shadow is gone"},
     {"type": "mouse_move", "x": 300, "y": 210},
     {"type": "assert_pixel", "x": 22, "y": 160, "min_r": 250, "max_r": 255, "min_g": 0, "max_g": 5, "min_b": 0, "max_b": 5},
     {"type": "assert_pixel", "x": 100, "y": 136, "min_r": 250},
+    {"type": "assert_pixel", "x": 38, "y": 160, "min_r": 250, "min_g": 250, "min_b": 250},
+    {"type": "assert_pixel", "x": 28, "y": 148, "min_r": 250, "min_g": 250, "min_b": 250},
 
     {"type": "log", "message": "a window losing the pointer sends it off the document, which clears hover"},
     {"type": "mouse_move", "target": {"selector": "#box"}},

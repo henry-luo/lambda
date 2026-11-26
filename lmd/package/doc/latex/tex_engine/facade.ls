@@ -65,7 +65,7 @@ pub fn host_capture(options: map, scope: string, name: string, data, no_base = f
 }
 
 // Only resource-free preloads can be reused without retaining a file grant.
-fn reusable_preload(loaded) bool^ => loaded is map and loaded.issue == null and len(loaded.resources_seen) == 0
+fn reusable_preload(loaded) bool^ => loaded is map and loaded.issue == null and loaded.resource_lookups == 0
 
 fn host_preload_options(options: map, math: bool) map =>
     // a lookup during preload must request a resource even if a caller supplied it.

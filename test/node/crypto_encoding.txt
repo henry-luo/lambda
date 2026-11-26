@@ -1,6 +1,0 @@
-cipher update encoding lock: true
-cipher final encoding lock: true
-cipher final unknown encoding: true
-hash update base64: true
-hash update latin1: true
-hash end/read: true

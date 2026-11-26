@@ -40,7 +40,6 @@ ignores:
   # vibe/Lambda_Lint_Fix.md §3.1 — these legitimately produce stdout.
   - "lambda/validator/ast_validate.cpp"   # `lambda validate` subcommand
   - "lambda/headless_stubs.cpp"           # CLI-only build stubs
-  - "lambda/module/npm/**"                       # npm-compat CLI
   - "lambda/runtime/runner.cpp"                   # CLI runner
   - "radiant/cmd_layout.cpp"              # `lambda layout` subcommand
   - "radiant/event_sim.cpp"               # event-simulation test driver

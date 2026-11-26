@@ -4365,7 +4365,7 @@ images remain. No capture-policy or budget change; mixed CDP timestamp
 alignment stays unqualified. [Evidence](comparison/repairs.html#round-204).
 
 
-Round 205 fixes **RI-246**: pre-load rAF advanced the shared native scheduler
+Round 205 fixes **RI-253**: pre-load rAF advanced the shared native scheduler
 and silently aged CSS effects. Loading host frames now preserve CSS animation
 and transition start/pause ages while timeline/media clocks advance. Normal
 host frames and selected virtual frames retain their behavior
@@ -4410,7 +4410,7 @@ frames are excluded and capture policy is unchanged (**D10.1.7**).
 [Evidence](comparison/repairs.html#round-206).
 
 
-Round 207 fixes **LI-124 / RI-248**. The selector matcher distinguishes
+Round 207 fixes **LI-125 / RI-255**. The selector matcher distinguishes
 `:host` from logical selectors. The scoped cascade applies the host's own
 shadow sheet before descendants resolve inherited values. Normal outer
 rules and important inner rules win by CSS cascade context
@@ -4439,7 +4439,7 @@ timeout, an interval and cancellation through that boundary
 
 **Comand clears high severity.** Two ordinary preceding release captures
 omit the hero video and each log four timer handoff failures. The repaired
-release shows the video and preserves RI-247’s corrected hero placement on
+release shows the video and preserves RI-254’s corrected hero placement on
 two captures. Against the same current Chromium reference, error falls from
 17.07% to 2.70% and 2.09%. The repeat has 1.50% changed area.
 
@@ -4498,7 +4498,7 @@ The report has **56 high, zero critical and 1,011 low** across 1,067 pairs.
 [Evidence](comparison/repairs.html#round-212).
 
 
-Round 213 clears **Refrakt**. RI-249 preserves the 750 px height transferred
+Round 213 clears **Refrakt**. RI-256 preserves the 750 px height transferred
 from the declared aspect ratio across flex layout and late text wrapping
 (**D9.1.3v2 / D5.5.1**). Both ordinary frames restore the centered title
 and photo gallery at the existing frame (**D10.1.7**), at **0.52%** and
@@ -4509,7 +4509,7 @@ failure on both releases. The report now has **55 high, zero critical and
 
 
 Round 214 clears **Ease Health**. JS13-L90 decodes its Lottie archive.
-JS13-L91 samples geometry after the frame’s queued writes, and RI-250
+JS13-L91 samples geometry after the frame’s queued writes, and RI-257
 removes excess wrapper height from a width-constrained SVG
 (**D6.3.3 / D8.4.4 / D9.1.3v2 / D9.5.6v2**). Both ordinary pairs at the
 existing frame (**D10.1.7**) show all three product cards at **6.93%** and
@@ -4554,7 +4554,7 @@ zero critical and 1,016 low** across 1,067 pairs.
 [Evidence](comparison/repairs.html#round-217).
 
 
-Round 218 clears **Craft**. LI-125 and RI-041 admit, resolve and paint a
+Round 218 clears **Craft**. LI-126 and RI-041 admit, resolve and paint a
 single CSS URL image as an alpha or luminance mask
 (**D5.5.1 / D9.1.1v4 / D9.1.2v2 / D9.1.3v2**). Both ordinary pairs
 show the torn edges at **1.53% mean error** and **1.92% changed area**
@@ -4573,7 +4573,7 @@ location and size, and composite their alpha from bottom to top
 (RI-041, **D5.5.1 / D9.1.3v2**). Both ordinary pairs show the repaired
 hero backdrop, copy and phone preview at **0.75% mean error** and
 **0.77% changed area** (**D10.1.7**). The star fills and blur differ.
-RI-251 reduces repeated container-query work on Dock. The ordinary Dock
+RI-258 reduces repeated container-query work on Dock. The ordinary Dock
 capture still times out. All 105 local cases, 107 display-list cases,
 the transformed mask raster test, and 13 UI fixtures pass. JS and static
 layout match the preceding result, including the existing static

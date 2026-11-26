@@ -18,15 +18,9 @@ pub fn preview_setup(pkg) map^ {
 fn result(nodes = [], diagnostics = []) => {nodes:nodes,diagnostics:diagnostics}
 fn warning(pkg, code, message) map^ => c.issue(code,pkg.main,message)
 
-// sdtContent is the saved display cache; control properties and end-marker formatting are metadata.
-fn unwrap_controls(nodes, pkg) array^ => [for (node in nodes)
-    if (node.uri == c.W and node.tag == "sdt") {
-        let cached = c.children(node,"sdtContent")
-        let invalid = any([for (child in ((c.children(node,null,null)) ^ { [] })) child.uri != c.W or
-            not contains(["sdtPr","sdtEndPr","sdtContent"],child.tag)]);
-        if (len(cached) != 1 or invalid) node
-        else *unwrap_controls(c.children(cached[0],null,null),pkg)^
-    } else node]
+fn unwrap_controls(nodes) array^ => [for (node in nodes,
+    let cached = if (node.uri == c.W and node.tag == "sdt") c.saved_control(node)^ else null)
+    if (cached == null) node else *unwrap_controls(c.children(cached,null,null)^)^]
 
 fn paragraph_tag(resolved, options) {
     let mapped = c.get(options.style_map,resolved.style_id,options.style_map[resolved.style_name])
@@ -108,7 +102,7 @@ fn drawing_node(node, pkg, sheet, options) map^ {
         else if (len(c.descendants(node,"wsp",c.WPS)) > 0)
             result([],[warning(pkg,"unsupported-shape","Shape geometry, fill, outline or effects are outside the flat rectangle profile")^])
         else picture(node,pkg,options,width,height,properties)^
-    let placement = drawing.placement(node,width,height)
+    let placement = drawing.placement(node,width,height,options.page_origin)
     let crop = drawing.crop(node,width,height);
     result([for (value in ((contents.nodes) ^ { [] })) {*:value,placement:placement.value,
         crop:if (value.kind == "image") crop.value else null}],
@@ -116,13 +110,13 @@ fn drawing_node(node, pkg, sheet, options) map^ {
             len(c.descendants(node,"blip",c.A)) > 0 or len(c.descendants(node,"txbxContent",c.W)) > 0))
             [warning(pkg,"unsupported-drawing-content","Only the first chart in the drawing is supported")^] else []) ++
         (if (placement.unsupported and len(contents.nodes) > 0)
-            [warning(pkg,"unsupported-floating-image","Drawing position or wrapping is outside the paragraph-relative profile")^] else []) ++
+            [warning(pkg,"unsupported-floating-image","Drawing position or wrapping could not be reproduced in the preview")^] else []) ++
         (if (crop.unsupported and any([for (value in ((contents.nodes) ^ { [] })) value.kind == "image"]))
-            [warning(pkg,"unsupported-image-crop","Image crop is outside the bounded inset profile")^] else []))
+            [warning(pkg,"unsupported-image-crop","Image crop is outside the bounded stretch profile")^] else []))
 }
 
 fn inline_many(nodes, pkg, sheet, marks, options) map^ {
-    let results = [for (node in unwrap_controls(nodes,pkg)^) inline_node(node,pkg,sheet,marks,options)^];
+    let results = [for (node in unwrap_controls(nodes)^) inline_node(node,pkg,sheet,marks,options)^];
     result(c.collect(results,"nodes"),c.collect(results,"diagnostics"))
 }
 fn annotation_reference(node, pkg) map^ {
@@ -161,7 +155,7 @@ fn inline_node(node, pkg, sheet, marks, options) map^ {
     else if (node.uri == c.W and node.tag == "noBreakHyphen") result([{kind:"text",text:"‑",marks:marks}])
     else if (node.uri == c.W and node.tag == "softHyphen") result([{kind:"text",text:"­",marks:marks}])
     else if (node.uri == c.W and node.tag == "hyperlink") {
-        let contents = inline_many(c.children(node,null,null),pkg,sheet,marks,options)^
+        let contents = inline_many(c.children(node,null,null),pkg,sheet,marks,{*:options,page_origin:null})^
         let rel = package.by_id(pkg.relationships,c.attr(node,"id",c.R))
         let anchor = c.attr(node,"anchor")
         let href = if (anchor != null) "#" ++ options.id_prefix ++ anchor
@@ -203,14 +197,17 @@ fn without_boxes(nodes) => [for (node in nodes where node.kind != "text-box")
     if (node.kind == "link") {*:node,children:without_boxes(node.children)} else node]
 fn box_blocks(nodes) any^ => [for (node in nodes, block in
     (((if (node.kind == "text-box") node.blocks else if (node.kind == "link") box_blocks(node.children) else [])) ^ { [] })) block]
-fn paragraph(node, pkg, sheet, options) map^ {
+fn paragraph(node, pkg, sheet, options, page_origin) map^ {
     let properties = c.child(node,"pPr")
     let resolved = styles.paragraph(sheet,properties)^
     let numbering = styles.list_info(sheet,resolved.props)
     let tag = paragraph_tag(resolved,options)
     let paragraph_mark = styles.run(sheet,resolved.run,c.child(properties,"rPr"))^
+    let on_first_page = if (page_origin == null or len(c.descendants(node,"lastRenderedPageBreak",c.W)) > 0 or
+        any([for (br in c.descendants(node,"br",c.W)) c.attr(br,"type") == "page"])) null else page_origin
     let contents = inline_many([for (child in ((c.children(node,null,null)) ^ { [] })
-        where not (child.uri == c.W and child.tag == "pPr")) child],pkg,sheet,resolved.run,options)^;
+        where not (child.uri == c.W and child.tag == "pPr")) child],pkg,sheet,resolved.run,
+        {*:options,page_origin:on_first_page})^;
     result([{kind:"paragraph",tag:tag.tag,attrs:tag.attrs,children:without_boxes(contents.nodes),list:numbering.value,
         props:resolved.props,run:resolved.run,empty_run:paragraph_mark.props,
         break_before:resolved.props.break_before == true,section_after:c.child(properties,"sectPr") != null},
@@ -218,7 +215,7 @@ fn paragraph(node, pkg, sheet, options) map^ {
         resolved.diagnostics ++ numbering.diagnostics ++ contents.diagnostics)
 }
 fn row(node, pkg, sheet, options) map^ {
-    let children = unwrap_controls(c.children(node,null,null),pkg)^
+    let children = unwrap_controls(c.children(node,null,null))^
     let cells = [for (cell in children where cell.uri == c.W and cell.tag == "tc",
         let properties = c.child(cell,"tcPr"), let merge = c.child(properties,"vMerge"),
         let blocks = block_many(c.children(cell,null,null),pkg,sheet,options)^)
@@ -237,14 +234,15 @@ fn row(node, pkg, sheet, options) map^ {
             where ((child.uri != c.W or not contains(["trPr","tc"],child.tag)) ^ { false }))
             warning(pkg,"unsupported-element","Unsupported table-row child " ++ child.tag)^]}
 }
-fn block_many(nodes, pkg, sheet, options) map^ {
-    let results = [for (node in unwrap_controls(nodes,pkg)^) block(node,pkg,sheet,options)^];
+fn block_many(nodes, pkg, sheet, options, first_page = null) map^ {
+    let results = [for (i,node in unwrap_controls(nodes)^)
+        block(node,pkg,sheet,options,if (i == 0) first_page else null)^];
     result(c.collect(results,"nodes"),c.collect(results,"diagnostics"))
 }
-fn block(node, pkg, sheet, options) map^ {
-    if (node.uri == c.W and node.tag == "p") paragraph(node,pkg,sheet,options)^
+fn block(node, pkg, sheet, options, page_origin) map^ {
+    if (node.uri == c.W and node.tag == "p") paragraph(node,pkg,sheet,options,page_origin)^
     else if (node.uri == c.W and node.tag == "tbl") {
-        let children = unwrap_controls(c.children(node,null,null),pkg)^
+        let children = unwrap_controls(c.children(node,null,null))^
         let resolved = styles.table(sheet,c.child(node,"tblPr"))^
         let rows = [for (child in children where child.uri == c.W and child.tag == "tr") row(child,pkg,resolved.sheet,options)^]
         let grid = [for (col in ((c.children(c.child(node,"tblGrid"),"gridCol")) ^ { [] })) c.pixels(c.attr(col,"w"),15.0)];
@@ -344,7 +342,7 @@ fn snapshot_prefix(body, scope, sheet, width, remaining, index = 0, kept = []) a
     }
 }
 
-pub fn build(pkg, options) map^ {
+pub fn build(pkg, options, viewer = false) map^ {
     let sheet = styles.prepare(pkg)^
     let defaults = styles.paragraph(sheet,null)^
     let default_section = if (options.snapshot) pkg.section else c.child(pkg.body,"sectPr")
@@ -352,8 +350,13 @@ pub fn build(pkg, options) map^ {
     let cut = if (paper != null)
         snapshot_prefix(pkg.raw_blocks,pkg.body_scope,sheet,paper.width,paper.height)^
         else {children:c.children(pkg.body,null,null)}
-    let contents = block_many(cut.children,pkg,sheet,options)^
     let section = if (cut.section != null) cut.section else default_section
+    let dimensions = if (viewer and options.presentation == "source" and not options.snapshot)
+        presentation.page_geometry(section).dimensions else null
+    // The first body paragraph starts on the first sheet. Later anchors need a resolved page.
+    let first_page = if (dimensions.width > 0 and dimensions.height > 0 and
+        len(c.descendants(pkg.body,"sectPr",c.W)) == 1) dimensions else null
+    let contents = block_many(cut.children,pkg,sheet,options,first_page)^
     let notes = annotations(contents.nodes,pkg,sheet,options)^;
     {blocks:contents.nodes,annotations:notes,page_style:presentation.page_style(section,defaults.run),
         diagnostics:pkg.diagnostics ++ contents.diagnostics ++ c.collect(notes,"diagnostics")}

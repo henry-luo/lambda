@@ -473,7 +473,7 @@ Front-end syntax mapping (each front-end does this once, thinly):
 | Python | `import spellcheck` | same |
 | Ruby | `require 'spellcheck'` | same |
 
-The `jube:` prefix on the JS side keeps the npm-package namespace unambiguous; Lambda/py/rb resolve bare names against (script modules first, then jube registry) — Lua's unified-`require` model.
+The `jube:` prefix on the JS side keeps the Jube module specifiers distinct; Lambda/py/rb resolve bare names against (script modules first, then jube registry) — Lua's unified-`require` model.
 
 ---
 

@@ -1,0 +1,25 @@
+[{
+    issue: "tex-unsupported-primitive",
+    unsupported: "expl3 fp array initialization",
+    globaldefs_preserved: true,
+    hook_preserved: true,
+    cctab_preserved: true
+  }, {
+    issue: "tex-unsupported-primitive",
+    unsupported: "expl3 fp array initialization",
+    globaldefs_preserved: true,
+    hook_preserved: true,
+    cctab_preserved: true
+  }, {
+    issue: "tex-unsupported-primitive",
+    unsupported: "expl3 fp array initialization",
+    globaldefs_preserved: true,
+    hook_preserved: true,
+    cctab_preserved: true
+  }, {
+    issue: "tex-unsupported-primitive",
+    unsupported: "expl3 fp array initialization",
+    globaldefs_preserved: true,
+    hook_preserved: true,
+    cctab_preserved: true
+  }]

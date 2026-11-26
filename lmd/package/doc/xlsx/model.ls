@@ -1,6 +1,7 @@
 // XLSX is an OPC workbook with namespace-qualified worksheet parts.
 import opc: lambda.doc.opc
 import xml: lambda.doc.xml
+import cells: .cells
 
 let X = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 let R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
@@ -31,7 +32,7 @@ fn position(text) map^ {
         let row=as_int(tail,0)-1
         let col=column(slice(a,0,at))^;
         if (at==0 or tail=="" or not all([for (ch in ((split(tail,"")) ^ { [] })) contains("0123456789",ch)]) or
-            row<0 or row>=1048576 or col<0 or col>=16384) raise fail("invalid-package","Invalid cell address " ++ a)
+            row<0 or row>=cells.ROW_LIMIT or col<0 or col>=cells.COLUMN_LIMIT) raise fail("invalid-package","Invalid cell address " ++ a)
         else {row:row,col:col}
     }
 }
@@ -228,6 +229,7 @@ fn worksheet(pkg,entry,shared,styles) map^ {
                 if (any([for (c in cells) c.formula!=null])) issue("formula-recalculation",rel.target,"Formula evaluation depends on the consuming application"),
                 if (any([for (c in cells) c.formula_type!=null and c.formula_type!="normal"])) issue("formula-type",rel.target,"Shared and array formulas are not expanded")];
             {title:name,part:rel.target,cells:cells,merges:merges,frozen:frozen,split:split,
+             *:if (attr(entry,"state") in ["hidden","veryHidden"]) {hidden:true} else {},
              conditional_rules:sort([for (rule in rules where rule!=null) rule],{by:(rule)=>rule.priority}),
              hidden_rows:[for (row in rows where on_attr(row,"hidden")^) as_int(attr(row,"r"),1)-1],
              hidden_columns:[for (col in cols where on_attr(col,"hidden")^)

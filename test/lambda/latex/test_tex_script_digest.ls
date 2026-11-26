@@ -1,13 +1,15 @@
 import profile: lambda.doc.latex.tex_engine.profile
 import digest: lambda.doc.latex.tex_engine.digest
 let kernel = input(sys.lambda.home ++ "/package/doc/latex/tex_engine/kernel.tex", "text")^;
-fn report(source) any^ {
-    let exp = profile.expand_with_kernel(source, kernel, {resources: {local: {}, bundled: {}}}, 100000)^;
+// Independent cases share the immutable, resource-free kernel snapshot.
+let shared = profile.preload_kernel(kernel, {resources: {local: {}, bundled: {}}}, 100000)^;
+fn report(source, fresh = false) any^ {
+    let exp = profile.expand_with_kernel(source, kernel, {resources: {local: {}, bundled: {}}}, 100000, if (fresh) null else shared)^;
     let result = digest.digest(exp)^;
     {issue: result.issue, unsupported: result.unsupported, complete: result.complete,
         matches_native: if (result.ast == null) null else result.ast == (parse(source, {type:"latex"})^)}
 }
-"document:"; report("\\documentclass{article}\\begin{document}Hello \\textbf{world}!\\end{document}")
+"document:"; report("\\documentclass{article}\\begin{document}Hello \\textbf{world}!\\end{document}", true)
 "paragraphs:"; report("\\begin{document}A\n\nB\\end{document}")
 "nested inline:"; report("\\begin{document}A \\emph{one \\textbf{two}}.\\end{document}")
 "plain text:"; report("Hello world")
@@ -40,7 +42,7 @@ fn report(source) any^ {
 "heading variants:"; report("\\begin{document}\\section*{Star}\\section[Short]{Long}\\end{document}")
 "formatted title:"; report("\\title{Hello \\textbf{World}}\\author{J.  Doe}\\begin{document}X\\end{document}")
 fn report_echo_ast(source) any^ {
-    let exp = profile.expand_with_kernel(source, kernel, {echo_definitions: true, resources: {local: {}, bundled: {}}}, 100000)^;
+    let exp = profile.expand_with_kernel(source, kernel, {echo_definitions: true, resources: {local: {}, bundled: {}}}, 100000, shared)^;
     let result = digest.digest(exp)^;
     {issue: result.issue, unsupported: result.unsupported, incomplete: exp.echo_incomplete,
         matches_native: if (result.ast == null) null else result.ast == (parse(source, {type:"latex"})^)}

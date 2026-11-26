@@ -1,0 +1,12 @@
+{
+  issue: null,
+  log: {
+    kind: "register",
+    index: 5
+  },
+  caller_count: 77,
+  scratch: 81,
+  max: 2147483647,
+  alloc: 123,
+  same_counts: true
+}

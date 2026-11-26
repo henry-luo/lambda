@@ -6,9 +6,9 @@ remain in the [active issue ledger](Lib_Input_Issue_Ledger.md).
 
 ## Fixed issues
 
-<a id="li-125"></a>
+<a id="li-126"></a>
 
-### LI-125 — The CSS mask shorthand and its geometry had no property dispatch
+### LI-126 — The CSS mask shorthand and its geometry had no property dispatch
 
 **Fixed, 2026-11-26.** Dock uses a URL, a `bottom` position, a slash size and
 `no-repeat` in one `mask` declaration. Craft uses the image, size and repeat
@@ -22,9 +22,9 @@ properties (**D9.1.1v4 / D9.1.3v2**).
 All 126 cases in `test_css_parser_gtest` pass, including a raw shorthand,
 vendor alias and invalid declarations. [CSS Masking shorthand](https://www.w3.org/TR/css-masking-1/#the-mask).
 
-<a id="li-124"></a>
+<a id="li-125"></a>
 
-### LI-124 — CSS matching loses the meaning of shadow host selectors
+### LI-125 — CSS matching loses the meaning of shadow host selectors
 
 **Fixed, 2026-11-26.** Input owns selector parsing, matching and declaration
 priority under **D9.1.1v4 / D9.1.3v2**. The parser treated `:host(...)` as
@@ -46,7 +46,7 @@ describe these rules.
 The maintained render fixture fails on the preceding release and passes
 in AST, MIR and Chromium. It checks a nested root, host arguments, outer
 document isolation, inline important priority and shadow descendants.
-Radiant's [RI-248](<Radiant_Issue_Ledger (fixed).md#ri-248>) qualifies
+Radiant's [RI-255](<Radiant_Issue_Ledger (fixed).md#ri-255>) qualifies
 the cascade integration. Evidence is in `temp/online-visual-round235/`.
 
 <a id="li-123"></a>

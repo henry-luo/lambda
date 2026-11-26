@@ -1,6 +1,7 @@
 import profile: lambda.doc.latex.tex_engine.profile
 import reconstruct: lambda.doc.latex.tex_engine.reconstruct
-let kernel=input(sys.lambda.home ++ "/package/doc/latex/tex_engine/kernel.tex","text")^;
+import compare: ._tex_expl3_compare
+let kernel=compare.kernel;
 let edges=["\\prop_new:N\\l_p_prop\\prop_put:Nnn\\l_p_prop{\\foo}{X}\\escapechar=-1[\\prop_item:Nn\\l_p_prop{\\foo}]",
  "\\prop_new:N\\l_p_prop\\escapechar=-1\\prop_put:Nnn\\l_p_prop{\\foo}{X}\\escapechar=92[\\prop_item:Nn\\l_p_prop{\\foo}]",
  "\\prop_new:N\\l_p_prop\\prop_put:Nnn\\l_p_prop{A}{X}\\catcode`A=12[\\prop_item:Nn\\l_p_prop{A}]",
@@ -23,14 +24,14 @@ let advanced=["[\\meaning\\prop_new:N/\\meaning\\prop_put:Nnn/\\meaning\\prop_gp
  "\\prop_new:N\\l_p_prop\\prop_put:Nnn\\l_p_prop{k}{\\relax A}[\\prop_item:Nn\\l_p_prop{k}]",
  "\\prop_new:N\\l_p_prop\\prop_put:Nnn\\l_p_prop{k}{X}\\ifx\\l_p_prop\\l_p_prop Y\\else N\\fi"];
 let bodies=[*edges,*advanced];
-fn check(body) any^ {
+fn check(body, fresh = false) any^ {
  let source="\\ExplSyntaxOn" ++ body ++ "\\ExplSyntaxOff";
- let r=profile.expand_with_kernel(source,kernel,{script_expl3:true,echo_definitions:true,adapters:[],resources:{local:{},bundled:{}}},100000)^;
+ let r=compare.expand(source,fresh)^;
  let n=parse(source,{type:"tex"})^;
  {body:body,issue:r.issue,unsupported:r.unsupported,text:if(r.issue==null)reconstruct.reconstruct(r)^.text==n.text else null,
   actual:if(r.issue==null)reconstruct.reconstruct(r)^.text else null,native:n.text,
   diagnostics:r.diagnostic_records==n.diagnostics,messages:r.messages==n.messages}
 }
-let results=[for(body in bodies)check(body)^];
-let duplicate=profile.expand_with_kernel("\\ExplSyntaxOn\\prop_new:N\\l_p_prop\\prop_new:N\\l_p_prop X",kernel,{script_expl3:true,echo_definitions:true,adapters:[],resources:{local:{},bundled:{}}},100000)^;
-{cases:len(results),duplicate_guard:duplicate.issue=="tex-unsupported-primitive" and duplicate.unsupported=="msg_error:nnee",failures:[for(r in results where r.issue!=null or not r.text or not r.diagnostics or not r.messages)r]}
+let results=[for(i,body in bodies)check(body,i == 0)^];
+let duplicate=compare.expand("\\ExplSyntaxOn\\prop_new:N\\l_p_prop\\prop_new:N\\l_p_prop X")^;
+{cases:len(results),duplicate_guard:duplicate.issue=="tex-unsupported-primitive" and duplicate.unsupported=="__msg_interrupt:NnnnN",failures:[for(r in results where r.issue!=null or not r.text or not r.diagnostics or not r.messages)r]}

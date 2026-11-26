@@ -4384,6 +4384,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("  .pdf       Portable Document Format\n");
             fputs("  .docx      Word document (semantic content)\n", stdout);
             fputs("  .pptx      PowerPoint presentation (imported slides)\n", stdout);
+            fputs("  .xlsx      Excel workbook (worksheet preview)\n", stdout);
             fputs("  .epub      EPUB 2/3 eBook reader\n", stdout); // PRINTF_OK: CLI help.
             fputs("  .diff/.patch  Unified diff review\n", stdout); // PRINTF_OK: CLI help.
             printf("  .html      HyperText Markup Language\n");
@@ -4413,7 +4414,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("  .csv/.tsv  Delimited tables\n");
             printf("  .zip/.jar  ZIP-backed archives (file tree)\n"); // PRINTF_OK: user-facing CLI help.
             printf("\nOptions:\n");
-            fputs("  --archive                 Browse the underlying ZIP parts, including DOCX\n", stdout);
+            fputs("  --archive                 Browse the underlying ZIP parts of documents and archives\n", stdout);
             fputs("  --standalone              Open with the native document loader\n", stdout);
             printf("  --event-file <file.json>   Load simulated events from JSON file for testing\n");
             printf("  --event-result <file.json> Write a machine-readable event result\n");
@@ -4537,7 +4538,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 // Get file extension from Content-Type
                 effective_ext = content_type_to_extension(response->content_type);
                 ArchiveFormat archive_format = archive_source_format(filename, response->data, response->size);
-                if (archive_format != ARCHIVE_UNKNOWN) {
+                if (archive_format != ARCHIVE_UNKNOWN && !str_ieq_cstr(effective_ext, ".xlsx")) {
                     static const char* extensions[] = {"", ".zip", ".7z", ".tar", ".rar", ".rar"};
                     effective_ext = extensions[archive_format];
                 }
@@ -4582,13 +4583,14 @@ static int lambda_main_impl(int argc, char *argv[]) {
         // A document format takes precedence over its ZIP storage; --archive exposes the parts.
         bool is_docx_file = ext && str_ieq_cstr(ext, ".docx");
         bool is_pptx_file = ext && str_ieq_cstr(ext, ".pptx");
+        bool is_xlsx_file = ext && str_ieq_cstr(ext, ".xlsx");
         bool is_ebook_file = input_path_is_ebook(filename);
         // presentations open in the full-window player, including imported decks.
         const bool full_window_document = is_pptx_file || input_path_is_xhtml(filename) ||
             (ext && (str_ieq_cstr(ext, ".html") || str_ieq_cstr(ext, ".htm") ||
                 str_ieq_cstr(ext, ".ls") || str_ieq_cstr(ext, ".slides")));
         bool browse_tree = file_is_dir(filename) || launch.browse_archive ||
-            (!is_docx_file && !is_pptx_file && !is_ebook_file && lambda_view_path_is_archive(filename));
+            (!is_docx_file && !is_pptx_file && !is_xlsx_file && !is_ebook_file && lambda_view_path_is_archive(filename));
         if (browse_tree) {
             static const LambdaDocumentTransformConfig browser_transform = {
                 "browse", "lambda.doc.doc_viewer", "open_browser",
@@ -4622,8 +4624,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
 
             lambda_view_log_completion(exit_code);
             return lambda_main_finish(exit_code);
-        } else if (!is_http_url && !launch.standalone && !launch.autoplay && !launch.microphone &&
-                !full_window_document) {
+        } else if (is_xlsx_file || (!is_http_url && !launch.standalone && !launch.autoplay &&
+                !launch.microphone && !full_window_document)) {
             // local files share the browser pane when they have no full-window surface (D9.3.4).
             static const LambdaDocumentTransformConfig file_transform = {
                 "document", "lambda.doc.doc_viewer", "open_file",
@@ -4654,7 +4656,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                                                        state_dump, nullptr, launch.fullscreen, launch.microphone);
         } else {
             printf("Error: Unsupported file format '%s'\n", ext ? ext : "(no extension)");
-            printf("Supported formats: .epub, .docx, .pptx, .pdf, .html, .xhtml, .xht, .md, .tex, .pgf, .ls, .slides, .xml, .svg, .png, .jpg, .gif, .psd, .json, .yaml, .toml, .txt, .csv\n");
+            printf("Supported formats: .epub, .docx, .pptx, .xlsx, .pdf, .html, .xhtml, .xht, .md, .tex, .pgf, .ls, .slides, .xml, .svg, .png, .jpg, .gif, .psd, .json, .yaml, .toml, .txt, .csv\n");
             if (temp_file_path) {
                 if (temp_file_path_is_local) file_delete(temp_file_path);
                 mem_free(temp_file_path);

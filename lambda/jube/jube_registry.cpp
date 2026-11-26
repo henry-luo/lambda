@@ -142,7 +142,6 @@ struct NodeRuntimeSession {
     JsCommonJsCompileCacheState* commonjs_compile_cache;
     JsDiagnosticsChannelState* diagnostics_channels;
     JsPermissionPolicy* permission_policy;
-    JsCryptoNativeState crypto_native;
 };
 
 static const ContextCapsuleOps jube_node_session_capsule_ops = {
@@ -254,7 +253,6 @@ static void jube_node_session_state_clear(NodeRuntimeSession* session) {
         mem_free(session->trace);
         session->trace = NULL;
     }
-    memset(&session->crypto_native, 0, sizeof(session->crypto_native));
 }
 
 struct JubeNodeAsyncWork {
@@ -3869,43 +3867,8 @@ uint32_t jube_node_resource_add_with_close(void* session_handle, Item value, con
                                        close_user, true);
 }
 
-uint32_t jube_node_resource_add_native(void* session_handle, Item value, const char* kind,
-        JubeNodeResourceCloseCallback close_callback, void* close_user) {
-    return jube_node_resource_add_impl(session_handle, value, kind, close_callback,
-                                       close_user, false);
-}
-
-void jube_node_resource_close_kind(void* session_handle, const char* kind_prefix) {
-    NodeRuntimeSession* session = (NodeRuntimeSession*)session_handle;
-    if (session != jube_active_node_runtime_session || !session || !kind_prefix) return;
-    // Dynamic Node modules link this legacy bridge by name. Keep the ABI
-    // narrow while translating it once to the table's typed close group.
-    if (strcmp(kind_prefix, "crypto.") == 0) {
-        runtime_resource_table_close_group_owned(js_runtime_resource_table(),
-            session, RUNTIME_RESOURCE_GROUP_CRYPTO);
-    }
-}
-
 uint32_t jube_node_resource_add(Item value, const char* kind) {
     return jube_node_resource_add_with_close(jube_active_node_runtime_session, value, kind, NULL, NULL);
-}
-
-void jube_node_resource_remove_for_session(void* session_handle, uint32_t resource_id) {
-    NodeRuntimeSession* session = (NodeRuntimeSession*)session_handle;
-    if (session != jube_active_node_runtime_session) return;
-    runtime_resource_table_remove_owned(js_runtime_resource_table(), session,
-        resource_id);
-}
-
-void jube_node_resource_remove(uint32_t resource_id) {
-    jube_node_resource_remove_for_session(jube_active_node_runtime_session, resource_id);
-}
-
-void* jube_node_resource_user_data_for_session(void* session_handle, uint32_t resource_id) {
-    NodeRuntimeSession* session = (NodeRuntimeSession*)session_handle;
-    if (session != jube_active_node_runtime_session) return NULL;
-    return runtime_resource_table_user_data_owned(js_runtime_resource_table(),
-        session, resource_id);
 }
 
 void* jube_node_runtime_current_session(void) {
@@ -3980,12 +3943,6 @@ JsPermissionPolicy* jube_node_permission_policy_ensure(void* session) {
             (JsPermissionPolicy*)mem_calloc(1, sizeof(JsPermissionPolicy), MEM_CAT_SYSTEM);
     }
     return node_session->permission_policy;
-}
-
-JsCryptoNativeState* jube_node_crypto_native_state(void* session) {
-    NodeRuntimeSession* node_session = jube_node_live_session(session);
-    if (!node_session) return NULL;
-    return &node_session->crypto_native;
 }
 
 void jube_node_resource_clear(void) {

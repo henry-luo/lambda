@@ -1,0 +1,31 @@
+{
+  "name": "TOML property context menu in the project viewer",
+  "html": "temp/view-property-context-files",
+  "prepare": ["python3", "-c", "from pathlib import Path;import shutil;p=Path('temp/view-property-context-files');p.mkdir(parents=True,exist_ok=True);shutil.copyfile('test/input/property_tree.toml',p/'property_tree.toml')"],
+  "viewport": {"width": 1000, "height": 650},
+  "events": [
+    {"type": "click", "target": {"selector": ".tree-entry[data-tree-path$='/property_tree.toml'] .tree-label"}},
+    {"type": "click", "target": {"selector": ".tab-edit"}},
+    {"type": "assert_count", "target": {"selector": ".property-toolbar .edit-document-actions button"}, "count": 4},
+    {"type": "assert_count", "target": {"selector": ".property-toolbar .document-tabs button"}, "count": 3},
+    {"type": "click", "target": {"selector": "#property-row-0 .property-name"}, "button": 1},
+    {"type": "assert_count", "target": {"selector": "#property-tree-menu button"}, "count": 1},
+    {"type": "assert_text", "target": {"selector": "#property-tree-menu .property-add"}, "equals": "Add property"},
+    {"type": "click", "target": {"selector": "#file-filter"}},
+    {"type": "assert_count", "target": {"selector": "#property-tree-menu"}, "count": 0},
+    {"type": "click", "target": {"selector": "textarea[aria-label='title']"}},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "type", "text": "\"A longer title in the property editor\""},
+    {"type": "click", "target": {"selector": "textarea[aria-label='server']"}, "button": 1},
+    {"type": "assert_text", "target": {"selector": "#property-tree-menu .property-add"}, "equals": "Add property"},
+    {"type": "click", "target": {"selector": "#property-tree-menu .property-add"}},
+    {"type": "type", "text": "limit"},
+    {"type": "key_press", "key": "Tab"},
+    {"type": "type", "text": "4"},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "assert_value", "target": {"selector": "textarea[aria-label='limit']"}, "equals": "4"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/view-property-context-files/property_tree.toml", "contains": "title = \"A longer title in the property editor\""},
+    {"type": "assert_file", "path": "temp/view-property-context-files/property_tree.toml", "contains": "ports = [8001, 8002]\n\n\"limit\" = 4\n[database.credentials]"}
+  ]
+}

@@ -54,7 +54,7 @@
     {
       "type": "assert_text",
       "target": {
-        "selector": ".property-status"
+        "selector": ".viewer-edit-host .edit-notice"
       },
       "contains": "invalid"
     },

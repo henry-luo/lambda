@@ -30,6 +30,7 @@ fn special_command(name: string) bool => tex_reader.definition_command(name) or 
         "'", "`", "^", "\"", "~", "=", ".", "u", "v", "H", "c", "d", "b", "t", "k", ",", ";", ":", "!"], name))
 
 fn inline_format_command(name) => contains(["textbf", "textit", "emph", "texttt", "textsf", "textrm", "underline"], name)
+fn escaped_literal_control(token) any^ => token.kind == "control" and contains(["$", "%", "#", "&", "_", "{", "}"], token.value)
 // These arguments are stored code, so unmatched environment boundaries are literal.
 fn code_fragment_command(name) => contains(["pretitle", "posttitle", "preauthor", "postauthor", "predate", "postdate"], name)
 
@@ -572,6 +573,21 @@ fn comment_between_text(tokens,sources,index) any^ {
     if (gap != null and gap.valid and gap.seen) gap.text else null
 }
 
+// Restore source line breaks that TeX discarded between direct tokens.
+fn skipped_text_line_gap(tokens, sources, index) bool^ {
+    let token = tokens[index];
+    let previous = if (index == 0) null else tokens[index - 1];
+    let eligible = previous != null and previous.kind == "char" and previous.cat != 10 and
+        previous.direct == true and previous.seq != null and previous.end != null and token.start != null and
+        token.start > previous.end;
+    let fragment = if (eligible) rebuild.source_fragment(token,sources,true,previous.file,previous.seq,previous.end)^ else null;
+    let raw = if (fragment == null) null else fragment.gap;
+    let checked = if (raw == null or raw == "") null else source_gap_bytes(binary(raw)^)^;
+    let mapped = if (checked == null) null else output_between(previous,token)^;
+    checked != null and checked.valid and not checked.seen and
+        (contains(raw,"\n") or contains(raw,"\r")) and (mapped == null or mapped == raw)
+}
+
 fn skip_par_blanks(chars,index = 0) any^ => if (index < len(chars) and
     contains([" ","\t","\n","\r"],chars[index])) skip_par_blanks(chars,index + 1) else index
 
@@ -694,7 +710,9 @@ fn math_delimiter_boundary(tokens, index, nested = 0, braces = 0) any^ {
         else if (braces == 0 and control(token, "middle") and nested == 0) {index: index, kind: "middle"}
         else {
             let next_braces = braces + if (opening(token)) 1 else if (closing(token)) -1 else 0;
-            let next_nested = if (braces != 0) nested else if (control(token, "left")) nested + 1
+            // a braced left token recovers as an ordinary atom and does not open a pair.
+            let next_nested = if (braces != 0) nested
+                else if (control(token, "left") and not opening(tokens[math_nonspace(tokens, index + 1)^])) nested + 1
                 else if (control(token, "right")) nested - 1 else nested;
             math_delimiter_boundary(tokens, index + 1, next_nested, next_braces)
         }
@@ -706,11 +724,14 @@ fn math_delimiter_control(name) => contains(["{", "}", "|", "vert", "Vert",
     "backslash", "arrowvert", "Arrowvert", "bracevert", "lmoustache", "rmoustache", "lgroup", "rgroup",
     "lbrack", "rbrack", "lparen", "rparen"], name)
 
-fn math_delimiter_token(tokens, index, middle = false, right_side = false) any^ {
+fn math_has_delimiter(token) bool^ =>
+    (token.kind == "char" and contains(["(", ")", "[", "]", "{", "}", "|", "<", ">", "/", "."], token.value)) or
+    (token.kind == "control" and math_delimiter_control(token.value))
+
+fn math_delimiter_token(tokens, index, allow_braced = false) any^ {
     let at = math_nonspace(tokens, index)^;
-    if (at >= len(tokens)) if (middle) unsupported(at, "math delimiter")
-        else {issue: null, index: at, value: "."}
-    else if (right_side and opening(tokens[at])) {
+    if (at >= len(tokens)) {issue: null, index: at, value: "."}
+    else if (allow_braced and opening(tokens[at])) {
         let group = read_group(tokens, at)^;
         if (group.issue != null) group
         else if (len(group.tokens) == 0 and math_adjacent(tokens[at], tokens[group.end - 1]))
@@ -728,12 +749,10 @@ fn math_delimiter_token(tokens, index, middle = false, right_side = false) any^ 
     }
     else {
         let token = tokens[at];
-        let char_ok = token.kind == "char" and not opening(token) and not closing(token) and
+        let char_ok = token.kind == "char" and not opening(token) and (allow_braced or not closing(token)) and
             len(token.value) == 1 and ord(token.value) < 128;
-        let control_ok = token.kind == "control" and (not middle or math_delimiter_control(token.value));
-        if (char_ok and (not middle or contains(["(", ")", "[", "]", "|", "<", ">", "/", "."], token.value)))
-            {issue: null, index: at + 1, value: token.value}
-        else if (control_ok) {issue: null, index: at + 1, value: "\\" ++ token.value}
+        if (char_ok) {issue: null, index: at + 1, value: token.value}
+        else if (token.kind == "control") {issue: null, index: at + 1, value: "\\" ++ token.value}
         else unsupported(at, "math delimiter")
     }
 }
@@ -745,22 +764,44 @@ fn math_delimiter_body(tokens, index, items = []) any^ {
         let combined = [*items, *section.items];
         if (boundary.kind == "end") {issue: null, index: boundary.index, right: ".", items: combined}
         else {
-            let delimiter = math_delimiter_token(tokens, boundary.index + 1, boundary.kind == "middle", boundary.kind == "right")^;
+            let at = math_nonspace(tokens, boundary.index + 1)^;
+            let has_delimiter = boundary.kind == "right" or (at < len(tokens) and math_has_delimiter(tokens[at])^);
+            let delimiter = if (has_delimiter) math_delimiter_token(tokens, at, true)^
+                else {issue:null, index:at};
             if (delimiter.issue != null) delimiter
             else if (boundary.kind == "right")
                 {issue: null, index: delimiter.index, right: delimiter.value, items: combined}
-            else math_delimiter_body(tokens, delimiter.index, [*combined, <middle_delim delim: delimiter.value>])
+            // an invalid middle delimiter leaves its following token in the math list.
+            else {
+                let middle = if (has_delimiter) <middle_delim delim:delimiter.value> else <middle_delim>;
+                math_delimiter_body(tokens, delimiter.index, [*combined, middle])
+            }
         }
     }
 }
 fn math_delimiter_group(tokens, index) any^ {
-    let left = math_delimiter_token(tokens, index + 1)^;
-    if (left.issue != null) left
+    let at = math_nonspace(tokens, index + 1)^;
+    if (opening(tokens[at])) {
+        // keep the first atom of a braced left token, as the native recovery did.
+        let start = math_nonspace(tokens, at + 1)^;
+        let first = if (start < len(tokens)) math_primary(tokens, start)^ else {issue:null, index:start};
+        if (first.issue != null) first
+        else {
+            let end = first.index;
+            let after = if (end < len(tokens) and closing(tokens[end]) and
+                math_adjacent(tokens[end - 1], tokens[end])) end + 1 else end;
+            {issue:null, index:after, value:<_seq <ERROR "\\left"> first.value>}
+        }
+    }
     else {
-        let body = math_delimiter_body(tokens, left.index)^;
-        if (body.issue != null) body
-        else {issue: null, index: body.index,
-            value: <delimiter_group left: left.value, right: body.right, *math_content(body.items)^>}
+        let left = math_delimiter_token(tokens, at)^;
+        if (left.issue != null) left
+        else {
+            let body = math_delimiter_body(tokens, left.index)^;
+            if (body.issue != null) body
+            else {issue: null, index: body.index,
+                value: <delimiter_group left: left.value, right: body.right, *math_content(body.items)^>}
+        }
     }
 }
 
@@ -814,25 +855,34 @@ fn math_dimension_argument(tokens, index) any^ {
 }
 
 // generic math commands consume adjacent or space-separated groups as children.
-fn math_generic_arguments(tokens, index, items = []) any^ {
+fn math_generic_arguments(tokens, index, items = [], raw_args = null) any^ {
     let at = math_nonspace(tokens, index)^;
-    if (at >= len(tokens)) {issue: null, index: at, items: items}
+    let done = {issue:null, index:at, items:items, raw_args:raw_args};
+    if (at >= len(tokens)) done
     else if (opening(tokens[at])) {
         let arg = math_script_arg(tokens, at)^;
-        if (arg.issue != null) arg else math_generic_arguments(tokens, arg.index, [*items, arg.value])
+        if (arg.issue != null) arg
+        else {
+            // extension metadata retains the spelling between the braces, including whitespace.
+            let capture = raw_args != null and len(raw_args) < 2;
+            let raw = if (capture) output_between(tokens[at], tokens[arg.index - 1])^ else null;
+            if (capture and raw == null) unsupported(at, "math extension argument source mapping")
+            else math_generic_arguments(tokens, arg.index, [*items, arg.value],
+                if (capture) [*raw_args, raw] else raw_args)
+        }
     }
     else if (tokens[at].kind == "char" and tokens[at].value == "[") {
         let arg = read_generic_delimited(tokens, at, "[", "]", "latex-digest-unclosed-optional")^;
         // An unmatched bracket remains punctuation after the command.
-        if (arg.issue == "latex-digest-unclosed-optional") {issue:null, index:at, items:items}
+        if (arg.issue == "latex-digest-unclosed-optional") done
         else if (arg.issue != null) arg
         else {
             let content = math_atoms(arg.tokens)^;
             if (content.issue != null) content
-            else math_generic_arguments(tokens, arg.end, [*items, <brack_group *math_content(content.items)^>])
+            else math_generic_arguments(tokens, arg.end, [*items, <brack_group *math_content(content.items)^>], raw_args)
         }
     }
-    else {issue: null, index: at, items: items}
+    else done
 }
 
 // Math digestion follows the native parser's standard lexical categories.
@@ -1164,7 +1214,7 @@ fn math_environment(tokens, index) any^ {
 
 // These native special forms must not be mistaken for generic commands.
 fn math_unported_special(name) => contains(["above", "angl", "anglk", "angln", "anglr",
-    "atop", "brace", "brack", "choose", "class", "cssId", "htmlData", "middle", "over", "right", "substack"], name)
+    "atop", "brace", "brack", "choose", "middle", "over", "substack"], name)
 
 fn math_command(tokens, index) any^ {
     let name = tokens[index].value;
@@ -1342,8 +1392,8 @@ fn math_command(tokens, index) any^ {
             *:if (separator.present) {separator:<brack_group *math_content(sep.items)^>} else {}>}
     }
     else if (name == "genfrac") {
-        let left = math_delimiter_token(tokens, index + 1, false, true)^;
-        let right = if (left.issue != null) left else math_delimiter_token(tokens, left.index, false, true)^;
+        let left = math_delimiter_token(tokens, index + 1, true)^;
+        let right = if (left.issue != null) left else math_delimiter_token(tokens, left.index, true)^;
         let thickness = if (right.issue != null) right else math_dimension_argument(tokens, right.index)^;
         let style = if (thickness.issue != null) thickness else math_dimension_argument(tokens, thickness.index)^;
         let args = if (style.issue != null) style else math_arguments(tokens, style.index, 2)^;
@@ -1391,10 +1441,8 @@ fn math_command(tokens, index) any^ {
         "bigg", "biggl", "biggr", "biggm", "Bigg", "Biggl", "Biggr", "Biggm"], name)) {
         let at = math_nonspace(tokens,index + 1)^;
         let next = if (at < len(tokens)) tokens[at] else null;
-        let has_delimiter = next != null and
-            ((next.kind == "char" and contains(["(", ")", "[", "]", "{", "}", "|", "<", ">", "/", "."],next.value)) or
-             (next.kind == "control" and math_delimiter_control(next.value)));
-        let delimiter = if (has_delimiter) math_delimiter_token(tokens,at,false,true)^
+        let has_delimiter = next != null and math_has_delimiter(next)^;
+        let delimiter = if (has_delimiter) math_delimiter_token(tokens,at,true)^
             else {issue:null,index:at};
         if (delimiter.issue != null) delimiter
         else {issue:null,index:delimiter.index,value:<sized_delimiter size:"\\" ++ name,
@@ -1423,6 +1471,11 @@ fn math_command(tokens, index) any^ {
             script: args.items[2], scriptscript: args.items[3]>}
     }
     else if (name == "left") math_delimiter_group(tokens, index)
+    else if (name == "right") {
+        let delimiter = math_delimiter_token(tokens, index + 1, true)^;
+        if (delimiter.issue != null) delimiter
+        else {issue:null, index:delimiter.index, value:<malformed_right delim:delimiter.value>}
+    }
     // style declarations change following math without consuming an argument.
     else if (contains(["displaystyle", "textstyle", "scriptstyle", "scriptscriptstyle"], name))
         {issue: null, index: index + 1, value: <style_command cmd: "\\" ++ name>}
@@ -1461,7 +1514,9 @@ fn math_command(tokens, index) any^ {
         {issue: null, index: index + 1, value: <not_overlay target: "=">}
     else if (name == "not") {
         let at = math_nonspace(tokens,index + 1)^;
-        if (at + 1 < len(tokens) and opening(tokens[at]) and closing(tokens[at + 1]) and
+        // a targetless negation uses the native generic command shape.
+        if (at >= len(tokens)) {issue:null, index:at, value:<command name:name>}
+        else if (at + 1 < len(tokens) and opening(tokens[at]) and closing(tokens[at + 1]) and
                 math_adjacent(tokens[at],tokens[at + 1]))
             {issue:null,index:at + 2,value:<not_empty>}
         else {
@@ -1509,8 +1564,12 @@ fn math_command(tokens, index) any^ {
     else if (math_unported_special(name)) unsupported(index, "math command " ++ name)
     // Native math preserves unknown commands and their adjacent argument groups.
     else {
-        let args = math_generic_arguments(tokens, index + 1)^;
-        if (args.issue != null) args else {issue: null, index: args.index, value: <command name: name, *args.items>}
+        let preserve_raw = contains(["class", "cssId", "htmlData"], name);
+        let args = math_generic_arguments(tokens, index + 1, [], if (preserve_raw) [] else null)^;
+        if (args.issue != null) args
+        else {issue:null, index:args.index, value:<command name:name,
+            *:if (len(args.raw_args) > 0) {arg0_raw:args.raw_args[0]} else {},
+            *:if (len(args.raw_args) > 1) {arg1_raw:args.raw_args[1]} else {}, *args.items>}
     }
 }
 
@@ -1595,72 +1654,54 @@ fn math_scripts(tokens, index, base, sub = null, sup = null, modifier = null) an
     }
 }
 
+// read the primary separately so braced left-delimiter recovery can reuse it.
+fn math_primary(tokens, index) any^ {
+    let token = tokens[index];
+    if (opening(token)) math_script_arg(tokens, index)^
+    else if (token.kind == "char" and contains(["#", "!"], token.value)) {
+        let raw = math_raw_run(tokens, index)^;
+        if (raw.issue != null) raw
+        else {issue:null, index:raw.index, value:<raw_math_text value:raw.text>}
+    }
+    // native math treats a decimal prefix and an ellipsis differently from a period.
+    else if (token.kind == "char" and token.value == ".") {
+        let next = if (index + 1 < len(tokens)) tokens[index + 1] else null;
+        let third = if (index + 2 < len(tokens)) tokens[index + 2] else null;
+        let joined = next != null and math_adjacent(token, next);
+        let dots = joined and next.kind == "char" and next.value == "." and third != null and
+            third.kind == "char" and third.value == "." and math_adjacent(next, third);
+        let decimal_prefix = joined and math_digit(next);
+        let numeric = if (decimal_prefix) math_number(tokens, index)^ else null;
+        let value = if (decimal_prefix) numeric.text else if (dots) <raw_math_text value: "..."> else <punctuation value: ".">;
+        let after = if (decimal_prefix) numeric.index else index + if (dots) 3 else 1;
+        {issue:null, index:after, value:value}
+    }
+    else if (math_unicode(token)^) {
+        let run = math_text_run(tokens, index, true)^;
+        if (run.issue != null) run
+        else {issue:null, index:run.index, value:<unicode_text value:run.text>}
+    }
+    else if (math_digit(token)) {
+        let numeric = math_number(tokens, index)^;
+        {issue:null, index:numeric.index, value:numeric.text}
+    }
+    else if (math_letter(token)) {issue:null, index:index + 1, value:token.value}
+    else if (token.kind == "control") math_command(tokens, index)^
+    else if (token.kind == "char" and len(token.value) == 1 and ord(token.value) < 128)
+        math_punctuation(tokens,index)^
+    else unsupported(index, "math atom")
+}
+
 fn math_atoms(tokens, index = 0, items = []) any^ {
-    if (index >= len(tokens)) {items: items, issue: null}
+    let at = math_nonspace(tokens,index)^;
+    if (at >= len(tokens)) {items:items, issue:null}
     else {
-        let token = tokens[index];
-        if (math_space(token)^) math_atoms(tokens, index + 1, items)
-        // a braced group is an atom and can itself carry scripts.
-        else if (opening(token)) {
-            let group = math_script_arg(tokens, index)^;
-            if (group.issue != null) group
-            else {
-                let scripted = math_scripts(tokens, group.index, group.value)^;
-                if (scripted.issue != null) scripted else math_atoms(tokens, scripted.index, [*items, scripted.value])
-            }
+        let atom = math_primary(tokens,at)^;
+        if (atom.issue != null) atom
+        else {
+            let scripted = math_scripts(tokens,atom.index,atom.value)^;
+            if (scripted.issue != null) scripted else math_atoms(tokens,scripted.index,[*items,scripted.value])
         }
-        else if (token.kind == "char" and contains(["#", "!"], token.value)) {
-            let raw = math_raw_run(tokens, index)^;
-            if (raw.issue != null) raw
-            else {
-                let scripted = math_scripts(tokens, raw.index, <raw_math_text value: raw.text>)^;
-                if (scripted.issue != null) scripted else math_atoms(tokens, scripted.index, [*items, scripted.value])
-            }
-        }
-        // native math treats a decimal prefix and an ellipsis differently from a period.
-        else if (token.kind == "char" and token.value == ".") {
-            let next = if (index + 1 < len(tokens)) tokens[index + 1] else null;
-            let third = if (index + 2 < len(tokens)) tokens[index + 2] else null;
-            let joined = next != null and math_adjacent(token, next);
-            let dots = joined and next.kind == "char" and next.value == "." and third != null and
-                third.kind == "char" and third.value == "." and math_adjacent(next, third);
-            let decimal_prefix = joined and math_digit(next);
-            let numeric = if (decimal_prefix) math_number(tokens, index)^ else null;
-            let value = if (decimal_prefix) numeric.text else if (dots) <raw_math_text value: "..."> else <punctuation value: ".">;
-            let after = if (decimal_prefix) numeric.index else index + if (dots) 3 else 1;
-            let scripted = math_scripts(tokens, after, value)^;
-            if (scripted.issue != null) scripted else math_atoms(tokens, scripted.index, [*items, scripted.value])
-        }
-        else if (math_unicode(token)^) {
-            let run = math_text_run(tokens, index, true)^;
-            if (run.issue != null) run
-            else {
-                let scripted = math_scripts(tokens, run.index, <unicode_text value: run.text>)^;
-                if (scripted.issue != null) scripted else math_atoms(tokens, scripted.index, [*items, scripted.value])
-            }
-        }
-        else if (math_letter(token) or math_digit(token)) {
-            let numeric = if (math_digit(token)) math_number(tokens, index)^ else {index: index + 1, text: token.value};
-            let scripted = math_scripts(tokens, numeric.index, numeric.text)^;
-            if (scripted.issue != null) scripted else math_atoms(tokens, scripted.index, [*items, scripted.value])
-        }
-        else if (token.kind == "control") {
-            let atom = math_command(tokens, index)^;
-            if (atom.issue != null) atom
-            else {
-                let scripted = math_scripts(tokens, atom.index, atom.value)^;
-                if (scripted.issue != null) scripted else math_atoms(tokens, scripted.index, [*items, scripted.value])
-            }
-        }
-        // Remaining ASCII characters have the native punctuation shape.
-        else if (token.kind == "char" and len(token.value) == 1 and ord(token.value) < 128) {
-            let atom = math_punctuation(tokens,index)^;
-            if (atom.issue != null) atom else {
-                let scripted = math_scripts(tokens,atom.index,atom.value)^;
-                if (scripted.issue != null) scripted else math_atoms(tokens,scripted.index,[*items,scripted.value])
-            }
-        }
-        else unsupported(index, "math atom")
     }
 }
 
@@ -2215,6 +2256,8 @@ fn needs_output_mapping(tokens, sources, main_file, constructor_mode, index = 0,
                 (token.direct != true or token.file != main_file)) or
                 token.raw_verb == true or token.raw_inline_kind != null or token.raw_group_kind != null or
                 token.raw_environment != null or escaped_text_name(token) != null) true
+        // Replayed controls need gaps from emitted bytes, not their original box span.
+        else if (token.kind == "control" and token.box_replayed == true) true
         else if (definition_group_index(tokens,index)^ >= 0) true
         else if (control(token,"par") and token.direct != true) true
         else if (dollar(token) or control(token,"(") or control(token,"[")) {
@@ -2601,6 +2644,62 @@ fn generic_arguments(tokens, sources, index, previous_end, source_file, groups =
     }
 }
 
+// Generic command parsing is shared by inline text and accent arguments.
+fn generic_command_node(tokens, sources, index) any^ {
+    let token = tokens[index];
+    // Synthetic commands use their verified reconstructed spelling and emission origin.
+    let mapped_command = (token.box_replayed == true and reconstructed_token(token)^) or token.read_offset != null or (token.output_synthetic_verified == true and token.direct != true and token.emit_origin != null and
+        reconstructed_token(token)^) or (token.output_start != null and
+        expanded_argument_sources(tokens,index + 1,token.file,sources)^);
+    let offset = if (mapped_command) rebuild.map_offset(token.output_segments,token.output_start)^ else token.start;
+    let next_token = if (index + 1 < len(tokens)) tokens[index + 1] else null;
+    let star = next_token != null and next_token.kind == "char" and next_token.value == "*";
+    let mapped = star and (if (mapped_command) reconstructed_literal(next_token)^
+        else next_token.direct == true and token.file == next_token.file);
+    let star_gap = if (mapped_command and star) output_between(token,next_token)^ else "";
+    let starred = mapped and (if (mapped_command) star_gap == "" else token.end == next_token.start);
+    let tag = if (token.value == "newtheorem" and starred) "newtheorem*" else token.value;
+    let at = index + if (starred) 2 else 1;
+    let next = if (at < len(tokens)) tokens[at] else null;
+    let anchor = tokens[at - 1];
+    let gap = if (mapped_command and next != null) output_between(anchor,next)^
+        else if (next != null and anchor.direct == true and next.direct == true and
+            anchor.file == next.file and next.start > anchor.end)
+        source_span({direct: true, file: anchor.file, start: anchor.end, end: next.start}, sources)^ else "";
+    let spaced_group = next != null and (opening(next) or
+        (next.kind == "char" and (next.value == "[" or next.value == "("))) and gap != "";
+    let joined = if (spaced_group) comment_gap(gap)^ else false;
+    if (mapped_command and next != null and gap == null) unsupported(index, "command source mapping")
+    else if (star and (not mapped or star_gap == null)) unsupported(index, "command star source mapping")
+    else if (spaced_group and not joined and (gap == null or (trim(gap) ^ { null }) != ""))
+        unsupported(index, "command argument source gap")
+    else if (spaced_group and not joined) {
+        let attrs = {source_offset: offset, *:if (starred) {starred: true} else {}, argument_groups: []};
+        {index:at, node:<[tag] *:attrs>, tail:gap, issue:null}
+    }
+    else if (at < len(tokens) and (opening(tokens[at]) or
+            (tokens[at].kind == "char" and (tokens[at].value == "[" or tokens[at].value == "(")))) {
+        let args = generic_arguments(tokens, sources, at, anchor.end, token.file, [], [], true, false, false,
+            anchor.output_end, mapped_command, if (code_fragment_command(token.value)) "raw" else "")^;
+        if (args.issue != null) args
+        else {
+            let following = if (args.index < len(tokens)) tokens[args.index] else null;
+            let tail_gap = if (mapped_command and following != null)
+                output_gap_text(output_between(tokens[args.index - 1],following)^)^ else "";
+            let attrs = {source_offset: offset, *:if (starred) {starred: true} else {}, argument_groups: args.groups};
+            let content = pack_arguments(args.items)^;
+            if (tail_gap == null) unsupported(index, "command argument source mapping")
+            else {index:args.index, node:<[tag] *:attrs, *content>, tail:tail_gap, issue:null}
+        }
+    }
+    else {
+        let text_gap = if (mapped_command) output_gap_text(gap)^ else if (starred) "" else control_gap(tokens, sources, index)^.text;
+        let attrs = {source_offset: offset, *:if (starred) {starred: true} else {}, argument_groups: []};
+        if (text_gap == null) unsupported(index, "command source gap")
+        else {index:at, node:<[tag] *:attrs>, tail:text_gap, issue:null}
+    }
+}
+
 fn accent_next(tokens, index) any^ =>
     if (index < len(tokens) and tokens[index].kind == "char" and tokens[index].cat == 10)
         accent_next(tokens, index + 1) else index
@@ -2620,17 +2719,52 @@ fn accent_gap_safe(tokens, sources, index) any^ {
     }
 }
 
+fn accent_comment_space(bytes, index = 0) any^ =>
+    if (index < len(bytes) and (bytes[index] == 32 or bytes[index] == 9))
+        accent_comment_space(bytes,index + 1) else index
+
+// The native parser consumes the percent as the argument before scanning its line as text.
+fn accent_comment(tokens, sources, index, offset) any^ {
+    let token = tokens[index];
+    let at = accent_next(tokens,index + 1)^;
+    let next = if (at < len(tokens)) tokens[at] else null;
+    let prior = if (at > index + 1) tokens[at - 1] else token;
+    let direct = offset != null and token.direct == true and token.read_offset == null and
+        token.output_start == null and next != null and next.direct == true and next.output_start == null and
+        token.file == next.file and next.start >= token.end and prior.seq != null and next.seq == prior.seq + 1;
+    if (not direct or next.start == token.end or control(next,"par") or paragraph_space(next,sources)^) null
+    else {
+        let gap = source_span({direct:true,file:token.file,start:token.end,end:next.start},sources)^;
+        let bytes = if (gap == null) binary("")^ else binary(gap)^;
+        let marker = accent_comment_space(bytes)^;
+        let body = if (marker < len(bytes) and bytes[marker] == 37) slice(bytes,marker + 1,len(bytes)) else null;
+        // Control syntax and paragraph boundaries need the full native inline parser.
+        let plain = body != null and len(body) > 0 and body[len(body) - 1] == 10 and
+            all([for (b in slice(body,0,len(body) - 1)^) (b == 9 or b >= 32) and
+                not contains([36, 37, 38, 92, 123, 125],b)]);
+        if (not plain) null else {index:at, node:<accent command:token.value, source_offset:offset, "%">,
+            // The recovered comment has already contributed its text to the inline stream.
+            tokens:[*slice(tokens,0,at),{*:next,paragraph_gap_seen:true},*slice(tokens,at + 1,len(tokens))],
+            tail:utf8.decode(body)^, issue:null}
+    }
+}
+
 fn accent_name(name) => contains(["'", "`", "^", "\"", "~", "=", ".", "u", "v", "H", "c", "d", "b", "t", "k"], name)
 fn accent_node(tokens, sources, index) any^ {
     let token = tokens[index];
     let offset = if (token.emit_origin != null) token.emit_origin
         else if (token.read_offset != null) token.read_offset
         else if (token.direct == true) token.start else null;
-    let arg = accent_argument(tokens, sources, index + 1)^;
+    let comment = accent_comment(tokens,sources,index,offset)^;
     if (offset == null) unsupported(index, "accent source mapping")
+    else if (comment != null) comment
     else if (not accent_gap_safe(tokens, sources, index)^) unsupported(index, "accent source gap")
-    else if (arg.issue != null) arg
-    else {index: arg.index, node: <accent command: token.value, source_offset: offset, *arg.items>, issue: null}
+    else {
+        let arg = accent_argument(tokens, sources, index + 1)^;
+        if (arg.issue != null) arg
+        else {index: arg.index, node: <accent command: token.value, source_offset: offset, *arg.items>,
+            tail: if (arg.tail == null) "" else arg.tail, tokens:arg.tokens, issue: null}
+    }
 }
 
 fn accent_argument(tokens, sources, index) any^ {
@@ -2654,7 +2788,90 @@ fn accent_argument(tokens, sources, index) any^ {
         {index: index + 1, items: [tokens[index].value], issue: null}
     else if (tokens[index].kind == "control" and accent_name(tokens[index].value)) {
         let nested = accent_node(tokens, sources, index)^;
-        if (nested.issue != null) nested else {index: nested.index, items: [nested.node], issue: null}
+        if (nested.issue != null) nested else {index: nested.index, items: [nested.node],
+            tail:nested.tail, tokens:nested.tokens, issue: null}
+    }
+    // the native document scanner may join source letters that TeX tokenized separately.
+    else if (tokens[index].kind == "control" and tokens[index].direct == true and
+            tokens[index].read_offset == null and index + 1 < len(tokens) and
+            (native_name_letter(tokens[index + 1])^ or tokens[index + 1].kind == "active") and
+            source_span(tokens[index],sources)^ == "\\" ++ tokens[index].value and
+            native_word_end(split(tokens[index].value, "")^)^ == len(tokens[index].value) and
+            native_join_end(tokens,sources,index + 1,tokens[index].end,tokens[index].file)^ > index + 1) {
+        let token = tokens[index];
+        let end = native_join_end(tokens,sources,index + 1,token.end,token.file)^;
+        let word = token.value ++ join([for (part in slice(tokens,index + 1,end)) part.value], "")^;
+        // a mapped stream must also prove that the emitted spelling stayed adjacent.
+        let mapped = token.output_start != null;
+        let verified = not mapped or (reconstructed_token(token)^ and token.output_end != null and
+            native_join_end(tokens,sources,index + 1,token.output_end)^ == end);
+        if (len(word) >= 95 or not verified) unsupported(index,"accent command lexical source mapping")
+        else {
+            let joined = {*:token,value:word,end:tokens[end - 1].end,seq:tokens[end - 1].seq,
+                *:if (token.output_start != null) {output_end:tokens[end - 1].output_end} else {}};
+            let normalized = [*slice(tokens,0,index),joined,*slice(tokens,end,len(tokens))];
+            let parsed = accent_argument(normalized,sources,index)^;
+            if (parsed.issue != null) parsed else {*:parsed,tokens:if (parsed.tokens == null) normalized else parsed.tokens}
+        }
+    }
+    else if (tokens[index].kind == "control") {
+        let token = tokens[index];
+        let next = if (index + 1 < len(tokens)) tokens[index + 1] else null;
+        let gap = if (next == null or next.paragraph_normalized == true) "" else if (token.output_end != null and next.output_start != null)
+            output_between(token,next)^ else if (token.direct == true and next.direct == true and
+                token.file == next.file and next.start >= token.end)
+            source_span({direct:true, file:token.file, start:token.end, end:next.start},sources)^ else null;
+        let grouped = next != null and (opening(next) or (next.kind == "char" and
+            contains(["[", "("], next.value)));
+        let star = next != null and next.kind == "char" and next.value == "*";
+        // Direct adjacent arguments use the same scanner as ordinary inline commands.
+        let direct_group = grouped and gap == "" and token.direct == true and token.read_offset == null and
+            token.output_start == null and next.direct == true and token.file == next.file;
+        let args = if (direct_group) generic_arguments(tokens,sources,index + 1,token.end,token.file,
+            [],[],true,false,false,null,false,if (code_fragment_command(token.value)) "raw" else "")^ else null;
+        let end = if (args != null and args.issue == null) args.index else index + 1;
+        let ending = tokens[end - 1];
+        let following = if (end < len(tokens)) tokens[end] else null;
+        let tail = if (following == null) "" else if (ending.direct == true and following.direct == true and
+                ending.file == following.file and following.start >= ending.end)
+            source_span({direct:true,file:ending.file,start:ending.end,end:following.start},sources)^ else null;
+        // TeX discards control-word whitespace that the native tree retains.
+        let gap_bytes = if (gap == null) binary("")^ else binary(gap)^;
+        let safe_gap = gap != null and all([for (b in gap_bytes) contains([9, 10, 13, 32], b)]) and
+            len([for (b in gap_bytes where b == 10 or b == 13) b]) <= 1 and
+            not ((contains(gap,"\n") or contains(gap,"\r")) and
+                (control(next,"par") or paragraph_space(next,sources)^));
+        // the generic parser already preserves the adjacent star and its argument spans.
+        let direct_star = star and token.direct == true and token.read_offset == null and
+            token.output_start == null and next.direct == true and token.file == next.file and token.end == next.start;
+        if (direct_star and not block(token)^ and not special_command(token.value)) {
+            let command = generic_command_node(tokens,sources,index)^;
+            // specialized inline commands must retain their own native node shape.
+            let parsed = if (command.issue == null) inline(slice(tokens,index,command.index), sources, 0, "", [], false)^ else null;
+            if (command.issue != null or parsed.issue != null or len(parsed.items) != 1 or parsed.items[0] != command.node)
+                unsupported(index,"accent argument")
+            else {index:command.index, items:[command.node], tail:command.tail, issue:null}
+        }
+        else if (star or not safe_gap or (grouped and (not direct_group or args.issue != null or tail != "")) or
+                block(token)^ or (special_command(token.value) and not escaped_literal_control(token)^))
+            unsupported(index, "accent argument")
+        // Inside an accent, native parsing treats an explicit \par as a command.
+        else if (control(token,"par") and token.direct == true and token.read_offset == null and
+                token.output_start == null and source_span(token,sources)^ == "\\par") {
+            let command = generic_command_node(tokens,sources,index)^;
+            if (command.issue != null or command.index != end) unsupported(index,"accent argument")
+            else {index:command.index, items:[command.node], tail:command.tail, issue:null}
+        }
+        else {
+            // Reuse the ordinary inline parser so command offsets and escaping agree.
+            let parsed = inline(slice(tokens,index,end), sources, 0, "", [], false)^;
+            let item = if (parsed.issue == null and len(parsed.items) == 1) parsed.items[0] else null;
+            // Inline-only symbols such as \par do not have the native accent shape.
+            let matches = if (item is element) string(name(item)) == token.value
+                else if (item is string) escaped_literal_control(token)^ and item == token.value else false;
+            if (parsed.issue != null or not matches) unsupported(index, "accent argument")
+            else {index:end, items:parsed.items, tail:gap, issue:null}
+        }
     }
     else unsupported(index, "accent argument")
 }
@@ -2691,10 +2908,22 @@ fn generated_rule(tokens, index) any^ {
             if (width.issue != null) width
             else if (height.issue != null) height
             else {
+                let token = tokens[index];
+                let ending = tokens[second.end - 1];
+                let replay = token.box_replayed == true;
+                let positions = if (replay) slice(tokens,index,second.end)^ else [];
+                // A replay's last endpoint can map to the following source segment.
+                let valid = not replay or (token.output_start != null and token.output_segments != null and
+                    ending.output_end != null and all([for (i in (0 to len(positions) - 1)^)
+                        positions[i].output_start != null and positions[i].output_end != null and
+                        reconstructed_token(positions[i])^ and (i == 0 or positions[i].output_start == positions[i - 1].output_end)]) and
+                    rebuild.map_offset(token.output_segments,token.output_start)^ == origin);
+                let final_end = if (valid and replay) rebuild.map_offset(token.output_segments,ending.output_end)^ else origin;
                 let groups = [{kind: "required", raw: width.raw, start: origin, end: origin},
-                    {kind: "required", raw: height.raw, start: origin, end: origin}];
+                    {kind: "required", raw: height.raw, start: origin, end: final_end}];
                 let content = pack_arguments([*width.items, *height.items])^;
-                {issue: null, index: second.end, node: <rule source_offset: origin, argument_groups: groups, *content>}
+                if (not valid) unsupported(index,"box rule source mapping")
+                else {issue: null, index: second.end, node: <rule source_offset: origin, argument_groups: groups, *content>}
             }
         }
     }
@@ -3097,6 +3326,10 @@ fn inline(tokens, sources, index = 0, text = "", items = [], stop_blocks = true,
             let updated = [*slice(tokens,0,index),{*:token,paragraph_gap_seen:true},*slice(tokens,index + 1,len(tokens))];
             inline(updated,sources,index,text ++ pending_comment,items,stop_blocks,table_mode)
         }
+        else if (skipped_text_line_gap(tokens,sources,index)^) {
+            let restored = restore_control_gap(tokens,sources,index - 1)^;
+            inline(restored,sources,index,text,items,stop_blocks,table_mode)
+        }
         else if (paragraph_space(token,sources)^) {
             let run = paragraph_run(tokens,sources,index)^;
             if (run.issue != null) run
@@ -3153,6 +3386,7 @@ fn inline(tokens, sources, index = 0, text = "", items = [], stop_blocks = true,
             let can_map = following != null and token.output_end != null and following.output_start != null and
                 following.output_text != null and following.output_start >= token.output_end;
             let gap = if (can_map) utf8.decode(slice(mapped_bytes(following)^,token.output_end,following.output_start))^ else null;
+            // Prefix expansion can consume source inside a following definition argument.
             let joined_group = gap != null and (gap == "" or comment_gap(gap)^);
             let definition = definition_span(token, sources, false, mapped_end)^;
             if (definition.issue != null) {
@@ -3213,8 +3447,8 @@ fn inline(tokens, sources, index = 0, text = "", items = [], stop_blocks = true,
             unsupported(index, "active syntax character")
         else if (token.kind == "active")
             inline(tokens, sources, index + 1, text ++ token.value, items, stop_blocks, table_mode)
-        // native tabular bodies emit cell separators at this nesting level only.
-        else if (table_mode and token.kind == "char" and token.value == "&")
+        // Only TeX alignment-category tokens separate cells at this nesting level.
+        else if (table_mode and token.kind == "char" and token.cat == 4 and token.value == "&")
             inline(tokens, sources, index + 1, "", [*append_text(items, text), 'alignment_tab'], stop_blocks, table_mode)
         // Native constructor arguments retain directly read character-definition names.
         else if (not stop_blocks and token.chardef_emission == true) {
@@ -3306,7 +3540,7 @@ fn inline(tokens, sources, index = 0, text = "", items = [], stop_blocks = true,
             if (gap == null) unsupported(index, "control-space source gap")
             else inline(tokens, sources, index + 1, text ++ " " ++ gap, items, stop_blocks, table_mode)
         }
-        else if (token.kind == "control" and contains(["$", "%", "#", "&", "_", "{", "}"], token.value))
+        else if (escaped_literal_control(token)^)
             inline(tokens, sources, index + 1, text ++ token.value, items, stop_blocks, table_mode)
         else if (token.kind == "control" and contains(["\\", "quad", "qquad", ",", ";", ":", "!"], token.value)) {
             let gap = if (contains(["quad", "qquad"], token.value))
@@ -3324,14 +3558,12 @@ fn inline(tokens, sources, index = 0, text = "", items = [], stop_blocks = true,
         else if (token.kind == "control" and accent_name(token.value)) {
             let accent = accent_node(tokens, sources, index)^;
             if (accent.issue != null) accent
-            else inline(tokens, sources, accent.index, "", [*append_text(items, text), accent.node], stop_blocks, table_mode)
+            else inline(if (accent.tokens == null) tokens else accent.tokens, sources,
+                accent.index, accent.tail, [*append_text(items, text), accent.node], stop_blocks, table_mode)
         }
         else if (token.kind == "control" and contains(["hrule", "vrule"], token.value) and token.echo_span != null and
             rule_span_needs_reparse(token, sources)^)
             unsupported(index, "rule comment source gap")
-        // a replayed synthetic rule's last argument follows the later source cursor.
-        else if (control(token, "rule") and token.emit_origin != null and token.box_replayed == true)
-            unsupported(index, "box rule source mapping")
         else if (control(token, "rule") and token.emit_origin != null) {
             let rule = generated_rule(tokens, index)^;
             if (rule.issue != null) rule
@@ -3429,61 +3661,10 @@ fn inline(tokens, sources, index = 0, text = "", items = [], stop_blocks = true,
                         (token.direct == true and token.file == token.read_file)))))
             unsupported(index, "command source mapping")
         else if (token.kind == "control") {
-            // native commands consume a star only when it immediately follows the control word.
-            // Synthetic commands use their verified reconstructed spelling and emission origin.
-            let mapped_command = token.read_offset != null or (token.output_synthetic_verified == true and token.direct != true and token.emit_origin != null and
-                reconstructed_token(token)^) or (token.output_start != null and
-                expanded_argument_sources(tokens,index + 1,token.file,sources)^);
-            let offset = if (mapped_command) rebuild.map_offset(token.output_segments,token.output_start)^ else token.start;
-            let next_token = if (index + 1 < len(tokens)) tokens[index + 1] else null;
-            let star = next_token != null and next_token.kind == "char" and next_token.value == "*";
-            let mapped = star and (if (mapped_command) reconstructed_literal(next_token)^
-                else next_token.direct == true and token.file == next_token.file);
-            let star_gap = if (mapped_command and star) output_between(token,next_token)^ else "";
-            let starred = mapped and (if (mapped_command) star_gap == "" else token.end == next_token.start);
-            let tag = if (token.value == "newtheorem" and starred) "newtheorem*" else token.value;
-            let at = index + if (starred) 2 else 1;
-            let next = if (at < len(tokens)) tokens[at] else null;
-            let anchor = tokens[at - 1];
-            let gap = if (mapped_command and next != null) output_between(anchor,next)^
-                else if (next != null and anchor.direct == true and next.direct == true and
-                    anchor.file == next.file and next.start > anchor.end)
-                source_span({direct: true, file: anchor.file, start: anchor.end, end: next.start}, sources)^ else "";
-            let spaced_group = next != null and (opening(next) or
-                (next.kind == "char" and (next.value == "[" or next.value == "("))) and gap != "";
-            let joined = if (spaced_group) comment_gap(gap)^ else false;
-            if (mapped_command and next != null and gap == null) unsupported(index, "command source mapping")
-            else if (star and (not mapped or star_gap == null)) unsupported(index, "command star source mapping")
-            else if (spaced_group and not joined and (gap == null or (trim(gap) ^ { null }) != ""))
-                unsupported(index, "command argument source gap")
-            else if (spaced_group and not joined) {
-                let attrs = {source_offset: offset, *:if (starred) {starred: true} else {}, argument_groups: []};
-                let node = <[tag] *:attrs>;
-                inline(tokens, sources, at, gap, [*append_text(items, text), node], stop_blocks, table_mode)
-            }
-            else if (at < len(tokens) and (opening(tokens[at]) or
-                    (tokens[at].kind == "char" and (tokens[at].value == "[" or tokens[at].value == "(")))) {
-                let args = generic_arguments(tokens, sources, at, anchor.end, token.file, [], [], true, false, false,
-                    anchor.output_end, mapped_command, if (code_fragment_command(token.value)) "raw" else "")^;
-                if (args.issue != null) args
-                else {
-                    let following = if (args.index < len(tokens)) tokens[args.index] else null;
-                    let tail_gap = if (mapped_command and following != null)
-                        output_gap_text(output_between(tokens[args.index - 1],following)^)^ else "";
-                    let attrs = {source_offset: offset, *:if (starred) {starred: true} else {}, argument_groups: args.groups};
-                    let content = pack_arguments(args.items)^;
-                    let node = <[tag] *:attrs, *content>;
-                    if (tail_gap == null) unsupported(index, "command argument source mapping")
-                    else inline(tokens, sources, args.index, tail_gap, [*append_text(items, text), node], stop_blocks, table_mode)
-                }
-            }
-            else {
-                let gap = if (mapped_command) {text: output_gap_text(gap)^} else if (starred) {text: ""} else control_gap(tokens, sources, index)^;
-                let attrs = {source_offset: offset, *:if (starred) {starred: true} else {}, argument_groups: []};
-                let node = <[tag] *:attrs>;
-                if (gap.text == null) unsupported(index, "command source gap")
-                else inline(tokens, sources, at, gap.text, [*append_text(items, text), node], stop_blocks, table_mode)
-            }
+            let command = generic_command_node(tokens,sources,index)^;
+            if (command.issue != null) command
+            else inline(tokens,sources,command.index,command.tail,
+                [*append_text(items,text),command.node],stop_blocks,table_mode)
         }
         else unsupported(index, "token")
     }
@@ -4075,9 +4256,6 @@ pub fn digest(expanded: map) Digested^ {
     // non-text source after the document needs full source-aware digestion.
     else if (expanded.trailing_source != null and not plain_trailing_text(expanded.trailing_source.text)^)
         {ast: null, issue: "latex-digest-unsupported", unsupported: "post-document source mapping"}
-    // macro-expanded assignments can join following groups to echoed definitions.
-    else if (expanded.prefixed_macro_seen == true and any([for (token in expanded.output) token.kind == "source-span"]))
-        {ast: null, issue: "latex-digest-unsupported", unsupported: "prefixed macro source mapping"}
     // consumed paragraph data can change native argument and math source mapping.
     else if (expanded.paragraph_data_seen == true)
         {ast: null, issue: "latex-digest-unsupported", unsupported: "paragraph assignment source mapping"}
@@ -4088,10 +4266,17 @@ pub fn digest(expanded: map) Digested^ {
     // Legacy argument expansion consumes font commands that native constructors retain.
     else if (expanded.font_token_seen == true and not expanded.constructor_argument_mode)
         {ast: null, issue: "latex-digest-unsupported", unsupported: "font token source mapping"}
+    // Legacy argument expansion cannot retain font commands around their diagnostics.
+    else if (expanded.font_parameter_error_seen == true and not expanded.constructor_argument_mode)
+        {ast: null, issue: "latex-digest-unsupported", unsupported: "font parameter diagnostic source mapping"}
     else if (expanded.mathchardef_emission_seen == true)
         {ast: null, issue: "latex-digest-unsupported", unsupported: "math character source mapping"}
+    else if (expanded.expl3_regex_seen == true)
+        {ast:null, issue:"latex-digest-unsupported", unsupported:"expl3 regex source mapping"}
     else if (expanded.expl3_bool_expr_seen == true)
         {ast: null, issue: "latex-digest-unsupported", unsupported: "expl3 boolean expression source mapping"}
+    else if (expanded.expl3_str_ee_seen == true)
+        {ast: null, issue: "latex-digest-unsupported", unsupported: "expl3 expanded string comparison source mapping"}
     else if (expanded.expl3_str_case_seen == true)
         {ast: null, issue: "latex-digest-unsupported", unsupported: "expl3 string case source mapping"}
     else if (expanded.expl3_seq_map_seen == true)
@@ -4102,6 +4287,8 @@ pub fn digest(expanded: map) Digested^ {
         {ast: null, issue: "latex-digest-unsupported", unsupported: "expl3 replication source mapping"}
     else if (expanded.expl3_tl_replace_seen == true)
         {ast: null, issue: "latex-digest-unsupported", unsupported: "expl3 token replacement source mapping"}
+    else if (expanded.expl3_tl_trim_seen == true)
+        {ast: null, issue: "latex-digest-unsupported", unsupported: "expl3 token trimming source mapping"}
     // Expanded tail results still need the native emission-origin mapping.
     else if (expanded.expl3_tl_tail_seen == true)
         {ast: null, issue: "latex-digest-unsupported", unsupported: "expl3 token tail source mapping"}
@@ -4113,6 +4300,9 @@ pub fn digest(expanded: map) Digested^ {
         {ast: null, issue: "latex-digest-unsupported", unsupported: "expl3 value argument source mapping"}
     else if (expanded.expl3_int_math_seen == true)
         {ast: null, issue: "latex-digest-unsupported", unsupported: "expl3 integer source mapping"}
+    // Legacy constructor expansion executes allocations that native argument scanning retains.
+    else if (expanded.expl3_int_new_seen == true and not expanded.constructor_argument_mode)
+        {ast: null, issue: "latex-digest-unsupported", unsupported: "expl3 register allocation source mapping"}
     else if (expanded.expl3_keyval_seen == true)
         {ast: null, issue: "latex-digest-unsupported", unsupported: "expl3 key-value source mapping"}
     else if (expanded.expl3_keys_seen == true)
