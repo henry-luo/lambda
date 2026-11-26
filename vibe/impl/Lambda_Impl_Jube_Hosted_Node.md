@@ -1,5 +1,9 @@
 # Jube Hosted Node — Detailed Implementation Plan
 
+> **Current profile update (2026-11-26):** `node-net` was retired from the
+> shipped Node profile under D9.4.1. Its source, manifest, and tests were
+> removed; the N5b details below are historical implementation notes.
+
 > **Status:** implementation underway. N0 architecture tooling and the N1
 > registry/catalog foundation are landed; N2 has the additive requirements and
 > session lifecycle boundary plus complete static `node-core/path` and
@@ -210,7 +214,7 @@
 > reviving the legacy host implementation. The compatibility package remains
 > the profile that carries the verified dynamic image.
 > N0.5's link audit confirms zlib must remain in the host independently of the
-> Node surface: PDF post-processing/decompression, npm tarball extraction, and
+> Node surface: PDF post-processing/decompression, and
 > font decompression include it. mbedTLS likewise remains host-linked for the
 > serve TLS handler and the existing JS TLS/crypto and digest paths. N4/N6 may
 > remove those libraries from a Node module's implementation boundary, but
@@ -489,8 +493,8 @@ These are release gates, not preferences:
   lines) — POC 1 / `radiant-dom` territory. `js_fetch`'s future as a Jube
   module (JA1 consequences) is its own plan.
 - Moving the event loop, global timers, microtask/nextTick machinery,
-  `console` core, `process` core, the JS module cache, the npm resolver
-  (revisit after N5), or `node:vm` out of the host (JN6).
+  `console` core, `process` core, the JS module cache, or `node:vm` out of the
+  host (JN6).
 - The JA16 central IO API design (open item 8 there). This plan's banned
   `uv_*` checker list is JA16's first enforcement instance, and the §15 op
   families are input to that design, but the IO-policy layer is not built
@@ -1523,7 +1527,6 @@ Implementation pauses for review if any of these becomes necessary:
 | 2 | crypto/WebCrypto split is surgery in an 8.7k file | N6c | three sub-tasks with the shared-primitives layer first; re-enumeration at sub-stage start |
 | 3 | process split hides engine deps on Node-only members | N3.3 | committed enumeration artifact; shim audit; minimal-profile smoke |
 | 4 | console degradation without node-core | N3.4 | absent-default formatter written + tested in N3, not later |
-| 5 | npm resolver placement | post-N5 | explicitly deferred; revisit note in N7.3 docs |
 | 6 | `node:vm` stays host | — | documented exception (JN6); no work here |
 | 7 | Windows loader parity | N4+ | keep export surface = Jube tables only (JN8 helps); Windows CI is out of scope but the export audit (§17.4) keeps the door open |
 | 8 | request-API coverage/cost: fs.watch, IPC fd passing, fd adoption; pool starvation; copy-on-submit cost | N2.1/N5/N6a | edge inventory before v1 freeze; pool sizing + hygiene rule documented; zero-copy only on N6a profile evidence |

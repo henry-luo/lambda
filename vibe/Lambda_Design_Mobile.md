@@ -236,7 +236,6 @@ What changed around it:
   - the `temp:` path scheme and other `"temp"` names;
   - the event-file harness's rule that fixtures write only under the repo's `temp/`;
   - `test_output/` dumps;
-  - the npm installer's project-local `.lambda/` (deferred with Jube);
   - the unbuilt `font_config.c`.
 - **Wasm.** The manifest gained `lib/host_paths.c`, with environment lookups and directory creation guarded by `LAMBDA_NO_AMBIENT_PROVIDERS` / `LAMBDA_NO_FILE_IO`, following the existing convention. It was not rebuilt; there is no Emscripten here.
 

@@ -63,7 +63,6 @@
     "internal/streams/add-abort-signal",
     "internal/streams/end-of-stream",
     "internal/streams/state",
-    "internal/crypto/util",
     "internal/util",
     "internal/util/inspect",
     "internal/repl",

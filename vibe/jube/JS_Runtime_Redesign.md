@@ -849,13 +849,12 @@ cases; IC-state plumbing through `js_exec_profile` becomes one dump loop.
 `module_registry` (D7); two caching/instantiation lifecycles.
 
 **Design.** JS modules (ESM and CJS) register, cache, and instantiate through
-the Lambda module registry and Jube packaging; Node semantics (extension
-probing, `node_modules` walk, JSON modules, compile cache) become a
-**resolver + format plug-in** consulted by the one loader. The Node compile
-cache keys into the same registry entry rather than a parallel table.
+the Lambda module registry and Jube packaging. Node-specific resolution and
+format behavior belongs in a **resolver + format plug-in** consulted by the
+one loader. The Node compile cache keys into the same registry entry rather
+than a parallel table.
 
-**Deleted.** The private loader's duplicate registry/caching layers (the
-resolver logic itself is kept — it is genuine Node semantics).
+**Deleted.** The private loader's duplicate registry and caching layers.
 
 ### JR10 — Decomposition of `js_runtime.cpp`
 

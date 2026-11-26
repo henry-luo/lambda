@@ -867,8 +867,7 @@ struct JubeHostStreamAPI {
     uint32_t struct_size;
     Item (*file_read_stream_new)(Item path, Item options);
     Item (*file_write_stream_new)(Item path, Item options);
-    // TCP handles are host-owned opaque resources. A Node module may retain
-    // only the returned rid; no uv handle or loop pointer crosses this ABI.
+    // Retired TCP transport slots stay in this additive table for ABI layout (D9.4.2).
     int (*tcp_create)(void* session, Item owner, uint32_t* out_resource_id);
     // Bind/address/fd adoption stay POD-only so the module owns the
     // BoundSocket object while the host remains the platform socket owner.
@@ -891,8 +890,7 @@ struct JubeHostStreamAPI {
     void (*transform_flush_drained)(Item stream);
 };
 
-// Network policy and raw resolver operations stay host-owned, while node-net
-// owns public Node setters/getters. The module never observes libuv handles.
+// Retired network-policy service table retained for additive ABI compatibility (D9.4.2).
 struct JubeHostNetworkAPI {
     uint32_t api_version;
     uint32_t struct_size;
@@ -1125,7 +1123,7 @@ struct JubeHostNodeAPI {
     // Additive permission tail consumed by extracted filesystem services.
     const JubeHostNodePermissionAPI* permission;
     const JubeHostStreamAPI* streams;
-    // Additive network-policy tail consumed by node-net.
+    // Reserved legacy network-policy tail retained for ABI compatibility (D9.4.2).
     const JubeHostNetworkAPI* network;
     // Additive static-host codec provider; its node-zlib consumer was removed
     // 2026-10-07, and the slot stays so the table layout is unchanged.

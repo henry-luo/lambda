@@ -489,29 +489,6 @@
       "source_files": [
         "lambda/module/node_fs/node_fs_module.cpp"
       ]
-    },
-    {
-      "name": "node-net",
-      "description": "External Node net Jube module",
-      "defines": [
-        "LAMBDA_NODE_NET_DYNAMIC_MODULE"
-      ],
-      "source_files": [
-        "lambda/module/node_net/node_net_module.cpp"
-      ]
-    },
-    {
-      "name": "node-crypto",
-      "description": "External Node crypto Jube module",
-      "defines": [
-        "LAMBDA_NODE_CRYPTO_DYNAMIC_MODULE"
-      ],
-      "source_files": [
-        "lambda/module/node_crypto/node_crypto_module.cpp"
-      ],
-      "dependencies": [
-        "node-core"
-      ]
     }
   ],
   "targets": [
@@ -3347,30 +3324,6 @@
             "icon": "\ud83e\udde9"
           },
           {
-            "source": "test_npm_semver_gtest.cpp",
-            "name": "NPM Semver Tests",
-            "dependencies": [],
-            "libraries": [
-              "gtest",
-              "gtest_main"
-            ],
-            "additional_sources": [
-              "lambda/module/npm/semver.cpp",
-              "lib/mem_context.c",
-              "lib/memtrack.c",
-              "lib/mem_alloc.c",
-              "lib/hashmap.c",
-              "lib/arena.c",
-              "lib/mempool.c",
-              "lib/str.c",
-              "lib/str_simd.c",
-              "lib/utf.c",
-              "lib/log.c"
-            ],
-            "binary": "test_npm_semver_gtest.exe",
-            "icon": "\ud83d\udce6"
-          },
-          {
             "source": "lib/test_avl_tree.cpp",
             "name": "AVL Tree Implementation Tests",
             "dependencies": [],
@@ -6065,23 +6018,6 @@
             ],
             "binary": "test_edit_bridge_gtest.exe",
             "icon": "\u270f\ufe0f"
-          },
-          {
-            "source": "test_npm_package_json_gtest.cpp",
-            "name": " npm package.json Tests",
-            "category": "extended",
-            "dependencies": [
-              "lambda-data"
-            ],
-            "libraries": [
-              "gtest",
-              "gtest_main"
-            ],
-            "additional_sources": [
-              "lambda/module/npm/npm_package_json.cpp"
-            ],
-            "binary": "test_npm_package_json_gtest.exe",
-            "icon": "\ud83d\udce6"
           },
           {
             "source": "test_source_pos_bridge_gtest.cpp",

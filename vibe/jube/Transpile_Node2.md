@@ -2,7 +2,7 @@
 
 ## 1. Executive Summary
 
-Lambda's Node.js compatibility layer (Transpile_Node) has established a solid foundation with 23 built-in modules implemented and an npm package management system. This proposal analyzes the results of running the official Node.js test suite (`ref/node/test/parallel/`) against Lambda's JS runtime and defines a phased plan to improve compliance.
+Lambda's Node.js compatibility layer (Transpile_Node) has established a solid foundation with 23 built-in modules implemented. This proposal analyzes the results of running the official Node.js test suite (`ref/node/test/parallel/`) against Lambda's JS runtime and defines a phased plan to improve compliance.
 
 ### Current State (after Phase 5 implementation)
 

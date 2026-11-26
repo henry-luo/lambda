@@ -1,8 +1,8 @@
 // Native source/config core of utils/check_node_module_architecture.py.
 import .path_utils
 
-let node_modules = ["node_core", "node_fs", "node_net",
-                    "node_child_process", "node_http", "node_tls", "node_crypto"]
+let node_modules = ["node_core", "node_fs",
+                    "node_child_process", "node_http", "node_tls"]
 let forbidden_tokens = [
     "\"../../js/", "\"../js/", "\"../../runtime/", "\"../runtime/",
     "js_runtime.h", "js_runtime_state.hpp", "js_globals.cpp",

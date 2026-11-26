@@ -53,23 +53,15 @@ try {
 
 // Tune4 startup keeps these bindings as real own slots while deferring each
 // large namespace transaction until Get observes its lazy value.
-out("lazy-own", ["process", "Buffer", "crypto"].every(
+out("lazy-own", ["process", "Buffer"].every(
     name => Object.prototype.hasOwnProperty.call(globalThis, name)));
 out("lazy-process-descriptor",
     Object.getOwnPropertyDescriptor(globalThis, "process").value === process);
 out("lazy-buffer-descriptor",
     Object.getOwnPropertyDescriptor(globalThis, "Buffer").value === Buffer);
-out("lazy-crypto-descriptor",
-    Object.getOwnPropertyDescriptor(globalThis, "crypto").value === crypto);
 out("lazy-buffer-module", Buffer === require("buffer").Buffer);
-out("lazy-crypto-module", crypto === require("crypto"));
 
 const originalBuffer = Buffer;
 globalThis.Buffer = 42;
 out("lazy-replaced", globalThis.Buffer);
 globalThis.Buffer = originalBuffer;
-
-const originalCrypto = crypto;
-delete globalThis.crypto;
-out("lazy-deleted", "crypto" in globalThis);
-globalThis.crypto = originalCrypto;

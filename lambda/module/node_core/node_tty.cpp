@@ -49,21 +49,6 @@ static void node_tty_set_property(Item object, const char* name, Item value) {
     node_tty_host->node->roots->root_frame_end(&frame);
 }
 
-static Item node_tty_property(Item object, const char* name) {
-    JubeRootFrame frame = {};
-    if (!node_tty_host->node->roots->root_frame_begin(&frame, 1)) return ItemNull;
-    uint64_t* key_root = node_tty_host->node->roots->root_frame_take_slot(&frame);
-    if (!key_root) {
-        node_tty_host->node->roots->root_frame_end(&frame);
-        return ItemNull;
-    }
-    Item key = node_tty_host->value->string_from_utf8_n(name, strlen(name));
-    *key_root = key.item;
-    Item result = node_tty_host->value->property_get(object, node_tty_root_value(key_root));
-    node_tty_host->node->roots->root_frame_end(&frame);
-    return result;
-}
-
 template <typename Target>
 static void node_tty_set_method(Item object, const char* name, Target target,
                                 int adapter_arity) {
@@ -84,79 +69,24 @@ static void node_tty_set_method(Item object, const char* name, Target target,
     node_tty_host->node->roots->root_frame_end(&frame);
 }
 
-static void node_tty_build_stream_constructor(Item namespace_item, const char* name,
-                                              Item socket_fn, Item socket_proto) {
-    JubeRootFrame frame = {};
-    if (!node_tty_host->node->roots->root_frame_begin(&frame, 5)) return;
-    uint64_t* namespace_root = node_tty_host->node->roots->root_frame_take_slot(&frame);
-    uint64_t* function_root = node_tty_host->node->roots->root_frame_take_slot(&frame);
-    uint64_t* prototype_root = node_tty_host->node->roots->root_frame_take_slot(&frame);
-    uint64_t* socket_function_root = node_tty_host->node->roots->root_frame_take_slot(&frame);
-    uint64_t* socket_prototype_root = node_tty_host->node->roots->root_frame_take_slot(&frame);
-    if (!namespace_root || !function_root || !prototype_root || !socket_function_root ||
-            !socket_prototype_root) {
-        node_tty_host->node->roots->root_frame_end(&frame);
-        return;
-    }
-    *namespace_root = namespace_item.item;
-    *socket_function_root = socket_fn.item;
-    *socket_prototype_root = socket_proto.item;
-    Item constructor = jube_new_constructor(node_tty_host->script,
-        node_tty_empty_object, 1);
-    *function_root = constructor.item;
-    Item prototype = node_tty_host->value->new_object();
-    *prototype_root = prototype.item;
-    node_tty_set_property(node_tty_root_value(prototype_root), "constructor",
-        node_tty_root_value(function_root));
-    Item constructor_key = node_tty_host->value->string_from_utf8_n("constructor", 11);
-    node_tty_host->script->mark_non_enumerable(node_tty_root_value(prototype_root), constructor_key);
-    node_tty_host->script->function_set_prototype(node_tty_root_value(function_root),
-        node_tty_root_value(prototype_root));
-    node_tty_host->script->set_prototype(node_tty_root_value(function_root),
-        node_tty_root_value(socket_function_root));
-    // Constructor/prototype creation may compact before the inherited Socket
-    // prototype is attached, so retain the host value in this frame.
-    node_tty_host->script->set_prototype(node_tty_root_value(prototype_root),
-        node_tty_root_value(socket_prototype_root));
-    node_tty_set_property(node_tty_root_value(namespace_root), name,
-        node_tty_root_value(function_root));
-    node_tty_host->node->roots->root_frame_end(&frame);
-}
-
 Item node_tty_namespace(void) {
     if (node_tty_cached_namespace.item != 0) return node_tty_cached_namespace;
     if (!node_tty_host || !node_tty_session) return ItemNull;
     JubeRootFrame frame = {};
-    if (!node_tty_host->node->roots->root_frame_begin(&frame, 4)) return ItemNull;
+    if (!node_tty_host->node->roots->root_frame_begin(&frame, 1)) return ItemNull;
     uint64_t* namespace_root = node_tty_host->node->roots->root_frame_take_slot(&frame);
-    uint64_t* net_root = node_tty_host->node->roots->root_frame_take_slot(&frame);
-    uint64_t* socket_root = node_tty_host->node->roots->root_frame_take_slot(&frame);
-    uint64_t* socket_prototype_root = node_tty_host->node->roots->root_frame_take_slot(&frame);
-    if (!namespace_root || !net_root || !socket_root || !socket_prototype_root) {
+    if (!namespace_root) {
         node_tty_host->node->roots->root_frame_end(&frame);
         return ItemNull;
     }
     node_tty_cached_namespace = node_tty_host->value->new_object();
     *namespace_root = node_tty_cached_namespace.item;
     node_tty_set_method(node_tty_root_value(namespace_root), "isatty", node_tty_undefined, 1);
-    Item net_namespace = ItemNull;
-    if (node_tty_host->node->runtime->resolve_host_namespace(node_tty_session, "net",
-            &net_namespace) == 0) {
-        *net_root = net_namespace.item;
-        Item socket = node_tty_property(node_tty_root_value(net_root), "Socket");
-        *socket_root = socket.item;
-        Item socket_prototype = node_tty_property(node_tty_root_value(socket_root), "prototype");
-        *socket_prototype_root = socket_prototype.item;
-        node_tty_build_stream_constructor(node_tty_root_value(namespace_root), "WriteStream",
-            node_tty_root_value(socket_root), node_tty_root_value(socket_prototype_root));
-        node_tty_build_stream_constructor(node_tty_root_value(namespace_root), "ReadStream",
-            node_tty_root_value(socket_root), node_tty_root_value(socket_prototype_root));
-    } else {
-        node_tty_set_method(node_tty_root_value(namespace_root), "WriteStream",
-            node_tty_empty_object, 1);
-        node_tty_set_method(node_tty_root_value(namespace_root), "ReadStream",
-            node_tty_empty_object, 1);
-    }
+    // net is not in the shipped Node module set (D9.4.1), so these stay inert.
+    node_tty_set_method(node_tty_root_value(namespace_root), "WriteStream",
+        node_tty_empty_object, 1);
+    node_tty_set_method(node_tty_root_value(namespace_root), "ReadStream",
+        node_tty_empty_object, 1);
     node_tty_set_property(node_tty_root_value(namespace_root), "default",
         node_tty_root_value(namespace_root));
     node_tty_cached_namespace = node_tty_root_value(namespace_root);
@@ -165,12 +95,9 @@ Item node_tty_namespace(void) {
 }
 
 int node_tty_init(const JubeHostAPI* host) {
-    if (!host || !host->node || !host->node->runtime || !host->node->roots || !host->value ||
-            !host->script || !host->node->runtime->resolve_host_namespace ||
-            !host->value->new_object || !host->value->property_get || !host->value->property_set ||
-            !host->value->string_from_utf8_n || !host->script->new_function ||
-            !host->script->function_set_prototype || !host->script->set_prototype ||
-            !host->script->mark_non_enumerable) return -1;
+    if (!host || !host->node || !host->node->roots || !host->value || !host->script ||
+            !host->value->new_object || !host->value->property_set ||
+            !host->value->string_from_utf8_n || !host->script->new_function) return -1;
     node_tty_host = host;
     return 0;
 }

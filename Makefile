@@ -79,7 +79,7 @@ PDF_TEST_CONFIG ?= debug_native
 # stale binaries. The concurrency and Node preliminary suites stay excluded.
 LAMBDA_BASELINE_SELECTION = --target=lambda --category=baseline --lambda-owned --exclude-test=test_node_prelim_gtest --exclude-test=test_lambda_concurrency_gtest
 LAMBDA_BASELINE_TEST_PROJECTS = $(shell node test/test_run.js $(LAMBDA_BASELINE_SELECTION) --list-build-targets)
-LAMBDA_FULL_EXTRA_TESTS = test_js_c_parser_gtest,test_js_regex_router_poc_gtest,test_js_coerce_gtest,test_js_mir_emission_gtest,test_js_script_gtest,test_js_opt_gtest,test_js_bt_regex_gtest,test_npm_package_json_gtest,test_js_mvp_lmd_gtest,test_js_test262_prelim_gtest,test_lambda_std_gtest
+LAMBDA_FULL_EXTRA_TESTS = test_js_c_parser_gtest,test_js_regex_router_poc_gtest,test_js_coerce_gtest,test_js_mir_emission_gtest,test_js_script_gtest,test_js_opt_gtest,test_js_bt_regex_gtest,test_js_mvp_lmd_gtest,test_js_test262_prelim_gtest,test_lambda_std_gtest
 LAMBDA_FULL_EXTRA_SELECTION = --target=lambda --lambda-owned --include-test=$(LAMBDA_FULL_EXTRA_TESTS)
 LAMBDA_FULL_EXTRA_TEST_PROJECTS = $(shell node test/test_run.js $(LAMBDA_FULL_EXTRA_SELECTION) --list-build-targets)
 
@@ -507,7 +507,7 @@ tree-sitter-libs: tree-sitter-jube-libs
 # Phony targets (don't correspond to actual files)
 .PHONY: push-lambda pull-lambda commit-lambda all build build-ascii clean clean-grammar generate-grammar test-grammar-s16 test-js-parser-diff generate-names debug release rebuild lambda-cst \
 	    test test-all test-all-baseline test-lambda-baseline test-lambda-interp interp-sweep semantics-verify interp-bench test-lambda-full test-gc-rooting test-gc-rooting-core test-mir-gc-stress test-mir-gc-stress-full test-bash-baseline test-radiant-baseline test-radiant-full test-layout-baseline test-page-load test-css-cascade-memory test-radiant-online test-pdf-render test-svg-export test-svg-paint test-svg-smil test-extended test-input run help \
-	    lambda lambda-cli build-cli lambda-headless build-headless lambda-nomir build-nomir lambda-jube build-jube build-node-core build-node-fs build-node-net build-node-crypto build-rdb-deps build-rdb-drivers test-rdb-drivers test-rdb-drivers-local rdb-test-servers-up rdb-test-servers-down check-rdb-module-architecture verify-rdb-module-licenses release-rdb-drivers release-node-core release-node-fs release-node-net release-node-crypto package-standard package-jube package-node-reduced package-minimal verify-jube-package verify-node-profile-packages test-jube-module-integrity test-jube-module-loader-negative test-node-module-architecture-checker test-premake-generator test-jube-node-fs-async-work test-jube-node-fs-dynamic test-jube-node-fs-negative test-jube-node-net-negative test-jube-node-core-leaves test-jube-node-error-lane test-jube-node-core-dynamic release-jube format lint lint-full check-doc-code formal-index check-formal-index check-code-dup check-lambda-dup check-radiant-dup check-node-module-architecture hosted-node-coupling-inventory check-host-exports docs intellisense analyze-binary \
+	    lambda lambda-cli build-cli lambda-headless build-headless lambda-nomir build-nomir lambda-jube build-jube build-node-core build-node-fs build-rdb-deps build-rdb-drivers test-rdb-drivers test-rdb-drivers-local rdb-test-servers-up rdb-test-servers-down check-rdb-module-architecture verify-rdb-module-licenses release-rdb-drivers release-node-core release-node-fs package-standard package-jube package-node-reduced package-minimal verify-jube-package verify-node-profile-packages test-jube-module-integrity test-jube-module-loader-negative test-node-module-architecture-checker test-premake-generator test-jube-node-fs-async-work test-jube-node-fs-dynamic test-jube-node-fs-negative test-jube-node-core-leaves test-jube-node-error-lane test-jube-node-core-dynamic release-jube format lint lint-full check-doc-code formal-index check-formal-index check-code-dup check-lambda-dup check-radiant-dup check-node-module-architecture hosted-node-coupling-inventory check-host-exports docs intellisense analyze-binary \
 	    build-debug build-release build-debug-asan build-release-profile clean-all distclean \
 	    tree-sitter-libs tree-sitter-jube-libs tree-sitter-cst-libs \
 	    generate-premake clean-premake build-lambda-data build-lambda-rt build-radiant build-lambda-static check-module-boundary build-test build-lambda-baseline build-radiant-baseline build-pdf-render-test build-test-linux build-jube-test run-radiant-baseline run-radiant-full run-layout-baseline-suites \
@@ -567,6 +567,7 @@ help:
 	@echo "  build-lambda-baseline - Build Lambda baseline runtime and input test executables"
 	@echo "  build-radiant-baseline - Build only lambda and the native runners used by test-radiant-baseline"
 	@echo "  build-lambda-split - Link Lambda against sibling archives"
+	@echo "  build-node-core - Build the external Node compatibility core module"
 	@echo "  test-split-fetch   - Test split CLI HTTPS fetch and resource cleanup (macOS)"
 	@echo "  build-pdf-render-test - Build PDF render visual gtest executable using Premake"
 	@echo "  build-jube-test - Build the lambda-jube compatibility link and test executables"
@@ -919,22 +920,6 @@ build-node-fs: build build-windows-host-import
 	$(PYTHON) utils/update_jube_manifest_integrity.py modules/node-fs
 	@ls -lh modules/node-fs/node-fs.dylib modules/node-fs/node-fs.so modules/node-fs/node-fs.dll 2>/dev/null || true
 
-build-node-net: build build-windows-host-import
-	@echo "Building external node-net Jube module..."
-	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
-	$(PREMAKE5) gmake --file=$(PREMAKE_FILE)
-	$(MAKE) -C build/premake config=debug_native node-net $(NODE_MODULE_BUILD_FLAGS) -j$(JOBS) CC="$(CC)" CXX="$(CXX)" --no-print-directory -s CFLAGS="-w" CXXFLAGS="-w"
-	$(PYTHON) utils/update_jube_manifest_integrity.py modules/node-net
-	@ls -lh modules/node-net/node-net.dylib modules/node-net/node-net.so modules/node-net/node-net.dll 2>/dev/null || true
-
-build-node-crypto: build build-windows-host-import
-	@echo "Building external node-crypto Jube module..."
-	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
-	$(PREMAKE5) gmake --file=$(PREMAKE_FILE)
-	$(MAKE) -C build/premake config=debug_native node-crypto $(NODE_MODULE_BUILD_FLAGS) -j$(JOBS) CC="$(CC)" CXX="$(CXX)" --no-print-directory -s CFLAGS="-w" CXXFLAGS="-w"
-	$(PYTHON) utils/update_jube_manifest_integrity.py modules/node-crypto
-	@ls -lh modules/node-crypto/node-crypto.dylib modules/node-crypto/node-crypto.so modules/node-crypto/node-crypto.dll 2>/dev/null || true
-
 # rdb-drivers: the PostgreSQL and MySQL/MariaDB drivers, with libpq and
 # Connector/C linked in statically (vibe/Lambda_IO_RDB.md section 13). The host
 # does the TLS, so neither client library is built with one.
@@ -1031,8 +1016,6 @@ endef
 
 $(eval $(call release_node_module,core))
 $(eval $(call release_node_module,fs))
-$(eval $(call release_node_module,net))
-$(eval $(call release_node_module,crypto))
 
 # Publish a fresh inode: overwriting a mapped executable can leave macOS using
 # stale code-signature pages, killing or stalling the next package launch.
@@ -1045,12 +1028,12 @@ endef
 
 # Standard and full Jube packages deliberately reuse the identical host.  The
 # full package adds language modules; it never recompiles a second runtime.
-package-standard: release-node-core release-node-fs release-node-net release-node-crypto
+package-standard: release-node-core release-node-fs
 	@mkdir -p release-standard
 	$(call publish_package_executable,release/lambda,release-standard/lambda)
 	@mkdir -p release-standard/modules
 	@cp modules/module-set.json release-standard/modules/module-set.json
-	# The module set advertises node-core, node-fs, node-net, and node-crypto, so their images must ship
+	# The module set advertises node-core and node-fs, so their images must ship
 	# with the compatibility bundle instead of falling back to host providers.
 	@mkdir -p release-standard/modules/node-core
 	@cp release/modules/node-core/module.json release-standard/modules/node-core/module.json
@@ -1058,13 +1041,7 @@ package-standard: release-node-core release-node-fs release-node-net release-nod
 	@mkdir -p release-standard/modules/node-fs
 	@cp release/modules/node-fs/module.json release-standard/modules/node-fs/module.json
 	@cp release/modules/node-fs/node-fs.dylib release/modules/node-fs/node-fs.so release/modules/node-fs/node-fs.dll release-standard/modules/node-fs/ 2>/dev/null || true
-	@mkdir -p release-standard/modules/node-net
-	@cp release/modules/node-net/module.json release-standard/modules/node-net/module.json
-	@cp release/modules/node-net/node-net.dylib release/modules/node-net/node-net.so release/modules/node-net/node-net.dll release-standard/modules/node-net/ 2>/dev/null || true
-	@mkdir -p release-standard/modules/node-crypto
-	@cp release/modules/node-crypto/module.json release-standard/modules/node-crypto/module.json
-	@cp release/modules/node-crypto/node-crypto.dylib release/modules/node-crypto/node-crypto.so release/modules/node-crypto/node-crypto.dll release-standard/modules/node-crypto/ 2>/dev/null || true
-	@for module in node-core node-fs node-net node-crypto; do \
+	@for module in node-core node-fs; do \
 		if ! find "release-standard/modules/$$module" -maxdepth 1 -type f \
 			\( -name "$$module.dylib" -o -name "$$module.so" -o -name "$$module.dll" \) \
 			-print -quit | grep -q .; then \
@@ -1114,7 +1091,6 @@ verify-jube-package: package-jube
 	@cmp -s release-standard/lambda release-jube/lambda
 	@cd release-standard && ./lambda js -e "console.log(require('buffer').Buffer === Buffer)" --no-log | rg -x "true"
 	@cd release-standard && ./lambda js -e "console.log(require('fs').existsSync('../test/node/jube_fs_exists_registry.txt'))" --no-log | rg -x "true"
-	@cd release-standard && ./lambda js -e "console.log(require('net').isIP('127.0.0.1'))" --no-log | rg -x "4"
 	$(PYTHON) utils/verify_rdb_module_licenses.py --module-dir release-jube/modules/rdb-drivers
 	$(PYTHON) utils/check_rdb_module_architecture.py --module-dir release-jube/modules/rdb-drivers --lambda release-jube/lambda --objects build/obj/rdb-drivers/native/release
 	$(PYTHON) utils/check_rdb_module_architecture.py --module-dir release-standard/modules/rdb-drivers --lambda release-standard/lambda --expect-absent
@@ -1129,7 +1105,6 @@ verify-node-profile-packages: package-node-reduced package-minimal
 	@cd release-minimal && ./lambda js -e "console.log(typeof Buffer)" --no-log | rg -x "undefined"
 	@cd release-minimal && ./lambda js -e "console.log(typeof vm)" --no-log | rg -x "undefined"
 	@cd release-minimal && ./lambda js -e "let moduleName = 'path'; try { require(moduleName) } catch (e) { console.log(e.code); console.log(e.message) }" --no-log | rg -x "MODULE_NOT_FOUND|Cannot find module 'path'"
-	@cd release-node-reduced && ./lambda js -e "try { require('net') } catch (e) { console.log(e.code) }" --no-log | rg -x "MODULE_NOT_FOUND"
 
 # The negative-fixture suite supplies an explicit digest and verifies that the
 # loader rejects tampered bytes before dlopen can execute module initializers.
@@ -1274,9 +1249,6 @@ test-jube-node-fs-dynamic: build-node-fs build-node-core
 test-jube-node-fs-negative: build-node-fs build-node-core
 	@python3 utils/test_jube_module_loader_negative.py --runtime-module-dir modules/node-fs --runtime-specifier fs
 
-test-jube-node-net-negative: build-node-net build-node-core
-	@python3 utils/test_jube_module_loader_negative.py --runtime-module-dir modules/node-net --runtime-specifier net
-
 # N3 leaf gate: normal decoding plus the forced-GC namespace/constructor
 # lifetime probe after each node-core leaf moves behind Jube tables.
 test-jube-node-core-leaves: build
@@ -1333,8 +1305,6 @@ test-jube-node-core-leaves: build
 	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_host_globals_registry.js --no-log | diff -u test/node/jube_host_globals_registry.txt -
 	@./lambda.exe js test/node/jube_process_registry.js --no-log | diff -u test/node/jube_process_registry.txt -
 	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_process_registry.js --no-log | diff -u test/node/jube_process_registry.txt -
-	@./lambda.exe js test/node/jube_net_resource_registry.js --no-log | diff -u test/node/jube_net_resource_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_net_resource_registry.js --no-log | diff -u test/node/jube_net_resource_registry.txt -
 	@./lambda.exe js test/node/jube_cluster_online_hook.js --no-log | diff -u test/node/jube_cluster_online_hook.txt -
 	@./lambda.exe js test/node/jube_console_formatter_hook.js --no-log | diff -u test/node/jube_console_formatter_hook.txt -
 	@JUBE_MODULE_PATH=./temp/no-node-profile ./lambda.exe js test/node/jube_console_minimal_formatter.js --no-log | diff -u test/node/jube_console_minimal_formatter.txt -
@@ -1351,14 +1321,12 @@ test-jube-node-error-lane: build
 # module-set file, so node-core cannot be registered from the executable.
 # Host-namespace parity imports fs, whose dynamic provider is node-fs; stage
 # the dependency so this isolated core image cannot silently fall back static.
-test-jube-node-core-dynamic: build-node-core build-node-fs build-node-net
-	@mkdir -p temp/node-core-dynamic/node-core temp/node-core-dynamic/node-fs temp/node-core-dynamic/node-net
+test-jube-node-core-dynamic: build-node-core build-node-fs
+	@mkdir -p temp/node-core-dynamic/node-core temp/node-core-dynamic/node-fs
 	@cp modules/node-core/module.json temp/node-core-dynamic/node-core/module.json
 	@cp modules/node-core/node-core.dylib modules/node-core/node-core.so modules/node-core/node-core.dll temp/node-core-dynamic/node-core/ 2>/dev/null || true
 	@cp modules/node-fs/module.json temp/node-core-dynamic/node-fs/module.json
 	@cp modules/node-fs/node-fs.dylib modules/node-fs/node-fs.so modules/node-fs/node-fs.dll temp/node-core-dynamic/node-fs/ 2>/dev/null || true
-	@cp modules/node-net/module.json temp/node-core-dynamic/node-net/module.json
-	@cp modules/node-net/node-net.dylib modules/node-net/node-net.so modules/node-net/node-net.dll temp/node-core-dynamic/node-net/ 2>/dev/null || true
 	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/node/jube_constants_registry.js --no-log | diff -u test/node/jube_constants_registry.txt -
 	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_timers_promises_registry.js --no-log | diff -u test/node/jube_timers_promises_registry.txt -
 	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/node/jube_v8_registry.js --no-log | diff -u test/node/jube_v8_registry.txt -
@@ -1870,15 +1838,11 @@ node-shim:
 		if [ ! -f ref/node/test/common/wpt.js.orig ]; then \
 			cp ref/node/test/common/wpt.js ref/node/test/common/wpt.js.orig; \
 		fi; \
-		if [ ! -f ref/node/test/common/crypto.js.orig ]; then \
-			cp ref/node/test/common/crypto.js ref/node/test/common/crypto.js.orig; \
-		fi; \
 		cp lambda/js/test_shim/common_index.js ref/node/test/common/index.js; \
 		cp lambda/js/test_shim/tmpdir.js ref/node/test/common/tmpdir.js; \
 		cp lambda/js/test_shim/fixtures.js ref/node/test/common/fixtures.js; \
 		cp lambda/js/test_shim/internet.js ref/node/test/common/internet.js; \
 		cp lambda/js/test_shim/wpt.js ref/node/test/common/wpt.js; \
-		cp lambda/js/test_shim/crypto.js ref/node/test/common/crypto.js; \
 		cp lambda/js/test_shim/package.json ref/node/test/common/package.json; \
 		echo "Shims installed."; \
 	else \
@@ -3124,7 +3088,7 @@ build-lambda-split: $(MIR_LIB)
 	@case "$(SPLIT_PROFILE)" in release|release_profile) \
 		stamp="build/.split-$(SPLIT_PROFILE)-lto"; \
 		if [ ! -f "$$stamp" ] || [ "$$(cat "$$stamp")" != "$(SPLIT_LTO_FLAG)" ]; then \
-			for project in lambda-rt-cpp lambda-radiant-adapter-cpp lambda-exe node-core; do \
+			for project in lambda-rt-cpp lambda-radiant-adapter-cpp lambda-exe; do \
 				rm -rf "build/obj/$$project/native/$(SPLIT_PROFILE)"; \
 			done; \
 			printf '%s\n' "$(SPLIT_LTO_FLAG)" > "$$stamp"; \
@@ -3134,8 +3098,6 @@ build-lambda-split: $(MIR_LIB)
 	$(MAKE) -C "$(SPLIT_RADIANT_ROOT)" INPUT_ROOT="$(SPLIT_INPUT_ROOT)" PROFILE="$(SPLIT_PROFILE)" JOBS="$(JOBS)" $(SPLIT_ARCHIVE_OPTIONS) -j$(JOBS)
 	$(call run_make_with_error_summary,split-runtime,$(SPLIT_PROFILE)_native,-f lambda-rt-cpp.make LDDEPS=,all)
 	$(call run_make_with_error_summary,split-adapters,$(SPLIT_PROFILE)_native,-f lambda-radiant-adapter-cpp.make LDDEPS=,all)
-	$(call run_make_with_error_summary,split-node-core,$(SPLIT_PROFILE)_native,-f node-core.make,all)
-	$(PYTHON) utils/update_jube_manifest_integrity.py modules/node-core
 	LAMBDA_INPUT_ROOT="$(SPLIT_INPUT_ROOT)" RADIANT_ROOT="$(SPLIT_RADIANT_ROOT)" $(PYTHON) utils/patch_static_module_makefile.py --sibling-archives
 	$(call run_make_with_error_summary,lambda-exe-split,$(SPLIT_PROFILE)_native,-f lambda-exe.make -B TARGET=../../$(SPLIT_OUTPUT),all)
 
@@ -3152,8 +3114,7 @@ test-split-fetch: build-lambda-split
 # the aggregate build-test target that normally supplies these DSOs.
 # debug and release share lambda.exe; remove it before a release host rebuild
 # so make cannot mistake an ASan debug binary for an up-to-date release host.
-# CryptoKey lazily loads node-crypto; stale DSOs otherwise hide current host behavior.
-build-lambda-baseline: build-lambda-data build-node-core build-node-fs build-node-crypto
+build-lambda-baseline: build-lambda-data build-node-core build-node-fs
 	@echo "Building the Lambda baseline runtime and native test executables..."
 	@if [ -f .lambda_release_build ]; then \
 		$(MAKE) build-lambda-split SPLIT_PROFILE=release SPLIT_OUTPUT=lambda.exe; \
@@ -3174,7 +3135,8 @@ check-module-boundary:
 
 # the generated all target includes rdb-drivers, whose pinned client libraries
 # must be prepared before the aggregate build.
-build-test: build-lambda-data build-windows-host-import build-rdb-drivers test-premake-generator
+# The Node compatibility tests need the external node-core DSO.
+build-test: build-lambda-data build-windows-host-import build-node-core build-rdb-drivers test-premake-generator
 	@if [ -f .lambda_release_build ]; then \
 		$(MAKE) build-lambda-split SPLIT_PROFILE=release SPLIT_OUTPUT=lambda.exe; \
 	else \
@@ -3184,9 +3146,7 @@ build-test: build-lambda-data build-windows-host-import build-rdb-drivers test-p
 	@# Select test projects explicitly; the workspace also contains host modules.
 	@projects=$$(awk '/^test_[^ :]+:/ { sub(/:$$/, "", $$1); print $$1 }' build/premake/Makefile); \
 		$(MAKE) -C build/premake config=debug_native $$projects -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"
-	@for module_dir in modules/node-core modules/node-fs; do \
-		$(PYTHON) utils/update_jube_manifest_integrity.py $$module_dir || exit 1; \
-	done
+	@$(PYTHON) utils/update_jube_manifest_integrity.py modules/node-fs
 
 # Radiant baseline needs lambda plus its focused native runners; building every test
 # project made unrelated suites dominate this gate after a clean build.
