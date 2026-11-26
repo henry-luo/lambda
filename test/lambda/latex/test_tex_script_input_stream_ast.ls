@@ -3,6 +3,7 @@ import profile: lambda.doc.latex.tex_engine.profile
 import digest: lambda.doc.latex.tex_engine.digest
 let kernel=input(sys.lambda.home ++ "/package/doc/latex/tex_engine/kernel.tex","text")^;
 let options={echo_definitions:true,constructor_argument_mode:true,adapters:[],resources:{local:{'stream-data.txt':{data:"alpha\nbeta\n"}},bundled:{}}};
+let preload=profile.preload_kernel(kernel,options,100000)^;
 let cases=[{source:"\\openin0=stream-data.txt\\relax\\readline0 to\\foo\\begin{document}\\foo\\end{document}", expected:<latex_document <document source_offset: 47, <paragraph "alpha\r">>>},
 {source:"\\def\\bar{A}\\openin0=stream-data.txt\\relax\\readline0 to\\foo\\begin{document}\\bar\\foo\\end{document}", expected:<latex_document <paragraph <def source_offset: 0, argument_groups: [{ kind: "required", raw: "\\bar", start: 4, end: 8}, { kind: "required", raw: "A", start: 8, end: 58}], "\\bar" <curly_group "A">>> <document source_offset: 58, <paragraph "Aalpha\r">>>},
 {source:"\\begin{document}\\openin0=stream-data.txt\\relax\\readline0 to\\foo\\foo\\closein0 Done\\end{document}", expected:<latex_document <document source_offset: 0, <paragraph "alpha\rDone">>>},
@@ -25,8 +26,16 @@ let cases=[{source:"\\openin0=stream-data.txt\\relax\\readline0 to\\foo\\begin{d
 {source:"\\openin0=stream-data.txt\\relax\\readline0 to\\foo\\begin{document}\\section{\\foo}\\end{document}", expected:<latex_document <document source_offset: 47, <section source_offset: 63, title: <curly_group "alpha\r">>>>},
 {source:"\\begin{document}\\ifeof0 \\section{A}\\else B\\fi\\end{document}", expected:<latex_document <document source_offset: 0, <section source_offset: 24, title: <curly_group "A">>>>},
 {source:"\\begin{document}\\ifeof0 \\textbf{A}\\else B\\fi\\end{document}", expected:<latex_document <document source_offset: 0, <paragraph <textbf source_offset: 24, "A">>>>},
-{source:"\\openin0=stream-data.txt\\relax\\readline0 to\\foo\\begin{document}\\foo \\textbf{B}\\end{document}", expected:<latex_document <document source_offset: 47, <paragraph "alpha\r" <textbf source_offset: 68, "B">>>>}];
-[for (c in cases) (let r=profile.expand_with_kernel(c.source,kernel,options,100000)^, let d=digest.digest(r)^, {issue:d.issue, matches:d.ast==c.expected})]
+{source:"\\openin0=stream-data.txt\\relax\\readline0 to\\foo\\begin{document}\\foo \\textbf{B}\\end{document}", expected:<latex_document <document source_offset: 47, <paragraph "alpha\r" <textbf source_offset: 68, "B">>>>},
+{source:"\\begin{document}$x\\openin0=stream-data.txt\\relax\\readline0 to\\v\\v y$\\end{document}",expected:<latex_document <document source_offset: 0, <paragraph <inline_math source_offset: 17, source: "xalpha\ry", ast: <math ["x", "a", "l", "p", "h", "a", "y"]> > > > >},
+{source:"\\begin{document}$x\\openin0=stream-data.txt\\relax\\readline0 to\\v\\ifeof0 T\\else F\\fi\\v y$\\end{document}",expected:<latex_document <document source_offset: 0, <paragraph <inline_math source_offset: 17, source: "xFalpha\ry", ast: <math ["x", "F", "a", "l", "p", "h", "a", "y"]> > > > >},
+{source:"\\endlinechar=9 \\openin0=stream-data.txt\\relax\\readline0 to\\v\\begin{document}$x\\v y$\\end{document}",expected:<latex_document <document source_offset: 60, <paragraph <inline_math source_offset: 77, source: "xalpha\ty", ast: <math ["x", "a", "l", "p", "h", "a", "y"]> > > > >},
+{source:"\\endlinechar=10 \\openin0=stream-data.txt\\relax\\readline0 to\\v\\begin{document}$x\\v y$\\end{document}",expected:<latex_document <document source_offset: 61, <paragraph <inline_math source_offset: 78, source: "xalpha\ny", ast: <math ["x", "a", "l", "p", "h", "a", "y"]> > > > >},
+{source:"\\endlinechar=11 \\openin0=stream-data.txt\\relax\\readline0 to\\v\\begin{document}$x\\v y$\\end{document}",expected:<latex_document <document source_offset: 61, <paragraph <inline_math source_offset: 78, source: ("xalpha" ++ chr(11) ++ "y"), ast: <math ["x", "a", "l", "p", "h", "a", "y"]> > > > >},
+{source:"\\endlinechar=12 \\openin0=stream-data.txt\\relax\\readline0 to\\v\\begin{document}$x\\v y$\\end{document}",expected:<latex_document <document source_offset: 61, <paragraph <inline_math source_offset: 78, source: "xalpha\fy", ast: <math ["x", "a", "l", "p", "h", "a", "y"]> > > > >},
+{source:"\\endlinechar=13 \\openin0=stream-data.txt\\relax\\readline0 to\\v\\begin{document}$x\\v y$\\end{document}",expected:<latex_document <document source_offset: 61, <paragraph <inline_math source_offset: 78, source: "xalpha\ry", ast: <math ["x", "a", "l", "p", "h", "a", "y"]> > > > >},
+{source:"\\endlinechar=32 \\openin0=stream-data.txt\\relax\\readline0 to\\v\\begin{document}$x\\v y$\\end{document}",expected:<latex_document <document source_offset: 61, <paragraph <inline_math source_offset: 78, source: "xalpha y", ast: <math ["x", "a", "l", "p", "h", "a", "y"]> > > > >}];
+[for (c in cases) (let r=profile.expand_with_kernel(c.source,kernel,options,100000,preload)^, let d=digest.digest(r)^, {issue:d.issue, matches:d.ast==c.expected})]
 // The legacy eager constructor mode must still reject its known unsafe mapping.
 let legacy=profile.expand_with_kernel(cases[5].source,kernel,{*:options,constructor_argument_mode:false},100000)^;
 let rejected=digest.digest(legacy)^;

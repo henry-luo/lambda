@@ -34,6 +34,16 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Stream whitespace in math, 2026-11-26:** A broader 48-case retired-engine
+  comparison found that `readline` can emit a category-12 carriage return
+  inside math. The native math scanner ignores the reconstructed whitespace;
+  Script formerly emitted punctuation. The digester now applies the native
+  whitespace rule to both math atoms and argument scanning (D10.2.2v2). The
+  comparison now matches, including six endline characters; the regression
+  fixture contains the independently captured native trees. Six focused math
+  and stream GTests pass; the stream fixture also passes interpreter and JIT
+  with forced GC and freed-memory poisoning.
+
 - **Stream document mapping, 2026-11-26:** Constructor argument mode preserves
   stream commands inside arguments; the older eager mode does not. The document
   digester now admits stream and EOF operations only in the former mode
@@ -185,9 +195,8 @@ The existing native engine design and historical Phase IV work are in
   slot reuse, reopening, dynamic names, filename spacing and scoped/global
   reads. An authorized file and denied symlink pass the security runtime check
   in interpreter and JIT. Missing-file diagnostics and negative `globaldefs`
-  pool scoping remain explicitly unsupported; the document digester still
-  rejects input-stream source mapping. Csvsimple's later blocker is recorded
-  in the current key-definition checkpoint above.
+  pool scoping remain explicitly unsupported. The later document mapping work
+  and csvsimple blocker are recorded in the current checkpoint above.
 
 - **Expl3 stream declarations and integer registers, 2026-11-26:** Script now
   creates closed input-stream variables with TeX's terminal-stream meaning and

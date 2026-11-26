@@ -672,7 +672,10 @@ fn math_content(items, index = 0, out = [], run = []) any^ {
     else math_content(items, index + 1, [*flush_math_strings(out, run), items[index]], [])
 }
 
-fn math_nonspace(tokens, index) any^ => if (index < len(tokens) and tokens[index].kind == "char" and tokens[index].cat == 10)
+// Native math scans reconstructed bytes, including whitespace emitted with catcode 12 by readline.
+fn math_space(token) any^ => token.kind == "char" and (token.cat == 10 or
+    (token.value <= " " and contains([" ", "\t", "\r", "\n", chr(11), chr(12)], token.value)))
+fn math_nonspace(tokens, index) any^ => if (index < len(tokens) and math_space(tokens[index])^)
     math_nonspace(tokens, index + 1) else index
 
 // Math options contain math lists, including controls and nested groups.
@@ -1596,7 +1599,7 @@ fn math_atoms(tokens, index = 0, items = []) any^ {
     if (index >= len(tokens)) {items: items, issue: null}
     else {
         let token = tokens[index];
-        if (token.kind == "char" and token.cat == 10) math_atoms(tokens, index + 1, items)
+        if (math_space(token)^) math_atoms(tokens, index + 1, items)
         // a braced group is an atom and can itself carry scripts.
         else if (opening(token)) {
             let group = math_script_arg(tokens, index)^;
