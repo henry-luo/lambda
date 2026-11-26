@@ -694,7 +694,9 @@ fn math_delimiter_boundary(tokens, index, nested = 0, braces = 0) any^ {
         else if (braces == 0 and control(token, "middle") and nested == 0) {index: index, kind: "middle"}
         else {
             let next_braces = braces + if (opening(token)) 1 else if (closing(token)) -1 else 0;
-            let next_nested = if (braces != 0) nested else if (control(token, "left")) nested + 1
+            // a braced left token recovers as an ordinary atom and does not open a pair.
+            let next_nested = if (braces != 0) nested
+                else if (control(token, "left") and not opening(tokens[math_nonspace(tokens, index + 1)^])) nested + 1
                 else if (control(token, "right")) nested - 1 else nested;
             math_delimiter_boundary(tokens, index + 1, next_nested, next_braces)
         }
@@ -706,11 +708,14 @@ fn math_delimiter_control(name) => contains(["{", "}", "|", "vert", "Vert",
     "backslash", "arrowvert", "Arrowvert", "bracevert", "lmoustache", "rmoustache", "lgroup", "rgroup",
     "lbrack", "rbrack", "lparen", "rparen"], name)
 
-fn math_delimiter_token(tokens, index, middle = false, right_side = false) any^ {
+fn math_has_delimiter(token) bool^ =>
+    (token.kind == "char" and contains(["(", ")", "[", "]", "{", "}", "|", "<", ">", "/", "."], token.value)) or
+    (token.kind == "control" and math_delimiter_control(token.value))
+
+fn math_delimiter_token(tokens, index, allow_braced = false) any^ {
     let at = math_nonspace(tokens, index)^;
-    if (at >= len(tokens)) if (middle) unsupported(at, "math delimiter")
-        else {issue: null, index: at, value: "."}
-    else if (right_side and opening(tokens[at])) {
+    if (at >= len(tokens)) {issue: null, index: at, value: "."}
+    else if (allow_braced and opening(tokens[at])) {
         let group = read_group(tokens, at)^;
         if (group.issue != null) group
         else if (len(group.tokens) == 0 and math_adjacent(tokens[at], tokens[group.end - 1]))
@@ -728,12 +733,10 @@ fn math_delimiter_token(tokens, index, middle = false, right_side = false) any^ 
     }
     else {
         let token = tokens[at];
-        let char_ok = token.kind == "char" and not opening(token) and not closing(token) and
+        let char_ok = token.kind == "char" and not opening(token) and (allow_braced or not closing(token)) and
             len(token.value) == 1 and ord(token.value) < 128;
-        let control_ok = token.kind == "control" and (not middle or math_delimiter_control(token.value));
-        if (char_ok and (not middle or contains(["(", ")", "[", "]", "|", "<", ">", "/", "."], token.value)))
-            {issue: null, index: at + 1, value: token.value}
-        else if (control_ok) {issue: null, index: at + 1, value: "\\" ++ token.value}
+        if (char_ok) {issue: null, index: at + 1, value: token.value}
+        else if (token.kind == "control") {issue: null, index: at + 1, value: "\\" ++ token.value}
         else unsupported(at, "math delimiter")
     }
 }
@@ -745,22 +748,44 @@ fn math_delimiter_body(tokens, index, items = []) any^ {
         let combined = [*items, *section.items];
         if (boundary.kind == "end") {issue: null, index: boundary.index, right: ".", items: combined}
         else {
-            let delimiter = math_delimiter_token(tokens, boundary.index + 1, boundary.kind == "middle", boundary.kind == "right")^;
+            let at = math_nonspace(tokens, boundary.index + 1)^;
+            let has_delimiter = boundary.kind == "right" or (at < len(tokens) and math_has_delimiter(tokens[at])^);
+            let delimiter = if (has_delimiter) math_delimiter_token(tokens, at, true)^
+                else {issue:null, index:at};
             if (delimiter.issue != null) delimiter
             else if (boundary.kind == "right")
                 {issue: null, index: delimiter.index, right: delimiter.value, items: combined}
-            else math_delimiter_body(tokens, delimiter.index, [*combined, <middle_delim delim: delimiter.value>])
+            // an invalid middle delimiter leaves its following token in the math list.
+            else {
+                let middle = if (has_delimiter) <middle_delim delim:delimiter.value> else <middle_delim>;
+                math_delimiter_body(tokens, delimiter.index, [*combined, middle])
+            }
         }
     }
 }
 fn math_delimiter_group(tokens, index) any^ {
-    let left = math_delimiter_token(tokens, index + 1)^;
-    if (left.issue != null) left
+    let at = math_nonspace(tokens, index + 1)^;
+    if (opening(tokens[at])) {
+        // keep the first atom of a braced left token, as the native recovery did.
+        let start = math_nonspace(tokens, at + 1)^;
+        let first = if (start < len(tokens)) math_primary(tokens, start)^ else {issue:null, index:start};
+        if (first.issue != null) first
+        else {
+            let end = first.index;
+            let after = if (end < len(tokens) and closing(tokens[end]) and
+                math_adjacent(tokens[end - 1], tokens[end])) end + 1 else end;
+            {issue:null, index:after, value:<_seq <ERROR "\\left"> first.value>}
+        }
+    }
     else {
-        let body = math_delimiter_body(tokens, left.index)^;
-        if (body.issue != null) body
-        else {issue: null, index: body.index,
-            value: <delimiter_group left: left.value, right: body.right, *math_content(body.items)^>}
+        let left = math_delimiter_token(tokens, at)^;
+        if (left.issue != null) left
+        else {
+            let body = math_delimiter_body(tokens, left.index)^;
+            if (body.issue != null) body
+            else {issue: null, index: body.index,
+                value: <delimiter_group left: left.value, right: body.right, *math_content(body.items)^>}
+        }
     }
 }
 
@@ -814,25 +839,34 @@ fn math_dimension_argument(tokens, index) any^ {
 }
 
 // generic math commands consume adjacent or space-separated groups as children.
-fn math_generic_arguments(tokens, index, items = []) any^ {
+fn math_generic_arguments(tokens, index, items = [], raw_args = null) any^ {
     let at = math_nonspace(tokens, index)^;
-    if (at >= len(tokens)) {issue: null, index: at, items: items}
+    let done = {issue:null, index:at, items:items, raw_args:raw_args};
+    if (at >= len(tokens)) done
     else if (opening(tokens[at])) {
         let arg = math_script_arg(tokens, at)^;
-        if (arg.issue != null) arg else math_generic_arguments(tokens, arg.index, [*items, arg.value])
+        if (arg.issue != null) arg
+        else {
+            // extension metadata retains the spelling between the braces, including whitespace.
+            let capture = raw_args != null and len(raw_args) < 2;
+            let raw = if (capture) output_between(tokens[at], tokens[arg.index - 1])^ else null;
+            if (capture and raw == null) unsupported(at, "math extension argument source mapping")
+            else math_generic_arguments(tokens, arg.index, [*items, arg.value],
+                if (capture) [*raw_args, raw] else raw_args)
+        }
     }
     else if (tokens[at].kind == "char" and tokens[at].value == "[") {
         let arg = read_generic_delimited(tokens, at, "[", "]", "latex-digest-unclosed-optional")^;
         // An unmatched bracket remains punctuation after the command.
-        if (arg.issue == "latex-digest-unclosed-optional") {issue:null, index:at, items:items}
+        if (arg.issue == "latex-digest-unclosed-optional") done
         else if (arg.issue != null) arg
         else {
             let content = math_atoms(arg.tokens)^;
             if (content.issue != null) content
-            else math_generic_arguments(tokens, arg.end, [*items, <brack_group *math_content(content.items)^>])
+            else math_generic_arguments(tokens, arg.end, [*items, <brack_group *math_content(content.items)^>], raw_args)
         }
     }
-    else {issue: null, index: at, items: items}
+    else done
 }
 
 // Math digestion follows the native parser's standard lexical categories.
@@ -1164,7 +1198,7 @@ fn math_environment(tokens, index) any^ {
 
 // These native special forms must not be mistaken for generic commands.
 fn math_unported_special(name) => contains(["above", "angl", "anglk", "angln", "anglr",
-    "atop", "brace", "brack", "choose", "class", "cssId", "htmlData", "middle", "over", "right", "substack"], name)
+    "atop", "brace", "brack", "choose", "middle", "over", "substack"], name)
 
 fn math_command(tokens, index) any^ {
     let name = tokens[index].value;
@@ -1342,8 +1376,8 @@ fn math_command(tokens, index) any^ {
             *:if (separator.present) {separator:<brack_group *math_content(sep.items)^>} else {}>}
     }
     else if (name == "genfrac") {
-        let left = math_delimiter_token(tokens, index + 1, false, true)^;
-        let right = if (left.issue != null) left else math_delimiter_token(tokens, left.index, false, true)^;
+        let left = math_delimiter_token(tokens, index + 1, true)^;
+        let right = if (left.issue != null) left else math_delimiter_token(tokens, left.index, true)^;
         let thickness = if (right.issue != null) right else math_dimension_argument(tokens, right.index)^;
         let style = if (thickness.issue != null) thickness else math_dimension_argument(tokens, thickness.index)^;
         let args = if (style.issue != null) style else math_arguments(tokens, style.index, 2)^;
@@ -1391,10 +1425,8 @@ fn math_command(tokens, index) any^ {
         "bigg", "biggl", "biggr", "biggm", "Bigg", "Biggl", "Biggr", "Biggm"], name)) {
         let at = math_nonspace(tokens,index + 1)^;
         let next = if (at < len(tokens)) tokens[at] else null;
-        let has_delimiter = next != null and
-            ((next.kind == "char" and contains(["(", ")", "[", "]", "{", "}", "|", "<", ">", "/", "."],next.value)) or
-             (next.kind == "control" and math_delimiter_control(next.value)));
-        let delimiter = if (has_delimiter) math_delimiter_token(tokens,at,false,true)^
+        let has_delimiter = next != null and math_has_delimiter(next)^;
+        let delimiter = if (has_delimiter) math_delimiter_token(tokens,at,true)^
             else {issue:null,index:at};
         if (delimiter.issue != null) delimiter
         else {issue:null,index:delimiter.index,value:<sized_delimiter size:"\\" ++ name,
@@ -1423,6 +1455,11 @@ fn math_command(tokens, index) any^ {
             script: args.items[2], scriptscript: args.items[3]>}
     }
     else if (name == "left") math_delimiter_group(tokens, index)
+    else if (name == "right") {
+        let delimiter = math_delimiter_token(tokens, index + 1, true)^;
+        if (delimiter.issue != null) delimiter
+        else {issue:null, index:delimiter.index, value:<malformed_right delim:delimiter.value>}
+    }
     // style declarations change following math without consuming an argument.
     else if (contains(["displaystyle", "textstyle", "scriptstyle", "scriptscriptstyle"], name))
         {issue: null, index: index + 1, value: <style_command cmd: "\\" ++ name>}
@@ -1461,7 +1498,9 @@ fn math_command(tokens, index) any^ {
         {issue: null, index: index + 1, value: <not_overlay target: "=">}
     else if (name == "not") {
         let at = math_nonspace(tokens,index + 1)^;
-        if (at + 1 < len(tokens) and opening(tokens[at]) and closing(tokens[at + 1]) and
+        // a targetless negation uses the native generic command shape.
+        if (at >= len(tokens)) {issue:null, index:at, value:<command name:name>}
+        else if (at + 1 < len(tokens) and opening(tokens[at]) and closing(tokens[at + 1]) and
                 math_adjacent(tokens[at],tokens[at + 1]))
             {issue:null,index:at + 2,value:<not_empty>}
         else {
@@ -1509,8 +1548,12 @@ fn math_command(tokens, index) any^ {
     else if (math_unported_special(name)) unsupported(index, "math command " ++ name)
     // Native math preserves unknown commands and their adjacent argument groups.
     else {
-        let args = math_generic_arguments(tokens, index + 1)^;
-        if (args.issue != null) args else {issue: null, index: args.index, value: <command name: name, *args.items>}
+        let preserve_raw = contains(["class", "cssId", "htmlData"], name);
+        let args = math_generic_arguments(tokens, index + 1, [], if (preserve_raw) [] else null)^;
+        if (args.issue != null) args
+        else {issue:null, index:args.index, value:<command name:name,
+            *:if (len(args.raw_args) > 0) {arg0_raw:args.raw_args[0]} else {},
+            *:if (len(args.raw_args) > 1) {arg1_raw:args.raw_args[1]} else {}, *args.items>}
     }
 }
 
@@ -1595,72 +1638,54 @@ fn math_scripts(tokens, index, base, sub = null, sup = null, modifier = null) an
     }
 }
 
+// read the primary separately so braced left-delimiter recovery can reuse it.
+fn math_primary(tokens, index) any^ {
+    let token = tokens[index];
+    if (opening(token)) math_script_arg(tokens, index)^
+    else if (token.kind == "char" and contains(["#", "!"], token.value)) {
+        let raw = math_raw_run(tokens, index)^;
+        if (raw.issue != null) raw
+        else {issue:null, index:raw.index, value:<raw_math_text value:raw.text>}
+    }
+    // native math treats a decimal prefix and an ellipsis differently from a period.
+    else if (token.kind == "char" and token.value == ".") {
+        let next = if (index + 1 < len(tokens)) tokens[index + 1] else null;
+        let third = if (index + 2 < len(tokens)) tokens[index + 2] else null;
+        let joined = next != null and math_adjacent(token, next);
+        let dots = joined and next.kind == "char" and next.value == "." and third != null and
+            third.kind == "char" and third.value == "." and math_adjacent(next, third);
+        let decimal_prefix = joined and math_digit(next);
+        let numeric = if (decimal_prefix) math_number(tokens, index)^ else null;
+        let value = if (decimal_prefix) numeric.text else if (dots) <raw_math_text value: "..."> else <punctuation value: ".">;
+        let after = if (decimal_prefix) numeric.index else index + if (dots) 3 else 1;
+        {issue:null, index:after, value:value}
+    }
+    else if (math_unicode(token)^) {
+        let run = math_text_run(tokens, index, true)^;
+        if (run.issue != null) run
+        else {issue:null, index:run.index, value:<unicode_text value:run.text>}
+    }
+    else if (math_digit(token)) {
+        let numeric = math_number(tokens, index)^;
+        {issue:null, index:numeric.index, value:numeric.text}
+    }
+    else if (math_letter(token)) {issue:null, index:index + 1, value:token.value}
+    else if (token.kind == "control") math_command(tokens, index)^
+    else if (token.kind == "char" and len(token.value) == 1 and ord(token.value) < 128)
+        math_punctuation(tokens,index)^
+    else unsupported(index, "math atom")
+}
+
 fn math_atoms(tokens, index = 0, items = []) any^ {
-    if (index >= len(tokens)) {items: items, issue: null}
+    let at = math_nonspace(tokens,index)^;
+    if (at >= len(tokens)) {items:items, issue:null}
     else {
-        let token = tokens[index];
-        if (math_space(token)^) math_atoms(tokens, index + 1, items)
-        // a braced group is an atom and can itself carry scripts.
-        else if (opening(token)) {
-            let group = math_script_arg(tokens, index)^;
-            if (group.issue != null) group
-            else {
-                let scripted = math_scripts(tokens, group.index, group.value)^;
-                if (scripted.issue != null) scripted else math_atoms(tokens, scripted.index, [*items, scripted.value])
-            }
+        let atom = math_primary(tokens,at)^;
+        if (atom.issue != null) atom
+        else {
+            let scripted = math_scripts(tokens,atom.index,atom.value)^;
+            if (scripted.issue != null) scripted else math_atoms(tokens,scripted.index,[*items,scripted.value])
         }
-        else if (token.kind == "char" and contains(["#", "!"], token.value)) {
-            let raw = math_raw_run(tokens, index)^;
-            if (raw.issue != null) raw
-            else {
-                let scripted = math_scripts(tokens, raw.index, <raw_math_text value: raw.text>)^;
-                if (scripted.issue != null) scripted else math_atoms(tokens, scripted.index, [*items, scripted.value])
-            }
-        }
-        // native math treats a decimal prefix and an ellipsis differently from a period.
-        else if (token.kind == "char" and token.value == ".") {
-            let next = if (index + 1 < len(tokens)) tokens[index + 1] else null;
-            let third = if (index + 2 < len(tokens)) tokens[index + 2] else null;
-            let joined = next != null and math_adjacent(token, next);
-            let dots = joined and next.kind == "char" and next.value == "." and third != null and
-                third.kind == "char" and third.value == "." and math_adjacent(next, third);
-            let decimal_prefix = joined and math_digit(next);
-            let numeric = if (decimal_prefix) math_number(tokens, index)^ else null;
-            let value = if (decimal_prefix) numeric.text else if (dots) <raw_math_text value: "..."> else <punctuation value: ".">;
-            let after = if (decimal_prefix) numeric.index else index + if (dots) 3 else 1;
-            let scripted = math_scripts(tokens, after, value)^;
-            if (scripted.issue != null) scripted else math_atoms(tokens, scripted.index, [*items, scripted.value])
-        }
-        else if (math_unicode(token)^) {
-            let run = math_text_run(tokens, index, true)^;
-            if (run.issue != null) run
-            else {
-                let scripted = math_scripts(tokens, run.index, <unicode_text value: run.text>)^;
-                if (scripted.issue != null) scripted else math_atoms(tokens, scripted.index, [*items, scripted.value])
-            }
-        }
-        else if (math_letter(token) or math_digit(token)) {
-            let numeric = if (math_digit(token)) math_number(tokens, index)^ else {index: index + 1, text: token.value};
-            let scripted = math_scripts(tokens, numeric.index, numeric.text)^;
-            if (scripted.issue != null) scripted else math_atoms(tokens, scripted.index, [*items, scripted.value])
-        }
-        else if (token.kind == "control") {
-            let atom = math_command(tokens, index)^;
-            if (atom.issue != null) atom
-            else {
-                let scripted = math_scripts(tokens, atom.index, atom.value)^;
-                if (scripted.issue != null) scripted else math_atoms(tokens, scripted.index, [*items, scripted.value])
-            }
-        }
-        // Remaining ASCII characters have the native punctuation shape.
-        else if (token.kind == "char" and len(token.value) == 1 and ord(token.value) < 128) {
-            let atom = math_punctuation(tokens,index)^;
-            if (atom.issue != null) atom else {
-                let scripted = math_scripts(tokens,atom.index,atom.value)^;
-                if (scripted.issue != null) scripted else math_atoms(tokens,scripted.index,[*items,scripted.value])
-            }
-        }
-        else unsupported(index, "math atom")
     }
 }
 

@@ -44,6 +44,17 @@ The existing native engine design and historical Phase IV work are in
   case, or harness timeout was removed or changed. Both fixtures also match
   under forced GC with freed-memory poisoning in interpreter and JIT.
 
+- **Math SVG corpus recovery, 2026-11-26.** The shared math digester preserves
+  raw arguments on generic extension commands and restores recovery for braced
+  left delimiters, invalid middle delimiters and targetless negation
+  (D10.2.2v2). All 13 affected public parse trees match the retired native
+  parser. The SVG corpus passes 921/921 and now reports parser and renderer
+  error messages (D10.2.3, S7.6.1v9). All 74 focused goldens pass. The
+  recovery golden also passes in the interpreter and JIT with forced GC.
+  The broader Lambda baseline passes 5,203/5,220, with failures in
+  networking and JavaScript media playback. Evidence is in
+  `temp/math-svg-corpus/` and `temp/math_corpus_report.json`.
+
 - **Prefixed macro source mapping, 2026-11-26:** The definition continuation
   and reconstructed-segment argument handling now cover the source-group
   joining that originally required the global prefixed-macro guard

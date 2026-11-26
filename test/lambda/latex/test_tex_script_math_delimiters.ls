@@ -32,6 +32,7 @@ let sources = [
     "\\begin{document}$\\left(x\\right{\\rangle}$\\end{document}",
     "\\begin{document}$\\left(x\\right{ )}$\\end{document}"
 ];
-let invalid = result("\\begin{document}$\\left(x\\middle a\\right)$\\end{document}")^;
+let recovered = result("\\begin{document}$\\left(x\\middle a\\right)$\\end{document}")^;
+let expected_recovery = <math <delimiter_group left:"(", right:")", "x" <middle_delim> "a">>;
 [*[for (source in sources) matches(source)^],
-    invalid.issue == "latex-digest-unsupported" and invalid.unsupported == "math delimiter"]
+    recovered.issue == null and recovered.ast[0][0][0].ast == expected_recovery]
