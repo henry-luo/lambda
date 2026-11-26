@@ -514,7 +514,7 @@ Focused gates:
 Acceptance:
 
 - VM failures stop being broad sandbox/isolation mismatches.
-- Module/require fixes do not destabilize npm package resolution.
+- Module/require fixes do not regress relative module loading.
 
 ## Proposed Order
 

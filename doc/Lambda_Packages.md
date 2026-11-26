@@ -3786,8 +3786,16 @@ data or implicitly acquires input (**D5.5.2 / D6.3.3 / S4.9.1**).
 body. The bounded CPU and GPU profiles render basic meshes or planar billboards using native
 instanced vertex fetch; geometry/material references and inline definitions work
 as for meshes. Opaque, masked and center-sorted transparent presentation are
-supported. Shader, lit and deformed particle meshes reject. Builders/presets
-remain M13 (**S12.1.1v3 / S12.1.5v2 / D5.5.2 / D9.5.6**).
+supported. Shader, lit and deformed particle meshes reject. Build emitters with
+`s.particle_emitter(geometry, material, options, controls)`, whose geometry and
+material work as for `s.mesh`. Its controls come from
+`s.particle_curve(kind, times, values)` (kind `'size'`, `'rotation'`, `'color'`,
+`'opacity'` or `'velocity'`), `s.particle_noise`, `s.particle_sheet`,
+`s.particle_trail` and `s.particle_collision(options, shapes)`, with
+`s.particle_plane` and `s.particle_sphere` as GPU analytic shapes. `s.validate`
+checks emitters and their controls against the native limits below, so a bad
+description fails with a message instead of blanking the scene. Presets remain
+M13 (**S12.1.1v3 / S12.1.5v2 / D5.5.2 / D9.5.6**).
 
 ```html
 <particle-emitter id="sparks" backend="cpu" space="local" seed="42"
@@ -3892,7 +3900,8 @@ The batch shape is:
   service_generation: particles.service_generation,
   sequence: next_sequence, tick: target_tick,
   commands: [{op: "spawn", emitter: target.id, identity: target.identity,
-              count: 12, depth: 1, position: [0, 1, 0], velocity: [0, 2, 0]}]
+              count: 12, depth: 1, position: [0, 1, 0], velocity: [0, 2, 0],
+              rotation: [0, 1.57, 0]}]
 }
 ```
 
@@ -3901,8 +3910,12 @@ A batch contains 1–128 `spawn` records. `count` is a whole number from 1 to 40
 `position` replaces this request's birth origin in the target's simulation
 space; shape offsets still use the emitter's birth basis. Omission preserves
 the authored origin. Optional `velocity` adds simulation-space initial dynamic
-velocity after that basis, defaulting to zero. Each vector has three finite
-float coordinates in [-1000000,1000000]. World emitters therefore accept copied
+velocity after that basis, defaulting to zero. Optional `rotation` turns this
+request's birth basis about its origin by Euler XYZ radians (`Rx * Ry * Rz`, as
+`particle-rotation-curve`). Shape offsets, authored velocity and the mesh turn
+with it, before the over-life rotation curve; the added `velocity` stays in
+simulation axes. Billboards keep facing the camera. Omission leaves the basis
+unturned. Each vector has three finite float coordinates in [-1000000,1000000]. World emitters therefore accept copied
 world contact positions directly; local emitters use local origins and axes.
 These overrides affect new births only. Sampled over-life velocity remains a
 separate transport component.
@@ -3935,8 +3948,8 @@ rule evaluator or automatic event mapping runs natively. GPU origins and added
 velocity remain in immutable birth recipes, with no ordinary particle readback
 or CPU motion mirror. Timing follows the Scene3D proposal's §3.2/M6; copied
 ownership and template authority retain **D5.5.2 / D6.3.3 / D9.5.6 /
-S12.1.5v2**. Capabilities report `particles_spawn_commands` and
-`particles_child_queues` for this bounded profile.
+S12.1.5v2**. Capabilities report `particles_spawn_commands`,
+`particles_spawn_rotation` and `particles_child_queues` for this bounded profile.
 
 #### Bounded native CPU/GPU particle trails
 

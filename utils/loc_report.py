@@ -167,7 +167,7 @@ JS_SUBMODULES = [
         'js_xhr', 'js_fetch', 'js_formdata', 'js_url_module',
     ])),
     ('node compat', in_dir_with_prefix('lambda/js', [
-        'js_fs', 'js_path', 'js_os', 'js_http', 'js_https', 'js_net',
+        'js_fs', 'js_path', 'js_os', 'js_http', 'js_https',
         'js_tls', 'js_child_process', 'js_stream', 'js_buffer', 'js_util',
         'js_querystring', 'js_readline', 'js_string_decoder',
         'js_events', 'js_assert',

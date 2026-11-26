@@ -1718,11 +1718,6 @@ Item js_dynamic_import(Item specifier);
 Item js_dynamic_import_at(Item specifier, const char* reference);
 Item js_p5_chain_dynamic_import(Item awaited, Item namespace_obj, Item result_promise);
 
-// Native SHA hash functions (Jube node-crypto host primitive provider)
-Item js_native_sha256(Item data, Item offset, Item length);
-Item js_native_sha384(Item data, Item offset, Item length);
-Item js_native_sha512(Item data, Item offset, Item length);
-
 // =============================================================================
 // OffscreenCanvas / CanvasRenderingContext2D (js_canvas.cpp)
 // =============================================================================

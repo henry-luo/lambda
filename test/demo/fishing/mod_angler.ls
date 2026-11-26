@@ -27,8 +27,10 @@ fn arc(a, b, k: float, height: float) => (let p = vlerp(a, b, k), [p[0], p[1] + 
 fn mix_angles(a, b, k) => [for (i in 0 to 2) a[i] + (b[i] - a[i]) * k]
 
 // ---- the building blocks
-let OARS_REST = {l: [0.0, 0.2], r: [0.0, 0.2]}
-let OARS_SHIPPED = {l: [1.38, -0.04], r: [1.38, -0.04]}
+// oars: [sweep (positive swings the blade aft), lift (positive dips the blade), square (1 turns the blade on edge)]
+// at rest the blades lie flat on the water
+let OARS_REST = {l: [0.0, 0.29, 0.0], r: [0.0, 0.29, 0.0]}
+let OARS_SHIPPED = {l: [1.38, -0.04, 0.0], r: [1.38, -0.04, 0.0]}
 let ROD_STOWED = {p: [-0.3, 0.08, -0.9], a: [0.15, -0.08, 0.0]}
 let ROD_READY = {p: [-0.25, 0.44, 0.1], a: [-0.22, -0.78, 0.0]}
 // hands: "oar" (its handle), "grip" (the rod's grip), "butt" (the rod's end), "knee", or a boat-space point
@@ -37,7 +39,8 @@ let ARMS_ROD = {hand_r: "grip", hand_l: "knee"}
 fn base(arms, oars, rod, line) => {torso: [0.0, 0.03, 0.0], scale: 1.0, head: [0.0, 0.08, 0.0], *: arms, oars: oars, rod: rod, line: line}
 fn blend(a, b, k) any^ => {torso: mix_angles(a.torso, b.torso, k), scale: lerp(a.scale, b.scale, k), head: mix_angles(a.head, b.head, k),
     hand_r: vlerp(resolve(a, "r")^, resolve(b, "r")^, k), hand_l: vlerp(resolve(a, "l")^, resolve(b, "l")^, k),
-    oars: {l: [lerp(a.oars.l[0], b.oars.l[0], k), lerp(a.oars.l[1], b.oars.l[1], k)], r: [lerp(a.oars.r[0], b.oars.r[0], k), lerp(a.oars.r[1], b.oars.r[1], k)]},
+    axis_r: vlerp(grip_axis(a, "r")^, grip_axis(b, "r")^, k), axis_l: vlerp(grip_axis(a, "l")^, grip_axis(b, "l")^, k),
+    oars: {l: [for (i in 0 to 2) lerp(a.oars.l[i], b.oars.l[i], k)], r: [for (i in 0 to 2) lerp(a.oars.r[i], b.oars.r[i], k)]},
     rod: {p: vlerp(a.rod.p, b.rod.p, k), a: mix_angles(a.rod.a, b.rod.a, k)}, line: if (k < 0.5) a.line else b.line}
 let STOW = {mode: "stow"}
 pub let IDLE_POSE = base(ARMS_OARS, OARS_REST, ROD_STOWED, STOW)
@@ -45,18 +48,24 @@ pub let READY_POSE = base(ARMS_ROD, OARS_SHIPPED, ROD_READY, STOW)
 fn floating(bob) => {mode: "float", bob: bob}
 
 // ---- each action as a pose at time x seconds into it
-// rowing: x is the stroke phase 0..1; push-rowing, the blades sweep aft in the water while the hands push forward
+// rowing: x is the stroke phase 0..1. Push-rowing facing the bow: at the catch the handles are at the
+// chest and the blades forward; the drive pushes the handles out over the knees with a lean from the
+// hips, sweeping the blades aft through the water on edge; at the finish the blades lift out, turn
+// flat, and skim back just clear of the water as the hands draw in, slower than the drive
+pub let DRIVE = 0.42
+let CATCH = -0.45
+let FINISH = 0.32
 pub fn row(x: float) {
     let f = x - floor(x)
-    let sweep = if (f < 0.5) -0.5 + ease(f / 0.5) else 0.5 - ease((f - 0.5) / 0.5)
-    // blades in the water through the push, lifted for the return, dropped back in at the end of it
-    let wet = if (f < 0.44) 1.0 else if (f < 0.5) 1.0 - span(f, 0.44, 0.5) else span(f, 0.92, 1.0)
-    let lift = 0.08 + 0.19 * wet
-    let reach = 0.5 + 0.5 * sin(sweep * 3.1);
-    {*: IDLE_POSE, torso: [0.0, 0.05 + 0.13 * reach, 0.0], head: [0.0, 0.0 - 0.06 * reach, 0.0],
-     oars: {l: [sweep, lift], r: [sweep, lift]}}
+    let k = if (f < DRIVE) ease(f / DRIVE) else 1.0 - ease((f - DRIVE) / (1.0 - DRIVE))
+    let wet = if (f < DRIVE - 0.03) 1.0 else if (f < DRIVE + 0.05) 1.0 - span(f, DRIVE - 0.03, DRIVE + 0.05) else span(f, 0.93, 1.0)
+    let square = if (f < DRIVE) 1.0 else if (f < DRIVE + 0.1) 1.0 - span(f, DRIVE, DRIVE + 0.1) else span(f, 0.8, 0.94)
+    // in the water the blade is buried just under the surface; on the way back it skims just clear
+    let lift = 0.22 + 0.16 * wet;
+    {*: IDLE_POSE, torso: [0.0, -0.05 + 0.27 * k, 0.0], scale: 1.0 - 0.015 * k, head: [0.0, 0.12 - 0.2 * k, 0.0],
+     oars: {l: [CATCH + (FINISH - CATCH) * k, lift, square], r: [CATCH + (FINISH - CATCH) * k, lift, square]}}
 }
-pub let ROW_PERIOD = 1.15
+pub let ROW_PERIOD = 1.6
 pub fn idle(x: float) => {*: IDLE_POSE, torso: [0.0, 0.03 + 0.012 * sin(x * 2.1), 0.0], scale: 1.0 + 0.012 * sin(x * 2.1),
     head: [0.22 * sin(x * 0.7), 0.08 + 0.03 * sin(x * 0.9), 0.0]}
 pub let IDLE_PERIOD = 2.99
@@ -65,6 +74,9 @@ pub fn ready(x: float) => {*: READY_POSE, torso: [0.0, 0.03 + 0.012 * sin(x * 2.
 pub let READY_PERIOD = 2.99
 pub fn to_fish(x: float) any^ => (let k = ease(x / 0.8), {*: blend(IDLE_POSE, READY_POSE, k)^, torso: [0.0, 0.03 + 0.1 * bump(x, 0.35, 0.35), 0.0]})
 pub fn to_row(x: float) any^ => (let k = ease(x / 0.8), {*: blend(READY_POSE, IDLE_POSE, k)^, torso: [0.0, 0.03 + 0.1 * bump(x, 0.45, 0.35), 0.0]})
+// easing the oars from the end of the last stroke (the catch) down to rest when the rowing stops
+pub let REST_TIME = 0.7
+pub fn rest_oars(x: float) any^ => blend(row(0.0), IDLE_POSE, ease(x / REST_TIME))^
 // the cast: wind up over the shoulder, whip forward, the bobber flies and bounces on landing
 pub fn cast(x: float) any^ {
     let wind = ease(span(x, 0.0, 0.42)), whip = ease(span(x, 0.42, 0.56)), settle = ease(span(x, 0.56, 1.25))
@@ -89,8 +101,9 @@ pub fn nibble(x: float) => waiting(x, -0.6 - 0.03 * (bump(x, 0.14, 0.08) + bump(
     [CAST_SPOT[0], CAST_SPOT[1] - 0.04 * bump(x, 0.12, 0.08) - 0.03 * bump(x, 0.4, 0.08), CAST_SPOT[2]])
 pub let NIBBLE_TIME = 0.7
 pub let NIBBLES = [0.12, 0.4]
-pub let BITE_WINDOW = 1.05
-pub let BITE_TIME = 1.35
+// the float stays under nearly two seconds, so a strike needs no lightning reflexes
+pub let BITE_WINDOW = 1.8
+pub let BITE_TIME = 2.1
 // a bite drags the float under; with no strike the fish lets go and it pops back up
 pub fn bite(x: float) {
     let under = ease(span(x, 0.0, 0.16)) * (1.0 - ease(span(x, BITE_WINDOW, BITE_TIME)))
@@ -165,17 +178,33 @@ pub fn line_points(pose) any^ {
     let d = v.subtract(bob, tip)
     let sag = if (l.mode == "float") 0.12 * sqrt(v.dot(d, d)) else if (l.mode == "fly") 0.05 * sqrt(v.dot(d, d)) else 0.02
     let mid = vlerp(tip, bob, 0.55)
-    return [tip, [mid[0], max(if (l.mode == "float") 0.03 else -1.0, mid[1] - sag), mid[2]], bob, hk]
+    // a floating or flying line also bows a little sideways (the drift of the water and the air)
+    let reach = sqrt(d[0] * d[0] + d[2] * d[2])
+    let bow = (if (l.mode == "float") 0.035 else if (l.mode == "fly") 0.025 else 0.0) * reach / max(reach, 0.001)
+    return [tip, [mid[0] + d[2] * bow, max(if (l.mode == "float") 0.03 else -1.0, mid[1] - sag), mid[2] - d[0] * bow], bob, hk]
+}
+// the eight line bones: the rod tip, five points along the line's curve, the bobber and the hook. The
+// curve is the quadratic through the tip, the sag point and the bobber; on the water it never dips under
+pub fn line_curve(pose) any^ {
+    let pts = line_points(pose)^
+    let tip = pts[0], mid = pts[1], bob = pts[2]
+    let c = [for (i in 0 to 2) (mid[i] - 0.2025 * tip[i] - 0.3025 * bob[i]) / 0.495]
+    let lowest = if (pose.line.mode == "float") 0.02 else -10.0;
+    [tip, *[for (k in 1 to 5, let t = k / 6.0, let p = [for (i in 0 to 2) (1.0 - t) * (1.0 - t) * tip[i] + 2.0 * t * (1.0 - t) * c[i] + t * t * bob[i]])
+        [p[0], max(lowest, p[1]), p[2]]], bob, pts[3]]
 }
 // where the bobber is (boat space), for ripples and for fish deciding to bite
 pub fn bobber(pose) any^ => line_points(pose)^[2]
 // oar blade centres (boat space), for the rings each stroke leaves
 pub fn blades(pose) any^ => [for (side in [-1.0, 1.0], let tag = if (side < 0.0) "r" else "l", let o = pose.oars[tag],
-    let d = t.quaternion_rotate(oar_q(side, o)^, [side * (boat.OAR_OUT - 0.23), 0.0, 0.0])^)
+    let d = t.quaternion_rotate(oar_q(side, o)^, [side * boat.BLADE_MID, 0.0, 0.0])^)
     [side * boat.OARLOCK[0] + d[0], boat.OARLOCK[1] + d[1], boat.OARLOCK[2] + d[2]]]
 fn yq(a: float) => [0.0, sin(a / 2.0), 0.0, cos(a / 2.0)]
 fn zq(a: float) => [0.0, 0.0, sin(a / 2.0), cos(a / 2.0)]
-fn oar_q(side: float, o) any^ => t.quaternion_multiply(yq(side * o[0]), zq(0.0 - side * o[1]))
+fn xq(a: float) => [sin(a / 2.0), 0.0, 0.0, cos(a / 2.0)]
+// sweep about the oarlock pin, then lift, then the blade turned about the loom (squared a little short of
+// upright, so from above the buried blade still shows its face)
+fn oar_q(side: float, o) any^ => t.quaternion_multiply(t.quaternion_multiply(yq(side * o[0]), zq(0.0 - side * o[1]))^, xq(0.95 * o[2]))
 
 // ---- where the hands are: a named grip resolved against the pose's oars and rod
 pub fn rod_point(rod, offset) any^ => (let d = t.quaternion_rotate(u.quat(rod.a[0], rod.a[1], rod.a[2])^, offset)^, [rod.p[0] + d[0], rod.p[1] + d[1], rod.p[2] + d[2]])
@@ -193,6 +222,17 @@ pub fn resolve(pose, which) any^ {
     return [side * fisher.KNEE_L[0], fisher.KNEE_L[1], fisher.KNEE_L[2]]
 }
 
+// the line the held thing runs along through the fist (boat space): an oar's shaft or the rod, and across
+// the boat for a hand on the knee, at the reel or anywhere else; a blend carries its own axis_r / axis_l
+pub fn grip_axis(pose, which) any^ {
+    let given = if (which == "r") pose.axis_r else pose.axis_l
+    if (given != null) { return given }
+    let spec = if (which == "r") pose.hand_r else pose.hand_l
+    if (spec == "oar") { return t.quaternion_rotate(oar_q(if (which == "r") -1.0 else 1.0, pose.oars[which])^, [1.0, 0.0, 0.0])^ }
+    if (spec == "grip" or spec == "butt") { return t.quaternion_rotate(q3(pose.rod.a)^, [0.0, 0.0, 1.0])^ }
+    return [1.0, 0.0, 0.0]
+}
+
 // ---- clips: every action sampled at FPS into the same set of tracks
 fn q3(a) any^ => u.quat(a[0], a[1], a[2])^
 // a one-shot clip holds its last pose for HOLD seconds, so switching to the next clip a frame late never shows a wrap
@@ -202,20 +242,21 @@ fn track(path, times, values, kind) any^ => s.track(path, times, values, kind)^
 pub fn clip(id, f, duration, loop) any^ {
     let times = sample(duration, loop)^
     let poses = [for (x in times) f(min(x, duration))^]
-    let lines = [for (p in poses) line_points(p)^]
-    let hands = [for (p in poses) {r: resolve(p, "r")^, l: resolve(p, "l")^}];
+    let lines = [for (p in poses) line_curve(p)^]
+    let hands = [for (p in poses) {r: resolve(p, "r")^, l: resolve(p, "l")^, ar: grip_axis(p, "r")^, al: grip_axis(p, "l")^}];
     s.clip(id, [
         *(fisher.tracks(poses, hands, times, track)^),
         *[for (side in [-1.0, 1.0], let tag = if (side < 0.0) "r" else "l")
             track("oar-" ++ tag ++ ".quaternion", times, [for (p in poses, c in oar_q(side, p.oars[tag])^) c], 'quaternion')^],
         track("rod.position", times, [for (p in poses, c in p.rod.p) c], 'vector')^,
         track("rod.quaternion", times, [for (p in poses, c in q3(p.rod.a)^) c], 'quaternion')^,
-        *[for (k in 0 to 3) track("ln-" ++ string(k) ++ ".position", times, [for (pts in lines, c in pts[k]) c], 'vector')^]],
+        *[for (k in 0 to 7) track("ln-" ++ string(k) ++ ".position", times, [for (pts in lines, c in pts[k]) c], 'vector')^]],
         {duration: if (loop) duration else duration + HOLD, autoplay: id == "idle"})
 }
 pub fn clips() any^ => [clip("idle", idle, IDLE_PERIOD, true)^, clip("row", (x) any^ => row(x / ROW_PERIOD), ROW_PERIOD, true)^,
     clip("ready", ready, READY_PERIOD, true)^,
-    clip("to-fish", to_fish, 0.8, false)^, clip("to-row", to_row, 0.8, false)^, clip("cast", cast, CAST_TIME, false)^,
+    clip("to-fish", to_fish, 0.8, false)^, clip("to-row", to_row, 0.8, false)^, clip("rest-oars", rest_oars, REST_TIME, false)^,
+    clip("cast", cast, CAST_TIME, false)^,
     clip("wait", wait, WAIT_PERIOD, true)^, clip("nibble", nibble, NIBBLE_TIME, false)^, clip("bite", bite, BITE_TIME, false)^,
     clip("reel", reel, REEL_TIME, false)^, clip("strike", strike, STRIKE_TIME, false)^]
-pub let CLIP_IDS = ["idle", "row", "ready", "to-fish", "to-row", "cast", "wait", "nibble", "bite", "reel", "strike"]
+pub let CLIP_IDS = ["idle", "row", "ready", "to-fish", "to-row", "rest-oars", "cast", "wait", "nibble", "bite", "reel", "strike"]

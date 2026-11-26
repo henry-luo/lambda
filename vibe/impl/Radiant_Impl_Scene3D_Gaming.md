@@ -71,7 +71,7 @@ does not revise those contracts.
 | M10 | Lightmap/probe baking and explicit bake jobs. | Pending |
 | M11 | Budgeted dynamic indirect lighting and volumetric fog. | Pending |
 | M12 | Surface soft-body kernels and combined native-service qualification. | Pending; topology/pin/material factories moved to M13 |
-| M13 | Dedicated Lambda packages for graph control, policy, factories/presets, orchestration, serialization and deterministic decision replay. | Deferred until M0–M12 native acceptance; active requested scope, not KIV |
+| M13 | Dedicated Lambda packages for graph control, policy, factories/presets, orchestration, serialization and deterministic decision replay. | Deferred until M0–M12 native acceptance; active requested scope, not KIV. Particle emitter/control builders and validation landed early on request (2026-11-26) |
 
 ## M0: source relocation
 
@@ -5147,6 +5147,43 @@ Evidence: `temp/scene3d-particles-spawn/qualification.json`,
 `ui-isolated-1.log`, `ui-original-workers-status.json`, `ui-system-kill.log`,
 `ui-kill-window.log`, `module-boundary.log`, `cli-verification.json`,
 `dimension-lint.log` and `doc-links.json`.
+
+## M6 per-spawn rotation and early M13 emitter builders — 2026-11-26
+
+**Outcome:** a spawn command takes an optional `rotation` (Euler XYZ radians,
+the rotation curve's convention) that turns that request's birth basis about its
+origin. Shape offsets, authored velocity and the mesh turn with it on both
+backends; the added velocity stays in simulation axes. Before this, every particle
+of an emitter shared one orientation (the emitter's birth frame and the shared
+over-life curve), so repeated shapes lined up. The fishing demo's ripples needed
+this. At the user's request the M13 builder and validation slice for emitters
+landed too: `s.particle_emitter`, `s.particle_curve`, `s.particle_noise`,
+`s.particle_sheet`, `s.particle_trail`, `s.particle_collision`, `s.particle_plane`
+and `s.particle_sphere`. `s.validate` now admits emitters and checks them against
+the native limits; it used to reject any scene that had one. Presets,
+normalization/serialization, effect sequences and sub-emitter rules remain M13.
+
+**Owners:** the turn composes into `ParticleRecord::frame`, which both the CPU
+matrices and the GPU birth recipe (`birth.frame`) already read for offsets,
+velocity and orientation. A GPU recipe's added velocity undoes the turn, because
+the device applies the frame to it. CPU local births transform by the frame once
+turned. A turned record sets the emitter's `rotating` flag, so GPU bounds use the
+rotation-safe sphere. The `radiant-dom` adapter parses `rotation` with the
+position/velocity bounds; capabilities add `particles_spawn_rotation`. The package
+checks live in `lmd/package/scene3d/particles.ls`. `model.ls` shares a mesh's
+geometry/material checks with emitters through `parts` and `mesh_part`.
+
+**Qualified behavior:** new CPU/GPU bridge controls show a quarter turn about Y
+carrying authored +X velocity to −Z, with the added velocity unturned and the
+rotation-safe bounds flag set. The existing validation control rejects an
+out-of-range or NaN rotation. All 301 `*Particle*` unit controls pass, as do the
+new `test/lambda/scene3d/particles.ls` golden (20 accept/reject cases, interpreter
+and JIT identical) and the other 34 scene3d goldens, unchanged. The fishing golden
+now validates its whole scene (7 emitters), and its three replays pass. The full
+Radiant aggregate, the forced-GC bridge matrix and ASan were not rerun for this
+component. Billboards keep facing the camera, so a spawn rotation turns only their
+emission. No normative ruling changed: **D9.5.6** covers the host contract and
+names no fields.
 
 ## M7 shared audio playback foundation — 2026-11-03
 

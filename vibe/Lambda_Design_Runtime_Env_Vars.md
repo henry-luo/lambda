@@ -116,7 +116,7 @@ present in every build because `lambda/main.cpp` reads it with an ungated
 | `JUBE_HOSTOBJ_DEMO_DYNAMIC_ONLY` | Non-zero: suppress static host-object demo so its dynamic version can register. Development/test integration switch. | ✓ | ✓ | ✓ |
 | `LAMBDA_PYTHON` | Python executable for the serve backend. | ✓ | ✓ | ✓ |
 | `LAMBDA_SHELL` | Shell executable for the serve Bash backend. | ✓ | ✓ | ✓ |
-| `HOME` | Lambda npm cache, fonts, Bash and JS home-directory support. | ✓ | ✓ | ✓ |
+| `HOME` | Fonts, Bash and JS home-directory support. | ✓ | ✓ | ✓ |
 | `XDG_DATA_HOME` | Linux font-discovery location. | ✓ | ✓ | ✓ |
 | `PWD` | Embedded Bash current-directory state. | ✓ | ✓ | ✓ |
 | `OLDPWD` | Embedded Bash previous-directory state. | ✓ | ✓ | ✓ |

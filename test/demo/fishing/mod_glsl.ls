@@ -89,3 +89,79 @@ void main() {
     float a = clamp(l * fade * strength, 0.0, 1.0);
     fragment_color = vec4(vec3(1.0, 0.96, 0.82) * a, a);
 }"
+
+// how the moving surface shifts what lies under it, seen from above: two crossing swells and a faint finer
+// one (a strong fine swell shears neighbouring vertices of one leaf apart and tears its outline)
+let WOBBLE = "vec2 wobble(vec2 q, float t) {
+    return vec2(sin(q.y * 2.1 + t * 1.3) + 0.6 * sin((q.x + q.y) * 3.3 - t * 1.7) + 0.15 * sin(q.y * 7.7 - q.x * 2.0 + t * 2.3),
+        sin(q.x * 2.4 - t * 1.1) + 0.6 * sin((q.x - q.y) * 2.9 + t * 1.5) + 0.15 * sin(q.x * 8.3 + q.y * 1.7 - t * 2.1));
+}
+"
+
+// Underwater plants: a wave travels up every leaf. Its bend grows with height and lags further up the
+// leaf, and each clump (by its root) and each leaf (by the direction it leaves the root) has its own
+// phase, so nothing moves in step. A second, slower wave crosses it, and the current slowly veers.
+// wave: amplitude at the reference height (m), reference height, wavelength along the leaf, rate (rad/s)
+pub let PLANT_VERTEX = WOBBLE ++ "uniform float time;
+uniform vec4 wave;
+uniform float refraction;
+out vec3 tint;
+out vec3 lit_normal;
+out float murk;
+float hash1(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+void main() {
+    mat4 m = model_matrix * instance_matrix;
+    vec3 root = m[3].xyz;
+    float h = max(position.y, 0.0) / wave.y;
+    float phase = dot(root.xz, vec2(1.3, 0.9)) + atan(position.z, position.x + 0.0001) * 1.7;
+    float along = position.y / wave.z * 6.2831853;
+    float scale = length(m[1].xyz);
+    float bend = wave.x * scale * h * sqrt(h) * sin(time * wave.w - along + phase);
+    float cross = 0.55 * wave.x * scale * h * h * sin(time * wave.w * 0.71 - along * 0.6 + phase * 1.9 + 1.7);
+    float veer = 0.6 + 0.35 * sin(time * 0.07);
+    vec2 d = vec2(cos(veer), sin(veer));
+    vec4 w = m * vec4(position, 1.0);
+    w.xz += d * bend + vec2(0.0 - d.y, d.x) * cross;
+    // seen through the moving surface: two crossing swells shift whatever lies below, more the deeper it
+    // is, so the floor wavers; and deeper water veils it in the cove's colour
+    float depth = max(0.0, 0.0 - w.y);
+    w.xz += wobble(w.xz, time) * depth * refraction;
+    murk = clamp(0.2 + depth * 0.28, 0.0, 0.62);
+    lit_normal = normalize(mat3(m) * normal);
+    // a per-clump shade and hue, so many copies of one clump never look stamped
+    tint = color * mix(0.8, 1.15, hash1(root.xz)) * mix(vec3(1.0), vec3(0.84, 1.0, 1.1), hash1(root.zx + 3.1));
+    gl_Position = projection_matrix * view_matrix * w;
+}"
+// thin leaves: lit from the sky and through from the sun on either face
+pub let PLANT_FRAGMENT = "uniform vec3 sun;
+uniform vec3 sun_color;
+uniform vec3 sky;
+uniform vec3 ground;
+uniform vec3 haze;
+in vec3 tint;
+in vec3 lit_normal;
+in float murk;
+void main() {
+    // a thin leaf shows the same light on both faces: sky from above, the sun straight or through it
+    vec3 n = normalize(lit_normal);
+    vec3 light = mix(ground, sky, 0.5 + 0.5 * abs(n.y)) + sun_color * (0.35 + 0.5 * abs(dot(n, sun)));
+    fragment_color = vec4(mix(tint * light, haze, murk), 1.0);
+}"
+// Things that dip into the water (the oar blades): the part under the surface is seen through it, so it
+// looks shallower (by the index of refraction), wavers with the swells and takes on the water's colour;
+// a blade going in seems to bend at the waterline. Shares the plants' lighting.
+pub let IMMERSED_VERTEX = WOBBLE ++ "uniform float time;
+uniform float refraction;
+out vec3 tint;
+out vec3 lit_normal;
+out float murk;
+void main() {
+    vec4 w = model_matrix * vec4(position, 1.0);
+    float depth = max(0.0, 0.0 - w.y);
+    w.y += depth * 0.25;
+    w.xz += wobble(w.xz, time) * depth * refraction;
+    murk = clamp(depth * 3.0, 0.0, 0.4);
+    tint = color;
+    lit_normal = normalize(mat3(model_matrix) * normal);
+    gl_Position = projection_matrix * view_matrix * w;
+}"

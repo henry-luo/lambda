@@ -7,6 +7,7 @@ import shapes: lambda.scene3d.shape
 import environments: lambda.scene3d.environment
 import effects: lambda.scene3d.effects
 import post: lambda.scene3d.postprocessing
+import particles: lambda.scene3d.particles
 
 pub type Vector3 = [number, number, number]
 pub type Matrix4 = number[]
@@ -49,7 +50,7 @@ pub fn postprocessing(children) element => post.chain(children)
 pub fn post_effect(kind, options = {}) element => post.effect(kind, options)
 pub fn texture(source, options = {}) element => <texture src: source, *: options>
 // static tags share reference and child construction; both inline values and resource IDs work.
-fn drawable(kind, geometry, material, options) element {
+fn drawable(kind, geometry, material, options, controls = []) element {
     let geometry_ref = geometry is string or geometry is symbol
     let material_ref = material is string or material is symbol
     let attrs = {*: options, *:(if (geometry_ref) {geometry: geometry} else {}), *:(if (material_ref) {material: material} else {})}
@@ -58,6 +59,7 @@ fn drawable(kind, geometry, material, options) element {
     else if (kind == 'points') <points *: attrs, *children>
     else if (kind == 'sprite') <sprite *: attrs, *children>
     else if (kind == 'line') <line *: attrs, *children>
+    else if (kind == 'particle-emitter') <'particle-emitter' *: attrs, *[*children, *controls]>
     else <'line-segments' *: attrs, *children>
 }
 pub fn mesh(geometry, material, options = {}) element^ => drawable('mesh', geometry, material, options)
@@ -65,6 +67,17 @@ pub fn points(geometry, material, options = {}) element^ => drawable('points', g
 pub fn sprite(material, options = {}) element^ => drawable('sprite', geometry([0.0, 0.0, 0.0]), material, options)
 pub fn line(geometry, material, options = {}) element^ => drawable('line', geometry, material, options)
 pub fn line_segments(geometry, material, options = {}) element^ => drawable('line-segments', geometry, material, options)
+// a native particle emitter: geometry and material as for a mesh (inline or by resource ID), emitter
+// attributes in `options`, and its controls (particle_curve, particle_noise, particle_sheet, particle_trail,
+// particle_collision); spawn commands go through lambda.scene3d.runtime.particle_commands
+pub fn particle_emitter(geometry, material, options = {}, controls = []) element => drawable('particle-emitter', geometry, material, options, controls)
+pub fn particle_curve(kind, times, values) element^ => particles.curve(kind, times, values)^
+pub fn particle_noise(options = {}) element => particles.noise(options)
+pub fn particle_sheet(options = {}) element => particles.sheet(options)
+pub fn particle_trail(options = {}) element => particles.trail(options)
+pub fn particle_collision(options = {}, shapes = []) element => particles.collision(options, shapes)
+pub fn particle_plane(normal = [0.0, 1.0, 0.0], offset = 0.0) element => particles.plane(normal, offset)
+pub fn particle_sphere(center = [0.0, 0.0, 0.0], radius = 1.0) element => particles.sphere(center, radius)
 pub fn resources(children) element => <resources *children>
 pub fn clip(label, tracks, options = {}) element^ => clips.clip(label, tracks, options)
 pub fn track(path, times, values, kind = 'number', options = {}) element^ => clips.track(path, times, values, kind, options)

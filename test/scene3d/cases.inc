@@ -96,6 +96,7 @@
 {"MidtownOpenRoadJumpAutoDriveAndNight", "test/demo/midtown/midtown.ls", "test/demo/midtown/tests/openroad.json", 31},
 {"FishingRowCastReelAndRowAway", "test/demo/fishing/fishing.ls", "test/demo/fishing/tests/desktop.json", 36},
 {"FishingAssistedCatchCountsAndReleases", "test/demo/fishing/fishing.ls", "test/demo/fishing/tests/catch.json", 17},
+{"FishingClickCastsDragOrbitsClickReels", "test/demo/fishing/fishing.ls", "test/demo/fishing/tests/mouse.json", 21},
 {"CrystalGardenPanTiltZoomRendersAndResetsCamera", "test/demo/scene3d/three-gallery.ls", "test/scene3d/events/CrystalGardenPanTiltZoomRendersAndResetsCamera.json", 43},
 {"NativeObservatoryControlsAndPlayback", "test/demo/scene3d/observatory.ls", "test/scene3d/events/NativeObservatoryControlsAndPlayback.json", 26},
 {"AquariumEditorBuildsEditsAnimatesAndSavesTank", "test/demo/aquarium/aquarium.ls", "test/demo/aquarium/tests/aquarium_editor.json", 61},

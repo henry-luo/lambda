@@ -640,7 +640,7 @@ Libarchive is an archive/container layer; its gzip/ZIP, xz/LZMA, bzip2 and zstd
 paths use their respective codec libraries, as documented in its
 [format/dependency matrix](https://github.com/libarchive/libarchive/wiki/LibarchiveFormats).
 Adding it does not remove zlib. Current Lambda consumers also include
-libpng, TIFF DEFLATE, PDF FlateDecode, WOFF1, Node's zlib APIs and npm tarballs.
+libpng, TIFF DEFLATE, PDF FlateDecode, WOFF1, Node's zlib APIs.
 Those consumers operate on streams embedded in their own formats; they keep
 their native codec APIs. The shared build should supply consistent codec
 libraries across consumers rather than route each embedded stream through an

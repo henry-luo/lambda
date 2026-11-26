@@ -762,7 +762,10 @@ the selected profile.
 M6 owns bounded storage, emission/update/collision, shared curve sampling,
 seed/restart/seek mechanisms and native snapshots of bounds/work/resources.
 M13 owns emitter/curve/preset builders, normalization/serialization, effect
-sequences, burst triggers and event-driven sub-emitter composition. Small
+sequences, burst triggers and event-driven sub-emitter composition. Emitter and
+control builders and their validation landed early (2026-11-26), with a
+per-spawn birth rotation on the M6 command; presets, normalization, effect
+sequences and sub-emitter rules remain M13. Small
 decorative effects may use a bounded script simulation; this does not replace
 the required scalable CPU/GPU profiles.
 

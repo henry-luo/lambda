@@ -4987,12 +4987,12 @@ TEST(JsInterpreter, BrowserRequireDoesNotEnterImplicitNodeLoader) {
         const char source[] = R"JS(
             globalThis.__browser_require = typeof require === 'undefined';
             var evaluated = false;
-            try { require((evaluated = true, 'crypto')); globalThis.__browser_require = false; }
+            try { require((evaluated = true, 'fs')); globalThis.__browser_require = false; }
             catch (error) { globalThis.__browser_require &&= error instanceof ReferenceError && !evaluated; }
             globalThis.require = function (name) { return 'browser:' + name; };
             globalThis.__browser_require &&= require('module') === 'browser:module';
             delete globalThis.require;
-            try { require('crypto'); globalThis.__browser_require = false; }
+            try { require('fs'); globalThis.__browser_require = false; }
             catch (error) { globalThis.__browser_require &&= error instanceof ReferenceError; }
         )JS";
         Item result = transpile_js_to_mir(&runtime, source, "<inline-script-0>", NULL);

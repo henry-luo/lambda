@@ -229,7 +229,6 @@ The findings by file (Top 12, covering 96 % of the corpus):
 | `lambda/validator/ast_validate.cpp` | 55 | `lambda validate` CLI subcommand. |
 | `radiant/cmd_layout.cpp` | 14 | `lambda layout` CLI subcommand. |
 | `lambda/headless_stubs.cpp` | 11 | Headless build stubs (CLI-only build). |
-| `lambda/module/npm` | 10 | npm-compat CLI. |
 | `radiant/event_sim.cpp` + `render_img.cpp` + misc | ~30 | Test/sim drivers and CLI dump paths. |
 
 **Root cause:** the rule's exclusion list (lambda/cli/**, lambda/repl/**,
@@ -256,7 +255,6 @@ ignores:
   - "lambda/print.cpp"
   - "lambda/validator/ast_validate.cpp"   # `lambda validate` subcommand
   - "lambda/headless_stubs.cpp"           # CLI-only build stubs
-  - "lambda/module/npm/**"                       # npm-compat CLI
   - "radiant/webdriver/**"                # `lambda webdriver` subcommand
   - "radiant/cmd_layout.cpp"              # `lambda layout` subcommand
   # Source-language print/puts builtin implementations (these *are* the
