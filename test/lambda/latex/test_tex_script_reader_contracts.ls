@@ -39,6 +39,12 @@ let changed: Reader={*:one.reader,catcodes:{'!':11}};
 // Incomplete optional/group/delimited input retains the reader's existing endpoints.
 [(inline("[abc",false)^).end == 4, (inline("{abc",false)^).end == 4,
  (inline("|abc\nZ",false)^).end == 4, group("{abc").end == 4];
+let multiline=group(" {é\r\n字  \r🙂}Z\nN");
+let next_line=reader.load_line(multiline.reader);
+let at_eof=group("{open\r\n");
+[multiline.end == 17, multiline.reader.line_byte == 12, multiline.reader.position_byte == 5,
+ reader.next(multiline.reader).token.start == 17, next_line.line == "N", next_line.line_byte == 19,
+ at_eof.end == 7, at_eof.reader.line_byte == 7, at_eof.reader.position == 0];
 [error("verb delimiter") ^reader.CaptureError { true } ^ { false },
  error("verb unterminated") ^reader.CaptureError { true } ^ { false },
  error("raw inline delimiter") ^reader.CaptureError { true } ^ { false },

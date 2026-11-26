@@ -6,6 +6,7 @@
 #include "../js_runtime.h"
 #include "../js_event_loop.h"
 #include "../js_host_hooks.h"
+#include "../../dom/dom.h"
 #include "../../runtime/lambda-root-frame.hpp"
 #include "../../runtime/heap_api.h"
 #include "../../runtime/runtime-state.h"
@@ -226,9 +227,11 @@ static Item host_schedule(Context*, MvpLmdProgram* program, Item* args, uint64_t
         js_microtask_enqueue(thunk.get());
         return Item{.item = ITEM_JS_UNDEFINED};
     }
-    Item timer = js_schedule_timer(thunk.get(), delay.get(), ItemNull, false, interval, !state->native_timers);
+    // a document host follows HTML timer nesting even when native timers are available.
+    bool numeric_handle = !state->native_timers || dom_get_document() != nullptr;
+    Item timer = js_schedule_timer(thunk.get(), delay.get(), ItemNull, false, interval, numeric_handle);
     return item_is_error(timer) || get_type_id(timer) == LMD_TYPE_INT ||
-        (state->native_timers && get_type_id(timer) == LMD_TYPE_MAP) ? timer : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+        (!numeric_handle && get_type_id(timer) == LMD_TYPE_MAP) ? timer : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
 }
 
 static Item host_clear_timer(Context*, MvpLmdProgram*, Item* args, uint64_t count,

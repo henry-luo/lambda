@@ -1799,6 +1799,16 @@ existing runtime-isolation test. Evidence:
 Online-page impact is recorded separately after capture; this unit result
 alone does not clear a high-severity review.
 
+**2026-11-26 entry-point repair.** Document globals still reached Node timer
+scheduling through the shared intrinsic and the MVP host binding. A recursive
+zero-delay timeout kept the snapshot drain busy at the same virtual frame
+until its watchdog expired. Both entry points now use numeric HTML timers when
+a document is bound (D8.4.4, D9.5.6v2, D10.1.7). The layout regression checks
+that six callbacks run in the zero-width window and that the returned handle
+is numeric. On the optimized host it dropped from 15.22s to 0.21s. AST and
+MIR layout probes and the existing Node timer goldens pass. Evidence is in
+`temp/radiant-under-10/`.
+
 <a id="js13-l57"></a>
 
 ### JS13-L57 — Pages without scripts skip required image completion — **FIXED**

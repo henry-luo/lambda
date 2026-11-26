@@ -1,5 +1,16 @@
 # Editing viewer document formats
 
+## Direct PowerPoint and PDF views — 2026-11-26
+
+Direct PowerPoint opens use the retained Slides player, including its full-size
+canvas and navigation controls (D9.3.4, D9.5.6v2). File-tree selections keep
+their embedded preview. The PDF pane mounts the renderer's page and text-run
+elements directly, preserving page numbers and text-copy metadata. The Type 1
+replay checks the pane's scroll position, rendered outlines, selection and
+clipboard text on page two (D10.2.1). The Radiant baseline passes, including
+all 329 UI automation cases. Evidence is in
+`temp/radiant-three-failures/verified-baseline.log`.
+
 ## Read-only viewer source — 2026-11-25
 
 The viewer mounts the source editor in read-only mode for file and archive

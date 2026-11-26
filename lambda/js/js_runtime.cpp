@@ -9294,11 +9294,9 @@ static Item js_intrinsic_global_timer_body(Item callee, Item this_value,
     Rooted<Item> delay_root(roots, argc > 1 ? actual[1] : make_js_undefined());
     Rooted<Item> arguments_root(roots, ItemNull);
     if (argc > 2) arguments_root.set(js_pack_args_span(actual + 2, argc - 2));
-    return is_interval
-        ? (argc > 2 ? js_setInterval_args(callback_root.get(), delay_root.get(),
-            arguments_root.get()) : js_setInterval(callback_root.get(), delay_root.get()))
-        : (argc > 2 ? js_setTimeout_args(callback_root.get(), delay_root.get(),
-            arguments_root.get()) : js_setTimeout(callback_root.get(), delay_root.get()));
+    // browser globals need HTML task nesting as well as numeric timer handles.
+    return js_schedule_timer(callback_root.get(), delay_root.get(), arguments_root.get(),
+        argc > 2, is_interval, dom_get_document() != nullptr);
 }
 
 Item js_intrinsic_global_set_timeout_body(Item callee, Item this_value,

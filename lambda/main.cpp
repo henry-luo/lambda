@@ -4574,9 +4574,6 @@ static int lambda_main_impl(int argc, char *argv[]) {
 
         // Detect file type by extension
         const char* ext = effective_ext ? effective_ext : file_path_ext(filename);
-        const bool authored_window = input_path_is_xhtml(filename) ||
-            (ext && (str_ieq_cstr(ext, ".html") || str_ieq_cstr(ext, ".htm") ||
-                str_ieq_cstr(ext, ".ls") || str_ieq_cstr(ext, ".slides")));
         int exit_code;
 
         // Check if this is a graph file that needs conversion
@@ -4586,6 +4583,10 @@ static int lambda_main_impl(int argc, char *argv[]) {
         bool is_docx_file = ext && str_ieq_cstr(ext, ".docx");
         bool is_pptx_file = ext && str_ieq_cstr(ext, ".pptx");
         bool is_ebook_file = input_path_is_ebook(filename);
+        // presentations open in the full-window player, including imported decks.
+        const bool full_window_document = is_pptx_file || input_path_is_xhtml(filename) ||
+            (ext && (str_ieq_cstr(ext, ".html") || str_ieq_cstr(ext, ".htm") ||
+                str_ieq_cstr(ext, ".ls") || str_ieq_cstr(ext, ".slides")));
         bool browse_tree = file_is_dir(filename) || launch.browse_archive ||
             (!is_docx_file && !is_pptx_file && !is_ebook_file && lambda_view_path_is_archive(filename));
         if (browse_tree) {
@@ -4622,16 +4623,15 @@ static int lambda_main_impl(int argc, char *argv[]) {
             lambda_view_log_completion(exit_code);
             return lambda_main_finish(exit_code);
         } else if (!is_http_url && !launch.standalone && !launch.autoplay && !launch.microphone &&
-                !authored_window) {
-            // Local documents share the browser pane, while authored pages keep
-            // their top-level window and scripting context (D9.3.4).
+                !full_window_document) {
+            // local files share the browser pane when they have no full-window surface (D9.3.4).
             static const LambdaDocumentTransformConfig file_transform = {
                 "document", "lambda.doc.doc_viewer", "open_file",
                 LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH, false
             };
             exit_code = view_lambda_document_transform_with_events(filename, &file_transform,
                 nullptr, 0, event_file, headless, font_dirs, font_dir_count, event_log, state_dump, launch.fullscreen, launch.microphone);
-        } else if (authored_window || is_docx_file || is_pptx_file || is_ebook_file || is_graph_file ||
+        } else if (full_window_document || is_docx_file || is_ebook_file || is_graph_file ||
                     eps_source_expected(filename, nullptr, 0) || (ext && (strcmp(ext, ".pdf") == 0 ||
                     strcmp(ext, ".md") == 0 || strcmp(ext, ".markdown") == 0 ||
                     strcmp(ext, ".tex") == 0 || strcmp(ext, ".latex") == 0 ||

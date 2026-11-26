@@ -1,6 +1,8 @@
 // Incremental TeX scanning uses explicit snapshots so callers can change category codes.
+type LineIndex = {length: int, parts: any}
 pub type Reader = {
     source: string, file_id: int, next_line: int, line: string, position: int,
+    line_index: LineIndex, next_part: int,
     line_start: int, line_end: int, line_next: int, loaded: bool, eol_done: bool,
     next_byte: int, line_byte: int, position_byte: int, state: "new" | "mid" | "skip",
     endline: int, catcodes: map, origin: string, end_input: bool, seq: int, line_no: int,
@@ -24,6 +26,7 @@ pub type CaptureError = error that ~.message in [VERB_DELIMITER_ERROR, VERB_UNTE
 type DelimiterScan = {end: int, present: bool, closed: bool}
 type TextScan = {value: string, end: int}
 type LineStep = {reader: Reader, eof: bool}
+type LineBreak = \("\r\n" | "\r" | "\n")
 fn text_scan(value: string, end: int) TextScan => {value:value, end:end}
 fn delimiter_scan(end: int, closed: bool, present: bool = true) DelimiterScan =>
     {end:end, present:present, closed:closed}
@@ -54,19 +57,17 @@ pub fn catcode(c: string, overrides: map) int {
     } else standard
 }
 
-// scan source lines without consuming the native call stack.
 fn line_end(s: string, i: int) int {
     var at = i
     while (at < len(s) and ch(s, at) != "\n" and ch(s, at) != "\r") { at = at + 1 }
     return at
 }
-fn trim_end(s: string, start: int, end: int) int {
+
+fn trim_end(s: string, end: int) int {
     var at = end
-    while (at > start and ch(s, at - 1) == " ") { at = at - 1 }
+    while (at > 0 and ch(s, at - 1) == " ") { at = at - 1 }
     return at
 }
-fn after_line(s: string, end: int) int => if (ch(s, end) == "\r" and ch(s, end + 1) == "\n") end + 2
-    else if (end < len(s)) end + 1 else end
 fn utf8_width(c: string) int => if (code_point(c) < 128) 1 else if (code_point(c) < 2048) 2 else if (code_point(c) < 65536) 3 else 4
 fn byte_count(s: string, i: int, end: int) int {
     var at = i, count = 0
@@ -78,23 +79,31 @@ fn byte_count(s: string, i: int, end: int) int {
 }
 
 pub fn reader(source: string, file_id: int = 0) Reader => {source: source, file_id: file_id, next_line: 0, line: "", position: 0,
+    line_index: {length:len(source), parts:split(source, LineBreak, true) ^ { [] }}, next_part: 0,
     line_start: 0, line_end: 0, line_next: 0, loaded: false, eol_done: false,
     next_byte: 0, line_byte: 0, position_byte: 0,
     state: "new", endline: 13, catcodes: {}, origin: "local", end_input: false, seq: 0, line_no: 0}
 
-fn read_line(r: Reader) LineStep {
-    if ((r.end_input and r.loaded) or r.next_line >= len(r.source)) {reader:r, eof:true}
-    else {
-        let end = line_end(r.source, r.next_line);
-        let trimmed = trim_end(r.source, r.next_line, end);
-        let next = after_line(r.source, end);
-        {eof:false, reader:{*:r, line: text_span(r.source, r.next_line, trimmed), position: 0,
-            line_start: r.next_line, line_end: trimmed, line_next: next,
-            line_byte: r.next_byte, position_byte: 0,
-            next_byte: r.next_byte + byte_count(r.source, r.next_line, next),
-            next_line: next, loaded: true, eol_done: false, state: "new", line_no: r.line_no + 1}}
-    }
+// Splitting preserves each terminator, so advancing a line only measures its own text.
+fn line_part(index: LineIndex, part: int) string? => match (index.parts[part] ^ { null }) {
+    case string: ~ default: null
 }
+fn physical_line(r: Reader) Reader {
+    let raw = (line_part(r.line_index, r.next_part) ^ { null }) or "";
+    let ending = len(line_part(r.line_index, r.next_part + 1) ^ { null });
+    let size = len(raw);
+    let trimmed = trim_end(raw, size);
+    let next = r.next_line + size + ending;
+    {*:r, line: if (trimmed == size) raw else text_span(raw, 0, trimmed), position: 0,
+        line_start: r.next_line, line_end: r.next_line + trimmed, line_next: next,
+        line_byte: r.next_byte, position_byte: 0, next_byte: r.next_byte + len(binary(raw) ^ { null }) + ending,
+        next_line: next, next_part: r.next_part + 2, loaded: true, eol_done: false,
+        state: "new", line_no: r.line_no + 1}
+}
+
+fn read_line(r: Reader) LineStep => if ((r.end_input and r.loaded) or r.next_line >= r.line_index.length or
+        r.next_part >= (len(r.line_index.parts) ^ { 0 }))
+    {reader:r, eof:true} else {reader:physical_line(r), eof:false}
 
 pub fn load_line(r: Reader) Reader? {
     let step = read_line(r);
@@ -151,24 +160,15 @@ pub fn raw_group_end(source: string, index: int, opener: string, closer: string)
     return delimiter_scan(at, false)
 }
 
-fn raw_line_start(source: string, index: int) int {
-    var at = index
-    while (at > 0 and ch(source, at - 1) != "\n" and ch(source, at - 1) != "\r") { at = at - 1 }
-    return at
-}
-
 // raw capture can cross lines, so rebuild the reader at the absolute source position.
 fn raw_seek(r: Reader, index: int) Reader {
-    let start = raw_line_start(r.source, index);
-    let end = line_end(r.source, index);
-    let trimmed = trim_end(r.source, start, end);
-    let next = after_line(r.source, end);
-    let position = if (index < trimmed) index - start else trimmed - start;
-    let line_byte = r.line_byte + byte_count(r.source, r.line_start, start);
-    {*:r, line: text_span(r.source, start, trimmed), position: position,
-        line_start: start, line_end: trimmed, line_next: next, next_line: next,
-        line_byte: line_byte, position_byte: byte_count(r.source, start, start + position),
-        next_byte: line_byte + byte_count(r.source, start, next), loaded: true, eol_done: false, state: "mid"}
+    var current: Reader = if (r.loaded) r else physical_line(r);
+    while (index >= current.line_next and (line_part(current.line_index, current.next_part - 1) ^ { null }) != null) {
+        current = physical_line(current)
+    }
+    let position = (if (index < current.line_end) index else current.line_end) - current.line_start;
+    {*:current, position:position, position_byte:byte_count(current.line, 0, position),
+        eol_done:false, state:"mid", line_no:r.line_no}
 }
 
 // native TeX preserves these environment bodies as source rather than executing them.
