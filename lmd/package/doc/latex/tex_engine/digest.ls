@@ -3213,8 +3213,8 @@ fn inline(tokens, sources, index = 0, text = "", items = [], stop_blocks = true,
             unsupported(index, "active syntax character")
         else if (token.kind == "active")
             inline(tokens, sources, index + 1, text ++ token.value, items, stop_blocks, table_mode)
-        // native tabular bodies emit cell separators at this nesting level only.
-        else if (table_mode and token.kind == "char" and token.value == "&")
+        // Only TeX alignment-category tokens separate cells at this nesting level.
+        else if (table_mode and token.kind == "char" and token.cat == 4 and token.value == "&")
             inline(tokens, sources, index + 1, "", [*append_text(items, text), 'alignment_tab'], stop_blocks, table_mode)
         // Native constructor arguments retain directly read character-definition names.
         else if (not stop_blocks and token.chardef_emission == true) {

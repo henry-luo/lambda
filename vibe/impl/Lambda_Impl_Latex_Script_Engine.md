@@ -34,6 +34,19 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Table alignment categories, 2026-11-26:** The document digester now treats
+  an ampersand as a cell separator only when its TeX category is alignment
+  (D10.2.2v2). Four complete document trees, including category-11,
+  category-12, alignment and escaped ampersands, match the retired engine
+  through both direct digestion and public `parse`. Five table GTests pass;
+  the new fixture also passes forced GC in interpreter and JIT. A diagnostic
+  run that forcibly disables the unqualified CSV source-mapping guards now
+  produces the expected six HTML checks, including `Tea &amp; cake`; this is
+  evidence for further provenance work, not a production guard removal.
+  The normal phase-five table GTest still fails its six CSV assertions because
+  those guards remain active. Prefixed macro provenance is an additional
+  guard that must be qualified alongside the expl3 and input-stream guards.
+
 - **Expl3 token trimming, 2026-11-26:** Script preloads TeX's original
   delimiter-driven `tl_trim_spaces:n`, its value/local/global variants and
   auxiliaries (D10.2.2v2). The macro loader preserves explicit space tokens in
