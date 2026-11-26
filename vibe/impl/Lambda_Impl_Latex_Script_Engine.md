@@ -34,6 +34,15 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Included environment definitions, 2026-11-26:** Twelve complete trees from
+  the retired native engines match Script for included multiline environment
+  definitions, blank lines, comments, CRLF and adjacent definitions
+  (S1.8, D10.2.2v2). The new golden fixture and existing foreign-definition
+  fixture pass; the new fixture also passes interpreter and JIT with forced GC
+  and freed-memory poisoning. The older report's original temporary fixture is
+  unavailable, so these comparisons qualify the tested cases without closing
+  that exact historical report.
+
 - **Unicode reader scaling, 2026-11-26:** A release-only reader probe took
   0.16 seconds for 4,001 characters and 3.95 seconds for 32,001 characters
   when the source contained one non-ASCII scalar; an otherwise comparable
