@@ -2747,6 +2747,10 @@ fn emit_traced_span(closed, name) any^ {
     else {*:closed.state, output: closed.state.output ++ [
         {*:raw[0], echo_span: closed.span, echo_count: len(raw)}, *slice(raw, 1, len(raw))^]}
 }
+// Generated tokens inherit the last source read for reconstruction and AST offsets.
+fn emit_generated(st: State, tokens: map[], map_source: bool = false) State^ => {*:st, output:st.output ++
+    [*[for (token in tokens) (let emitted = {*:token, emit_origin:st.input.last_main_offset},
+        if (map_source) {*:emitted, emission_mapping:true} else emitted)]]}
 fn emit_spacing(st: State, original, command, budget) State^ {
     let traced = begin_main_trace(st, original, true)^;
     let mu = command == "mskip" or command == "mkern";
@@ -2761,8 +2765,7 @@ fn emit_spacing(st: State, original, command, budget) State^ {
         let value = if (is_glue) glue.format(scanned.value, mu)^
             else dimension.format(scanned.value, if (mu) "mu" else "pt")^;
         let tokens = [control_token(name), brace_token(true), *text_tokens(value), brace_token(false)];
-        {*:closed.state, output: closed.state.output ++ [
-            *[for (token in tokens) {*:token, emit_origin: closed.state.input.last_main_offset}]]}
+        emit_generated(closed.state, tokens)
     }
 }
 
@@ -2813,8 +2816,7 @@ fn emit_rule(st: State, original, command, budget) State^ {
             else text_tokens(dimension.format(rule.height + if (rule.depth > 0) rule.depth else 0, "pt")^)^;
         let tokens = [control_token("rule"), brace_token(true), *width, brace_token(false),
             brace_token(true), *height, brace_token(false)];
-        {*:closed.state, output: closed.state.output ++ [
-            *[for (token in tokens) {*:token, emit_origin: closed.state.input.last_main_offset}]]}
+        emit_generated(closed.state, tokens)
     }
 }
 
@@ -5048,7 +5050,6 @@ fn end_main_trace(st, original) any^ {
         {state: {*:st, input: traced.stream}, echo: traced.valid, span: traced}
     }
 }
-fn counter_diagnostic(st, code) => {*:st, diagnostics: [*st.diagnostics, code]}
 fn counter_command_tokens(name, command, value = null) any^ {
     let opener = brace_token(true);
     let closer = brace_token(false);
@@ -5056,13 +5057,12 @@ fn counter_command_tokens(name, command, value = null) any^ {
         *(if (value == null) [] else [opener, *value, closer])]
 }
 // TeX allocates counts, dimensions and skips through adjacent counter slots.
-fn latex_allocate_register(st: State, tracker, full_diagnostic) any^ {
+fn latex_allocate_register(st: State, tracker) any^ {
     let next = count_value(st,tracker) + 1;
     let exhausted = next >= count_value(st,20);
     let index = if (exhausted) COUNT_REGISTER_LIMIT - 1 else next;
     let allocated = if (not exhausted) save_count(st,tracker,index,true)^
-        else if (full_diagnostic) record_diagnostic(st,"tex-no-room","No room for a new register")^
-        else counter_diagnostic(st,"tex-no-room");
+        else record_diagnostic(st,"tex-no-room","No room for a new register")^;
     {state:allocated,index:index}
 }
 
@@ -5114,7 +5114,7 @@ fn latex_length_command(st: State, original, command, budget) State^ {
             if (not latex_definable(meaning_value)) record_diagnostic(emitted,"latex-already-defined",
                 "LaTeX Error: Command already defined (\\newlength)")
             else {
-                let allocated = latex_allocate_register(emitted,12,true)^;
+                let allocated = latex_allocate_register(emitted,12)^;
                 assign_meaning(allocated.state,key(cs),{kind:"glue-register",index:allocated.index,mu:false},true)
             }
         }
@@ -5155,12 +5155,13 @@ fn latex_newcounter(st: State, original, budget) State^ {
     else {
         let existing = counter_meaning(current, named.name)^;
         if (existing.kind == "register") {
+            // Public parsing requires the native message and location, not only its code.
             let closed = end_main_trace(current, original)^;
             let emitted = if (closed.echo) {*:closed.state, output: closed.state.output ++ [original, *named.raw, *opt.raw]} else closed.state;
-            counter_diagnostic(emitted, "latex-counter-defined")
+            record_diagnostic(emitted, "latex-counter-defined", "LaTeX Error: Counter `" ++ named.name ++ "' already defined")
         }
         else {
-            let allocated = latex_allocate_register(current,10,false)^;
+            let allocated = latex_allocate_register(current,10)^;
             let registered = assign_meaning(allocated.state, counter_key(named.name),
                 {kind: "register", index: allocated.index}, true)^;
             let body = counter_command_tokens(named.name, "arabic")^;
@@ -5199,7 +5200,7 @@ fn latex_counter_value(st, tokens, budget) any^ {
         let after = if (primitive(end.state, end.token) == "relax") expanded_nonspace(end.state, budget)^ else end;
         if (after.state.issue != null) {state: after.state, value: value.value}
         else if (after.token != null and after.token.kind == "counter-value-end") {state: after.state, value: value.value}
-        else {state: counter_diagnostic(put_back(after.state, after.token), "latex-counter-value"), value: value.value}
+        else {state: record_diagnostic(put_back(after.state, after.token), "latex-counter-value", "counter value has trailing material")^, value: value.value}
     }
 }
 fn latex_counter_command(st: State, original, command, budget) State^ {
@@ -5228,9 +5229,8 @@ fn latex_counter_command(st: State, original, command, budget) State^ {
         if (stepped.issue != null) stepped
         else if (echo) {*:stepped, output: stepped.output ++ [original, *raw]}
         else if (contains(stepped.engine_counters, named.name)) stepped
-        else {*:stepped, output: stepped.output ++ [
-            *counter_command_tokens(named.name, command, if (has_value and len(arg.tokens) > 0)
-                if (found.kind == "register") text_tokens(string(next)) else arg.tokens else null)]}
+        else emit_generated(stepped, counter_command_tokens(named.name, command, if (has_value and len(arg.tokens) > 0)
+            if (found.kind == "register") text_tokens(string(next)) else arg.tokens else null)^, true)
     }
 }
 fn counter_symbol(value) => if (value == 1) "*" else if (value == 2) "\\dag"
@@ -5257,7 +5257,7 @@ fn latex_counter_format(st: State, original, command, budget) State^ {
                     else if (command == "Roman") upper(roman(value)^)
                     else if (command == "alph") if (valid) chr(96 + value) else ""
                     else if (command == "Alph") if (valid) chr(64 + value) else "" else "";
-                let checked = if (valid) named.state else counter_diagnostic(named.state, "latex-counter-too-large");
+                let checked = if (valid) named.state else record_diagnostic(named.state, "latex-counter-too-large", "LaTeX Error: Counter too large")^;
                 if (command != "fnsymbol") {*:checked, input: stream.push(checked.input, text_tokens(text))}
                 else if (not valid) checked
                 else if (len(checked.input.levels) >= 6000) fail(checked, "tex-capacity")
@@ -7357,7 +7357,7 @@ fn enable_expl_counts(st: State, names, index = 0) State^ {
     else {
         let name = "control:" ++ names[index];
         let next = if (st.definitions[name] != null) st else {
-            let allocated = latex_allocate_register(st, 10, false)^;
+            let allocated = latex_allocate_register(st, 10)^;
             assign_meaning(allocated.state, name, {kind:"register", index:allocated.index}, true)^
         };
         enable_expl_counts(next, names, index + 1)

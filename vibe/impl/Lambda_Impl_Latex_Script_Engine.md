@@ -34,6 +34,19 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Counter diagnostics and generated commands, 2026-11-26:** Counter errors
+  and exhausted register allocation now retain the native messages and source
+  locations, rather than only their codes (S1.8, D10.2.2v2). Generated counter
+  commands retain their invocation origin, and the digester admits their
+  source mapping only after checking the reconstructed spelling. Fourteen
+  diagnostic cases, eight complete diagnostic trees, one included-file tree,
+  and sixteen generated-command text/tree cases match the retired engines.
+  The previously failing counter GTest and eight focused reconstruction,
+  spacing, rule, table and new parity tests pass. Both new fixtures also pass
+  interpreter and JIT under forced GC and freed-memory poisoning. The counter
+  golden's two diagnostic AST expectations were updated after independent
+  full-tree comparison.
+
 - **Scoped expl3 input streams, 2026-11-26:** The input-stream free list and
   allocated stream variable now follow TeX assignment scope under negative
   `globaldefs`; physical open and close effects remain visible across group
@@ -41,10 +54,9 @@ The existing native engine design and historical Phase IV work are in
   nested groups, reuse, counter restoration and a later global override. The
   new fixture passes interpreter and JIT under forced GC; six focused stream
   and group GTests and the interpreter/JIT file-authority checks pass.
-  The broader counter fixture also fails against the pre-change Script
-  snapshot: production parsing reports incomplete diagnostics or missing
-  reconstructed origins for several cases. That failure and missing-file
-  diagnostics remain open.
+  The broader counter fixture also failed against the pre-change Script
+  snapshot; its subsequent diagnostic and reconstruction fixes are recorded
+  above. Stream missing-file diagnostics remain open.
 
 - **Included environment definitions, 2026-11-26:** Twelve complete trees from
   the retired native engines match Script for included multiline environment

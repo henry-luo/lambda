@@ -2222,7 +2222,7 @@ fn needs_output_mapping(tokens, sources, main_file, constructor_mode, index = 0,
             if (math.needed) true
             else needs_output_mapping(tokens,sources,main_file,constructor_mode,math.end,paren,generated,checked_paren)
         }
-        else if (token.kind == "control" and ((declaration_command(token)^ and token.direct != true and token.emit_origin != null) or
+        else if (token.kind == "control" and (((declaration_command(token)^ or token.emission_mapping == true) and token.direct != true and token.emit_origin != null) or
                 expanded_argument_sources(tokens,index + 1,token.file,sources)^)) true
         // generated inline stars require their reconstructed byte adjacency.
         else if (token.kind == "control" and inline_format_command(token.value) and index + 1 < len(tokens) and
@@ -2277,7 +2277,14 @@ fn mark_output_span(tokens,built,constructor_mode,span) any^ {
     let first=tokens[span.index]; let bytes=if (first.reconstruct_text == null) null else binary(first.reconstruct_text)^;
     let positions=if (bytes == null or first.reconstruct_count != span.count or len(bytes) != span.end - span.start)
         null else synthetic_positions(tokens,span,bytes,span.index,0)^;
-    if (span.count == 1) [marked_output(first,built,constructor_mode,span.start,span.end)]
+    if (span.count == 1) {
+        let marked = marked_output(first,built,constructor_mode,span.start,span.end);
+        let spelling = emitted_spelling(first);
+        // Generated commands enter the native parser only after their spelling is verified.
+        let verified = first.emission_mapping == true and first.direct != true and first.emit_origin != null and spelling != null and
+            slice(built.output_bytes,span.start,span.end) == binary(spelling)^;
+        [if (verified) {*:marked,output_synthetic_verified:true} else marked]
+    }
     else if (echo_positions_known(tokens,span)^) [for (i in span.index to span.index + span.count - 1)
         marked_output(tokens[i],built,constructor_mode,span.start + tokens[i].start - first.echo_span.start,
             span.start + tokens[i].end - first.echo_span.start)]

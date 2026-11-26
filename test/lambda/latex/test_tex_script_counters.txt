@@ -366,7 +366,7 @@
   script_diagnostics: ["latex-counter-value"],
   native_diagnostics: ["latex-counter-value"],
   children_match: true,
-  full_ast_match: false
+  full_ast_match: true
 }
 "expression trailing token, diagnostic metadata pending:"
 {
@@ -374,7 +374,7 @@
   script_diagnostics: ["latex-counter-value"],
   native_diagnostics: ["latex-counter-value"],
   children_match: true,
-  full_ast_match: false
+  full_ast_match: true
 }
 "pdfLaTeX reference:"
 {
