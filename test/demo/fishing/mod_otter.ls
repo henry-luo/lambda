@@ -293,6 +293,8 @@ pub let CLIP_IDS = ["otter-float", "otter-paddle", "otter-swim", "otter-dive", "
 
 // a small adult (about 1 m nose to tail), modelled at 1.15 m and scaled down as a whole
 pub let SIZE = 0.9
+// how far its body reaches from its root (the tail tip), in the scene
+pub let REACH = 0.64 * SIZE
 pub fn body(x, y, z, heading) any^ => physics.body("otter", [
     physics.collider("otter-shape", 'sphere', {radius: 0.05, groups: {membership: 0, filter: 0}}),
     s.group([skeleton()^,

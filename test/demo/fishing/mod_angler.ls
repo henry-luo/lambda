@@ -39,6 +39,7 @@ let ARMS_ROD = {hand_r: "grip", hand_l: "knee"}
 fn base(arms, oars, rod, line) => {torso: [0.0, 0.03, 0.0], scale: 1.0, head: [0.0, 0.08, 0.0], *: arms, oars: oars, rod: rod, line: line}
 fn blend(a, b, k) any^ => {torso: mix_angles(a.torso, b.torso, k), scale: lerp(a.scale, b.scale, k), head: mix_angles(a.head, b.head, k),
     hand_r: vlerp(resolve(a, "r")^, resolve(b, "r")^, k), hand_l: vlerp(resolve(a, "l")^, resolve(b, "l")^, k),
+    axis_r: vlerp(grip_axis(a, "r")^, grip_axis(b, "r")^, k), axis_l: vlerp(grip_axis(a, "l")^, grip_axis(b, "l")^, k),
     oars: {l: [for (i in 0 to 2) lerp(a.oars.l[i], b.oars.l[i], k)], r: [for (i in 0 to 2) lerp(a.oars.r[i], b.oars.r[i], k)]},
     rod: {p: vlerp(a.rod.p, b.rod.p, k), a: mix_angles(a.rod.a, b.rod.a, k)}, line: if (k < 0.5) a.line else b.line}
 let STOW = {mode: "stow"}
@@ -100,8 +101,9 @@ pub fn nibble(x: float) => waiting(x, -0.6 - 0.03 * (bump(x, 0.14, 0.08) + bump(
     [CAST_SPOT[0], CAST_SPOT[1] - 0.04 * bump(x, 0.12, 0.08) - 0.03 * bump(x, 0.4, 0.08), CAST_SPOT[2]])
 pub let NIBBLE_TIME = 0.7
 pub let NIBBLES = [0.12, 0.4]
-pub let BITE_WINDOW = 1.05
-pub let BITE_TIME = 1.35
+// the float stays under nearly two seconds, so a strike needs no lightning reflexes
+pub let BITE_WINDOW = 1.8
+pub let BITE_TIME = 2.1
 // a bite drags the float under; with no strike the fish lets go and it pops back up
 pub fn bite(x: float) {
     let under = ease(span(x, 0.0, 0.16)) * (1.0 - ease(span(x, BITE_WINDOW, BITE_TIME)))
@@ -220,6 +222,17 @@ pub fn resolve(pose, which) any^ {
     return [side * fisher.KNEE_L[0], fisher.KNEE_L[1], fisher.KNEE_L[2]]
 }
 
+// the line the held thing runs along through the fist (boat space): an oar's shaft or the rod, and across
+// the boat for a hand on the knee, at the reel or anywhere else; a blend carries its own axis_r / axis_l
+pub fn grip_axis(pose, which) any^ {
+    let given = if (which == "r") pose.axis_r else pose.axis_l
+    if (given != null) { return given }
+    let spec = if (which == "r") pose.hand_r else pose.hand_l
+    if (spec == "oar") { return t.quaternion_rotate(oar_q(if (which == "r") -1.0 else 1.0, pose.oars[which])^, [1.0, 0.0, 0.0])^ }
+    if (spec == "grip" or spec == "butt") { return t.quaternion_rotate(q3(pose.rod.a)^, [0.0, 0.0, 1.0])^ }
+    return [1.0, 0.0, 0.0]
+}
+
 // ---- clips: every action sampled at FPS into the same set of tracks
 fn q3(a) any^ => u.quat(a[0], a[1], a[2])^
 // a one-shot clip holds its last pose for HOLD seconds, so switching to the next clip a frame late never shows a wrap
@@ -230,7 +243,7 @@ pub fn clip(id, f, duration, loop) any^ {
     let times = sample(duration, loop)^
     let poses = [for (x in times) f(min(x, duration))^]
     let lines = [for (p in poses) line_curve(p)^]
-    let hands = [for (p in poses) {r: resolve(p, "r")^, l: resolve(p, "l")^}];
+    let hands = [for (p in poses) {r: resolve(p, "r")^, l: resolve(p, "l")^, ar: grip_axis(p, "r")^, al: grip_axis(p, "l")^}];
     s.clip(id, [
         *(fisher.tracks(poses, hands, times, track)^),
         *[for (side in [-1.0, 1.0], let tag = if (side < 0.0) "r" else "l")

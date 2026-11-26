@@ -57,6 +57,8 @@ fn polar(i: int, lo: float, hi: float) any^ => (let a = roll(i, 0)^ * u.TAU, let
 // the jetty reaches into the south shore; the boat starts beside it
 pub let JETTY = {x: -2.6, z0: 16.2, z1: 11.4, width: 1.5, deck: 0.38}
 pub let START = {x: 0.2, z: 10.2, heading: math.pi}
+// within `margin` of the jetty's deck
+pub fn by_jetty(x: float, z: float, margin: float) bool => abs(x - JETTY.x) < JETTY.width / 2.0 + margin and z > JETTY.z1 - margin and z < JETTY.z0 + margin
 fn clear_of_start(p) bool^ => u.dist(p.x, p.z, START.x, START.z) > 4.5 and u.dist(p.x, p.z, JETTY.x, (JETTY.z0 + JETTY.z1) / 2.0) > 3.5
 
 let HEAPS = [[-14.5, -6.0], [13.0, 5.5], [6.0, -11.0], [-8.0, 7.5], [16.5, -3.5]]
