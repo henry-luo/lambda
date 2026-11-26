@@ -38,10 +38,10 @@ fn checked(options) map^ {
             snapshot:opts.snapshot == true}
     }
 }
-pub fn convert(source, options, include_serialized: bool) map^ {
+pub fn convert(source, options, include_serialized: bool, viewer = false) map^ {
     let opts = checked(options)^
     let pkg = package.open_package(source,opts.snapshot)^
-    let parsed = model.build(pkg,opts)^
+    let parsed = model.build(pkg,opts,viewer)^
     let rendered = renderer.render(parsed,opts,include_serialized)^
     let diagnostics = parsed.diagnostics ++ [for (issue in rendered.diagnostics) {*:issue,part:c.get(issue,"part",pkg.main)}];
     if (opts.unsupported == "error" and len(diagnostics) > 0)

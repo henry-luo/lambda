@@ -1,5 +1,6 @@
 import t: .transform
 import animation: .animation
+import particles: .particles
 
 // the native per-mesh admission bound; generators must partition larger instance sets.
 pub let INSTANCE_LIMIT = 16384
@@ -35,7 +36,7 @@ let RESERVED = ["position", "normal", "uv", "uv1", "color", "tangent", "instance
 let SIMULATION_RESERVED = ["resolution", "delta", "fragment_color"]
 let POST_RESERVED = ["color_input", "resolution", "fragment_color", "pass_color", "effect_main"]
 let DRAWABLES = ['mesh', 'points', 'sprite', 'line', 'line-segments']
-let OBJECT_CHILDREN = ['group', 'lod', 'skeleton', 'camera', 'light', *DRAWABLES, 'resources', 'geometry', 'material', 'texture',
+let OBJECT_CHILDREN = ['group', 'lod', 'skeleton', 'camera', 'light', *DRAWABLES, 'particle-emitter', 'resources', 'geometry', 'material', 'texture',
     'animation-clip', 'rigid-body', 'collider', 'physics', 'joint', 'motion-controller', 'environment', 'simulation']
 let IDENT = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"
 fn glsl_name(k, reserved = RESERVED) bool^ {
@@ -59,11 +60,13 @@ fn definition(by_id, reference, kind) element^ {
     if (found == null or name(found) != kind) raise fail("missing " ++ string(kind) ++ " reference") else found
 }
 // the material a mesh names or holds
-fn mesh_material(mesh, by_id) element^ {
-    let held = [for (c in ((content(mesh)) ^ { [] }) where ((c is element and name(c) == 'material') ^ { false })) c]
-    if (mesh.material != null) definition(by_id, mesh.material, 'material')^
-    else if (len(held) != 1) raise fail("mesh requires material") else held[0]
+// a mesh or emitter's geometry or material: the resource it names, or its one inline child
+fn mesh_part(mesh, kind, by_id) element^ {
+    let held = [for (c in ((content(mesh)) ^ { [] }) where ((c is element and name(c) == kind) ^ { false })) c]
+    if (mesh[string(kind)] != null) definition(by_id, mesh[string(kind)], kind)^
+    else if (len(held) != 1) raise fail("mesh requires " ++ string(kind)) else held[0]
 }
+fn mesh_material(mesh, by_id) element^ => mesh_part(mesh, 'material', by_id)^
 // a `uniforms` map of at most 32 entries
 fn uniform_map(n) map^ {
     let u = value(n.uniforms, {})
@@ -184,13 +187,26 @@ pub fn check_geometry(n) bool^ {
         if (not t.vector(size, 3) or not all([for (x in size) x > 0])) raise fail("invalid primitive size") else true
     }
 }
+// a drawable or emitter's geometry and material: each either one inline child or one resource reference
+fn parts(n, children, by_id) bool^ {
+    let geometries = [for (c in children where ((name(c) == 'geometry') ^ { false })) c]
+    let materials = [for (c in children where ((name(c) == 'material') ^ { false })) c]
+    let checked_geometry = if (n.geometry != null) {
+        let d = definition(by_id, n.geometry, 'geometry')^
+        if (len(geometries) != 0) raise fail("duplicate mesh geometry") else true
+    } else if (len(geometries) != 1) raise fail("mesh requires geometry") else true
+    if (n.material != null) {
+        let d = definition(by_id, n.material, 'material')^
+        if (len(materials) != 0) raise fail("duplicate mesh material") else true
+    } else if (len(materials) != 1) raise fail("mesh requires material") else true
+}
 fn check_node(n, all_nodes, by_id) bool^ {
     let checked_element = if (not (n is element)) raise fail("scene children must be elements")
     let kind = name(n)
-    let checked_kind = if (not contains(['scene3d', 'group', 'lod', 'skeleton', 'bone', 'camera', 'light', *DRAWABLES, 'resources', 'geometry', 'collision-geometry', 'material', 'texture', 'animation-clip', 'keyframe-track', 'physics', 'rigid-body', 'collider', 'joint', 'motion-controller', 'motion-state', 'environment', 'fog', 'simulation', 'variable', 'postprocessing', 'effect'], kind))
+    let checked_kind = if (not contains(['scene3d', 'group', 'lod', 'skeleton', 'bone', 'camera', 'light', *DRAWABLES, 'resources', 'geometry', 'collision-geometry', 'material', 'texture', 'animation-clip', 'keyframe-track', 'physics', 'rigid-body', 'collider', 'joint', 'motion-controller', 'motion-state', 'environment', 'fog', 'simulation', 'variable', 'postprocessing', 'effect', *particles.KINDS], kind))
         raise fail("unknown scene element")
     let checked_refs = [for (key in (if (kind == 'scene3d') ["camera", "environment"] else if (contains(DRAWABLES, kind)) ["geometry", "material", "skeleton"]
-        else if (kind == 'material') ["texture", *MAPS] else []) where n[key] != null)
+        else if (kind == 'particle-emitter') ["geometry", "material", "surface"] else if (kind == 'material') ["texture", *MAPS] else []) where n[key] != null)
         if (not text(n[key])) raise fail("resource reference requires text") else true]
     let checked_vectors = [for (key in ["position", "rotation", "scale", "target", "up"] where n[key] != null)
         if (not t.vector(n[key], 3) or (key == "scale" and any([for (x in n[key]) x == 0])))
@@ -226,7 +242,9 @@ fn check_node(n, all_nodes, by_id) bool^ {
         else if (kind == 'skeleton' or kind == 'bone') ['bone']
         else if (kind == 'resources') ['geometry', 'collision-geometry', 'material', 'texture', 'environment']
         else if (kind == 'animation-clip') ['keyframe-track'] else if (kind == 'motion-controller') ['motion-state']
-        else if (contains(DRAWABLES, kind)) ['geometry', 'material'] else if (kind == 'material') ['texture'] else []
+        else if (contains(DRAWABLES, kind)) ['geometry', 'material'] else if (kind == 'material') ['texture']
+        else if (kind == 'particle-emitter') ['geometry', 'material', *particles.CONTROLS]
+        else if (kind == 'particle-collision') ['particle-plane', 'particle-sphere'] else []
     let checked_children = if (any([for (child in children) not (child is element) or not contains(allowed, name(child))])) raise fail("invalid scene child")
     let checked_lod = if (kind == 'lod') {
         let distances=n.distances, hysteresis=value(n.hysteresis,0.1)
@@ -425,17 +443,13 @@ fn check_node(n, all_nodes, by_id) bool^ {
                 else if (key == "min-filter") [9728, 9729, 9984, 9985, 9986, 9987] else [9728, 9729], n[key]))
                 raise fail("invalid texture sampler") else true]
         true
-    } else if (contains(DRAWABLES, kind)) {
-        let geometries = [for (c in children where ((name(c) == 'geometry') ^ { false })) c]
-        let materials = [for (c in children where ((name(c) == 'material') ^ { false })) c]
-        let checked_geometry = if (n.geometry != null) {
-            let d = definition(by_id, n.geometry, 'geometry')^
-            if (len(geometries) != 0) raise fail("duplicate mesh geometry") else true
-        } else if (len(geometries) != 1) raise fail("mesh requires geometry") else true
-        let checked_material = if (n.material != null) {
-            let d = definition(by_id, n.material, 'material')^
-            if (len(materials) != 0) raise fail("duplicate mesh material") else true
-        } else if (len(materials) != 1) raise fail("mesh requires material") else true
+    } else if (kind == 'particle-emitter') {
+        let checked_parts = parts(n, children, by_id)^
+        let checked_surface = if (n.surface != null) definition(by_id, n.surface, 'geometry')^
+        particles.check_emitter(n, children, mesh_material(n, by_id)^, mesh_part(n, 'geometry', by_id)^)^
+    } else if (contains(particles.KINDS, kind)) particles.check_control(n)^
+    else if (contains(DRAWABLES, kind)) {
+        let checked_parts = parts(n, children, by_id)^
         let checked_instances = if (n.instances != null and (not (n.instances is array) or len(n.instances) > INSTANCE_LIMIT or
             not all([for (m in n.instances) t.affine(m)]))) raise fail("invalid instance matrices")
         let checked_skeleton = if (n.skeleton != null) {
@@ -450,7 +464,7 @@ fn check_node(n, all_nodes, by_id) bool^ {
             not all([for (x in n["morph-weights"]) numeric(x)]))) raise fail("invalid morph weights")
         // SH3: a shader mesh may draw instances its vertex shader places, with named per-instance numbers
         let drawn_with = mesh_material(n, by_id)^
-        let drawn_geometry = if (n.geometry != null) definition(by_id, n.geometry, 'geometry')^ else geometries[0]
+        let drawn_geometry = mesh_part(n, 'geometry', by_id)^
         let checked_drawable_material = if (kind != 'mesh' and (drawn_with.type != 'basic' or drawn_with.depth_only == true or
             n.skeleton != null or n["morph-weights"] != null or drawn_geometry["skin-indices"] != null or drawn_geometry["morph-positions"] != null))
             raise fail("drawables require basic color without deformation")

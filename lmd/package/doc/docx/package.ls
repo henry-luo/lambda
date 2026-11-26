@@ -41,7 +41,10 @@ fn visible_story_content(node) any^ {
         (shading != null and (c.attr(shading,"themeFill") != null or
             (c.attr(shading,"fill") != null and c.attr(shading,"fill") != "auto") or
             (c.attr(shading,"val") != null and not contains(["nil","clear"],c.attr(shading,"val")))))
-    } else if (contains(["hdr","ftr","p","r","fldSimple"],node.tag))
+    } else if (node.tag == "sdt") {
+        let cached = c.saved_control(node)^;
+        cached == null or visible_story_content(cached)^
+    } else if (contains(["hdr","ftr","p","r","fldSimple","sdtContent"],node.tag))
         any([for (child in node.children) visible_story_content(child)])
     else true
 }

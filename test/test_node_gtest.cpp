@@ -201,7 +201,6 @@ static std::vector<FeatureModule> g_feature_modules = {
     {"http",           "http",            true,  nullptr},
     {"https",          "https",           true,  nullptr},
     {"module",         "module",          true,  nullptr},
-    {"net",            "net",             true,  nullptr},
     {"readline",       "readline",        true,  nullptr},
     {"timers",         "timers",          true,  nullptr},
     {"tls",            "tls",             true,  nullptr},
@@ -374,7 +373,7 @@ static std::vector<FeatureModule> g_feature_modules = {
     // --- Unsupported modules (disabled by default) ---
     {"cluster",        "cluster",         true, ""},
     {"dgram",          "dgram",           false, "UDP sockets not implemented"},
-    {"dns",            "dns",             false, "DNS module removed from node-net"},
+    {"dns",            "dns",             false, "DNS module is not shipped"},
     {"domain",         "domain",          true,  nullptr},  // enabled: some tests pass
     {"http2",          "http2",           false, "HTTP/2 not implemented"},
     {"inspector",      "inspector",       true,  nullptr},
@@ -872,6 +871,65 @@ static std::vector<NodeOfficialParam> filter_node_official_tests_for_gtest(
     return selected;
 }
 
+static bool node_test_specifier_is_retired_net(const char* start, size_t length) {
+    static const char* retired[] = {
+        "net", "node:net", "internal/net", "internal/js_stream_socket"
+    };
+    for (size_t i = 0; i < sizeof(retired) / sizeof(retired[0]); i++) {
+        size_t retired_length = strlen(retired[i]);
+        if (length == retired_length && memcmp(start, retired[i], length) == 0) return true;
+    }
+    if (length >= 13 && memcmp(start + length - 13, "common/net.js", 13) == 0) return true;
+    return length >= 10 && memcmp(start + length - 10, "common/net", 10) == 0;
+}
+
+static bool node_test_line_imports_retired_net(const char* line) {
+    static const char* keywords[] = {"require", "from"};
+    for (size_t i = 0; i < sizeof(keywords) / sizeof(keywords[0]); i++) {
+        const char* cursor = line;
+        size_t keyword_length = strlen(keywords[i]);
+        while ((cursor = strstr(cursor, keywords[i])) != NULL) {
+            cursor += keyword_length;
+            while (*cursor == ' ' || *cursor == '\t') cursor++;
+            if (strcmp(keywords[i], "require") == 0) {
+                if (*cursor != '(') continue;
+                cursor++;
+                while (*cursor == ' ' || *cursor == '\t') cursor++;
+            }
+            if (*cursor != '\'' && *cursor != '"') continue;
+            char quote = *cursor++;
+            const char* end = strchr(cursor, quote);
+            if (end && node_test_specifier_is_retired_net(cursor,
+                    (size_t)(end - cursor))) return true;
+        }
+    }
+    return false;
+}
+
+static bool node_test_uses_retired_net(const char* filename, const char* path) {
+    const size_t diagnostics_net_prefix_length = sizeof("test-diagnostics-channel-net") - 1;
+    if (strncmp(filename, "test-net-", 9) == 0 ||
+            strncmp(filename, "test-tls-net-", 13) == 0 ||
+            strncmp(filename, "test-cluster-net-", 17) == 0 ||
+            strcmp(filename, "test-snapshot-net.js") == 0 ||
+            (strncmp(filename, "test-diagnostics-channel-net",
+                diagnostics_net_prefix_length) == 0 &&
+             (filename[diagnostics_net_prefix_length] == '-' ||
+              filename[diagnostics_net_prefix_length] == '.'))) return true;
+    FILE* source = fopen(path, "rb");
+    if (!source) return false;
+    char line[8192];
+    bool uses_net = false;
+    while (fgets(line, sizeof(line), source)) {
+        if (node_test_line_imports_retired_net(line)) {
+            uses_net = true;
+            break;
+        }
+    }
+    fclose(source);
+    return uses_net;
+}
+
 static std::vector<NodeOfficialParam> discover_node_official_tests(bool honor_slow_list = true,
                                                                    bool baseline_only = false) {
     ensure_prefixes_initialized();
@@ -914,6 +972,11 @@ static std::vector<NodeOfficialParam> discover_node_official_tests(bool honor_sl
 
         // check if module is enabled
         if (g_enabled_prefixes.find(mod) == g_enabled_prefixes.end()) continue;
+
+        // the upstream tree is shared; exclude fixtures that import the retired net module.
+        char test_path[4096];
+        snprintf(test_path, sizeof(test_path), "%s/%s", dir_path.c_str(), filename.c_str());
+        if (node_test_uses_retired_net(filename.c_str(), test_path)) continue;
 
         // check if test is explicitly skipped (loaded from official_skip_list.txt)
         load_skip_list();
@@ -969,91 +1032,12 @@ static std::atomic<int> g_node_progress_failed{0};
 static std::atomic<int> g_node_progress_timed_out{0};
 static std::atomic<int> g_node_progress_crashed{0};
 static std::atomic<int> g_node_progress_gate_failures{0};
-static bool g_node_socket_preflight_failed = false;
-static std::string g_node_socket_preflight_message;
-
 static const char* node_result_status(const NodeTestResult& r);
 static void ensure_temp_dir();
 
 static bool node_test_requires_serial(const NodeOfficialParam& t) {
     load_serial_list();
     return g_serial_tests.find(t.filename) != g_serial_tests.end();
-}
-
-static bool node_test_needs_socket_preflight(const NodeOfficialParam& t) {
-    return t.module == "http" ||
-           t.module == "https" ||
-           t.module == "net" ||
-           t.module == "tls";
-}
-
-static bool node_tests_need_socket_preflight(const std::vector<NodeOfficialParam>& tests) {
-    for (const auto& t : tests) {
-        if (node_test_needs_socket_preflight(t)) return true;
-    }
-    return false;
-}
-
-static bool run_node_socket_preflight(std::string& message) {
-#ifdef _WIN32
-    (void)message;
-    return true;
-#else
-    char path_env[4096];
-    char timeout_cmd[1024];
-    shell_quote_single(node_child_path_value(), path_env, sizeof(path_env));
-    shell_quote_single(node_timeout_command_value(), timeout_cmd, sizeof(timeout_cmd));
-    char command[8192];
-    snprintf(command, sizeof(command),
-        "mkdir -p \"temp/node_test/_preflight_socket\" && "
-        "cd \"temp/node_test/_preflight_socket\" && "
-        "env -u DYLD_INSERT_LIBRARIES -u DYLD_LIBRARY_PATH -u ASAN_OPTIONS -u MallocNanoZone "
-        "-u LAMBDA_NODE_BASELINE_ONLY PATH=%s NODE_COMMON_PORT=9900 "
-        "%s -k 2s 10 ../../../lambda.exe js -e "
-        "\"const net=require('net');"
-        "const s=net.createServer();"
-        "s.on('error',(e)=>{console.error('NODE_SOCKET_PREFLIGHT_ERROR',e&&e.code,e&&e.address,e&&e.port);process.exit(1);});"
-        "s.listen(0,()=>s.close(()=>process.exit(0)));\" --no-log 2>&1",
-        path_env, timeout_cmd);
-
-    FILE* pipe = popen(command, "r");
-    if (!pipe) {
-        message = "could not execute socket preflight command";
-        return false;
-    }
-
-    std::string output;
-    char buffer[1024];
-    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-        output += buffer;
-    }
-
-    int status = pclose(pipe);
-    int exit_code = -1;
-#ifdef _WIN32
-    exit_code = status;
-#else
-    if (status != -1) {
-        if (WIFEXITED(status)) {
-            exit_code = WEXITSTATUS(status);
-        } else if (WIFSIGNALED(status)) {
-            exit_code = 128 + WTERMSIG(status);
-        }
-    }
-#endif
-    if (exit_code == 0) return true;
-
-    std::ostringstream ss;
-    ss << "local socket preflight failed before running Node official socket tests (exit "
-       << exit_code << ").\n"
-       << "The current execution sandbox may block net.createServer().listen(0), "
-       << "which would produce false EPERM regressions for http/https/net/tls tests.\n"
-       << "Run the harness from a network-capable context, or use the approved/escalated "
-       << "command path for ./test/test_node_gtest.exe.\n"
-       << "Preflight output:\n" << output;
-    message = ss.str();
-    return false;
-#endif
 }
 
 static void node_write_failure_output_entry(FILE* f,
@@ -1478,17 +1462,6 @@ public:
         auto tests = discover_node_official_tests(true, g_baseline_only);
         tests = filter_node_official_tests_for_gtest(tests);
         g_node_executed_params = tests;
-        if (node_tests_need_socket_preflight(tests)) {
-            std::string message;
-            if (!run_node_socket_preflight(message)) {
-                g_node_socket_preflight_failed = true;
-                g_node_socket_preflight_message = message;
-                fprintf(stderr, "[node-official] ERROR: %s\n", message.c_str());
-                ADD_FAILURE() << message;
-                return;
-            }
-            fprintf(stderr, "[node-official] Local socket preflight passed\n");
-        }
         execute_all_tests(tests);
         auto end = std::chrono::steady_clock::now();
         g_node_run_wall_secs = std::chrono::duration<double>(end - start).count();
@@ -1499,11 +1472,6 @@ bool NodeOfficialTest::suite_executed = false;
 
 TEST_P(NodeOfficialTest, Run) {
     const auto& p = GetParam();
-
-    if (g_node_socket_preflight_failed) {
-        GTEST_SKIP() << "Node socket preflight failed; see setup diagnostic above.";
-        return;
-    }
 
     load_slow_list();
     if (!g_include_slow && g_slow_tests.find(p.filename) != g_slow_tests.end()) {
@@ -1580,12 +1548,6 @@ class NodeOfficialReportListener : public testing::EmptyTestEventListener {
 public:
     void OnTestSuiteEnd(const testing::TestSuite& suite) override {
         if (std::string(suite.name()).find("NodeOfficial") == std::string::npos) return;
-
-        if (g_node_socket_preflight_failed) {
-            printf("\n[node-official] Node official run aborted before test execution: socket preflight failed.\n");
-            printf("[node-official] See the preflight diagnostic above for the required execution mode.\n");
-            return;
-        }
 
         auto tests = g_node_gtest_filter_active
             ? g_node_executed_params

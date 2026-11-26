@@ -9,7 +9,6 @@ typedef struct JsCjsState JsCjsState;
 typedef struct JsCommonJsCompileCacheState JsCommonJsCompileCacheState;
 typedef struct JsDiagnosticsChannelState JsDiagnosticsChannelState;
 typedef struct JsPermissionPolicy JsPermissionPolicy;
-typedef struct JsCryptoNativeState JsCryptoNativeState;
 
 #ifdef __cplusplus
 extern "C" {
@@ -57,7 +56,6 @@ bool jube_node_module_enabled(const char* module_name);
 // The registry owns generation-checked resource ids for hosted Node services.
 // With no registered resources, process inventory reports an empty array.
 uint32_t jube_node_resource_add(Item value, const char* kind);
-void jube_node_resource_remove(uint32_t resource_id);
 void jube_node_resource_clear(void);
 bool jube_node_resource_contains(uint32_t resource_id);
 Item jube_node_resource_active_handles(void);
@@ -65,18 +63,6 @@ Item jube_node_resource_active_resources_info(void);
 uint32_t jube_node_resource_add_with_close(void* session, Item value, const char* kind,
                                            JubeNodeResourceCloseCallback close_callback,
                                            void* close_user);
-// Same generation-checked table, for a native resource that is NOT a libuv
-// handle (a crypto context, say). It is owned and closed identically but is
-// invisible to process._getActiveHandles / getActiveResourcesInfo, which
-// report only handles (JSCU24).
-LAMBDA_RT_API uint32_t jube_node_resource_add_native(void* session, Item value, const char* kind,
-                                       JubeNodeResourceCloseCallback close_callback,
-                                       void* close_user);
-// Legacy host-ABI bridge. It maps the one published crypto prefix to a frozen
-// resource group; resource-table teardown itself never dispatches on text.
-LAMBDA_RT_API void jube_node_resource_close_kind(void* session, const char* kind_prefix);
-LAMBDA_RT_API void jube_node_resource_remove_for_session(void* session, uint32_t resource_id);
-LAMBDA_RT_API void* jube_node_resource_user_data_for_session(void* session, uint32_t resource_id);
 LAMBDA_RT_API void* jube_node_runtime_current_session(void);
 LAMBDA_RT_API NodeTraceState* jube_node_trace_state(void* session);
 LAMBDA_RT_API NodeTraceState* jube_node_trace_state_ensure(void* session);
@@ -85,7 +71,6 @@ JsCommonJsCompileCacheState* jube_node_commonjs_compile_cache_state(void* sessio
 JsDiagnosticsChannelState* jube_node_diagnostics_channel_state(void* session);
 JsPermissionPolicy* jube_node_permission_policy(void* session);
 JsPermissionPolicy* jube_node_permission_policy_ensure(void* session);
-LAMBDA_RT_API JsCryptoNativeState* jube_node_crypto_native_state(void* session);
 int jube_static_module_count(void);
 const JubeModuleDef* jube_static_module_at(int index);
 const JubeModuleDef* jube_find_static_module(const char* name);

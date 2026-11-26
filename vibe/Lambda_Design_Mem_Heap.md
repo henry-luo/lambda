@@ -847,7 +847,7 @@ leverage:
 | Guest-language ASTs | `js.ast`, `py.ast`, `rb.ast`, `bash.ast` | py/rb already allocate AST nodes from a sibling arena; the pool now backs only `NamePool` |
 | Temp format/convert | `main.fmt` ×3, `convert.temp`, `proc.output.format`, `emit-parse.pool`, `jube.hosted.result` | textbook scoped temporaries |
 | Radiant per-pass | `cmd_layout` ×6, `render.svg_inline` ×2, `window`, `state.dump.scratch`, `rdt.vector.*` ×2, `radiant.document` ×2, `script_runner` | `cmd_layout`'s former `pool_realloc` users are gone — it is now free-less |
-| Input/module/misc | `input.sysinfo` ×2, npm ×5, `css.dom_node.format`, `js.cssom`, `pdf.document.pool` | |
+| Input/module/misc | `input.sysinfo` ×2, `css.dom_node.format`, `js.cssom`, `pdf.document.pool` | |
 
 Two structural observations from the census:
 

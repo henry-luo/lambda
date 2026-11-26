@@ -48,7 +48,7 @@ pn particle_batch(scene, st, sequence, tick) {
     let parts = runtime.particle_snapshot(scene) ^ { null }
     if (parts == null or not (parts.emitters is array)) { return sequence }
     let spawns = [for (p in st.spawns, let ident = identity(parts.emitters, "id", p.emitter)^ where ident != null)
-        {op: "spawn", emitter: p.emitter, identity: ident, count: p.count, position: p.position}]
+        {op: "spawn", emitter: p.emitter, identity: ident, count: p.count, position: p.position, *: (if (p.rotation != null) {rotation: p.rotation} else {})}]
     if (len(spawns) == 0) { return sequence }
     let sent = runtime.particle_commands(scene, {session: parts.session, generation: parts.generation, service_generation: parts.service_generation,
         sequence: sequence, tick: tick, commands: slice(spawns, 0, min(len(spawns), 128))})

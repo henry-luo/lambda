@@ -1979,12 +1979,15 @@ protected:
         return emitter;
     }
     void check_particle_spawn_bridge(bool gpu);
+    void check_particle_spawn_rotation(bool gpu);
     void check_particle_spawn_maximum(bool gpu);
     struct ParticleSpawnTestRequest {
         DomElement *emitter;
         unsigned count, depth;
         Scene3dVec position, velocity;
         bool positioned;
+        Scene3dVec rotation;
+        bool rotated;
     };
     Item particle_spawn_batch(const ParticleSpawnTestRequest *values, unsigned count, uint64_t sequence = 0,
                               uint64_t tick = 0, const Scene3dRuntimeStats *envelope = nullptr) {
@@ -2006,6 +2009,7 @@ protected:
             command.put("count", Item{.item=i2it(values[i].count)}); command.put("depth", Item{.item=i2it(values[i].depth)});
             if (values[i].positioned) command.put("position", navigation_point_value({values[i].position.x,values[i].position.y,values[i].position.z},3));
             command.put("velocity", navigation_point_value({values[i].velocity.x,values[i].velocity.y,values[i].velocity.z},3));
+            if (values[i].rotated) command.put("rotation", navigation_point_value({values[i].rotation.x,values[i].rotation.y,values[i].rotation.z},3));
             commands.append(command.value.get());
         }
         batch.put("commands", commands.value.get()); request.put("batch",batch.value.get());
@@ -4072,6 +4076,29 @@ void Scene3dTest::check_particle_spawn_bridge(bool gpu) {
 }
 TEST_F(Scene3dTest, ParticlesSpawnCommandsQueueCopiedRequestsBeforeBirthAtTheSelectedTick) { check_particle_spawn_bridge(false); }
 TEST_F(Scene3dTest, ParticlesGpuSpawnCommandsQueueCopiedRequestsBeforeBirthAtTheSelectedTick) { check_particle_spawn_bridge(true); }
+// a spawn rotation turns that birth's basis: a quarter turn about Y carries the authored +X velocity to -Z,
+// while the request's added velocity stays in simulation axes; the turned birth asks for rotation-safe bounds
+void Scene3dTest::check_particle_spawn_rotation(bool gpu) {
+    ParticleBridgeCommand commands[] = {
+        {gpu ? "configureParticleSpawns('gpu');queueParticleSpawns([{op:'spawn',emitter:'sparks',count:1,position:[3,0,0],velocity:[2,0,0],rotation:[0,Math.PI/2,0]}],2)"
+             : "configureParticleSpawns('cpu');queueParticleSpawns([{op:'spawn',emitter:'sparks',count:1,position:[3,0,0],velocity:[2,0,0],rotation:[0,Math.PI/2,0]}],2)",
+         "particleResult.pending_commands===1n&&particleResult.tick===0"},
+        {"particleRequest('step',1)", "particleResult.tick===1"},
+        {"particleRequest('step',1)", "particleResult.tick===2"},
+        {"particleRequest('read')", "particleResult.emitters[0].live===1n&&Math.abs(particleResult.emitters[0].samples[0].position[0]-3)<1e-6"},
+        {"particleRequest('step',1)", "particleResult.tick===3"},
+        {"particleRequest('read')", "Math.abs(particleResult.emitters[0].samples[0].position[0]-3.2)<1e-5&&"
+            "Math.abs(particleResult.emitters[0].samples[0].position[2]+.1)<1e-5"},
+        {"particleRequest('capabilities')", "particleResult.particles_spawn_rotation===true"}
+    };
+    check_particle_commands(commands, sizeof(commands) / sizeof(*commands));
+    auto *world = dom_find_element_by_id(page->root, "world"), *emitter = dom_find_element_by_id(page->root, "sparks");
+    ASSERT_NE(world, nullptr); ASSERT_NE(emitter, nullptr);
+    Scene3dEmitterView view; ASSERT_TRUE(scene3d_particles_view(scene3d_particles(world), emitter, &view));
+    EXPECT_TRUE(view.rotating);
+}
+TEST_F(Scene3dTest, ParticlesSpawnRotationTurnsTheBirthBasis) { check_particle_spawn_rotation(false); }
+TEST_F(Scene3dTest, ParticlesGpuSpawnRotationTurnsTheBirthBasis) { check_particle_spawn_rotation(true); }
 
 
 
@@ -11995,7 +12022,9 @@ TEST_F(Scene3dAgentTest, ParticlesSpawnCommandsValidateDepthCountAndBatchAtomici
     requests[1].depth=8; requests[1].count=0; EXPECT_TRUE(item_is_error(particle_spawn_batch(requests,2)));
     requests[1].count=4096; EXPECT_TRUE(item_is_error(particle_spawn_batch(requests,2)));
     requests[1].count=1; requests[1].velocity={INFINITY,0,0}; EXPECT_TRUE(item_is_error(particle_spawn_batch(requests,2)));
-    requests[1].velocity={}; ASSERT_FALSE(item_is_error(particle_spawn_batch(requests,2)));
+    requests[1].velocity={}; requests[1].rotation={0,2e6f,0}; requests[1].rotated=true; EXPECT_TRUE(item_is_error(particle_spawn_batch(requests,2)));
+    requests[1].rotation={NAN,0,0}; EXPECT_TRUE(item_is_error(particle_spawn_batch(requests,2)));
+    requests[1].rotated=false; ASSERT_FALSE(item_is_error(particle_spawn_batch(requests,2)));
     ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root),1)); Scene3dParticleSample sample;
     ASSERT_TRUE(scene3d_particles_sample(scene3d_particles(root),emitter,1,&sample)); EXPECT_EQ(sample.depth,8u);
 }

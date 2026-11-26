@@ -1,5 +1,5 @@
 {
-  "name": "Doc editor previews D2 graphs and node shapes",
+  "name": "Doc editor previews D2 graphs and sequence diagrams",
   "html": "test/ui/doc_editor.ls",
   "viewport": {"width": 1280, "height": 1800},
   "events": [
@@ -21,6 +21,14 @@
     {"type": "click", "target": {"selector": ".tab-source"}},
     {"type": "assert_text", "target": {"selector": "#source-preview"}, "contains": "db.shape: cylinder"},
     {"type": "click", "target": {"selector": ".tab-view"}},
-    {"type": "assert_count", "target": {"selector": "#rendered-preview graph.lambda-graph"}, "count": 1}
+    {"type": "assert_count", "target": {"selector": "#rendered-preview graph.lambda-graph"}, "count": 1},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input_seq_diagram_d2 .tree-label"}},
+    {"type": "assert_text", "target": {"selector": ".document-name"}, "equals": "seq_diagram.d2"},
+    {"type": "assert_count", "target": {"selector": "#rendered-preview .lambda-sequence svg line"}, "count": 3},
+    {"type": "assert_count", "target": {"selector": "#rendered-preview .lambda-sequence svg text"}, "count": 6},
+    {"type": "assert_text", "target": {"selector": "#rendered-preview .lambda-sequence svg text", "index": 0}, "equals": "son"},
+    {"type": "assert_text", "target": {"selector": "#rendered-preview .lambda-sequence svg text", "index": 1}, "equals": "father"},
+    {"type": "assert_text", "target": {"selector": "#rendered-preview .lambda-sequence svg text", "index": 2}, "equals": "friend"},
+    {"type": "assert_text", "target": {"selector": "#rendered-preview .lambda-sequence svg text", "index": 5}, "equals": "internal debate ensues"}
   ]
 }

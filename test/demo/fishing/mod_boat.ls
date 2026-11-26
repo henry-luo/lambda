@@ -24,6 +24,9 @@ fn half_width(s) => 0.55 * (if (s < 0.42) 0.76 + 0.24 * sin(1.5708 * s / 0.42) e
 fn sheer(s) => 0.3 + 0.13 * s * s * s
 fn keel(s) => -0.17 + 0.12 * math.pow(s, 4.0)
 fn station_z(s) => STERN + s * (BOW - STERN)
+// the hull's outline seen from above (boat space [across, along]): the gunwale at a few stations on both
+// sides, the stem and the transom; the sim keeps every point of it on open water
+pub let PLANFORM = [[0.0, BOW], [0.0, STERN], *[for (s in [0.0, 0.22, 0.42, 0.62, 0.8, 0.92], side in [-1.0, 1.0]) [side * half_width(s), station_z(s)]]]
 // a point on section s at angle a (-pi/2 port gunwale .. 0 keel .. pi/2 starboard gunwale), inset inward
 fn hull_point(s, a, inset) => (let hw = max(0.0, half_width(s) - inset), let top = sheer(s), let bot = keel(s) + inset * 1.2,
     [hw * sin(a), top - (top - bot) * math.pow(max(0.0, cos(a)), 0.65), station_z(s)])

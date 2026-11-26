@@ -16,8 +16,5 @@ eval-throw:eval-boom:11
 lazy-own:true
 lazy-process-descriptor:true
 lazy-buffer-descriptor:true
-lazy-crypto-descriptor:true
 lazy-buffer-module:true
-lazy-crypto-module:true
 lazy-replaced:42
-lazy-deleted:false

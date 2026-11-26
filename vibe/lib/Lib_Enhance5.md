@@ -18,7 +18,7 @@
 >   `isalpha(ch)` swap also fixes a latent bug where high bytes could miss the
 >   UTF-8 identifier branch). CSS+Radiant scope lint-clean; radiant layout
 >   baseline 4245/4245.
-> - **Phase 3 (serve/npm/url/log + remaining parsers) — done.** 44 `ctype(*char*)`
+> - **Phase 3 (serve/url/log + remaining parsers) — done.** 44 `ctype(*char*)`
 >   sites across 19 files (input-ics/pdf/toml/mdx/latex/graph, format-yaml/xml/
 >   markup/utils, lib/log/url_parser/datetime/mime-detect, print) → `str_char_is_*`,
 >   plus the `bash_builtins` `strchr(set, *p2)` → `str_char_in_set`. **The whole
@@ -71,7 +71,7 @@ Survey command classes used:
   **19 matches in 15 files**. Most are harmless string searches, but the risky
   class is delimiter-set membership on the current byte.
 - Pointer-advancing `while` loops over strings in high-churn parser areas:
-  **702 matches in 77 files** across markup, CSS, serve, radiant, npm, bash, and
+  **702 matches in 77 files** across markup, CSS, serve, radiant, bash, and
   core `lib`.
 - Simple skip/run loops such as `while (*p == ' ') p++` or
   `while (*p == marker) p++`: **333 matches in 60 files**.
@@ -86,7 +86,7 @@ High-density areas:
 | `lambda/input/css/**` | `css_font_face`, tokenizer, selector matcher, `dom_element` | Repeated whitespace/comment/delimiter scans; multiple bounded and unbounded styles |
 | `radiant/**` | `css_animation`, `render_svg_inline`, `render_clip`, `cmd_layout`, `surface` | CSS/SVG attribute mini-parsers repeat skip/scan code |
 | `lambda/serve/**` | router, schema validator, OpenAPI, cookies, ASGI bridge | Small JSON/header/router scanners with duplicated quote and delimiter walking |
-| `lambda/module/npm/semver.cpp`, `lib/url_parser.c`, `lib/log.c` | numeric and token scans | Smaller but central primitives still apply |
+| `lib/url_parser.c`, `lib/log.c` | numeric and token scans | Smaller but central primitives still apply |
 
 Excluded from sweep:
 
@@ -311,7 +311,7 @@ Use bounded helpers where an `end` pointer exists; avoid converting grammar
 state loops that need custom nesting/quote logic unless the leaf scanner is
 exactly equivalent.
 
-### Phase 3 — serve/npm/url/log adoption
+### Phase 3 — serve/url/log adoption
 
 Target smaller but recurring patterns:
 
@@ -319,7 +319,6 @@ Target smaller but recurring patterns:
 - `lambda/serve/router.cpp`
 - `lambda/serve/openapi.cpp`
 - `lambda/serve/asgi_bridge.cpp`
-- `lambda/module/npm/semver.cpp`
 - `lib/url_parser.c`
 - `lib/log.c`
 

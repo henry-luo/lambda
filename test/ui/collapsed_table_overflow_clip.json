@@ -1,0 +1,17 @@
+{
+  "name": "Collapsed table borders stay inside the scroll pane",
+  "html": "test/ui/collapsed_table_overflow_clip.html",
+  "viewport": {"width": 330, "height": 170},
+  "events": [
+    {"type": "assert_pixel", "x": 110, "y": 31, "min_r": 204, "max_r": 204, "max_g": 0, "max_b": 0},
+    {"type": "assert_pixel", "x": 220, "y": 71, "min_r": 255, "min_g": 255, "min_b": 255},
+    {"type": "assert_pixel", "x": 120, "y": 111, "min_r": 255, "min_g": 255, "min_b": 255},
+    {"type": "scroll", "x": 160, "y": 70, "dx": -1, "dy": -1},
+    {"type": "assert_pixel", "x": 99, "y": 68, "min_r": 255, "min_g": 255, "min_b": 255},
+    {"type": "assert_pixel", "x": 100, "y": 68, "min_r": 204, "max_r": 204, "max_g": 0, "max_b": 0},
+    {"type": "assert_pixel", "x": 219, "y": 67, "min_r": 204, "max_r": 204, "max_g": 0, "max_b": 0},
+    {"type": "assert_pixel", "x": 220, "y": 67, "min_r": 255, "min_g": 255, "min_b": 255},
+    {"type": "assert_pixel", "x": 189, "y": 29, "min_r": 255, "min_g": 255, "min_b": 255},
+    {"type": "assert_pixel", "x": 189, "y": 30, "min_r": 204, "max_r": 204, "max_g": 0, "max_b": 0}
+  ]
+}

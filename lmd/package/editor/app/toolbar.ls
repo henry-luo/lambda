@@ -193,7 +193,7 @@ pub fn toolbar(file, editor, dirty, ds, groups, view_items, table_allowed = true
       file;
       <div class: "edit-document-actions",
         if (not has_formatting) history else null;
-        group(view_items, editor, dirty, ds)
+        if (len(view_items) > 0) group(view_items, editor, dirty, ds) else null;
         group(take(file_group, 2), editor, dirty, ds)
       >
     >
@@ -266,12 +266,14 @@ pub let css = "
   .edit-document-bar { display: flex; align-items: center; justify-content: space-between;
                         gap: 16px; padding: 10px 20px; border-bottom: 1px solid var(--document-rule);
                         background: var(--document-chrome); }
-  .edit-format-source .edit-document-bar { padding: 6px 20px; border-bottom: none; }
+  /* Embedded Source shares the Edit document row and uses its separator. */
+  .edit-format-source:not(.edit-source-compact) .edit-toolbar { border-bottom: none; }
+  .edit-source-compact .edit-document-bar { padding: 6px 20px; border-bottom: none; }
   .edit-document-actions { display: flex; align-items: center; flex: none; gap: 12px; }
   .edit-file { display: flex; align-items: center; gap: 6px; min-width: 0; }
   .edit-file .document-name { font-size: 16px; }
-  .edit-format-source .edit-file .document-name { font-size: 14px; }
-  .edit-format-source .edit-file .document-path { line-height: 14px; }
+  .edit-source-compact .edit-file .document-name { font-size: 14px; }
+  .edit-source-compact .edit-file .document-path { line-height: 14px; }
   .edit-dirty { flex: none; width: 8px; color: #b17a24; }
   .edit-format-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
                       padding: 7px 20px; background: var(--document-chrome); }

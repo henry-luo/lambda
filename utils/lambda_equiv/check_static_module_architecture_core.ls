@@ -17,7 +17,6 @@ let public_headers = [
 ]
 let runtime_native_io = [
     {path: "lambda/js/js_fs.cpp", classification: "rt-native: Node fs handles and callbacks"},
-    {path: "lambda/js/js_net.cpp", classification: "rt-native: Node sockets and libuv handles"},
     {path: "lambda/js/js_tls.cpp", classification: "rt-native: Node TLS handles and promises"},
     {path: "lambda/dom/dom_fetch.cpp", classification:
      "review: JS promise binding stays rt; reusable curl worker is io candidate"}

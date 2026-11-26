@@ -1,4 +1,5 @@
 // Formula syntax compiles into callable Lambda closures (S12.3.4v2).
+import cells: lambda.doc.xlsx.cells
 import ops: .mod_formula_functions
 import c: .mod_formula_common
 import dates: .mod_formula_date
@@ -15,8 +16,8 @@ function run_plan(plan: FormulaPlan,sheet,path,samples) any^ =>
 let LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 fn letter(ch) any^ => ch!="" and contains(LETTERS,upper(ch))
 fn digit(ch) any^ => ch!="" and contains("0123456789",ch)
-pub fn column(col) any^ => if (col<26) slice(LETTERS,col,col+1) else column(int(floor(col/26))-1) ++ column(col%26)
-pub fn address(row,col) any^ => column(col) ++ string(row+1)
+pub fn column(col) any^ => cells.column(col)^
+pub fn address(row,col) any^ => cells.address(row,col)^
 fn column_index(text,i=0,value=0) any^ => if (i==len(text)) value-1
     else column_index(text,i+1,value*26+index_of(LETTERS,slice(text,i,i+1))+1)
 fn letters_end(text,at=0) any^ => if (letter(slice(text,at,at+1))) letters_end(text,at+1) else at
@@ -28,7 +29,7 @@ pub fn position(text) map^ {
     else {
         let row = int(tail)^-1
         let col = column_index(slice(clean,0,at))
-        if (row<0 or row>=1048576 or col<0 or col>=16384) raise error("#REF!") else {row:row,col:col}
+        if (row<0 or row>=cells.ROW_LIMIT or col<0 or col>=cells.COLUMN_LIMIT) raise error("#REF!") else {row:row,col:col}
     }
 }
 // A prepared sheet supplies an address index so visible cells and references avoid scans.
@@ -103,7 +104,7 @@ fn translated_reference(key,offset) any^ {
         let row_absolute=starts_with(slice(bare,end),"$")
         let row=position_value.row+(if (row_absolute) 0 else offset.row)
         let col=position_value.col+(if (column_absolute) 0 else offset.col);
-        if (row<0 or row>=1048576 or col<0 or col>=16384) raise error("#REF!") else address(row,col)^
+        if (row<0 or row>=cells.ROW_LIMIT or col<0 or col>=cells.COLUMN_LIMIT) raise error("#REF!") else address(row,col)^
     }
 }
 fn binding_name(key) => if ((starts_with(key,"_XLPM.")) ^ {false}) (slice(key,6) ^ {key}) else key

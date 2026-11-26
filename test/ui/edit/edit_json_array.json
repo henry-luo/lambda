@@ -7,13 +7,14 @@
     {
       "type": "click",
       "target": {
-        "selector": "input[aria-label='Property name: flags']"
-      }
+        "selector": "textarea[aria-label='1']"
+      },
+      "button": 1
     },
     {
       "type": "click",
       "target": {
-        "selector": ".property-toolbar_add"
+        "selector": ".property-menu .property-add"
       }
     },
     {

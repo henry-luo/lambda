@@ -26,9 +26,11 @@ Letting go of the arrows doesn't stop the oars mid-air: the stroke under way
 finishes, still pulling, and then the oars ease down to rest. Rowing again picks
 up at once.
 
-Space casts while the boat is drifting slowly. A fish comes to the bobber,
-nibbles once or twice (the float twitches and rings), then takes it: the float
-is dragged under. Strike within about a second to hook it. The angler then
+Space casts while the boat is drifting slowly. Within a few seconds a fish
+hurries over to the bobber, nibbles once or twice (the float twitches and
+rings), then takes it: the float is dragged under. Strike within about two
+seconds to hook it. Pressing while it only nibbles is just too soon: the fish
+stays, and a toast says to wait for the float to go under. The angler then
 fights it to the boatside, lifts it out for a look, and lets it go, and the
 catch badge counts it. Rowing reels the line in first. The strike assist strikes
 for you a beat after the bite.
@@ -39,10 +41,15 @@ for you a beat after the bite.
   sheen, a broken foam lip at the beach, and toon sun glints cut from an
   animated wave normal, glittering in drifting bands. A second film lays thin
   drifting caustics on the floor, brightest in the shallows.
-- **Ripples**: natural water rings rather than circles. Each is one disc of
-  vertex colour and alpha: a bright leading crest with a darker trough behind
-  it, then weaker trailing rings. The edges wobble a little, the bands widen as
-  they spread, and they fade. Three ripple emitters (small, medium, large), a
+- **Ripples**: drawn like the wavy lines the moving surface throws, not as
+  ruled circles. Each is one finely divided disc of vertex colour and alpha: a
+  broad bright leading crest with a soft glow and a faint trough behind it, and
+  on the larger ripples one weaker crest well back. Each ring meanders on its own, so no two run parallel,
+  and its strength swells and fades round the ring, so it thickens, thins and
+  nearly breaks. The bands widen as they spread, and they fade. Each round
+  ripple and foam crown is born turned its own way (a per-spawn rotation keyed to
+  where it lands), so no two wavy outlines repeat. A splash's foam crown is a
+  soft band broken into patches. Three ripple emitters (small, medium, large), a
   foam crown and splash droplets are spawned where the oar blades bite and leave
   the water, behind the boat, at the bobber, under nibbles and bites, where a
   hooked fish thrashes, where fish rise to sip, around the otter, and where it
@@ -96,9 +103,12 @@ for you a beat after the bite.
   crown. Each vertex takes its colour and up to four bone weights from the
   sculpt parts around it, blending only bones that join, so a flipper never
   drags the tail. The otter keeps to the boat's stern quarter, or its bow
-  quarter while the boat backs up, and it is quick: it paddles fast to keep
-  station, and if the boat bears down on it, ahead or astern, it paddles
-  straight out of the way to the side. It floats on its back with its head bent
+  quarter while the boat backs up, well outside the oars' reach, and it is
+  quick: it paddles fast to keep station, and if the boat bears down on it,
+  ahead or astern, it paddles straight out of the way to the side. While the
+  oars are out it keeps clear of them too. If it is within an oar's reach, or
+  will be in a moment as the boat turns or backs, it paddles straight out from
+  the boat, so a blade never sweeps through it. It floats on its back with its head bent
   down to its tummy, so its face looks up at you over a pink clam held on its
   chest, and paddles on its back, face up, to keep up. Now and then, and
   whenever the boat rows hard, it rolls over and duck-dives, flippers up out of
@@ -112,17 +122,24 @@ for you a beat after the bite.
   strake over a cream stripe, wooden floorboards above the waterline, and oars
   with orange-tipped blades. The fisher is a seated adult as one skinned mesh: a
   wide woven straw hat with a red band, a bearded face, a cream striped shirt
-  under blue denim bib overalls with brass buckles, and brown boots. The fisher
+  under blue denim bib overalls with brass buckles, and brown boots. Round caps
+  on the shoulders, elbows and knees keep the limbs joined at any bend. Each hand
+  is a fist: the back of the hand, a row of knuckles, four fingers curled round
+  the grip in three joints, and the thumb wrapped over them. The fisher
   faces the bow and push-rows: at the catch the handles come back to the chest
   with the blades forward. The drive pushes them out over the knees with a lean
   from the hips, sweeping the blades aft on edge, and the boat surges with each
   drive. At the finish the blades lift out and turn flat, then skim back as the
   hands draw in, slower than the drive. Rowing, casting, nibbles, bites, the
-  strike and the release are clips sampled from pose functions, and a two-bone
-  IK solve places the hands on the oar handles, the rod grip or the reel. The
+  strike and the release are clips sampled from pose functions. A two-bone IK
+  solve closes each fist round an oar handle, the rod grip or the reel, and the
+  wrist turns the fist so its grip lies along the oar or the rod. The whole hull,
+  and the reach of the oars, stays off the jetty, the rocks and the shallows. A
+  move that would put any part of it there is refused, and so is a turn that
+  would swing the hull's side in, so the boat never rows into the jetty. The
   oars are short, and in the drive the blades bury themselves just under the
-  surface. A blade biting in throws a ring, a smaller ring and a few drops,
-  swirls trail it through the pull, and it lifts out with a splash. Under the
+  surface. A blade biting in throws a ring and a few drops, a swirl or two
+  trails it through the pull, and it lifts out with a splash. Under the
   surface the blade is drawn through the water: shallower by the refractive
   index, wavering with the swells and veiled in the water's colour, so it seems
   to bend at the waterline. The fishing line is a skinned ribbon on eight bones:
@@ -139,6 +156,9 @@ three kinds of command through the explicit Radiant contracts (**D9.5.6v2**):
   otter, camera rig);
 - an animation batch when a clip must switch or a fish's tail-beat changes;
 - a particle batch for the frame's ripples and splashes.
+
+The emitters are built with `s.particle_emitter` and `s.particle_curve`, and the
+whole scene passes `s.validate`.
 
 The HUD (catch badge, hint, toast) changes only when its text does, and the
 toast and badge pop through the presentation channel.
@@ -183,11 +203,15 @@ LAMBDA_HEADLESS_GLFW_WINDOW=1 ./lambda.exe demo fishing --headless \
   --event-file test/demo/fishing/tests/catch.json --event-result temp/fishing-catch.json
 ```
 
-The model golden (`test/lambda/scene3d/fishing.ls`) checks the cove layout and
+The model golden (`test/lambda/scene3d/fishing.ls`) checks that the whole scene passes `s.validate`, the cove layout and
 flora counts, the roster and its skinned buffers, the angler's rod tip, bobber, blades, catch path
 and clips, the otter's rig, clips and dive timelines, and the pure game step. The step runs
-through the otter's idle dive under the boat and its dive to keep up with hard rowing. That covers rowing out, gliding to a stop, a
-cast, a reel-in, and a staged bite that the assist lands, counts and releases.
+through the otter's idle dive under the boat and its dive to keep up with hard rowing, and checks
+that a working blade stays over a metre from it while the boat turns on the spot each way, backs,
+and sets off after it has drifted under a resting oar. Backing and turning into the jetty, no point of
+the hull's outline and no blade gets onto its deck, and the boat can still row away. That covers rowing out, gliding to a stop, a
+cast, a reel-in, and a staged bite that the assist lands, counts and releases. Without the assist,
+a press during the nibble keeps the fish, and a strike a second and a half into the bite hooks it.
 `tests/desktop.json` rows, turns, casts, reels in and rows away, checking each
 mode change and that the scene draws and moves. `tests/catch.json` turns on the
 assist, casts and waits for a natural bite to be caught and counted. `tests/mouse.json`

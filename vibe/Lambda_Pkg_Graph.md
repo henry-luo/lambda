@@ -638,6 +638,14 @@ Element and relationship styles lower to canonical style assignments and pass th
 
 The D2 reader handles bare identifiers including spaces, slashes and dotted keys, labels, node and style blocks, graph direction, and all four connection operators. A chain expands in source order and applies its trailing label to each link. A left-pointing link uses its logical source and destination for ranking. The shared scanner follows S12.1.1v5 and S12.1.2v3. The D2 routing golden and the pinned upstream render corpus cover source Mark and rendered behavior.
 
+A root `shape: sequence_diagram` selects the shared `lambda.chart` sequence
+renderer (D9.3.4, D9.5.6v2). Top-level actors use declaration or first
+appearance order. Connections keep source order, direction, and arrow ends.
+The D2 style draws dashed lifelines and measures message labels to space the
+actors. The SVG scales to the preview width. The golden and viewer replay
+exercise `seq_diagram.d2`, including its self-message.
+[D2 sequence diagram reference](https://d2lang.com/tour/sequence-diagrams/).
+
 ### 11.8 TikZ and PGFPlots
 
 The TikZ reader belongs in `lambda.doc.tikz` (D9.3.4). It builds the existing `<tikz_picture>` Mark for authored picture environments and standalone fragments. Its consumers handle explicit coordinates, paths, style resolution, PGF math, and plot geometry. Standalone TikZ/PGF input, embedded LaTeX graphics islands, and generated fragments all use this reader. TikZ shares suitable scanning mechanics with the graph formats and TeX-specific lexical behavior with the LaTeX package. Its rendering contract is documented in [Lambda_Impl_Latex_Phase4.md](impl/Lambda_Impl_Latex_Phase4.md).

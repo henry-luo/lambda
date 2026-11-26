@@ -24,6 +24,13 @@
       "count": 1
     },
     {
+      "type": "assert_count",
+      "target": {
+        "selector": ".viewer-edit-host .edit-status, .viewer-edit-host .edit-notice"
+      },
+      "count": 0
+    },
+    {
       "type": "click",
       "target": {
         "selector": "#property-filter"
@@ -99,9 +106,16 @@
       "contains": "\"name\": \"Edited\""
     },
     {
+      "type": "assert_text",
+      "target": {
+        "selector": ".viewer-edit-host .edit-document-bar + .edit-notice"
+      },
+      "contains": "Saved view_to_edit.json."
+    },
+    {
       "type": "click",
       "target": {
-        "selector": ".property-source"
+        "selector": ".viewer-edit-host .tab-source"
       }
     },
     {

@@ -21,6 +21,11 @@
   start_navigable: true,
   bank_navigable: false
 }
+"scene"
+{
+  valid: true,
+  emitters: 7
+}
 "fish"
 {
   count: 44,
@@ -37,7 +42,7 @@
   blades_at_catch: [[-1.48, -0.09, 0.58], [1.48, -0.09, 0.58]],
   hook_at_show: [-0.78, 0.95, 0.55],
   released: [-1.95, -0.12, 0.9],
-  clips: [["idle", 20, 2.99], ["row", 20, 1.6], ["ready", 20, 2.99], ["to-fish", 20, 1.8], ["to-row", 20, 1.8], ["rest-oars", 20, 1.7], ["cast", 20, 2.25], ["wait", 20, 3], ["nibble", 20, 1.7], ["bite", 20, 2.35], ["reel", 20, 1.9], ["strike", 20, 5.6]]
+  clips: [["idle", 22, 2.99], ["row", 22, 1.6], ["ready", 22, 2.99], ["to-fish", 22, 1.8], ["to-row", 22, 1.8], ["rest-oars", 22, 1.7], ["cast", 22, 2.25], ["wait", 22, 3], ["nibble", 22, 1.7], ["bite", 22, 3.1], ["reel", 22, 1.9], ["strike", 22, 5.6]]
 }
 "otter"
 {
@@ -54,9 +59,17 @@
   rowing: ["float", "dive", "swim"]
 }
 {
-  backing: ["float", "to-paddle", "paddle", "to-float", "float"],
+  backing: ["float", "to-paddle", "paddle"],
   clear_of_hull: true,
-  ended: ["float", -1.71]
+  ended: ["paddle", -3.1]
+}
+{
+  oars_clear: [true, true, true, true]
+}
+"jetty"
+{
+  clear: [true, true],
+  rows_away: true
 }
 "row"
 {
@@ -88,4 +101,9 @@
   toast: "Koi · 84 cm",
   fish_mode: "wander",
   target: null
+}
+{
+  early: ["wait", true, "Not yet… wait for the float to go under"],
+  bitten: ["bite", 1.62],
+  struck: "strike"
 }

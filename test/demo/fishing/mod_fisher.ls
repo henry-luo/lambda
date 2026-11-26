@@ -23,6 +23,8 @@ let WRIST_R = [-0.225, 0.158, -0.2]
 let KNUCKLES_R = [-0.225, 0.07, -0.2]
 pub let UPPER = 0.266
 pub let FORE = 0.242
+// how far past the wrist, on the hand's own line, the fist closes round what it holds
+pub let GRIP_REACH = 0.075
 // name, joint, bone end (for weights), parent
 let BONES = [["f-pelvis", PELVIS, SPINE, -1], ["f-spine", SPINE, CHEST, 0], ["f-chest", CHEST, NECK, 1], ["f-neck", NECK, HEAD, 2],
     ["f-head", HEAD, [0.0, 1.0, -0.17], 3],
@@ -105,12 +107,33 @@ fn neck() any^ => [rig.tube([[0.0, 0.66, -0.2], [0.0, 0.83, -0.172]], [0.058, 0.
     rig.tube([[0.0, 0.705, -0.195], [0.0, 0.755, -0.19]], [0.078, 0.07], 16, (k, a) => SHIRT, bind([2, 3], 1.0)^)^]
 
 let JOINT_BALL = shape.sphere(12, 18)
-// ---- arms: striped shirt sleeves to the elbow, then to a turned-back cuff at the wrist, a gripping hand
+// ---- hands: a fist closed round a grip GRIP_REACH past the wrist on the hand's own line (so a turn of the
+// wrist keeps the grip where it is). Offsets are from the grip, +x toward the thumb (the body's middle),
+// +y up the arm at rest and +z the palm's side
+// fingers from the index to the little finger: offset across the hand, size, radius
+let FINGERS = [[0.021, 1.0, 0.0098], [0.007, 1.04, 0.0102], [-0.007, 1.0, 0.0096], [-0.02, 0.88, 0.0086]]
+// a finger's joints round the grip ([up, forward]): the knuckle, then the ends of its three bones
+let CURL = [[-0.013, -0.03], [-0.037, -0.008], [-0.025, 0.024], [-0.001, 0.033]]
+// the wrist, the back of the hand and the heel of the thumb, a row of knuckles, four fingers curled round
+// the grip in three joints with rounded tips, and the thumb wrapped over the first two
+fn fist(x, wr, hand) any^ {
+    let g = rig.add(wr, [0.0, 0.0 - GRIP_REACH, 0.0])^
+    let b = on(hand)^
+    let at = (p) any^ => rig.add(g, [0.0 - x * p[0], p[1], p[2]])^
+    let fingers = [for (f in FINGERS) [for (c in CURL) at([f[0], c[0] * f[1], c[1] * f[1]])^]]
+    let thumb = [at([0.036, 0.03, -0.018])^, at([0.042, 0.0, 0.012])^, at([0.026, -0.018, 0.036])^]
+    return [ball(at([0.0, 0.066, -0.012])^, [0.032, 0.024, 0.027], SKIN, b)^,
+        ball(at([0.002, 0.03, -0.03])^, [0.042, 0.048, 0.019], SKIN, b)^,
+        ball(at([0.032, 0.022, -0.016])^, [0.017, 0.028, 0.017], SKIN, b)^,
+        *[for (j, f in FINGERS, let r = f[2], let pts = fingers[j]) *[ball(pts[0], [r * 1.2, r * 1.2, r * 1.2], SKIN, b)^,
+            rig.tube(pts, [r * 1.12, r * 1.04, r, r * 0.92], 8, (k, a) => SKIN, b)^, ball(pts[3], [r * 0.92, r * 0.92, r * 0.92], SKIN, b)^]],
+        rig.tube(thumb, [0.014, 0.0118, 0.0098], 10, (k, a) => SKIN, b)^, ball(thumb[2], [0.0098, 0.0098, 0.0098], SKIN, b)^]
+}
+// ---- arms: striped shirt sleeves to the elbow, then to a turned-back cuff at the wrist, and the fist
 fn arm(x, upper, fore, hand) any^ {
     let sh = if (x < 0.0) SHOULDER_R else mirror(SHOULDER_R)
     let el = if (x < 0.0) ELBOW_R else mirror(ELBOW_R)
     let wr = if (x < 0.0) WRIST_R else mirror(WRIST_R)
-    let palm = rig.add(wr, [0.0, -0.05, 0.008])^
     // round caps centred on the shoulder and elbow joints turn about their own centres with the arm, so
     // the sleeve stays joined to the body and to the forearm at any angle; the sleeve starts at the
     // shoulder joint and rides the arm alone (a sleeve begun inside the chest twisted into a pinch)
@@ -119,14 +142,14 @@ fn arm(x, upper, fore, hand) any^ {
         rig.tube([sh, rig.lerp3(sh, el, 0.5)^, el], [0.064, 0.057, 0.048], 14, (k, a) => shirt(a * 0.6), bind([upper, fore], 1.3)^)^,
         rig.tube([el, rig.lerp3(el, wr, 0.75)^, rig.add(wr, [0.0, 0.025, 0.0])^], [0.047, 0.04, 0.044], 14,
             (k, a) => if (k > 0.7) SHIRT else shirt(a * 0.6), bind([upper, fore, hand], 1.3)^)^,
-        ball(palm, [0.03, 0.048, 0.042], SKIN, on(hand)^)^,
-        // curled fingers across the front of the palm, and the thumb over them
-        *[for (j in 0 to 3) ball(rig.add(palm, [-0.02 + 0.0135 * j, -0.03, 0.036])^, [0.0085, 0.022, 0.012], SKIN, on(hand)^)^],
-        ball(rig.add(palm, [x * -0.022, -0.008, 0.035])^, [0.01, 0.024, 0.011], SKIN_SHADE, on(hand)^)^]
+        *(fist(x, wr, hand)^)]
 }
-// ---- legs: thighs forward along the seat, shins to boots on the floorboards (they ride the pelvis)
+// ---- legs: thighs forward along the seat, shins to boots on the floorboards (they ride the pelvis). The
+// thigh runs level and the shin drops from the knee, so their tube ends leave a wedge open at the front of
+// the knee; a round knee cap on the joint fills it
 fn legs() any^ => [for (x in [-1.0, 1.0]) *[
-    rig.tube([[x * 0.085, 0.24, -0.24], [x * 0.1, 0.25, -0.02], [x * 0.11, 0.24, 0.2]], [0.085, 0.078, 0.062], 14, (k, a) => if (k > 0.5) DENIM_SHADE else DENIM, on(0)^)^,
+    rig.tube([[x * 0.085, 0.24, -0.24], [x * 0.1, 0.25, -0.02], [x * 0.11, 0.24, 0.2]], [0.085, 0.078, 0.062], 14, (k, a) => DENIM, on(0)^)^,
+    rig.ellipsoid([x * 0.11, 0.245, 0.2], [0.062, 0.064, 0.064], rig.IDENTITY, rig.flat(DENIM)^, on(0)^, JOINT_BALL)^,
     rig.tube([[x * 0.11, 0.25, 0.2], [x * 0.12, 0.17, 0.235], [x * 0.125, 0.09, 0.26]], [0.06, 0.052, 0.046], 12, (k, a) => DENIM, on(0)^)^,
     ball([x * 0.125, 0.085, 0.3], [0.05, 0.045, 0.1], BOOT, on(0)^)^, ball([x * 0.125, 0.052, 0.305], [0.054, 0.012, 0.108], SOLE, on(0)^)^]]
 pub fn buffer() any^ => rig.merge([torso()^, *(buckles()^), *(head()^), *(neck()^), *(arm(-1.0, 5, 6, 7)^), *(arm(1.0, 8, 9, 10)^), *(legs()^)])^
@@ -134,21 +157,33 @@ pub fn geometry() any^ => rig.geometry("g-fisher", buffer()^)^
 
 // ---- posing: torso and head turns, and hands placed by IK
 fn quat3(a) any^ => u.quat(a[0], a[1], a[2])^
-// shoulder, the chest's orientation, and arm turns reaching for `target` (boat space)
-fn reach(torso_q, side, target) any^ {
+// arm and wrist turns that close the fist round `grip` (boat space) with its grip lying along `axis`, given
+// the chest's orientation. The fist closes GRIP_REACH past the wrist on the hand's own line, so the forearm
+// and hand reach as one straight piece from the elbow, and the wrist sits that far back from the grip
+fn reach(torso_q, side, grip, axis) any^ {
     let upper = if (side < 0.0) 5 else 8
     let shoulder0 = joint(upper)
     let shoulder = rig.add(SPINE, rig.qrot(torso_q, rig.sub(shoulder0, SPINE)^)^)^
     // elbows hang out to the side and a little back
     let pole = rig.add(shoulder, rig.qrot(torso_q, [side * 0.55, -0.75, -0.35])^)^
-    let elbow = rig.knee(shoulder, target, UPPER, FORE, pole)^
-    return rig.chain(torso_q, shoulder, elbow, target, rest_dir(upper)^, rest_dir(upper + 1)^)^
+    let elbow = rig.knee(shoulder, grip, UPPER, FORE + GRIP_REACH, pole)^
+    let wrist = rig.sub(grip, rig.scale(rig.unit(rig.sub(grip, elbow)^)^, GRIP_REACH)^)^
+    let turns = rig.chain(torso_q, shoulder, elbow, wrist, rest_dir(upper)^, rest_dir(upper + 1)^)^
+    // the wrist turns the fist about the forearm until its knuckles (across the boat at rest) lie along
+    // the held line, the shorter way round; a line along the forearm itself leaves it unturned
+    let fore_q = rig.qmul(rig.qmul(torso_q, turns[0])^, turns[1])^
+    let local = rig.qrot(rig.qinv(fore_q)^, axis)^
+    let bone = rest_dir(upper + 2)^
+    let flat = rig.sub(local, rig.scale(bone, rig.dot(local, bone)^)^)^
+    let lined = if (flat[0] < 0.0) rig.scale(flat, -1.0)^ else flat
+    let twist = if (rig.length(flat)^ < 0.2) rig.IDENTITY else rig.aim([1.0, 0.0, 0.0], rig.unit(lined)^)^
+    return [turns[0], turns[1], twist]
 }
 // tracks for one action: `poses` carry torso/head angles and scale; `hands` the resolved {r, l} targets
 pub fn tracks(poses, hands, times, track) any^ {
     let torso_q = [for (p in poses) quat3(p.torso)^]
-    let right = [for (i, p in poses) reach(torso_q[i], -1.0, hands[i].r)^]
-    let left = [for (i, p in poses) reach(torso_q[i], 1.0, hands[i].l)^]
+    let right = [for (i, p in poses) reach(torso_q[i], -1.0, hands[i].r, hands[i].ar)^]
+    let left = [for (i, p in poses) reach(torso_q[i], 1.0, hands[i].l, hands[i].al)^]
     let half = (a) => [a[0] * 0.5, a[1] * 0.5, a[2] * 0.5];
     [track("f-spine.quaternion", times, [for (q in torso_q, c in q) c], 'quaternion')^,
      track("f-spine.scale", times, [for (p in poses, c in [2.0 - p.scale, p.scale, 2.0 - p.scale]) c], 'vector')^,
@@ -156,8 +191,10 @@ pub fn tracks(poses, hands, times, track) any^ {
      track("f-head.quaternion", times, [for (p in poses, c in quat3(half(p.head))^) c], 'quaternion')^,
      track("f-arm-r.quaternion", times, [for (q in right, c in q[0]) c], 'quaternion')^,
      track("f-fore-r.quaternion", times, [for (q in right, c in q[1]) c], 'quaternion')^,
+     track("f-hand-r.quaternion", times, [for (q in right, c in q[2]) c], 'quaternion')^,
      track("f-arm-l.quaternion", times, [for (q in left, c in q[0]) c], 'quaternion')^,
-     track("f-fore-l.quaternion", times, [for (q in left, c in q[1]) c], 'quaternion')^]
+     track("f-fore-l.quaternion", times, [for (q in left, c in q[1]) c], 'quaternion')^,
+     track("f-hand-l.quaternion", times, [for (q in left, c in q[2]) c], 'quaternion')^]
 }
 pub let KNEE_L = [0.12, 0.33, 0.14]
 pub fn mesh() any^ => s.mesh(geometry()^, "m-boat", {id: "fisher", skeleton: "fisher-rig", 'cast-shadow': true, 'receive-shadow': true,

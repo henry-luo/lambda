@@ -1,0 +1,14 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Rounded inline code in a scroll pane</title>
+<style>
+  body { margin: 0; background: white; }
+  #pane { margin-top: 10px; width: 200px; height: 44px; overflow: auto; background: #eee; }
+  .line { padding-top: 34px; font: 20px/24px monospace; }
+  code { padding: 6px 16px; background: #c00; color: #c00; border-radius: 6px; }
+  .tail { height: 30px; }
+</style>
+<div id="pane">
+  <div class="line"><code>inline code</code></div>
+  <div class="tail"></div>
+</div>

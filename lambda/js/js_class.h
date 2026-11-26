@@ -144,7 +144,6 @@ enum JsClass : uint8_t {
     JS_CLASS_SECURITY_POLICY_VIOLATION_EVENT,
     JS_CLASS_PERFORMANCE_OBSERVER,
     JS_CLASS_PERFORMANCE_OBSERVER_ENTRY_LIST,
-    JS_CLASS_CRYPTO_KEY,
     JS_CLASS_INTL_LOCALE,
     JS_CLASS_INTL_NUMBER_FORMAT,
     JS_CLASS_ANIMATION,
@@ -374,7 +373,6 @@ static inline const char* js_class_to_name(JsClass cls) {
         case JS_CLASS_EVENT_TARGET: return "EventTarget";
         case JS_CLASS_PERFORMANCE_OBSERVER: return "PerformanceObserver";
         case JS_CLASS_PERFORMANCE_OBSERVER_ENTRY_LIST: return "PerformanceObserverEntryList";
-        case JS_CLASS_CRYPTO_KEY: return "CryptoKey";
         case JS_CLASS_INTL_LOCALE: return "Intl.Locale";
         case JS_CLASS_INTL_NUMBER_FORMAT: return "Intl.NumberFormat";
         case JS_CLASS_ANIMATION: return "Animation";
