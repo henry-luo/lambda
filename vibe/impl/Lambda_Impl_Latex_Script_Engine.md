@@ -34,6 +34,16 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Focused test timeouts, 2026-11-26:** The digest and expl3 integer-compare
+  fixtures rebuilt the same resource-free kernel for every independent case.
+  They now reuse the supported immutable preload (D10.2.2v2) while retaining
+  fresh-load coverage for the first document and the included-file case. Both
+  unchanged goldens pass the original GTest timeout in an isolated release
+  home: digest 3.287 seconds and integer comparison 11.908 seconds. Before the
+  fixture change, both exceeded 60 seconds when run alone. No expectation,
+  case, or harness timeout was removed or changed. Both fixtures also match
+  under forced GC with freed-memory poisoning in interpreter and JIT.
+
 - **Prefixed macro source mapping, 2026-11-26:** The definition continuation
   and reconstructed-segment argument handling now cover the source-group
   joining that originally required the global prefixed-macro guard

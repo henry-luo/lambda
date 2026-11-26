@@ -3,8 +3,11 @@ import reconstruct: lambda.doc.latex.tex_engine.reconstruct
 import digest: lambda.doc.latex.tex_engine.digest
 let kernel=input(sys.lambda.home ++ "/package/doc/latex/tex_engine/kernel.tex","text")^;
 let baseline=parse("",{type:"tex"})^.messages;
+// Reuse the resource-free expl3 snapshot; the included-file case still loads afresh.
+let options={script_expl3:true,echo_definitions:true,adapters:[],resources:{local:{},bundled:{}}};
+let preload=profile.preload_expl3_kernel(kernel,options,100000)^;
 fn check(source) any^ {
- let r=profile.expand_with_kernel(source,kernel,{script_expl3:true,echo_definitions:true,adapters:[],resources:{local:{},bundled:{}}},100000)^;
+ let r=profile.expand_with_kernel(source,kernel,options,100000,preload)^;
  let n=parse(source,{type:"tex"})^;
  let b=reconstruct.reconstruct(r)^;
  {issue:r.issue,reconstruct_issue:b.issue,text_match:b.text==n.text,messages_match:r.messages==slice(n.messages,len(baseline),len(n.messages))^,diagnostics_match:r.diagnostic_records==n.diagnostics}
@@ -51,7 +54,7 @@ fn check(source) any^ {
 ]) check(source)^]
 
 fn safe_digestion(source) any^ {
- let r=profile.expand_with_kernel(source,kernel,{script_expl3:true,echo_definitions:true,adapters:[],resources:{local:{},bundled:{}}},100000)^;
+ let r=profile.expand_with_kernel(source,kernel,options,100000,preload)^;
  let d=digest.digest(r)^;
  if(d.ast!=null) d.ast==(parse(source,{type:"latex"})^) else d.issue=="latex-digest-unsupported"
 }
