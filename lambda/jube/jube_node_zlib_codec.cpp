@@ -175,6 +175,7 @@ struct NodeZlibStreamState {
     bool initialized;
     bool finished;
     bool is_deflate;
+    ZlibMemberPolicy member_policy;
 };
 
 static bool node_zlib_stream_is_deflate(int mode) {
@@ -189,7 +190,7 @@ static bool node_zlib_stream_starts_gzip_member(const uint8_t* data, int length)
 
 static bool node_zlib_stream_should_reset_member(const NodeZlibStreamState* state,
                                                  const uint8_t* data, int length) {
-    if (!state || state->is_deflate) return false;
+    if (!state || state->is_deflate || state->member_policy == ZlibMemberPolicy::Single) return false;
     if (state->mode == NODE_ZLIB_CODEC_GUNZIP) return true;
     return state->mode == NODE_ZLIB_CODEC_UNZIP &&
         node_zlib_stream_starts_gzip_member(data, length);
@@ -207,7 +208,7 @@ static int node_zlib_stream_reset_inflate_member(NodeZlibStreamState* state) {
 
 bool node_zlib_stream_init(enum NodeZlibCodecMode mode, int window_bits, int level,
                            int mem_level, int strategy, void** out_state,
-                           int* out_status) {
+                           int* out_status, ZlibMemberPolicy member_policy) {
     if (out_state) *out_state = NULL;
     if (out_status) *out_status = Z_STREAM_ERROR;
     if (!out_state) return false;
@@ -220,6 +221,7 @@ bool node_zlib_stream_init(enum NodeZlibCodecMode mode, int window_bits, int lev
     state->mode = mode;
     state->window_bits = window_bits;
     state->is_deflate = node_zlib_stream_is_deflate(mode);
+    state->member_policy = member_policy;
     int status = state->is_deflate
         ? deflateInit2(&state->stream, level, Z_DEFLATED, window_bits, mem_level, strategy)
         : inflateInit2(&state->stream, window_bits);
@@ -250,6 +252,10 @@ bool node_zlib_stream_run(void* state_ptr, const uint8_t* data, int length, int 
         return false;
     }
     if (state->finished) {
+        if (length > 0 && state->member_policy == ZlibMemberPolicy::Single) {
+            out_bytes->status = Z_DATA_ERROR;
+            return false;
+        }
         if (length > 0 && node_zlib_stream_should_reset_member(state, data, length)) {
             int status = node_zlib_stream_reset_inflate_member(state);
             if (status != Z_OK) {
@@ -302,6 +308,12 @@ bool node_zlib_stream_run(void* state_ptr, const uint8_t* data, int length, int 
 
         if (status == Z_STREAM_END) {
             state->finished = true;
+            // Compression Streams reject trailing bytes in the terminating chunk as well.
+            if (state->member_policy == ZlibMemberPolicy::Single && state->stream.avail_in > 0) {
+                free(output);
+                out_bytes->status = Z_DATA_ERROR;
+                return false;
+            }
             if (!state->is_deflate && state->stream.avail_in > 0 &&
                     node_zlib_stream_should_reset_member(state,
                         (const uint8_t*)state->stream.next_in,

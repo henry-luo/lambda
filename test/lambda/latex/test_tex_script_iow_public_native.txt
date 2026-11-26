@@ -1,0 +1,61 @@
+[{
+    text: "X",
+    messages: ["Hello"],
+    diagnostics: []
+  }, {
+    text: "X",
+    messages: ["Hello"],
+    diagnostics: []
+  }, {
+    text: "\\def\\x{Hi}X",
+    messages: ["\\x "],
+    diagnostics: []
+  }, {
+    text: "\\def\\x{Hi}X",
+    messages: ["Hi"],
+    diagnostics: []
+  }, {
+    text: "\\def\\x{Hi}X",
+    messages: ["Hi"],
+    diagnostics: []
+  }, {
+    text: "X",
+    messages: ["A B"],
+    diagnostics: []
+  }, {
+    text: "X",
+    messages: ["A B"],
+    diagnostics: []
+  }, {
+    text: "X",
+    messages: [],
+    diagnostics: []
+  }, {
+    text: "X",
+    messages: ["A\\iow_newline:B "],
+    diagnostics: []
+  }, {
+    text: "-1",
+    messages: ["A@B"],
+    diagnostics: []
+  }, {
+    text: "",
+    messages: ["Hello"],
+    diagnostics: []
+  }, {
+    text: "AB",
+    messages: ["Hi"],
+    diagnostics: []
+  }, {
+    text: "-1",
+    messages: ["A"],
+    diagnostics: []
+  }, {
+    text: "-1",
+    messages: ["A"],
+    diagnostics: []
+  }, {
+    text: "X",
+    messages: ["A"],
+    diagnostics: []
+  }]

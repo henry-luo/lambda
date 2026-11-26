@@ -1,3 +1,13 @@
+const assert=require('node:assert/strict');
+const {rgb}=require('./render_fixture.cjs');
+
+function checkCssClockFrame(image) {
+    const fade=rgb(image,40,120);
+    assert.ok(Math.abs(fade[0]-128)<20&&Math.abs(fade[1]-128)<20&&fade[2]===0,
+        'CSS animation age includes the one-second settlement, excluding loading: '+fade);
+    assert.deepEqual(rgb(image,40,200),[255,0,0],'authored CSS pause stays paused');
+}
+
 function loadClockSource(antiFlicker=false,frames='') {
  return `<!doctype html><style>html,body{margin:0;background:white}
     ${antiFlicker?'.anti-flicker,.anti-flicker *{visibility:hidden!important;opacity:0!important}':''}
@@ -59,4 +69,4 @@ function serveLoadClock(request,response) {
         .end(loadClockSource(antiFlicker,url.searchParams.get('frames')||''));
 }
 
-module.exports={serveLoadClock};
+module.exports={serveLoadClock,checkCssClockFrame};

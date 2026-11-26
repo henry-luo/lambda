@@ -1,8 +1,9 @@
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),puppeteer=require('puppeteer');
 const {renderFixtures,loggedResult,serveFixtureResources}=require('./render_fixture.cjs');
-const {serveLoadClock}=require('./load_clock_fixtures.cjs');
+const {serveLoadClock,checkCssClockFrame}=require('./load_clock_fixtures.cjs');
 const {captureBrowser,parseOptions}=require('./capture_snapshots.cjs');
+const {pngLibrary}=require('./compare_snapshots.cjs');
 const render=renderFixtures('load-frames'),origin=serveFixtureResources(serveLoadClock);
 
 function checkFrames(log,mode,browser=false) {
@@ -22,9 +23,10 @@ function checkFrames(log,mode,browser=false) {
 
 for(const blocker of ['script','image'])for(const mode of ['elapsed','frozen'])
 test('native '+mode+' frames during '+blocker+' loading',async()=>{
-    const {log}=await render(blocker+'-'+mode,{url:origin()+'/?frames='+blocker+'&clock='+mode},{...process.env,
+    const {image,log}=await render(blocker+'-'+mode,{url:origin()+'/?frames='+blocker+'&clock='+mode},{...process.env,
         LAMBDA_POST_LOAD_SETTLE_MS:'1000',LAMBDA_CAPTURE_LOAD_CLOCK:mode});
     checkFrames(log,mode);
+    checkCssClockFrame(image);
 });
 
 for(const blocker of ['script','image'])test('Chromium frames during '+blocker+' loading',async()=>{
@@ -37,10 +39,12 @@ for(const blocker of ['script','image'])test('Chromium frames during '+blocker+'
         const host={newPage:async()=>{
             const page=await browser.newPage();page.on('console',message=>log.push(message.text()));return page;
         }};
-        const result=await captureBrowser(host,{url:origin()+'/?frames='+blocker},path.join(scratch,'browser.png'),
+        const output=path.join(scratch,'browser.png');
+        const result=await captureBrowser(host,{url:origin()+'/?frames='+blocker},output,
             parseOptions(['--settle-ms=1000'],path.resolve(__dirname,'../..')));
         assert.equal(result.ok,true,result.error);
         checkFrames(log.join('\n'),'elapsed',true);
+        checkCssClockFrame(pngLibrary(process.cwd()).sync.read(fs.readFileSync(output)));
     } finally {
         if(browser)await browser.close();
         fs.rmSync(scratch,{recursive:true,force:true});

@@ -14,6 +14,7 @@
 #include "js_host_hooks.h"
 #include "js_regex_generated_properties.h"
 #include "js_intl_likely_subtags.h"
+#include "js_intl_locale.h"
 #include "js_regex_router_scanner.h"
 #include "js_regexp_compile.h"
 #include "js_state_guards.h"
@@ -19067,11 +19068,13 @@ extern "C" Item js_set_collection_new(void) {
 }
 
 
-static Item js_iterator_close_preserve_exception(Item iterator, Item original) {
+Item js_iterator_close_preserve_exception(Item iterator, Item original) {
+    RootFrame roots(2);
+    Rooted<Item> owner(roots, iterator), error(roots, original);
     // IteratorClose is cleanup for an existing abrupt completion; even a failing
     // return method must not replace the original exception in that completion.
-    js_iterator_close(iterator);
-    return js_throw_value(original);
+    js_iterator_close(owner.get());
+    return js_throw_value(error.get());
 }
 
 const JsCollectionOps js_collection_default_ops = {
@@ -24314,7 +24317,7 @@ static void js_namespace_set_object_prototype(Item object) {
     if (get_type_id(prototype) == LMD_TYPE_MAP) js_set_prototype(object, prototype);
 }
 
-static void js_namespace_set_to_string_tag(Item object, const char* name, int len) {
+void js_namespace_set_to_string_tag(Item object, const char* name, int len) {
     Item tag_key = js_well_known_symbol_key(4);
     js_set_key_default(object, tag_key, js_name_item(name, len));
     js_mark_non_writable(object, tag_key);
@@ -24472,8 +24475,6 @@ static unsigned char js_intl_ascii_case(unsigned char value, bool upper = false)
 }
 
 // locale records contain syntax-derived data; all published strings stay precisely rooted.
-enum JsIntlLocaleField { JS_INTL_LOCALE_TAG, JS_INTL_LOCALE_BASE,
-    JS_INTL_LOCALE_LANGUAGE, JS_INTL_LOCALE_SCRIPT, JS_INTL_LOCALE_REGION, JS_INTL_LOCALE_FIELDS };
 struct JsLocaleSubtag { char* text; size_t length; };
 
 static bool js_locale_subtag_matches(const char* text, size_t length, bool alpha, bool digit) {
@@ -24536,8 +24537,12 @@ static Item js_intl_locale_record(Item tag, Item options) {
     uint64_t seen_extensions = 0;
     while (cursor < count) {
         JsLocaleSubtag extension = tags[cursor++];
-        if (extension.length != 1 || extension.text[0] == 'x')
+        if (extension.length != 1)
             return js_throw_range_error("Unsupported locale extension");
+        if (extension.text[0] == 'x') {
+            if (cursor == count) return js_throw_range_error("Empty locale private use");
+            break;
+        }
         unsigned char name = extension.text[0];
         unsigned bit = name >= 'a' ? name - 'a' + 10 : name - '0';
         uint64_t mask = UINT64_C(1) << bit;
@@ -24604,6 +24609,102 @@ static Item js_intl_locale_record(Item tag, Item options) {
     value.set(js_strbuf_take_item(canonical));
     js_set_key_default(record.get(), (Item){.item = i2it(JS_INTL_LOCALE_TAG)}, value.get());
     return record.get();
+}
+
+Item js_intl_requested_locales(Item source) {
+    RootFrame roots(6);
+    Rooted<Item> input(roots, source), result(roots, js_array_new(0));
+    Rooted<Item> key(roots, ItemNull), value(roots, ItemNull), record(roots, ItemNull), tag(roots, ItemNull);
+    JS_RETURN_IF_ERROR(result.get());
+    if (get_type_id(input.get()) == LMD_TYPE_UNDEFINED) return result.get();
+    bool single = get_type_id(input.get()) == LMD_TYPE_STRING || js_object_has_class(input.get(), JS_CLASS_INTL_LOCALE);
+    int64_t count = 1;
+    if (!single) {
+        JS_RETURN_IF_ERROR(js_require_object_coercible(input.get()));
+        input.set(js_to_object(input.get()));
+        JS_RETURN_IF_ERROR(input.get());
+        Item length_key = ItemNull;
+        JS_RETURN_IF_ERROR(js_array_get_length_status(input.get(), &length_key, &count));
+    }
+    for (int64_t index = 0; index < count; ++index) {
+        if (single) value.set(input.get());
+        else {
+            key.set(js_property_index_key(index));
+            Item present = js_has_property(input.get(), js_property_lane_for_canonical_key(key.get()), key.get());
+            JS_RETURN_IF_ERROR(present);
+            if (!it2b(present)) continue;
+            value.set(js_get_key_default(input.get(), key.get()));
+            JS_RETURN_IF_ERROR(value.get());
+        }
+        if (js_object_has_class(value.get(), JS_CLASS_INTL_LOCALE)) {
+            record.set(js_native_private_array_state(value.get(), JS_CLASS_INTL_LOCALE,
+                JS_INTL_LOCALE_FIELDS, "Illegal Intl.Locale receiver"));
+        } else record.set(js_intl_locale_record(value.get(), make_js_undefined()));
+        JS_RETURN_IF_ERROR(record.get());
+        tag.set(js_elements_get_int(record.get(), JS_INTL_LOCALE_TAG));
+        bool duplicate = false;
+        for (int64_t i = 0; i < js_array_length(result.get()); ++i) {
+            Item earlier = js_elements_get_int(result.get(), i);
+            duplicate = js_same_value_zero(tag.get(), js_elements_get_int(earlier, JS_INTL_LOCALE_TAG));
+            if (duplicate) break;
+        }
+        if (!duplicate) JS_RETURN_IF_ERROR(js_array_push(result.get(), record.get()));
+    }
+    return result.get();
+}
+
+Item js_intl_string_option(Item options, const char* name, const char* const* choices,
+                            size_t count, int* index, const char* message) {
+    if (get_type_id(options) == LMD_TYPE_UNDEFINED) return ItemNull;
+    RootFrame roots(2);
+    Rooted<Item> owner(roots, options), value(roots, js_get_key_cstr(owner.get(), name));
+    JS_RETURN_IF_ERROR(value.get());
+    if (get_type_id(value.get()) == LMD_TYPE_UNDEFINED) return ItemNull;
+    value.set(js_to_string(value.get()));
+    JS_RETURN_IF_ERROR(value.get());
+    String* text = it2s(value.get());
+    for (size_t i = 0; i < count; ++i) {
+        size_t length = strlen(choices[i]);
+        if (text->len == length && memcmp(text->chars, choices[i], length) == 0) {
+            *index = (int)i;
+            return ItemNull;
+        }
+    }
+    return js_throw_range_error(message);
+}
+
+Item js_intl_coerce_options(Item source) {
+    if (get_type_id(source) == LMD_TYPE_UNDEFINED) return js_object_create(ItemNull);
+    JS_RETURN_IF_ERROR(js_require_object_coercible(source));
+    return js_to_object(source);
+}
+
+Item js_intl_install_service(Item owner, const char* name, const char* tag,
+                              JsNativeConstructBody construct, const JsIntlServiceMethod* methods,
+                              size_t method_count) {
+    RootFrame roots(4);
+    Rooted<Item> intl(roots, owner), constructor(roots,
+        js_new_native_body_constructor(js_intrinsic_ctor_requires_new_call_body, construct, 0));
+    JS_RETURN_IF_ERROR(constructor.get());
+    Rooted<Item> prototype(roots, js_new_object()), method(roots, ItemNull);
+    JS_RETURN_IF_ERROR(prototype.get());
+    js_set_function_name(constructor.get(), js_name_item(name));
+    JS_RETURN_IF_ERROR(js_initialize_native_constructor_prototype(constructor.get(), prototype.get()));
+    JS_RETURN_IF_ERROR(js_set_key_cstr(prototype.get(), "constructor", constructor.get()));
+    js_mark_non_enumerable(prototype.get(), js_name_item("constructor"));
+    for (size_t i = 0; i < method_count; ++i) {
+        const JsIntlServiceMethod& entry = methods[i];
+        method.set(js_new_native_payload_function(entry.body, 0, entry.arity));
+        JS_RETURN_IF_ERROR(method.get());
+        js_set_function_name(method.get(), js_name_item(entry.name));
+        Item target = entry.is_static ? constructor.get() : prototype.get();
+        JS_RETURN_IF_ERROR(js_set_key_cstr(target, entry.name, method.get()));
+        js_mark_non_enumerable(target, js_name_item(entry.name));
+    }
+    js_namespace_set_to_string_tag(prototype.get(), tag, strlen(tag));
+    JS_RETURN_IF_ERROR(js_set_key_cstr(intl.get(), name, constructor.get()));
+    js_mark_non_enumerable(intl.get(), js_name_item(name));
+    return constructor.get();
 }
 
 static Item js_intl_locale_get(Item callee, Item receiver, Item*, int, uint64_t*) {
@@ -24782,13 +24883,20 @@ static Item js_intl_number_state(Item receiver) {
         JS_INTL_NUMBER_FIELDS, "Illegal Intl.NumberFormat receiver");
 }
 
-static Item js_intl_number_part(Item parts, const char* type, const char* text, size_t length) {
+Item js_intl_append_part(Item parts, const char* type, Item part_value) {
     RootFrame roots(4);
-    Rooted<Item> output(roots, parts), part(roots, js_new_object());
-    Rooted<Item> value(roots, js_make_string_len(text, length)), kind(roots, js_name_item(type));
+    Rooted<Item> output(roots, parts), value(roots, part_value);
+    JS_RETURN_IF_ERROR(value.get());
+    Rooted<Item> part(roots, js_new_object()), kind(roots, js_name_item(type));
     JS_RETURN_IF_ERROR(js_create_data_property(part.get(), js_name_item("type"), kind.get()));
     JS_RETURN_IF_ERROR(js_create_data_property(part.get(), js_name_item("value"), value.get()));
     return js_array_push(output.get(), part.get());
+}
+
+static Item js_intl_number_part(Item parts, const char* type, const char* text, size_t length) {
+    RootFrame roots(1);
+    Rooted<Item> output(roots, parts);
+    return js_intl_append_part(output.get(), type, js_make_string_len(text, length));
 }
 
 static Item js_intl_number_render(Item state, Item input, bool parts) {
@@ -25432,6 +25540,8 @@ extern "C" Item js_get_intl_object_value() {
         supported_locales_root.get());
     js_intl_object = intl_root.get();
     JS_RETURN_IF_ERROR(js_intl_locale_install(intl_root.get()));
+    JS_RETURN_IF_ERROR(js_intl_plural_rules_install(intl_root.get()));
+    JS_RETURN_IF_ERROR(js_intl_list_format_install(intl_root.get()));
     js_set_key_cstr(intl_root.get(), "Segmenter", segmenter_ctor_root.get());
     js_set_key_cstr(intl_root.get(), "NumberFormat", number_format_ctor_root.get());
     js_set_key_cstr(intl_root.get(), "Collator", collator_ctor_root.get());

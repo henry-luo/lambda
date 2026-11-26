@@ -58,3 +58,48 @@ for(const fixture of cases)test('style attribute dependency: '+fixture.kind,asyn
     if(fixture.stable)assert.equal(/mutation-fallback: reason=broad-relational-css-risk/.test(log),false,
         'unchanged selector predicates must preserve the retained paint path');
 });
+
+test('layout-capable CSSOM writes settle container sizes with an unrelated shadow tree', async () => {
+    const {log} = await render('shadow-container-query', `<!doctype html><style>
+        body:has(.witness-state) #other{width:38px}
+        #scope{container:panel / inline-size;width:var(--panel-width,80px)}
+        #query{width:30px;height:20px}
+        @container panel (min-width:100px){#query{width:60px}}
+        </style><div id=shadow-host></div><div id=other></div>
+        <section id=scope><div id=query></div></section><script>
+        const root=document.getElementById('shadow-host').attachShadow({mode:'open'});
+        root.innerHTML='<style>:host{display:block}</style><span>shadow</span>';
+        window.addEventListener('load',function(){
+            const scope=document.getElementById('scope'), query=document.getElementById('query');
+            const widths=[query.offsetWidth];
+            for(const width of [140,80]){
+                scope.style.setProperty('--panel-width',width+'px');
+                widths.push(query.offsetWidth);
+            }
+            console.log('SHADOW_CONTAINER_SIZE',JSON.stringify({widths}));
+        });</script>`, {...process.env, LAYOUT_DEBUG:'cache', LAYOUT_PROFILE:'1'});
+    assert.deepEqual(loggedResult(log, 'SHADOW_CONTAINER_SIZE'), {widths:[30,60,30]});
+    const writes = Array.from(log.matchAll(/mutation-record:[^\n]+style=--panel-width:[^]*?\[LAYOUT_PROFILE\] root_total:/g));
+    assert.equal(writes.length, 2);
+    for (const [write] of writes) assert.doesNotMatch(write, /mutation-fallback: reason=broad-relational-css-risk/);
+});
+
+test('a shadow style predicate still recascades a sibling after a CSSOM write', async () => {
+    const {log} = await render('shadow-style-predicate', `<!doctype html><style>
+        #scope{container:inline-size;width:120px}
+        @container (min-width:100px){#host{display:block}}
+        </style><section id=scope><div id=host></div></section><script>
+        const tree=document.getElementById('host').attachShadow({mode:'open'});
+        tree.innerHTML='<style>#peer{width:30px;height:15px}.group:has([style*="--activated"]) #peer{width:60px}</style>'+
+            '<div class="group"><span id="flag"></span><div id="peer"></div></div>';
+        window.addEventListener('load',function(){
+            const flag=tree.querySelector('#flag'), peer=tree.querySelector('#peer');
+            const widths=[peer.offsetWidth];
+            flag.style.setProperty('--activated','1');
+            widths.push(peer.offsetWidth);
+            flag.style.removeProperty('--activated');
+            widths.push(peer.offsetWidth);
+            console.log('SHADOW_STYLE_MATCH',JSON.stringify({widths}));
+        });</script>`, {...process.env, LAYOUT_DEBUG:'cache'});
+    assert.deepEqual(loggedResult(log, 'SHADOW_STYLE_MATCH'), {widths:[30,60,30]});
+});

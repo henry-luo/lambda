@@ -23,7 +23,7 @@ from 1,248 to 3,309 MiB before the changes. The rebuilt host used 1,107 MiB
 in the first round and 1,265 MiB in the twelfth. From round four through
 twelve it gained 6 MiB. A 16-round native macOS replay passed all content
 checks, with a two-second median warm round. Raw measurements are under
-`temp/view-navigation-memory/`. Embedded HTML retirement remains RI-254.
+`temp/view-navigation-memory/`. Embedded HTML retirement remains RI-260.
 
 ## Viewer header and edit feedback — 2026-11-26
 

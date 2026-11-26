@@ -8,7 +8,7 @@ remain in the [active issue ledger](Lib_Input_Issue_Ledger.md).
 
 <a id="li-125"></a>
 
-### LI-125 — Re-registering a math font grows the font resource registry
+### LI-127 — Re-registering a math font grows the font resource registry
 
 **Fixed 2026-11-26.** Repeatedly visiting the same LaTeX and math previews
 registered identical `@font-face` resources in the window's font context.
@@ -18,6 +18,49 @@ Re-registering an equivalent face preserves last-rule precedence within its
 family. Distinct sources, faces, and Unicode ranges remain separate
 (D5.5.1, D10.2.4). The 31-case font-context suite passes, including a
 repeated-registration replay that checks precedence, count and arena usage.
+
+<a id="li-126"></a>
+
+### LI-126 — The CSS mask shorthand and its geometry had no property dispatch
+
+**Fixed, 2026-11-26.** Dock uses a URL, a `bottom` position, a slash size and
+`no-repeat` in one `mask` declaration. Craft uses the image, size and repeat
+longhands. Input previously recognized the image longhand by itself. The
+shorthand and its geometry now use the shared image-layer position, size
+and repeat grammar. Mask modes, boxes and composite keywords use the mask
+grammar. New entries in the shared name catalog preserve existing NameIds
+and let both standalone parsing and the live CSS registry dispatch these
+properties (**D9.1.1v4 / D9.1.3v2**).
+
+All 126 cases in `test_css_parser_gtest` pass, including a raw shorthand,
+vendor alias and invalid declarations. [CSS Masking shorthand](https://www.w3.org/TR/css-masking-1/#the-mask).
+
+<a id="li-125"></a>
+
+### LI-125 — CSS matching loses the meaning of shadow host selectors
+
+**Fixed, 2026-11-26.** Input owns selector parsing, matching and declaration
+priority under **D9.1.1v4 / D9.1.3v2**. The parser treated `:host(...)` as
+`:is(...)`. An ordinary document `matches(':host(.active)')` could return
+true, while the scoped matcher stopped at the fragment and failed to match
+`:host(.active) > .tile` within that root.
+
+The parser distinguishes bare and functional `:host` from logical
+selectors. The matcher can see the owning host at the root boundary in a
+shadow stylesheet. It exposes the host's attributes only to the functional
+argument. The declaration records which side of the boundary supplied it.
+Normal declarations from the enclosing tree and important declarations
+from the inner tree win before specificity or layer order. Style recipes
+and declaration copies retain the context (**D5.5.1**).
+[CSS Shadow §3.2](https://drafts.csswg.org/css-shadow-1/#shadow-dom-selectors)
+and [CSS Cascade §6.1](https://drafts.csswg.org/css-cascade-5/#cascade-sort)
+describe these rules.
+
+The maintained render fixture fails on the preceding release and passes
+in AST, MIR and Chromium. It checks a nested root, host arguments, outer
+document isolation, inline important priority and shadow descendants.
+Radiant's [RI-255](<Radiant_Issue_Ledger (fixed).md#ri-255>) qualifies
+the cascade integration. Evidence is in `temp/online-visual-round235/`.
 
 <a id="li-123"></a>
 

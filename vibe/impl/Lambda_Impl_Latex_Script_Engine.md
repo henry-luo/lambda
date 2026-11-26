@@ -34,6 +34,656 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Suppressed source line endings, 2026-11-26:** When `\endlinechar=-1`
+  suppresses a TeX token, the native LaTeX parser still sees the source line
+  ending. The digester previously dropped that verified gap between adjacent
+  direct text tokens, including before a closing document command. It now
+  restores proven source line gaps through the existing paragraph event parser
+  (S1.8, D10.2.2v2); non-direct gaps and other unsupported paths retain their
+  existing handling. The native input-stream fixture previously produced a
+  constructor-mode tree missing a final newline. Its captured native tree now
+  matches; legacy stream mode remains guarded. The old native API's tree was
+  independently verified against the archive capture. A source-bound
+  122-combination test covers default, negative and space `endlinechar`,
+  streams, blank lines, CRLF, inline commands, math, comments and block
+  boundaries: 116 complete native matches, six existing guards and no
+  mismatches (`test/lambda/latex/test_tex_script_endline_source_native.ls`).
+  The previously qualified stream AST fixture still matches. Nine neighboring
+  GTests and five paragraph GTests passed on the staged engine
+  (`temp/tex-count-v9/neighbor-gtest-v2.log`, `paragraph-gtest.log`). Both
+  tiers passed the new matrix and stream fixture with forced GC and poisoning
+  before installation. Three interleaved release comparisons of a 300-repeat
+  ordinary text digestion sample preserved identical SHA-256 output: control
+  9.873–10.358s and candidate 9.794–10.556s
+  (`temp/tex-count-v9/digest-bench-results.json`). The installed regression,
+  stream cache and existing stream AST goldens pass interpreter and JIT with
+  forced GC (`temp/tex-count-v9/installed-*.diff`); five installed GTests pass
+  (`temp/tex-count-v9/installed-gtest.log`). The aggregate baselines recorded
+  below predate this last Script digestion change.
+
+- **Raw-inline oracle repair, 2026-11-26:** Two non-timeout aggregate
+  mismatches were caused by probing the current Script parser for native tree
+  availability. Independent archive captures cover 27 verbatim cases and
+  three local files (`temp/tex-count-v8/verb-native.json`, SHA-256
+  `1f1b78038c96fcc221f5ce89fd4320f44cc510b8902ec1c148600d39601b83b1`), and
+  36 raw-inline cases plus one local file (`temp/tex-count-v8/raw-inline-native.json`,
+  SHA-256 `9c94f79102911a596b902b667b4ba1fe82cf1009a0751b299155ab2bb7951391`).
+  The archived native API's fallible availability was captured separately with
+  `temp/tex-script-f/lambda-release` (SHA-256
+  `bbc1e4d24f1d8d48228967d5eb5b2580f44707dadafb6fde4605d2c15acb0684`): it
+  rejects two verbatim and five raw-inline sources, which remain represented as
+  unavailable rather than as accepted archive roots. Both fixtures are
+  installed with unchanged goldens; the staged verbatim fixture passed both
+  tiers with forced GC before the final digest change, and the installed
+  fixture passed interpreter forced GC after it. The raw-inline candidate
+  passed both forced-GC tiers against the final digest
+  (`temp/tex-count-v9/raw-{interp,jit}.diff`) (S1.8, D10.2.2v2).
+  The inline-environment mismatch has the same stale-oracle cause. Its 18
+  archived trees and old API availability are in
+  `temp/tex-count-v8/inline-environment-native.json` (SHA-256
+  `a0f5bfb8f487e1576f92cbd93809f2124c59cf5c9e7c479dda6b81380487e923`);
+  the old API rejects one case. The installed fixture keeps its unchanged
+  golden; the staged version passed both forced-GC tiers against the final
+  digest (`temp/tex-count-v9/environment-{interp,jit}.diff`). The bundled
+  adapter-state fixture also uses four old-API captures at
+  `test/lambda/latex/fixtures/tex_bundled_adapter_native.json`; its staged JIT
+  comparison matches the unchanged golden. Installed forced-GC validation of
+  these oracle fixtures was interrupted when the goal was cleared.
+
+- **Expl3 timeout investigation, 2026-11-26:** The timed-out
+  `test_tex_script_expl3_cs_exist` repeatedly loaded expl3 and compared with
+  the current Script input path. Fifteen archived-native expansion results
+  and one native local-file result are captured at
+  `temp/tex-count-v8/cs-exist-native.json`. A staged fixture in
+  `temp/tex-count-v8/cs-fixture/` preserves a fresh first expansion, uses the
+  existing immutable preload for later cases and compares source-bound native
+  text, messages and diagnostics. It matches the unchanged golden in the
+  interpreter and JIT with forced GC and poisoning (S1.8, D10.2.2v2). The
+  candidate is installed after the aggregate run. The adjacent timed-out
+  `cs_exist_c` fixture has the same staged treatment: 18 native expansions
+  and one local-file result (`temp/tex-count-v8/cs-exist-c-native.json`),
+  with the unchanged golden passing both tiers under forced GC
+  (`temp/tex-count-v8/cs-fixture/shared-candidate-c-*.diff`). The staged
+  recovery helper shares its preload setup with the existing multi-mode
+  helper; a control probe of the existing helper retains identical output
+  (`temp/tex-count-v8/cs-fixture/probe.diff`). The third timed-out fixture,
+  `cs_exist_c_cases`, has 18 captured native expansions at
+  `temp/tex-count-v8/cs-exist-c-cases-native.json`. All three use one shared
+  comparison loop and match their unchanged goldens in both tiers under forced
+  GC (`temp/tex-count-v8/cs-fixture/matrix-*.diff`). They pass the normal
+  60-second GTest harness in a separate test root, in 12.544–17.738s while the
+  broader run was active (`temp/tex-count-v8/cs-harness-gtest-three.log`), and
+  again after installation in 9.305–13.363s
+  (`temp/tex-count-v8/cs-installed-gtest.log`). The original tests timed out
+  during the aggregate run; isolated
+  original-versus-candidate timing remains open.
+
+- **Generated-declaration oracle, 2026-11-26:** The integration fixture used
+  `parse` and `input` as native references after the production route moved to
+  Script, so a preserved source-mapping guard raised an error during the wider
+  suite. It now compares its original eleven text/tree cases and local-package
+  case against archived-native captures (S1.8, D10.2.2v2); the existing golden
+  is unchanged. The captured sources and results are in
+  `test/lambda/latex/fixtures/tex_generated_declarations_native.json`.
+  That fixture's SHA-256 is
+  `0a63a336538684821d76a95ca674f9382d19276a35fe400daa5969db9f0eeba6`.
+  The file-based oracle SHA-256 is
+  `c51ec7705e6462458a6578e53967e406270d34cc028d149ddb9aba30ef08d55b`;
+  the batch oracle and input archive hashes are recorded below. The unchanged
+  golden passed in interpreter and JIT with forced GC and poisoning. The
+  generated-math fixture had the same stale oracle: its twelve text/tree cases
+  and local-package case now use an independent native capture at
+  `test/lambda/latex/fixtures/tex_generated_math_native.json`, SHA-256
+  `92d83a0b50dabbd08fda8e66784b9d207357141a5d0db709edcc8776987d80ee`.
+  Both fixtures bind each captured result to its original source and share the
+  snapshot comparison helper; their unchanged goldens pass in interpreter and
+  JIT with forced GC and poisoning (`temp/tex-count-v8/snapshot-generated_*.diff`). The
+  interrupted wider run started before the declaration fix; the full
+  small-batch rerun includes both snapshot-backed fixtures.
+
+- **Parenthesized-source oracle, 2026-11-26:** The wider run exposed the same
+  stale production-parser oracle in the parenthesized reconstruction test.
+  All 20 native trees are captured in
+  `test/lambda/latex/fixtures/tex_paren_reconstruction_native.json`, SHA-256
+  `7d1dcd77741852707b61ea4f3bb5c66ede27076f19fca75be04af6bc64934263`.
+  The fixture binds the source to its tree and retains its two existing
+  source-mapping guards and unchanged golden (S1.8, D10.2.2v2). Interpreter
+  and JIT passed with forced GC and poisoning
+  (`temp/tex-count-v8/snapshot-paren_reconstruction-*.diff`); the wider run
+  had already executed the old fixture, so its failure remains in that log.
+
+- **Declaration and trailing-source oracles, 2026-11-26:** The recovery pass
+  exposed two further fixtures that evaluated the Script input route as their
+  supposed native reference. Archived-native captures now cover 33 declaration
+  trees and 27 trailing-source trees, respectively
+  `test/lambda/latex/fixtures/tex_declaration_digest_native.json` (SHA-256
+  `f202db2ac93449dbc150714fdfcbf83a413245349f2dd681b9d043bb5b1bb3a6`)
+  and `test/lambda/latex/fixtures/tex_trailing_source_native.json` (SHA-256
+  `a20882593fde5776a20c687ceb2a6fc0f2bb3ffb66845f97c3e298f5ffe6e4ba`).
+  The declaration golden and unresolved source-mapping guards are retained.
+  One trailing-comment expectation is updated from a guard to a required native
+  tree match because the separately qualified comment support below already
+  covers it (S1.8, D10.2.2v2). The declaration fixture passed in both tiers with forced
+  GC (`temp/tex-count-v8/snapshot-declaration_digest-*.diff`), as did the
+  updated trailing-source fixture (`snapshot-trailing_source-*.diff`). The
+  earlier 16-case trailing-comment matrix now also uses independently recaptured
+  native text, diagnostics and trees from
+  `test/lambda/latex/fixtures/tex_trailing_comments_native.json` (SHA-256
+  `87be041612a7cae7b6450a2354cc1f5095fc76abf9204711d9136297c915e9bc`);
+  its unchanged golden passed in both tiers with forced GC
+  (`temp/tex-count-v8/snapshot-trailing_comments-*.diff`). Both old executions
+  remain in the aggregate log.
+
+- **Format count allocations, 2026-11-26 (qualification in progress):** A
+  source-derived catalog reproduces the 84 later count declarations and
+  immediate constants in upstream order; the engine derives the array-loop and
+  font-allocation values from the initialized arrays (S1.8, D10.2.2v2). Its
+  155 named integer probes match the captured native values and meanings in
+  both constructor modes (`temp/tex-count-v6/all-script.out`); a rebuilt oracle linked against
+  the archived native input library independently recaptured all 155 cases
+  (`temp/tex-count-v6/native-all-fresh.json`). The batch oracle SHA-256 is
+  `77d849f08dcddf3d96ab18991a26fd43260da948510dfaf9ee5d88e7a84067c7`;
+  its input archive SHA-256 is
+  `7ea88e1cfd28c7fe568342340469c657def2d06a6f7f3cbafbf59268557fdf57`.
+  TeX Live agrees on 99 of 100
+  named count values; its LaTeX format has made two additional font
+  allocations. An unknown-register mechanism guards reads of the other
+  allocator trackers and `allocationnumber`, while explicit scoped writes make
+  those values known again. Count 10 and a subsequent `\int_new:N` match the
+  native allocation sequence. The archived engine initializes `\count16` to
+  0 during format loading; the unqualified Script value was -1, so this slot
+  remains guarded until the native stream allocator and free pool are modeled
+  (`temp/tex-count-v8/native-count16.json`). The complete native tracker values
+  for slots 10–22 are in `temp/tex-count-v8/native-allocator-counts.json`.
+  The remaining allocation audit found 31 top-level dimension declarations
+  plus the font-array branch's scaled-point dimension, six skips, six muskips,
+  seven boxes and eleven coffins. Their counts explain the native dimension,
+  skip, muskip and box tracker totals from the standard kernel, but their
+  initialization and caller-owned-state behavior still need qualification
+  (`temp/tex-count-v8/kernel-trackers.out`). An archived-native scan captured
+  69 named dimension, skip, muskip, box, coffin and stream meanings and
+  values (`temp/tex-next-alloc/native.json`); notably the internal empty
+  coffin is nonvoid and the display-offset dimension starts at 2pt.
+  Two hundred count reads after successful and
+  failed regex matches match the native oracle in each constructor mode.
+  Five supported public TeX parser probes match native; two probes of
+  uninitialized allocator state remain guarded
+  (`temp/tex-count-v7/public-native-reference.json`).
+  Alternate engine branches, caller-owned declarations, a modified initial
+  font counter and insufficient count slots remain guarded before any font or
+  count allocation. Kernel allocator macros are compared to tokenized definitions
+  generated from the bundled kernel; modified controls or primitives remain
+  guarded, while an equivalent definition is accepted. In 12 independently
+  captured native document trees, eight match in legacy mode and ten in
+  constructor-aware mode; the remaining cases are guarded after two legacy
+  constructor mismatches were reproduced. The tree oracle SHA-256 is
+  `6b868df6e67572823656dc33a69dca054d74967794de70ac753486cd3adf5fb7`.
+  The candidate is installed; nine targeted regressions passed on the current
+  snapshot. Seven fixtures passed interpreter and JIT with forced GC and
+  poisoning (`temp/tex-count-v8/forced-*.diff`). Three interleaved release pairs
+  of the cold 100-stringification sample retained identical output hashes:
+  control 4.19–4.32s and candidate 4.20–4.38s
+  (`temp/tex-count-v8/bench-results.json`). The 13-test focused integration
+  suite passed (`temp/tex-count-v8/focused-gtest.log`). The first 425-case
+  TeX Script run was interrupted after 132 completions and ten timeouts when
+  the harness entered a long serial replay of unstarted records
+  (`temp/tex-count-v8/tex-script-suite.log`). A full rerun with five-script
+  batches and the same 60-second per-test limit finished at 333/425
+  (`temp/tex-count-v8/tex-script-suite-small-batches.log`). Eighty cases timed
+  out; the remaining 12 include three stale-oracle errors repaired above and
+  nine other output mismatches. The three selected timeout fixtures were
+  subsequently repaired and passed focused tests as recorded above. Four
+  additional mismatches were repaired by native reference captures, and the
+  stream-cache mismatch was repaired by the source-gap change. The four other
+  mismatches (`char`, `counters_native_fixture`, `declaration_origin` and
+  `errmessage_diagnostics`) and the remaining timeouts need investigation.
+  These repairs do not qualify the remaining failures. Before the final
+  digestion change, the Lambda baseline passed 5,203/5,220 with the same 17
+  failures as the prior baseline (`temp/tex-count-v8/lambda-baseline.log`),
+  and Test262 passed 40,261/40,261 with 2,652 skips
+  (`temp/tex-count-v8/test262-baseline.log`). Neither baseline was rerun after
+  the final digestion change because the goal was cleared.
+
+- **Unicode format arrays, 2026-11-26 (qualification in progress):** The six
+  codepoint index and block arrays now use a generated catalog derived from the
+  bundled Unicode data and expl3's block deduplication (S1.8, D10.2.2v2).
+  All 86,720 values match independent native font-parameter reads and a fresh
+  TeX Live scan using byte-identical expl3 and Unicode data
+  (`temp/tex-format-v5/texlive-unicode-values.txt`). Seventy-two of 78 identity,
+  metadata and parameter probes also match TeX Live in both constructor modes;
+  the six `skewchar` probes retain the retired native engine's zero default,
+  while TeX Live returns -1 (`temp/tex-format-v5/texlive-matrix.out`). Native
+  undefines the font's original control sequence after assigning the constant
+  alias, so `\the\font` for these arrays remains guarded until its identity
+  behavior is implemented. Array writes, growth, and caller-owned initial
+  names also remain guarded. A compatible preloaded font is reused with native
+  values, while an incompatible earlier font remains guarded. Twelve sampled
+  document trees remain guarded in both modes. Seven array and neighboring guard
+  fixtures passed in interpreter and JIT with forced GC and poisoning. Three
+  interleaved release pairs of a cold 100-stringification Script sample have
+  identical hashes: control 4.01–4.20s, candidate 4.06–4.12s
+  (`temp/tex-format-v5/bench-results.json`). The generator verifies its bundled
+  inputs with `python3 utils/generate_latex_unicode_array_catalog.py --check`.
+  Nine selected integration tests passed on the final snapshot
+  (`temp/tex-format-v5/focused-gtest.log`). The Lambda baseline passed
+  5,203/5,220, with the same 17 failures as the preceding run
+  (`temp/tex-format-v5/lambda-baseline.log`). Test262 passed 40,261/40,261
+  baseline entries with 2,652 skips and no regressions
+  (`temp/tex-format-v5/test262-baseline.log`). Count allocations beyond the
+  existing partial bootstrap remain open. Native counts 41–124 match 84
+  source declarations in order once the selected font-array branch and TeX's
+  immediate integer constants are accounted for
+  (`temp/tex-format-v5/audit-declarations.py`). The array-loop and font-count
+  values are outcomes of initialization; neither should be replaced by an
+  unqualified static snapshot. TeX Live agrees with 99 of the 100 captured
+  named count values; its later LaTeX format initialization increases the font
+  count from 20 to 22. In two sampled matches, all 100 named values returned to
+  their original values (`temp/tex-format-v5/texlive-count-dirty.out`); broader
+  regex state behavior still needs qualification. The native `allocationnumber`
+  also reflects allocations in other register classes and remains open.
+
+- **Category-code and regex format arrays, 2026-11-26:** The bootstrap now
+  initializes the five upstream category-code tables through the shared font
+  allocator, using the reader's standard TeX catcodes, and creates the seven
+  initial regex arrays with sparse zero storage (S1.8, D10.2.2v2). All 1,285
+  category-code entries and all 458,752 initial regex entries match independent
+  native scans. Eighty category-code and 70 regex identity and parameter cases
+  match native in each constructor mode and through the public TeX parser.
+  A native regex match changes its scratch arrays; Script therefore guards
+  later parameter reads of those arrays until its regex engine mirrors the
+  mutations, while retaining qualified metadata and unrelated array reads.
+  Writes, out-of-range growth and later uninitialized format fonts remain
+  guarded. Caller-owned array state, nonzero `globaldefs` and pending
+  `afterassignment` during bootstrap also remain guarded. Twelve sampled
+  category-code trees and twelve sampled regex trees remain guarded in both
+  modes (`temp/tex-cctab/`, `temp/tex-cctab-v2/`, `temp/tex-format-v2/`).
+  A compatible caller-owned category-code font is reused after kernel preload;
+  an incompatible non-last font remains guarded. The font-format guard starts
+  only after format bootstrap, so it does not block valid kernel setup
+  (`temp/tex-format-v3/cctab-custom-native.out`). Twenty-seven adjacent
+  integration tests passed on this snapshot (`temp/tex-format-v3/focused-gtest.log`).
+  The six later native fonts are the category, uppercase and lowercase
+  codepoint index arrays followed by their block arrays; their initialization
+  and remaining limitations are recorded in the newer checkpoint above.
+
+- **First two expl3 font-backed arrays, 2026-11-26:** The bootstrap now creates
+  the upstream exponential and trigonometric constant arrays as shared TeX
+  fonts. A generated catalog extracts their integer data from the bundled
+  `expl3-code.tex`; the ordinary font allocator, parameter storage and font
+  character storage retain font reuse and identity (S1.8, D10.2.2v2). All
+  1,480 entries match independent native TeX reads, and 45 further identity,
+  parameter and diagnostic cases match in both constructor modes. A preexisting
+  compatible font is reused; a non-last font that cannot grow and a caller-owned
+  array allocator or array definition remain guarded. Re-enabling the bootstrap
+  retains later caller overrides.
+  Twelve sampled LaTeX trees remain guarded in each mode. Font-array writes,
+  parameter growth beyond the initialized arrays and the remaining format font
+  accesses remain guarded; later count allocations still differ from native
+  (`temp/tex-fp-arrays/`). Eight array and guard fixtures pass interpreter and
+  JIT with forced GC and poisoning, and the adjacent 20-test integration suite
+  passes (`temp/tex-fp-arrays-v2/focused-gtest.log`). Three interleaved release
+  pairs for the cold 100-stringification sample retain identical output hashes;
+  control took 4.594–4.611s and candidate 4.601–4.618s
+  (`temp/tex-fp-arrays-v2/bench-results.json`). The catalog is checked against
+  its bundled source with `python3 utils/generate_latex_intarray_catalog.py --check`.
+  The Lambda baseline finished at 5,203/5,220 with the same 17 previously
+  recorded server, media, synchronization and WebSocket failures
+  (`temp/tex-fp-arrays-v2/lambda-baseline.log`). Test262 passed 40,261/40,261
+  baseline entries with 2,652 skips and no regressions
+  (`temp/tex-fp-arrays-v2/test262-baseline.log`).
+
+- **Font parameter diagnostics and expl3 format guard, 2026-11-26:** A
+  `fontdimen` access outside a non-last font's parameter range previously
+  recorded only an internal code, so the public TeX parser rejected the result
+  instead of returning the native diagnostic. The scanner now records its message and location
+  (S1.8, D10.2.2v2). Twenty ordinary TeX cases match independently captured
+  native text, messages and diagnostics in both constructor modes, including
+  invalid reads and writes, nullfont and multiline input. The public TeX parser
+  matches the same cases. Twelve sampled document trees match native in
+  constructor-aware mode; legacy mode remains guarded because eager argument
+  expansion loses font commands and their diagnostic context.
+
+  Native expl3 preloads font-backed arrays that reuse `cmr10` at tiny sizes;
+  the partial Script format does not. A direct probe showed native data and
+  parameter counts differ from a fresh Script font: a `cmr10 at 1sp` definition
+  is identical to native `c__fp_exp_intarray`, whose `hyphenchar` count is
+  216 (`temp/tex-fontarray-v2/format-witness.out`). Until that format is
+  initialized, expl3 `cmr10` parameter and character accesses and nullfont
+  growth stopped at the explicit `expl3 font format` guard. The newer entry
+  above records the subsequently initialized arrays and newly qualified reads.
+  Existing supported nullfont reads and character operations still match native
+  (`temp/tex-fontarray/`). Six macro-generated diagnostics
+  also match native in both modes. The seven new diagnostic and guard fixtures
+  pass interpreter and JIT with forced GC and poisoning, and the adjacent
+  sixteen-test integration suite passes (`temp/tex-fontarray-v2/focused-gtest.log`).
+  Three interleaved release pairs of 100 valid font reads retain identical
+  output hashes; the control took 1.161–1.261s and the candidate 1.210–1.311s,
+  with substantial overlap (`temp/tex-fontarray-v2/bench-results.json`). The
+  Lambda baseline finished at 5,203/5,220 with the same 17 previously recorded
+  server, media, synchronization and WebSocket failures
+  (`temp/tex-fontarray-v2/lambda-baseline.log`). Test262 passed 40,261/40,261
+  baseline entries with 2,652 skips and no regressions
+  (`temp/tex-fontarray-v2/test262-baseline.log`).
+
+- **Expl3 integer steps, 2026-11-26:** The function, inline, token and variable
+  forms now use the upstream expansion loop and nested-map cleanup. The global
+  protected expanded-definition helper used by variable steps is also
+  installed with its native `e`/`x` alias (S1.8, D10.2.2v2). Forty-one
+  independently captured native cases match in each constructor mode, and a
+  250-case range matrix and 47 variable-step and scope cases match in each
+  mode, including zero-step diagnostics.
+  Twenty public TeX parser cases match native. Twelve sampled step-loop trees
+  and eight protected-definition trees remain guarded in each mode, as does an
+  undefined expl3 control inside a nested loop
+  (`temp/tex-step/`). Both new fixtures pass interpreter and JIT with forced
+  GC and poisoning, and the adjacent nine-test integration suite passes
+  (`temp/tex-step/focused-gtest.log`). Three interleaved release pairs for the
+  cold 100-stringification sample retained identical output hashes; the
+  preceding candidate took 4.437–4.511s and this candidate 4.590–4.604s
+  (`temp/tex-step/bench-results.json`). The Lambda baseline finished at
+  5,203/5,220 with the same 17 previously recorded server, media,
+  synchronization and WebSocket failures (`temp/tex-step/lambda-baseline.log`).
+  Test262 passed 40,261/40,261 baseline entries with 2,652 skips and no
+  regressions (`temp/tex-step/test262-baseline.log`).
+  These loops are a prerequisite for the font-backed integer-array
+  initialization; the array format and remaining count allocations are not
+  yet implemented.
+
+- **Expl3 terminal writes and partial format allocation, 2026-11-26:** The
+  bootstrap now declares the native count-backed constants and scratch values
+  through `l_keys_choice_int` in upstream order, using TeX's count allocator.
+  It preserves existing caller definitions and only initializes declarations
+  that upstream initializes. `iow_now`, `iow_term` and `iow_log` execute their
+  native macro shapes and argument variants, including the scoped temporary
+  `newlinechar` assignment (S1.8, D10.2.2v2). In both constructor modes,
+  27 register probes and 122 terminal-write probes match independently
+  captured native text, diagnostics and messages; 24 sampled LaTeX trees
+  remain guarded (`temp/tex-register/`). Fifteen additional public TeX parser
+  cases match native. The new register, write, public parser and bootstrap
+  override fixtures pass interpreter and JIT with forced GC and poisoning;
+  the eleven-test adjacent integration suite passes
+  (`temp/tex-register/focused-gtest.log`). Three interleaved release pairs
+  for the 100-stringification cold sample have identical output hashes; the
+  previous candidate took 4.400–4.432s and this candidate 4.453–4.497s
+  (`temp/tex-register/bench-results.json`). The Lambda baseline finished at
+  5,203/5,220 with the same 17 server, media, synchronization and WebSocket
+  failures as the preceding run (`temp/tex-register/lambda-baseline.log`).
+  Test262 passed 40,261/40,261 baseline entries with 2,652 skips and no
+  regressions (`temp/tex-register/test262-baseline.log`).
+
+  **Remaining allocation gap:** The native format continues allocating counts
+  after `l_keys_choice_int`, ending at count 124. Five probes of `newcount`,
+  `int_new` and the allocator counters therefore still differ: the partial
+  bootstrap ends at 40, and `allocationnumber` also reflects incomplete format
+  initialization. The complete native mapping of count slots 25–124 and their
+  initial values is captured in `temp/tex-register/all-native.out`; slots 41
+  and 42 depend on the upstream integer-array initialization, not just
+  declarations. Preserve these mismatches visibly until the remaining format
+  initialization is implemented; do not reserve synthetic slots. Ordinary
+  unsuppressed errors remain guarded at `__msg_interrupt:NnnnN` because the
+  message and line-wrapping paths are still incomplete.
+
+- **Expl3 output prerequisites, 2026-11-26:** The shared temporary integer
+  setting helper, `exp_args:Ne` and `exp_args:Nx`, string assignment for the
+  `n`, `e` and `x` forms, and string/space counting now use upstream-shaped
+  macros. They retain native expansion, assignment scope and macro meanings
+  (S1.8, D10.2.2v2). In each constructor mode, 78 independently captured native
+  cases match text and diagnostics: 39 cover temporary assignments, expansion
+  and string assignment, and 39 cover counting, including loop boundaries,
+  spaces and Unicode (`temp/tex-iow/` and `temp/tex-count/`). Twelve sampled
+  document trees for string assignment and twelve for string counting remain
+  guarded in each mode. At that checkpoint, interrupt, wrapping and terminal
+  I/O were unsupported. Native `c_log_iow` is a format-allocated count
+  register; assigning it a fixed slot would create incorrect observable state.
+  Native meaning probes identify the allocation order: `c_max_int` at 25,
+  six scratch counts at 26–31, the mapping and property counts at 32–33,
+  the negative terminal-input and log constants at 34–35, four I/O counts at
+  36–39, and the keys choice count at 40. The corresponding positive constants
+  use math-character definitions. Initial values were captured independently,
+  including the line width 78 and indent width 4
+  (`temp/tex-count/allocation/{native,values}.out`).
+  That checkpoint called for allocation and initial-value qualification before
+  enabling writes; the newer entry above records the partial result.
+  Both new fixtures pass interpreter and JIT with forced GC and poisoning;
+  the five-test focused integration suite passes
+  (`temp/tex-count/focused-gtest.log`). Three interleaved release pairs for
+  the same 100-stringification cold sample kept identical output hashes; the
+  preceding candidate took 4.246–4.329s and this candidate 4.496–4.563s
+  (`temp/tex-count/bench-results.json`). The added bootstrap cost remains an
+  open performance issue and is not a full-workload measurement. The Lambda
+  baseline completed at 5,203/5,220, with the same 17 synchronization,
+  WebSocket, server and JavaScript media failures as the earlier run; the
+  intermittent recursion-exhaustion failure passed this time
+  (`temp/tex-count/lambda-baseline.log`). Test262 passed 40,261/40,261
+  baseline entries with 2,652 skips and no regressions
+  (`temp/tex-count/test262-baseline.log`).
+
+- **Message redirects and property recovery, 2026-11-26:** Upstream-shaped
+  non-expandable error dispatch now honors name, module and class redirects,
+  including scoped settings and multi-hop redirects. Invalid property
+  operations use the native splitter and type-check path: when the relevant
+  error is redirected to `none`, they recover and reset the property with the
+  native assignment scope. Unsuppressed errors still stop at the unported
+  `__msg_interrupt:NnnnN`; redirect loops stop at the unported warning path
+  (S1.8, D10.2.2v2, S7.4.1–S7.4.4). The new 33-case regression records native
+  text, diagnostics and public parsing, plus those two guards. In both
+  constructor modes, a 320-case property matrix has 256 native matches and
+  64 guarded errors; a 99-case redirect matrix has 54 matches and 45 guards.
+  Fifty macro/state meaning checks and 48 property-emptiness probes match
+  native. Eighty document-tree probes remain guarded in both modes
+  (`temp/tex-msg-dispatch/`). Existing property lookup/removal tests now check
+  that the public path still rejects unsuppressed errors, and the message and
+  property fixtures share immutable preloads while retaining fresh first cases.
+
+- **Kernel preload compatibility, 2026-11-26:** A cache made for legacy
+  constructor mode previously produced the wrong result when resumed in
+  constructor mode; cached kernel bytes and resources could also be silently
+  reused for different requests. The profile now records the source and
+  settings of each preload and reloads when they do not match. Resource
+  lookups, including missing entries, are recorded so host preloads are reused
+  across changed captures only when the kernel performed no lookup
+  (D10.2.2v2, D11.1.2). The native-reference preload regression covers both
+  constructor directions, same-settings reuse, changed kernel and resources,
+  and a missing resource later supplied. The earlier starred-accent fixture
+  now uses a separate constructor preload; its constructor checks pass with
+  the actual mode rather than the legacy snapshot. The candidate passed 14
+  focused GTests and ten resource-authority/cache-revocation checks across
+  interpreter and JIT; the new redirect, preload and captured-member fixtures
+  passed both tiers with forced GC and poisoning, and the installed preload
+  fixture passed both tiers again after the settings-helper refactor. The
+  installed focused harness passed 7/7
+  (`temp/tex-msg-dispatch/installed-gtest.log`). Three interleaved release
+  pairs for 100 expl3 stringifications kept identical output hashes; control
+  took 3.875–3.953s and the installed candidate 4.388–4.576s. This increase
+  for a cold invocation remains a performance limitation, not a full workload assessment
+  (`temp/tex-msg-dispatch/bench-installed-results.json`). The Lambda baseline
+  finished at 5,202/5,220: the prior 17 synchronization/WebSocket, server and
+  JavaScript media failures remained, and the interpreter recursion-exhaustion
+  test additionally returned `error[E0]: Success`. That test passed three
+  isolated reruns; the aggregate failure is not a passing baseline
+  (`temp/tex-msg-dispatch/lambda-baseline.log` and `recursion-{1,2,3}.log`).
+
+- **Expl3 introspection and type-check prerequisites, 2026-11-26:** The
+  upstream `token_if_macro` conditionals, control-sequence prefix, parameter
+  and replacement inspection, and shared defined/token-list type checks now
+  run through native-shaped TeX macros. Bootstrap supports the other-category
+  delimiter tokens that upstream builds with `tl_to_str:n`, and preserves
+  caller-supplied definitions. `use:e` and `token_to_meaning:N` now have their
+  native shapes; `tl_to_str:n` is the native `detokenize` alias instead of a
+  synthetic primitive. This also repairs missing-brace and runaway recovery
+  for seven sampled stringification cases. A Script-only expl3 primitive in
+  general-text lookahead remains explicitly guarded because its native macro
+  expansion can differ (S1.8, D10.2.2v2, S7.4.1–S7.4.4).
+
+  Forty-three independently captured native expansion/diagnostic results pass
+  in both tiers with forced GC and poisoning, including native meanings, alias
+  identity, valid type checks, malformed text and caller-defined kernel
+  overrides. A 180-case inspection matrix and a 70-case stringification matrix
+  match native throughout. A 154-case type-check matrix has 16 native matches
+  and 138 explicit `msg_error` guards; a 144-case document-tree matrix remains
+  guarded in both constructor modes. The message, property-recovery and message
+  recovery fixtures pass in both tiers with forced GC and poisoning before the
+  final shared-shape refactor. An older errmessage diagnostic golden differs
+  after native retirement, but its control and candidate output are identical
+  (`temp/tex-introspect/diagnostics-control-candidate.diff`). The installed
+  focused harness passes 5/5 (`temp/tex-introspect/focused-gtest.log`); the full
+  TeX corpus and non-expandable message recovery remain open. Three interleaved
+  release pairs of 100 stringifications retained
+  identical output hashes: control took 4.017–4.042s and candidate
+  4.011–4.058s (`temp/tex-introspect/bench-results.json`). This is not a broad
+  performance qualification. The Lambda baseline passed 5,203/5,220 with the
+  same 17 failing tests as the preceding run: 13 synchronization/WebSocket,
+  three server and one JavaScript media case
+  (`temp/tex-introspect/lambda-baseline.log`).
+
+- **Starred accent arguments and native command names, 2026-11-26:** The
+  native document scanner can combine a TeX control token with immediately
+  following source letters such as `@x`; previously an accent could silently
+  digest `\A@x` as `\A` and text. Accent arguments now use the existing
+  source-verified native name scanner, including a reconstructed-byte check
+  when output mapping is present. Adjacent starred generic commands reuse the
+  ordinary generic and inline parsers; specialized nodes and unverified
+  mappings remain guarded (D10.2.2v2). Twelve independently captured native
+  trees pass direct digestion, public parsing and both constructor modes.
+  In a 2,754-case star matrix, each constructor mode matched 1,152 native trees
+  and guarded 1,602 cases; the native parser itself rejected 135 inputs. A
+  1,728-case split-name matrix matched 1,608 and guarded 120 in legacy mode,
+  and matched 1,448 and guarded 280 in constructor mode. Neither matrix had an
+  admitted mismatch (`temp/tex-accent-star/`). The older 252-case control
+  matrix now matches 216 and guards 36; comment, whitespace and paragraph
+  matrices retain their earlier results. Nine regression fixtures pass in both
+  tiers with forced GC and poisoning, and ten focused GTests pass
+  (`temp/tex-accent-star/focused-gtest.log`). Three interleaved release pairs
+  preserved output hashes for 600 ordinary accents and 400 control-argument
+  accents; respective control ranges were 1.610–1.859s and 1.420–1.649s,
+  versus 2.013–3.664s and 1.442–1.509s for the candidate. These noisy samples
+  are not a general performance qualification
+  (`temp/tex-parity-perf/results-star-final.json`). The Lambda baseline passed
+  5,203/5,220 with the same 17 failing tests as the preceding run: 13
+  synchronization/WebSocket, three server and one JavaScript media case
+  (`temp/tex-accent-star/lambda-baseline.log`). The full TeX corpus and shared
+  non-expandable message recovery remain open.
+
+- **Replayed box-rule endpoints and spacing, 2026-11-26:** Replayed synthetic rules can
+  end at the following reconstructed source segment, rather than the rule's
+  emission origin. `generated_rule` now verifies contiguous reconstructed
+  token spellings and maps the final argument endpoint through the existing
+  segment map (D10.2.2v2). Twelve native trees match public parsing and both
+  constructor modes; the new fixture also passes interpreter and JIT with
+  forced GC and poisoning. The box-register and box-register-digest goldens
+  also pass in both execution tiers with forced GC and poisoning. Ten final
+  box, rule and accent GTests pass; the
+  former box-register guard fixture now passes all 38 cases. The 62-case box
+  register fixture keeps a fresh first case and shares the immutable kernel
+  for the others, reducing a 60-second timeout to 4.6 seconds without changing
+  its golden (`temp/tex-parity-release-run/box-rule-final2.log`). Replayed direct
+  controls also use reconstructed output gaps: their original box source span
+  can contain the later copy command instead of the emitted separator. This
+  fixes four pre-existing whitespace mismatches. All 360 rule cases and 330
+  additional replayed-control cases match the retired parser; the 300 newly
+  admitted rule trees also match in legacy constructor mode
+  (`temp/tex-box-{rule,control}-matrix/`). The post-change Lambda baseline
+  passed 5,203/5,220 with the same server, synchronization/WebSocket and JS
+  media failures as the earlier run (`temp/tex-parity-lambda-baseline-box.log`).
+  Three interleaved release pairs with 200
+  replayed controls retained identical output hashes; control took
+  1.075–1.159s and candidate 1.027–1.248s. This small sample is not a general
+  performance qualification (`temp/tex-parity-perf/results-box-final.json`).
+
+- **Explicit `\par` as an accent argument, 2026-11-26:** Native's accent
+  parser reads an explicit `\par` as a generic command, rather than the
+  paragraph event used by ordinary inline parsing. The generic command parser
+  is now shared with accent parsing (D10.2.2v2). Six native trees, including a
+  grouped argument, whitespace and nested accents, match direct and public
+  parsing in interpreter and JIT with forced GC and poisoning. An 84-case
+  matrix has 72 exact trees, 12 guards and no admitted mismatches; the other
+  grouped, whitespace and comment matrices remain unchanged. Fourteen focused
+  command and accent GTests passed before the final comment-path fast check;
+  its five accent fixtures passed both forced-GC tiers afterward. The final
+  Lambda baseline passed 5,203/5,220, with the same 13 synchronization and
+  WebSocket, three server and one JavaScript media failures recorded below
+  (`temp/tex-parity-lambda-baseline-final2.log`). The complete TeX sweep
+  remains open. In three interleaved release pairs using the same
+  pinned host and exact output hashes, the 600-accent case took 1.326–1.387s
+  on control and 1.320–1.383s on the candidate; the 600 generic-command case
+  took 1.444–1.496s and 1.490–1.505s respectively. These are small samples,
+  not a corpus-wide performance qualification (`temp/tex-parity-perf/`).
+
+- **TeX fixture setup and undefined properties, 2026-11-26:** The box
+  movement, expl3 control-sequence equality and token-list string fixtures
+  repeatedly loaded the same resource-free expl3 kernel. Reusing its immutable
+  preload while retaining a fresh first case and separately loaded resource
+  fixtures makes all three unchanged goldens pass the existing 60-second
+  GTest limit in an isolated release home (10.5, 15.8 and 13.0 seconds).
+  They had each timed out alone before the change. `prop_remove` instead
+  fails because its invalid-variable probe reaches the unimplemented upstream
+  `__prop_split_wrong:Nw`; the retired engine emits a located
+  `tex-errmessage` and continues. This is a runtime parity gap, not a timeout.
+  Evidence: `temp/tex-parity-release-run/{timeouts-isolated,preload-focused}.log`
+  and `temp/tex-prop-missing-native.out` (D10.2.2v2, S7.4.1–S7.4.4).
+  The three fixtures now reuse `_tex_expl3_compare.ls`; the affected and
+  neighboring fixtures pass 15/15 in `shared-focused.log`. The release engine
+  sweep was interrupted at 59/371 after six further timeouts and two errors;
+  it is not a passing aggregate (`engine-sweep-final.log`).
+
+- **Comment-adjacent accent arguments, 2026-11-26:** The retired document
+  parser consumes `%` as the character argument of an accent before reading
+  the remainder of that line as document text. Script now reconstructs that
+  bounded case from consecutive direct source tokens, preserving nested
+  accent and text boundaries (D10.2.2v2). Eight independent native trees pass
+  through direct digestion and public `parse`; four accent fixtures pass in
+  interpreter and JIT with forced GC and poisoning. A 1,386-case matrix has
+  315 native-tree matches, 1,071 guarded cases and no admitted mismatches
+  (`temp/tex-accent-comment-matrix/`). Comment text containing document
+  syntax, paragraph boundaries, and non-direct mappings remain guarded.
+  The debug 371-fixture TeX sweep was interrupted after 33 cases because four
+  fixtures hit the unchanged 60-second timeout under load; see
+  `temp/tex-parity-engine-sweep.log`. A pinned release build and isolated
+  reruns are in progress. The broader Lambda baseline has not yet been rerun
+  for these changes.
+
+- **Accent control-word whitespace, 2026-11-26:** The native parser preserves
+  whitespace after a command used as an accent argument, even when TeX's
+  reader skips it. The Script digester now carries verified spaces, tabs and
+  one line ending to the enclosing inline stream, including nested accents
+  (D10.2.2v2). Eight complete trees match the retired native parser through
+  direct digestion and public `parse`; interpreter and JIT pass with forced GC
+  and poisoning. A 336-case native comparison found 220 exact trees, 116
+  guarded cases and no admitted mismatches (`temp/tex-accent-space-matrix/`).
+  Comment gaps and paragraph boundaries remain guarded. The full Lambda
+  baseline has not been rerun since these changes.
+
+- **Accent command arguments, 2026-11-26:** Direct adjacent groups after an
+  accent's control-sequence argument now use the existing generic argument
+  scanner and inline parser (D10.2.2v2). Twelve complete document trees match
+  the retired native parser through both digestion and public `parse`;
+  interpreter and JIT match the golden under forced GC and poisoning. A
+  252-case matrix found 192 full native-tree matches, 60 guarded cases and no
+  admitted mismatches (`temp/tex-accent-matrix/`). Five neighboring focused
+  GTests passed before the final expansion of the new fixture; starred and
+  multi-node formatting arguments remain guarded. The earlier baseline below
+  predates this change and does not qualify it.
+
+- **Accent control arguments, 2026-11-26:** The digester now reuses inline
+  parsing for single control-sequence accent arguments, with direct-source or
+  reconstructed-gap validation (D10.2.2v2). Ten full trees including offsets,
+  nested accents, Unicode, control words and escaped symbols match the retired
+  engine in both direct digestion and public `parse`. Interpreter and JIT
+  pass the new golden with forced GC and freed-memory poisoning. The previous
+  accent, nested-accent and prefixed-macro goldens pass on an isolated release
+  host. Inline-only symbols such as `\par`, commands with attached arguments,
+  and trailing source gaps remain guarded. In particular, the retired engine parses `\'% hi\n{e}` with `%`
+  as the accent argument and retains the following text and group: skipping the
+  comment would change the tree. The native oracle
+  `temp/tex-script-f/lambda-release` has SHA-256
+  `bbc1e4d24f1d8d48228967d5eb5b2580f44707dadafb6fde4605d2c15acb0684`.
+  The Lambda baseline passed 5,203/5,220: 13 synchronization/WebSocket script
+  failures, three server tests and one JavaScript media-playback test remain.
+  Server logs record denied loopback binds; the media test has an output
+  mismatch. See `temp/tex-port-lambda-baseline-final.log` and `test_output/`.
+  The focused LaTeX GTest run passes 4/4 in
+  `temp/tex-port-gtest-focused.log`; the baseline excludes those fixtures.
+
 - **Focused test timeouts, 2026-11-26:** The digest and expl3 integer-compare
   fixtures rebuilt the same resource-free kernel for every independent case.
   They now reuse the supported immutable preload (D10.2.2v2) while retaining

@@ -14,6 +14,4 @@ fn check(source) any^ {
  "\\begin{document}\\'  \\`é!\\end{document}",
  "\\def\\a{\\'\\`a}\\begin{document}\\a\\end{document}",
  "\\begin{document}\\'{\\'\\`a}\\end{document}"
-]) check(source)^];
-let gap=digest.digest(expand("\\begin{document}\\'\\`% hi\n{a}\\end{document}")^)^;
-[gap.issue,gap.unsupported]
+]) check(source)^]

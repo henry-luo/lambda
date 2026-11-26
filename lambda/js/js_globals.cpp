@@ -18,6 +18,7 @@
 #include "../dom/dom_xhr.h"
 #include "js_error_codes.h"
 #include "../jube/jube_node_permission.h"
+#include "../jube/jube_node_zlib_codec.hpp"
 #include "../module/node_core/node_url.hpp"
 #include "js_property_attrs.h"
 #include "js_host_hooks.h"
@@ -65,6 +66,7 @@ extern "C" Item js_proxy_trap_set_with_receiver(Item proxy, Item key, Item value
 extern "C" void js_async_hooks_after_gc(void);
 extern "C" Item js_global_url_search_params_new(Item init);
 static bool js_activate_url_primitives(void);
+static Item js_decompression_stream_new(Item format);
 static Item js_install_url_constructor(Item global);
 extern "C" Item js_func_get_custom_proto(Item func);
 extern "C" Item js_get_typed_array_base();
@@ -139,7 +141,8 @@ static const JsHostGlobalSpec js_host_globals[] = {
     {"TextEncoder", JS_HOST_GROUP_CODECS}, {"TextDecoder", JS_HOST_GROUP_CODECS},
     {"ReadableStream", JS_HOST_GROUP_STREAMS}, {"WritableStream", JS_HOST_GROUP_STREAMS},
     {"TransformStream", JS_HOST_GROUP_STREAMS}, {"TextEncoderStream", JS_HOST_GROUP_STREAMS},
-    {"TextDecoderStream", JS_HOST_GROUP_STREAMS}, {"ByteLengthQueuingStrategy", JS_HOST_GROUP_STREAMS},
+    {"TextDecoderStream", JS_HOST_GROUP_STREAMS}, {"DecompressionStream", JS_HOST_GROUP_STREAMS},
+    {"ByteLengthQueuingStrategy", JS_HOST_GROUP_STREAMS},
     {"CountQueuingStrategy", JS_HOST_GROUP_STREAMS}, {"Headers", JS_HOST_GROUP_HEADERS},
     {"Response", JS_HOST_GROUP_HEADERS}, {"Request", JS_HOST_GROUP_HEADERS},
     {"performance", JS_HOST_GROUP_PERFORMANCE},
@@ -14586,6 +14589,8 @@ static Item js_install_host_global_group(Item target, JsHostGlobalGroup group) {
             js_text_encoder_stream_new);
         js_install_native_constructor(global.get(), "TextDecoderStream",
             js_text_decoder_stream_new);
+        js_install_native_constructor(global.get(), "DecompressionStream",
+            js_decompression_stream_new);
         // Streams §7.2/§7.3: size functions are shared per realm; instance state is private.
         js_install_queuing_strategy(global.get(), "ByteLengthQueuingStrategy",
             JS_CLASS_BYTE_LENGTH_QUEUING_STRATEGY);
@@ -17007,9 +17012,13 @@ extern "C" Item js_get_intrinsic_prototype_for_class(int class_id) {
         JsPerformanceState* state = js_performance_resources();
         return js_get_constructor_intrinsic_prototype(cls == JS_CLASS_PERFORMANCE_MARK ? state->mark_constructor : state->measure_constructor);
     }
-    if (cls == JS_CLASS_INTL_LOCALE || cls == JS_CLASS_INTL_NUMBER_FORMAT)
-        return js_get_constructor_intrinsic_prototype(js_get_key_cstr(js_get_intl_object_value(),
-            cls == JS_CLASS_INTL_LOCALE ? "Locale" : "NumberFormat"));
+    static const struct { JsClass brand; const char* name; } intl_types[] = {
+        {JS_CLASS_INTL_LOCALE, "Locale"}, {JS_CLASS_INTL_NUMBER_FORMAT, "NumberFormat"},
+        {JS_CLASS_INTL_PLURAL_RULES, "PluralRules"},
+        {JS_CLASS_INTL_LIST_FORMAT, "ListFormat"},
+    };
+    for (const auto& type : intl_types) if (cls == type.brand)
+        return js_get_constructor_intrinsic_prototype(js_get_key_cstr(js_get_intl_object_value(), type.name));
     const char* name = NULL;
     int len = 0;
     if (!js_intrinsic_proto_ctor_name_for_class(cls, &name, &len)) return ItemNull;
@@ -18542,46 +18551,60 @@ static Item js_readable_stream_tee(Item) {
     return result.get();
 }
 
-static Item js_writable_stream_writer_write(Item env_item, Item chunk) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return js_promise_resolve(make_js_undefined());
-    Item sink = js_get_key_cstr(env[0], "__sink__");
-    Item write_fn = js_get_key_cstr(sink, "write");
-    if (js_is_callable(write_fn)) {
-        js_call_function(write_fn, sink, &chunk, 1);
+static Item js_writable_stream_writer_call(Item stream, const char* method, Item chunk, int argc) {
+    RootFrame roots(6);
+    Rooted<Item> owner(roots, stream), value(roots, chunk);
+    Rooted<Item> error_key(roots, js_name_item("__error__"));
+    if (it2b(js_has_own_property(owner.get(), error_key.get())))
+        return js_promise_reject(js_get_key_default(owner.get(), error_key.get()));
+    if (js_is_truthy(js_get_key_cstr(owner.get(), "__closed__")))
+        return js_promise_from_completion(js_throw_type_error("WritableStream is closed"));
+    Rooted<Item> sink(roots, js_get_key_cstr(owner.get(), "__sink__"));
+    Rooted<Item> function(roots, js_get_key_cstr(sink.get(), method));
+    Rooted<Item> result(roots, function.get());
+    if (js_is_callable(function.get())) {
+        Item args[] = {value.get()};
+        result.set(js_call_function(function.get(), sink.get(), args, argc));
     }
+    // A failing sink retains its error for later writes and close.
+    if (item_is_error(result.get())) {
+        JS_RETURN_IF_ERROR(js_set_key_default(owner.get(), error_key.get(), js_error_lane_payload(result.get())));
+        return js_promise_from_completion(result.get());
+    }
+    if (argc == 0) JS_RETURN_IF_ERROR(js_set_key_cstr(owner.get(), "__closed__", (Item){.item = ITEM_TRUE}));
     return js_promise_resolve(make_js_undefined());
+}
+
+static Item js_writable_stream_writer_write(Item env_item, Item chunk) {
+    JS_ENV_OR_UNDEFINED(env, env_item);
+    return js_writable_stream_writer_call(env[0], "write", chunk, 1);
 }
 
 static Item js_writable_stream_writer_close(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return js_promise_resolve(make_js_undefined());
-    Item sink = js_get_key_cstr(env[0], "__sink__");
-    Item close_fn = js_get_key_cstr(sink, "close");
-    if (js_is_callable(close_fn)) {
-        js_call_function(close_fn, sink, NULL, 0);
-    }
-    js_set_key_cstr(env[0], "__closed__", (Item){.item = b2it(true)});
-    return js_promise_resolve(make_js_undefined());
+    JS_ENV_OR_UNDEFINED(env, env_item);
+    return js_writable_stream_writer_call(env[0], "close", make_js_undefined(), 0);
 }
 
 static Item js_writable_stream_get_writer_stub(void) {
-    Item stream = js_get_this();
-    Item* env = js_alloc_env1(stream);
-    Item writer = js_new_object();
-    js_set_key_cstr(writer, "write", js_new_native_closure(js_writable_stream_writer_write, 1, env, 1));
-    js_set_key_cstr(writer, "close", js_new_native_closure(js_writable_stream_writer_close, 0, env, 1));
-    return writer;
+    RootFrame roots(4);
+    Rooted<Item> stream(roots, js_get_this()), writer(roots, js_new_object());
+    Item* env = js_alloc_env1(stream.get());
+    if (!env) return ItemError;
+    Rooted<Item> write(roots, js_new_native_closure(js_writable_stream_writer_write, 1, env, 1));
+    Rooted<Item> close(roots, js_new_native_closure(js_writable_stream_writer_close, 0, env, 1));
+    JS_RETURN_IF_ERROR(js_set_key_cstr(writer.get(), "write", write.get()));
+    JS_RETURN_IF_ERROR(js_set_key_cstr(writer.get(), "close", close.get()));
+    return writer.get();
 }
 
 extern "C" Item js_writable_stream_new(Item underlying_sink) {
-    Item obj = js_new_object_with_class(JS_CLASS_WRITABLE_STREAM);
-    js_set_key_cstr(obj, "__sink__", underlying_sink);
-    js_set_key_cstr(obj, "__closed__", (Item){.item = b2it(false)});
-    Item get_writer_key = js_name_item("getWriter");
-    Item get_writer_fn = js_new_native_function(js_writable_stream_get_writer_stub);
-    js_set_key_default(obj, get_writer_key, get_writer_fn);
-    return obj;
+    RootFrame roots(3);
+    Rooted<Item> sink(roots, underlying_sink), obj(roots, js_new_object_with_class(JS_CLASS_WRITABLE_STREAM));
+    Rooted<Item> get_writer(roots, js_new_native_function(js_writable_stream_get_writer_stub));
+    JS_RETURN_IF_ERROR(js_set_key_cstr(obj.get(), "__sink__", sink.get()));
+    JS_RETURN_IF_ERROR(js_set_key_cstr(obj.get(), "__closed__", (Item){.item = ITEM_FALSE}));
+    JS_RETURN_IF_ERROR(js_set_key_cstr(obj.get(), "getWriter", get_writer.get()));
+    return obj.get();
 }
 
 static Item js_transform_stream_controller_terminate(Item env_item) {
@@ -18616,6 +18639,17 @@ static Item js_transform_stream_close_readable(Item readable) {
         (Item){.item = (uint64_t)(uintptr_t)env});
 }
 
+static Item js_transform_stream_apply(Item method, Item transformer, Item readable,
+        Item* args, int argc) {
+    RootFrame roots(2);
+    Rooted<Item> output(roots, js_call_function(method, transformer, args, argc));
+    if (item_is_error(output.get())) {
+        Rooted<Item> reason(roots, js_error_lane_payload(output.get()));
+        JS_RETURN_IF_ERROR(js_readable_stream_error(readable, reason.get()));
+    }
+    return output.get();
+}
+
 static Item js_transform_stream_sink_write(Item env_item, Item chunk) {
     JS_ENV_OR_UNDEFINED(env, env_item);
     RootFrame roots(5);
@@ -18628,7 +18662,7 @@ static Item js_transform_stream_sink_write(Item env_item, Item chunk) {
         js_get_key_cstr(transformer_root.get(), "transform"));
     if (js_is_callable(transform_root.get())) {
         Item args[] = {chunk_root.get(), controller_root.get()};
-        return js_call_function(transform_root.get(), transformer_root.get(), args, 2);
+        return js_transform_stream_apply(transform_root.get(), transformer_root.get(), readable_root.get(), args, 2);
     }
     return js_transform_stream_enqueue(readable_root.get(), chunk_root.get());
 }
@@ -18644,8 +18678,7 @@ static Item js_transform_stream_sink_close(Item env_item) {
         js_get_key_cstr(transformer_root.get(), "flush"));
     if (js_is_callable(flush_root.get())) {
         Item args[] = {controller_root.get()};
-        Item flush_result = js_call_function(flush_root.get(), transformer_root.get(), args, 1);
-        if (item_is_error(flush_result)) return flush_result;
+        JS_RETURN_IF_ERROR(js_transform_stream_apply(flush_root.get(), transformer_root.get(), readable_root.get(), args, 1));
     }
     return js_transform_stream_close_readable(readable_root.get());
 }
@@ -18723,4 +18756,116 @@ extern "C" Item js_text_decoder_stream_new(Item encoding, Item options) {
         js_text_decoder_stream_transform, 2, env, 1));
     js_set_key_cstr(transformer_root.get(), "transform", transform_root.get());
     return js_transform_stream_new(transformer_root.get());
+}
+
+static VMapVtable js_decompression_state_vtable = {
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, node_zlib_stream_free, nullptr,
+};
+
+static bool js_decompression_bytes(Item chunk, const char** data, int* length) {
+    JsArrayBuffer* buffer = nullptr;
+    if (js_is_typed_array(chunk)) {
+        buffer = js_get_typed_array_ptr(chunk.map)->base.buffer;
+    } else if (js_is_dataview(chunk)) {
+        JsDataView* view = js_get_dataview_ptr(chunk);
+        if (js_arraybuffer_view_is_out_of_bounds(view)) return false;
+        buffer = view->buffer;
+    } else if (js_is_arraybuffer(chunk)) {
+        buffer = js_get_arraybuffer_ptr_item(chunk);
+    }
+    return buffer && !js_arraybuffer_shared(buffer) && !js_arraybuffer_detached(buffer) &&
+        js_item_bytes(chunk, data, length);
+}
+
+static Item js_decompression_enqueue(Item controller, const NodeZlibBytes* decoded) {
+    if (decoded->length == 0) return make_js_undefined();
+    RootFrame roots(4);
+    Rooted<Item> owner(roots, controller);
+    Rooted<Item> buffer(roots, js_arraybuffer_from_bytes(decoded->data, decoded->length));
+    JS_RETURN_IF_ERROR(buffer.get());
+    Rooted<Item> bytes(roots, js_typed_array_new_from_buffer(JS_TYPED_UINT8, buffer.get(), 0, decoded->length));
+    JS_RETURN_IF_ERROR(bytes.get());
+    Rooted<Item> enqueue(roots, js_get_key_cstr(owner.get(), "enqueue"));
+    Item args[] = {bytes.get()};
+    return js_call_function(enqueue.get(), owner.get(), args, 1);
+}
+
+static Item js_decompression_run(Item owner, Item chunk, Item controller, bool final) {
+    RootFrame roots(3);
+    Rooted<Item> state(roots, owner), source(roots, chunk), destination(roots, controller);
+    VMap* carrier = state.get().vmap;
+    const char* input = nullptr;
+    int length = 0;
+    if (!carrier->data) return js_throw_type_error("DecompressionStream is closed or errored");
+    if (!final && !js_decompression_bytes(source.get(), &input, &length)) {
+        node_zlib_stream_free(carrier->data);
+        carrier->data = nullptr;
+        return js_throw_type_error("DecompressionStream requires a BufferSource");
+    }
+    NodeZlibBytes decoded;
+    // The codec borrows the rooted source only until it returns native output bytes.
+    bool success = node_zlib_stream_run(carrier->data, (const uint8_t*)input, length,
+        final ? Z_FINISH : Z_NO_FLUSH, &decoded);
+    if (final || !success) {
+        node_zlib_stream_free(carrier->data);
+        carrier->data = nullptr;
+    }
+    if (!success) return decoded.status == Z_MEM_ERROR ? ItemError
+        : js_throw_type_error("Invalid or incomplete compressed data");
+    Item output = js_decompression_enqueue(destination.get(), &decoded);
+    node_zlib_bytes_free(&decoded);
+    return output;
+}
+
+static Item js_decompression_transform(Item env_item, Item chunk, Item controller) {
+    JS_ENV_OR_UNDEFINED(env, env_item);
+    return js_decompression_run(env[0], chunk, controller, false);
+}
+
+static Item js_decompression_flush(Item env_item, Item controller) {
+    JS_ENV_OR_UNDEFINED(env, env_item);
+    return js_decompression_run(env[0], make_js_undefined(), controller, true);
+}
+
+static Item js_decompression_stream_new(Item format) {
+    if (get_type_id(js_get_new_target()) != LMD_TYPE_FUNC)
+        return js_throw_type_error("DecompressionStream requires new");
+    RootFrame roots(7);
+    Rooted<Item> name(roots, format);
+    name.set(js_to_string(name.get()));
+    JS_RETURN_IF_ERROR(name.get());
+    String* value = name.get().get_string();
+    static const struct { const char* name; NodeZlibCodecMode mode; int window_bits; } formats[] = {
+        {"deflate", NODE_ZLIB_CODEC_INFLATE, MAX_WBITS},
+        {"deflate-raw", NODE_ZLIB_CODEC_INFLATE_RAW, -MAX_WBITS},
+        {"gzip", NODE_ZLIB_CODEC_GUNZIP, MAX_WBITS + 16},
+    };
+    const auto* selected = &formats[0];
+    for (; selected != formats + sizeof(formats) / sizeof(formats[0]); ++selected) {
+        size_t length = strlen(selected->name);
+        if (value->len == length && memcmp(value->chars, selected->name, length) == 0) break;
+    }
+    if (selected == formats + sizeof(formats) / sizeof(formats[0]))
+        return js_throw_type_error("Unsupported DecompressionStream format");
+    Rooted<Item> prototype(roots, js_get_prototype_from_constructor_default(js_get_new_target(), JS_CLASS_OBJECT, -1));
+    JS_RETURN_IF_ERROR(prototype.get());
+    // The two transform callbacks share a precise GC owner for abandoned streams.
+    Rooted<Item> state(roots, vmap_new());
+    JS_RETURN_IF_ERROR(state.get());
+    VMap* carrier = state.get().vmap;
+    carrier->vtable = &js_decompression_state_vtable;
+    if (!node_zlib_stream_init(selected->mode, selected->window_bits, Z_DEFAULT_COMPRESSION,
+            8, Z_DEFAULT_STRATEGY, &carrier->data, nullptr, ZlibMemberPolicy::Single)) return ItemError;
+    Rooted<Item> transformer(roots, js_new_object());
+    JS_RETURN_IF_ERROR(transformer.get());
+    Item* env = js_alloc_env1(state.get());
+    if (!env) return ItemError;
+    Rooted<Item> transform(roots, js_new_native_closure(js_decompression_transform, 2, env, 1));
+    Rooted<Item> flush(roots, js_new_native_closure(js_decompression_flush, 1, env, 1));
+    JS_RETURN_IF_ERROR(js_set_key_cstr(transformer.get(), "transform", transform.get()));
+    JS_RETURN_IF_ERROR(js_set_key_cstr(transformer.get(), "flush", flush.get()));
+    Rooted<Item> stream(roots, js_transform_stream_new(transformer.get()));
+    JS_RETURN_IF_ERROR(stream.get());
+    js_set_prototype(stream.get(), prototype.get());
+    return stream.get();
 }

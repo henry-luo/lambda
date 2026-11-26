@@ -1,0 +1,6 @@
+{
+  cases: 122,
+  matched: 116,
+  guarded: 6,
+  failures: []
+}

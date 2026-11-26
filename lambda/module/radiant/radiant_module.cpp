@@ -5832,12 +5832,6 @@ static bool radiant_host_svg_clip_contains(DomElement* element, const void* leng
     return svg_dom_clip_contains_point(element, (const SvgLengthContext*)lengths, (FontContext*)fonts,
         frame, contains, point, (const SvgDomStyleScope*)scope);
 }
-static void* radiant_host_web_animation_create(DomElement* element, void* keyframes,
-        double duration, const void* timing, Pool* pool) {
-    return css_web_animation_create(element, (CssKeyframes*)keyframes, duration,
-        (const TimingFunction*)timing, pool);
-}
-
 static bool radiant_host_element_client_frame(DomNode* node, RdtMatrix* matrix, float* x, float* y) {
     // snapshot the projected frame and its CSS-plane origin together at the engine owner (D9.1.3).
     if (!node || !matrix || !view_get_client_matrix(node, matrix)) return false;
@@ -5918,7 +5912,13 @@ static const DomHostEngineOps radiant_host_operations = {
     radiant_host_svg_append_shape,
     radiant_host_svg_text_path,
     radiant_host_svg_clip_contains,
-    radiant_host_web_animation_create,
+    css_web_animation_create,
+    css_web_animation_current_time,
+    css_web_animation_is_relevant,
+    css_web_animation_play,
+    css_web_animation_pause,
+    css_web_animation_set_current_time,
+    css_web_animation_cancel,
     dom_range_adopt_subtree,
     [](DomDocument*) {}, // required host ABI slot; endpoint setters maintain the holds
     dom_selection_collapse,

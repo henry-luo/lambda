@@ -20,9 +20,9 @@ observations still require re-verification. Add new Radiant issues here.
 
 ## Open issues
 
-<a id="ri-254"></a>
+<a id="ri-260"></a>
 
-### RI-254 — Detached frame documents accumulate during viewer navigation
+### RI-260 — Detached frame documents accumulate during viewer navigation
 
 **Open, observed 2026-11-26.** Repeatedly switch between a local HTML page
 and a text file in `lambda view`. The allocator report retains a separate
@@ -33,9 +33,33 @@ retirement needs to track those lifetime edges and wait until the relevant
 evaluators are quiescent (D5.5.1, D6.3.3). This affects the mixed-document
 memory gate. Transformed inline previews have a separate lifetime.
 
+<a id="ri-259"></a>
+
+- [RI-259 — Cached previews repeat stylesheet, font and layout allocation](<Radiant_Issue_Ledger (fixed).md#ri-259>).
+
+<a id="ri-258"></a>
+
+- [RI-258 — A broad rebuild loses the input measurements of its completed container cascade](<Radiant_Issue_Ledger (fixed).md#ri-258>).
+
+<a id="ri-257"></a>
+
+- [RI-257 — SVG auto-height measurement ignores its resolved width](<Radiant_Issue_Ledger (fixed).md#ri-257>).
+
+<a id="ri-256"></a>
+
+- [RI-256 — Flex layout loses ratio-transferred height](<Radiant_Issue_Ledger (fixed).md#ri-256>).
+
+<a id="ri-255"></a>
+
+- [RI-255 — Shadow stylesheets skip their own host](<Radiant_Issue_Ledger (fixed).md#ri-255>).
+
+<a id="ri-254"></a>
+
+- [RI-254 — Nested flex height queries lose the percentage containing width](<Radiant_Issue_Ledger (fixed).md#ri-254>).
+
 <a id="ri-253"></a>
 
-- [RI-253 — Cached previews repeat stylesheet, font and layout allocation](<Radiant_Issue_Ledger (fixed).md#ri-253>).
+- [RI-253 — Loading animation frames silently age held CSS effects](<Radiant_Issue_Ledger (fixed).md#ri-253>).
 
 <a id="ri-252"></a>
 
@@ -1082,28 +1106,54 @@ All 126 owner fragmentation tests pass. See
 
 ### RI-041 — URL-based CSS image masks have no paint consumer
 
-**Status:** OPEN feature gap, 2026-11-12. **Lambda blocker:** no; captures
-complete, but Craft's decorative paper shapes remain substantially different.
-Ownership **D9.1.1v4 / D9.1.3v2**, effects contract **D5.5.1 / CI-18**.
-The existing mask path is limited to radial gradients: MaskProp retains only
-a RadialGradient and resolve_css_mask_image calls resolve_radial_gradient_value;
-URL image masks are not retained or consumed. The support matrix already
-marks URL/linear/multilayer mask consumers open.
+**Status:** PARTIAL, 2026-11-26. Ownership **D9.1.1v4 / D9.1.3v2**.
+Effects contract **D5.5.1 / CI-18**.
 
-Craft's authored CSS uses mask-image:url(/images/decorations/paperSheetMask.svg)
-and paperShredTriangleFrontMask/paperShredBlobMask variants. These masks cut
-the torn edges in Chromium; Radiant paints the unmasked solid paper geometry.
-The inline logo-outline URL mask has the same unsupported image consumer.
-RI-040 restores the heading and product placement, isolating this remaining
-large decoration difference from the repaired flex sizing.
+**2026-11-26.** A single URL image mask now uses the stylesheet’s resource
+base, the existing image cache and computed tile geometry. The renderer
+flattens the subtree, then samples mask alpha or luminance in the owner’s
+coordinate space. An unavailable URL has zero coverage. The paint record
+uses a frame-local image handle, and the existing retained-list check
+rejects live mask payloads. Input shorthand and longhand admission is
+recorded in LI-126 (**D5.5.1 / D9.1.1v4 / D9.1.2v2 / D9.1.3v2**).
 
-Implementing resource-backed mask images, sizing/positioning and SVG mask
-rasterization/composition is outside this round's existing-bug milestone.
-No shape is substituted or hidden. Evidence: Lambda
+The callback fixture covers standalone SVG, WebP, repeat, rotation,
+stylesheet-relative resolution, shorthand priority, a failed request, and
+a live reset. The radial mask UI fixture passes all 30 assertions. Two
+ordinary Craft pairs restore the torn edges at 1.53% mean error. The same
+paint consumer reveals the Acme AE Onboarding panel and photograph in Dock’s
+saved authored DOM. Dock stays high pending a qualifying live frame.
+This iteration covers one URL or radial layer (**D10.1.7 / CI-18**).
+[Regression](../test/online/render_css_image_masks.test.cjs) ·
+[CSS Masking](https://www.w3.org/TR/css-masking-1/#the-mask-image) ·
+[Round 218](../test/online/comparison/repairs.html#round-218).
+
+**2026-11-26, layered image follow-up.** Standalone image and CSS gradient
+layers now use the shared tile and gradient geometry. Each layer computes
+alpha or luminance, and the compositor applies `add`, `subtract`,
+`intersect` or `exclude` from the bottom layer up. A `none` slot supplies
+zero coverage in a list. The layer properties retain their computed
+periods for inheritance (CI-18, **D5.5.1 / D9.1.3v2**).
+
+Both ordinary Draftbit pairs show the gradient confined to its border.
+Mean error falls from 14.36% to 0.75%. Local checks cover the four operators,
+mixed SVG and WebP resources, generated gradients, inheritance, and the
+borrowed display-list and transformed render paths. Chromium omits a leading
+`none` in the reduced intersection and drops an unused inherited mask
+position. Radiant follows the CSS Masking used-value
+rules. Inline and paged clips, and URLs selecting an SVG mask element,
+remain open (**D10.1.7 / CI-18**).
+[CSS Masking](https://www.w3.org/TR/css-masking-1/#layering) ·
+[Round 219](../test/online/comparison/repairs.html#round-219).
+
+**Original report, 2026-11-12.** `MaskProp` retained only a radial gradient.
+Craft's authored CSS used `mask-image:url(/images/decorations/paperSheetMask.svg)`
+and variants for the torn edges. Radiant painted solid paper geometry where
+Chromium used the masks. The inline wordmark outline also used a URL mask.
+RI-040 had restored the heading and product placement, isolating the
+decoration difference from the repaired flex sizing. Evidence includes
 temp/online-visual-round5/craft-static.html, round-six live capture
-temp/online-visual-round6/craft-live.png, and the unchanged browser reference
-test/online/snapshots/saas_landing_436-browser.png. This observation does not
-assign other pages' blank content to masking without their own evidence.
+temp/online-visual-round6/craft-live.png, and the paired browser reference.
 
 **Additional evidence, 2026-11-21:** Dock's `.hero-scene-foreground` repeats
 the full workspace photograph above its product panel (`z-index:1` on the
@@ -1163,6 +1213,17 @@ The current macOS replay and its platform lookup control are recorded at
 <a id="ri-031"></a>
 
 ### RI-031 — Dock captures after redundant work is removed; layout cost remains
+
+**2026-11-26.** The current release still reaches the 150-second native
+deadline. RI-258 fixes a redundant full container-query probe. Stable broad
+rebuilds in the profiling run take about 8.5–8.8 seconds, down from
+14.5–15.5 seconds, while the saved geometry and live stylesheet controls
+retain correct query results. Subsequent startup turns still repeatedly
+reach broad relational fallback. In one sequence each of five CSS custom
+property writes on the same editor container requests a full rebuild.
+The same 1000 ms capture window applies. Dock stays high
+(**D5.5.1 / D9.1.3v2 / D10.1.7**). See
+`temp/online-visual-round244/dock-candidate-profile/`.
 
 **Latest qualification129 — PARTIAL:** LI-089 evaluates the authored relative
 Oklch background; LI-090 reuses the existing all-only cascade cache for absent

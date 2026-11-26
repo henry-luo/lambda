@@ -1,0 +1,185 @@
+[[{
+      text: "124",
+      issue: null,
+      unsupported: null
+    }, {
+      text: "",
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 register initialization"
+    }, {
+      text: "",
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 register initialization"
+    }, {
+      text: "7",
+      issue: null,
+      unsupported: null
+    }, {
+      text: "{}",
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 register initialization"
+    }, {
+      text: "{}7",
+      issue: null,
+      unsupported: null
+    }, {
+      text: "",
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 register initialization"
+    }, {
+      text: "",
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 register initialization"
+    }, {
+      text: "\\textbackslash{}count125/125/125",
+      issue: null,
+      unsupported: null
+    }, {
+      text: "",
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 register initialization"
+    }, {
+      text: "",
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 register initialization"
+    }, {
+      text: "",
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 register initialization"
+    }, {
+      text: "43/\\textbackslash{}dimen43",
+      issue: null,
+      unsupported: null
+    }, {
+      text: "{}",
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 register initialization"
+    }, {
+      text: "{}43",
+      issue: null,
+      unsupported: null
+    }, {
+      text: "",
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 register initialization"
+    }, {
+      text: "",
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 register initialization"
+    }, {
+      text: "",
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 register initialization"
+    }, {
+      text: "",
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 register initialization"
+    }, {
+      text: "\\setcounter{foo}{7}7 ",
+      issue: null,
+      unsupported: null
+    }, {
+      text: "",
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 register initialization"
+    }, {
+      text: "\\newlength{\\x}",
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 register initialization"
+    }, {
+      text: "\\newlength{\\x}\\textbackslash{}skip61/61",
+      issue: null,
+      unsupported: null
+    }], [{
+      text: "124",
+      issue: null,
+      unsupported: null
+    }, {
+      text: "",
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 register initialization"
+    }, {
+      text: "",
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 register initialization"
+    }, {
+      text: "7",
+      issue: null,
+      unsupported: null
+    }, {
+      text: "{}",
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 register initialization"
+    }, {
+      text: "{}7",
+      issue: null,
+      unsupported: null
+    }, {
+      text: "",
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 register initialization"
+    }, {
+      text: "",
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 register initialization"
+    }, {
+      text: "\\textbackslash{}count125/125/125",
+      issue: null,
+      unsupported: null
+    }, {
+      text: "",
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 register initialization"
+    }, {
+      text: "",
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 register initialization"
+    }, {
+      text: "",
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 register initialization"
+    }, {
+      text: "43/\\textbackslash{}dimen43",
+      issue: null,
+      unsupported: null
+    }, {
+      text: "{}",
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 register initialization"
+    }, {
+      text: "{}43",
+      issue: null,
+      unsupported: null
+    }, {
+      text: "",
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 register initialization"
+    }, {
+      text: "",
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 register initialization"
+    }, {
+      text: "",
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 register initialization"
+    }, {
+      text: "",
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 register initialization"
+    }, {
+      text: "\\setcounter{foo}{7}7 ",
+      issue: null,
+      unsupported: null
+    }, {
+      text: "",
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 register initialization"
+    }, {
+      text: "\\newlength{\\x}",
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 register initialization"
+    }, {
+      text: "\\newlength{\\x}\\textbackslash{}skip61/61",
+      issue: null,
+      unsupported: null
+    }]]

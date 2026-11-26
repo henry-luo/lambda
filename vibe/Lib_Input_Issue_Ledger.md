@@ -15,9 +15,17 @@ Resolved records are in the [fixed issue ledger](<Lib_Input_Issue_Ledger (fixed)
 
 ## Open issues
 
+<a id="li-127"></a>
+
+- [LI-127 — Re-registering a math font grows the font resource registry](<Lib_Input_Issue_Ledger (fixed).md#li-127>).
+
+<a id="li-126"></a>
+
+- [LI-126 — The CSS mask shorthand and its geometry had no property dispatch](<Lib_Input_Issue_Ledger (fixed).md#li-126>).
+
 <a id="li-125"></a>
 
-- [LI-125 — Re-registering a math font grows the font resource registry](<Lib_Input_Issue_Ledger (fixed).md#li-125>).
+- [LI-125 — CSS matching loses the meaning of shadow host selectors](<Lib_Input_Issue_Ledger (fixed).md#li-125>).
 
 <a id="li-124"></a>
 

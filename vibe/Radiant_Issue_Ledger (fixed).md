@@ -14,9 +14,9 @@ are unchanged. Full evidence is under `../../lambda/temp/kianhup-style/`.
 
 ## Fixed issues
 
-<a id="ri-253"></a>
+<a id="ri-259"></a>
 
-### RI-253 — Cached previews repeat stylesheet, font and layout allocation
+### RI-259 — Cached previews repeat stylesheet, font and layout allocation
 
 **Fixed 2026-11-26.** Switching between the math Markdown and intensive TeX
 fixtures in `lambda view` recreated 298 parsed inline sheets per round in
@@ -25,11 +25,180 @@ its unexposed sheet. Stylesheet removal still withdraws its rules from the
 cascade. An author that obtained the old CSSOM object retains its own copy.
 Animation and font caches are invalidated when the changed sheets contribute
 their at-rules. CSS font registration publishes directly to the shared font
-registry (D5.5.1, D5.5.3, D10.2.4 and LI-125).
+registry (D5.5.1, D5.5.3, D10.2.4 and LI-127).
 
 Retained layout replay now allocates live text rectangles from the same list
 to which it returns them. Retiring a border releases its computed corners,
 with layout and paint sharing the currently owned snapshot (D5.5.1, D5.5.3).
+
+<a id="ri-258"></a>
+
+### RI-258 — A broad rebuild loses the input measurements of its completed container cascade
+
+**Fixed, 2026-11-26.** Broad DOM reconciliation applied the new cascade
+against existing query container boxes, then reset their view resources.
+Layout compared its first probe to an empty baseline and repeated the
+full probe and cascade even when the query measurements were unchanged.
+The Radiant rebuild now snapshots the same eligible container boxes
+before releasing the view resources. Committed effects still follow the
+settled query pass, and changed dimensions or names still recascade
+(**D5.5.1 / D9.1.1v4 / D9.1.3v2**).
+
+The stylesheet mutation control has five matching native and Chromium
+CSSOM observations. Unchanged input needs two native passes, down from
+three. Three changed input cases still need three. All 62 local render
+tests and 13 UI fixtures pass. Dock’s stable broad rebuilds take about
+8.5–8.8 seconds in the candidate trace, compared with 14.5–15.5 seconds
+in the preceding release. Its ordinary capture still times out (RI-031).
+Evidence is in `temp/online-visual-round244/`.
+[Regression](../test/online/render_relational_mutations.test.cjs).
+
+<a id="ri-257"></a>
+
+### RI-257 — SVG auto-height measurement ignores its resolved width
+
+**Fixed, 2026-11-26.** An SVG with 777 × 358 presentation attributes used
+a CSS width of 576 px and a height percentage without a definite basis.
+Its final viewport was 265.39 px tall, but its flex wrapper measured
+358 px. Chromium used 265.38 px for both. Ease Health’s original hero
+stylesheet produced the same mismatch at a larger width.
+
+Intrinsic replaced-height measurement transfers a definite resolved width
+through the SVG’s natural ratio when the block dimension is automatic.
+The other intrinsic queries retain the natural-size fallback
+(**D9.1.3v2 / D5.5.1**). The regression checks geometry and the area below
+the wrapper. The ordinary captures restore the product animation, with a
+residual crop at the right edge during the card reveal (**D10.1.7**).
+[Regression](../test/online/render_svg_flex_ratio.test.cjs) ·
+[Round 214](../test/online/comparison/repairs.html#round-214).
+
+<a id="ri-256"></a>
+
+### RI-256 — Flex layout loses ratio-transferred height
+
+**Fixed, 2026-11-26.** A 240 px flex container with an 8:5 ratio and a short
+text child shrank to 20 px. In a nested column, its parent assigned 150 px
+and late child wrapping replaced that height with 120 px. Chromium kept
+150 px in both cases. Refrakt reproduced the nested loss with its original
+stylesheet and a script-free replay. Its 1,200 × 750 px gallery clipped to
+125.4 px in Radiant. [CSS Box Sizing Level 4](https://drafts.csswg.org/css-sizing-4/#aspect-ratio).
+
+Final flex sizing transfers a definite width through the preferred ratio
+before distributing space. A content-based automatic minimum can grow the
+box, while intrinsic probes retain their natural measurement. Late layout
+of a nested column reuses the fixed-axis decision that already recognizes
+the parent's assigned height (**D9.1.3v2 / D5.5.1**).
+
+All 62 focused controls pass. The new geometry fixture covers row and column
+flex, growth, overflow, max-height, border-box sizing and nested text wrap.
+Both ordinary Refrakt captures restore the gallery and centered title at
+the existing frame (**D10.1.7**). [Round 213](../test/online/comparison/repairs.html#round-213).
+
+<a id="ri-255"></a>
+
+### RI-255 — Shadow stylesheets skip their own host
+
+**Fixed, 2026-11-26.** The scoped stylesheet walk began at the shadow
+fragment. It matched the nodes inside the fragment and never collected
+rules on the host. Linktree and Bento left their consent panels below the
+viewport. Teachable drew its panel text over a transparent background
+because the host's custom properties were missing.
+
+Full and per element cascades now apply the host's own shadow sheets before
+its descendants read inherited values. They use the source tree and
+declaration context from [LI-125](<Lib_Input_Issue_Ledger (fixed).md#li-125>)
+under **D9.1.1v4 / D9.1.3v2 / D5.5.1**. The fixture checks fixed geometry,
+paint, a generated box, inherited values, and live class, attribute, CSSOM
+and media changes. It passes in AST, MIR and Chromium. All 15 selected
+AST shadow and slot checks and the Radiant integer cast lint pass.
+
+Linktree and Bento restore the complete consent panel in ordinary matched
+captures and clear high severity at 1.45% and 1.14% mean error. Teachable's
+panel now has a readable background, text and button. The current Chromium
+capture has no panel and shows the primary offer action. The current
+Lambda frame still rates high. Evidence is in
+`temp/online-visual-round235/` and [round 207](../test/online/comparison/repairs.html#round-207).
+
+<a id="ri-254"></a>
+
+### RI-254 — Nested flex height queries lose the percentage containing width
+
+**Fixed, 2026-11-26.** Native layout ownership **D9.1.3v2**, with selected
+measurement state governed by **D5.5.1**. Comand 524's hero column measures
+355.6px instead of 420.4px, moving its correctly sized headline down 129.6px
+and clipping the copy/action. The unchanged saved, script-free document
+reproduces the live result. The RI-065 inline formatter remains correct.
+
+The child-height fallback computes a fixed-width parent's content width,
+subtracts child margins and passes the wrapping width into the intrinsic
+query. It drops the distinct percentage containing width. Resolving the
+child's `width:100%` then uses a stale ancestor basis: a reduced 240px query
+becomes 1200px or 560px, losing a wrapped line. A percentage-width group
+happens to materialize styles through a different earlier query and hides
+the error. Recascading also hides the first-layout defect in the old test.
+
+The shared fallback now performs the height query while supplying both
+widths to the existing containing-block scope. Both callers use that helper;
+there is no alternate line algorithm, authored-width override or site check.
+The existing dynamic regression now checks the first fixed-width layout,
+horizontal child margins, fixed/percentage group widths, recascade, break
+visibility, repeated constrained queries and selected text preservation.
+Its new cold-layout assertions fail before the repair by 36px.
+
+**Qualification:** all 11 focused intrinsic-height, column, ratio and
+percentage-basis tests pass; the layout integer-cast lint passes. The saved
+Comand document now measures 420.4px and places the headline at 333.6px,
+against current Chromium's 420.391px and 333.609px. The ordinary live PNG
+also restores the copy and primary action placement. The missing background
+video remains separate; this is not a complete Comand clearance. Broad
+baselines have not been repeated for this layout change.
+
+Evidence: `temp/online-visual-round234/{unit-before.log,unit-final.log,
+fixed-group-trace2.log,fixed-group-after.json,comand-saved-after.json,
+comand-geometry.json,lint.log}` and the ordinary qualified capture. Temporary
+trace instrumentation is excluded from production source and the candidate.
+
+The subsequent JS13-L88 repair restores Comand's video in two ordinary
+captures. The earlier geometry repair and the timer repair are both present
+in the release that clears the page at 2.09% mean error (**D10.1.7**).
+[Round 208](../test/online/comparison/repairs.html#round-208).
+
+<a id="ri-253"></a>
+
+### RI-253 — Loading animation frames silently age held CSS effects
+
+**Fixed, 2026-11-26.** The headless elapsed-load profile holds CSS age until
+its selected post-load interval, while JavaScript and host timelines advance.
+Pre-load rAF dispatch introduced by JS13-L86 called the shared scheduler's
+host anchor. After its initial anchor, that function advanced current_time
+without rebasing held CSS start/pause clocks. CSS effects therefore consumed
+load time even though the frame preparation sampled only timeline drivers.
+The no-rAF control selected the correct half-yellow one-second fade; the
+same script/image load waits with rAF selected a fully finished green fade.
+Both new maintained CSS-age assertions fail on the preceding release.
+
+The existing host-anchor helper now accepts a preserve_css_time option.
+Loading snapshot frames rebase CSS animation/transition start and pause clocks
+as host time advances; timeline and media clocks retain their elapsed time.
+Normal host and selected virtual frames keep their prior behavior. Lambda's
+DOM bridge supplies the actual loading phase through its existing frame hook
+(**D9.1.3v2 / D9.5.6v2 / D10.1.7**). No RuntimeState layout, authored CSS,
+visibility, capture origin or timer budget changes. The CSS pixel assertion
+is shared between the clock and frame fixtures rather than copied.
+
+**Qualification:** 22 scheduler tests pass, including two new clock/paused
+cases. Five AST controls, four MIR controls and two Chromium controls pass;
+each loading-frame fixture now also checks CSS age and the authored pause.
+The Radiant integer-cast lint passes. One accumulated JS-layout baseline is
+**630/630**, with no failures, errors, skips or partials. Ordinary native
+captures preserve Family's resolved hero/actions; Frame.io retains its dark,
+low montage, so no further page clearance is assigned to this repair.
+Report205 remains **68 high / zero critical / 999 low**.
+
+Evidence: `temp/online-visual-round232/{maintained-css-age-before.log,
+scheduler-unit.log,focused-ast-chromium.log,focused-mir.log,baseline-js.json,
+lint.log,qualified-run,checkpoint.md}`. Final release SHA256:
+`01392e8090f48504a81b27cc7c3ce8f89b1844c94e0da70e96994ad1c266a98c`.
 
 <a id="ri-252"></a>
 

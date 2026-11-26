@@ -1,0 +1,2 @@
+let sources = ["\\ExplSyntaxOn\\the\\hyphenchar\\nullfont\\relax\\ExplSyntaxOff", "\\ExplSyntaxOn\\the\\skewchar\\nullfont\\relax\\ExplSyntaxOff", "\\ExplSyntaxOn\\hyphenchar\\nullfont=9\\relax\\the\\hyphenchar\\nullfont\\relax\\ExplSyntaxOff", "\\ExplSyntaxOn\\the\\fontdimen7\\nullfont\\relax\\ExplSyntaxOff", "\\ExplSyntaxOn\\the\\fontdimen0\\nullfont\\relax\\ExplSyntaxOff", "\\ExplSyntaxOn\\the\\fontdimen8\\nullfont\\relax\\ExplSyntaxOff"];
+[for (source in sources) (let r=parse(source,{type:"tex"}) ^ {null}, if(r == null) null else {text:r.text,diagnostics:r.diagnostics})]

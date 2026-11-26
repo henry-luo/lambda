@@ -107,10 +107,14 @@ node --test test/online/render_clip.test.cjs
 node --test test/online/render_observers.test.cjs test/online/render_observer_zero_area.test.cjs
 node --test test/online/render_snapshot_ready_tasks.test.cjs
 node --test test/online/render_readable_stream.test.cjs test/online/render_readable_tee.test.cjs
+node --test test/online/render_decompression_stream.test.cjs
 node --test test/online/render_base64.test.cjs test/online/render_service_worker_events.test.cjs
 node --test test/online/render_selector_roots.test.cjs test/online/render_selector_identifiers.test.cjs
 node --test test/online/render_direction_mutations.test.cjs test/online/render_relational_mutations.test.cjs
 node --test test/online/render_load_frames.test.cjs test/online/render_load_clock.test.cjs
+node --test test/online/render_child_timer_ownership.test.cjs
+node --test test/online/render_css_font_load.test.cjs
+node --test test/online/render_web_animation_playback.test.cjs
 node --test test/online/render_dataset_metadata.test.cjs
 node --test test/online/render_error_stack.test.cjs test/online/render_document_title.test.cjs
 node --test test/online/render_grid.test.cjs
@@ -122,6 +126,7 @@ node --test test/online/render_nested_pseudo.test.cjs
 node --test test/online/render_intrinsic_width_value.test.cjs
 node --test test/online/render_positioned_order.test.cjs
 node --test test/online/render_shadow_positioned.test.cjs
+node --test test/online/render_shadow_host.test.cjs
 node --test test/online/render_video_percentage.test.cjs
 node --test test/online/render_video_first_frame.test.cjs
 node --test test/online/render_canvas_transform.test.cjs
@@ -4336,3 +4341,242 @@ Only the ordinary final Superpower native frame refreshes. Inventory stays
 **69 high, zero critical, 998 low**, 1067 pairs, severity sorted. All URLs,
 1066 other rows, browser reference and frame history remain; capture policy
 is unchanged (**D10.1.7**). See [round 203](comparison/repairs.html#round-203).
+
+
+Round 204 qualifies **JS13-L86** on ordinary online pages. The loader delivers
+coalesced pre-load animation frames through the existing rooted dispatcher;
+frozen captures, callback/microtask boundaries and CSS age stay correct
+(**D6.4.1 / D8.4.4 / D10.1.7**). The final release includes both runtime and
+loader adapter changes; earlier incomplete links are excluded.
+
+**Family clears high severity**: supporting copy and both primary actions
+render with the heading, navigation and large artwork. Its matched current
+pair has **2.58% mean error / 8.02% changed area**. Anam completes without
+reproducing the earlier experimental crash, but its heading/actions remain
+unresolved; current Chromium also starts with those regions hidden, so it
+does not clear the historical omission. Frame.io retains a major dark/low
+montage difference. No unique remaining cause is assigned to either page.
+
+**Five current AST and four MIR controls pass.** The earlier two Chromium
+fixture groups remain recorded; three ordinary page pairs qualify this
+release. No broad baseline repeats. Inventory is **68 high, zero critical,
+999 low**, 1067 pairs, severity sorted. All URLs, 1064 other rows and previous
+images remain. No capture-policy or budget change; mixed CDP timestamp
+alignment stays unqualified. [Evidence](comparison/repairs.html#round-204).
+
+
+Round 205 fixes **RI-253**: pre-load rAF advanced the shared native scheduler
+and silently aged CSS effects. Loading host frames now preserve CSS animation
+and transition start/pause ages while timeline/media clocks advance. Normal
+host frames and selected virtual frames retain their behavior
+(**D9.1.3v2 / D9.5.6v2 / D10.1.7**). Both extended held-script/image
+regressions fail the prior release; the shared CSS pixel assertion now also
+runs on the frame fixtures.
+
+**22 scheduler tests, five AST controls, four MIR controls, two Chromium
+controls and the native integer-cast lint pass.** One accumulated JS-layout
+baseline passes **630/630**, with no errors, skips or partials. No further
+broad gate repeats. Family keeps its resolved hero/actions; Frame.io remains
+high with the dark/low montage. No additional clearance is claimed.
+
+A separate mixed browser-clock reduction remains unresolved: individual
+animation holds are rejected because they resume an authored pause. The
+browser capture policy stays unchanged and diagnostic frames are excluded.
+Inventory remains **68 high, zero critical, 999 low**, 1067 pairs, severity
+sorted. Two ordinary native frames refresh with prior images retained;
+browser references, URLs, review history and 1065 other rows remain.
+[Evidence](comparison/repairs.html#round-205).
+
+
+Round 206 clears **Mode**: complete navigation, heading, hero photographs,
+query illustration, primary action and consent now render. Its formerly
+declined 142207-byte framework executes under the corrected normal policy.
+The current matched pair has **1.16% mean error / 1.54% changed area**.
+This is qualification of accumulated repairs, with no new site-specific code.
+
+**Affinity remains high under JS13-L87.** Its Rive canvas initialization waits
+for unavailable WebAssembly. Removing that namespace in Chromium leaves the
+canvas uninitialized with no drawing calls. Denying both WebGL contexts still
+renders its Canvas2D artwork, so neither GPU capability nor Blob image
+decoding is assigned as its cause (**D8.4.4 / D9.5.6v2**). WebAssembly is a
+deferred major feature; no runtime or artwork fallback is fabricated.
+
+Two ordinary matched pairs and focused source/API controls qualify this
+review. The runtime and pin are unchanged; the preceding **630/630**
+JS-layout milestone is retained without a repeated build or baseline.
+Inventory is **67 high, zero critical, 1000 low**, 1067 pairs, severity sorted.
+All URLs, 1065 other rows, prior frames and review history remain. Diagnostic
+frames are excluded and capture policy is unchanged (**D10.1.7**).
+[Evidence](comparison/repairs.html#round-206).
+
+
+Round 207 fixes **LI-125 / RI-255**. The selector matcher distinguishes
+`:host` from logical selectors. The scoped cascade applies the host's own
+shadow sheet before descendants resolve inherited values. Normal outer
+rules and important inner rules win by CSS cascade context
+(**D9.1.1v4 / D9.1.3v2 / D5.5.1**).
+
+**Linktree and Bento clear high severity** with their consent panel restored
+at the Chromium position. Current mean error falls from 9.28% to **1.45%**
+for Linktree and from 8.97% to **1.14%** for Bento, which redirects to Linktree.
+Teachable's panel has its background, text and button again. Its panel still
+covers the primary offer action visible in the Chromium capture, so Teachable
+remains high.
+
+The maintained regression fails the preceding release and passes AST, MIR
+and Chromium. All 15 selected AST shadow and slot checks, the Radiant integer
+cast lint and the **630/630 JS layout baseline** pass. Three ordinary pairs use
+the existing 1000 ms capture frame (**D10.1.7**). The report has **65 high,
+zero critical and 1,002 low** across 1,067 pairs. Previous frames are retained.
+[Evidence](comparison/repairs.html#round-207).
+
+
+Round 208 fixes **JS13-L88**. A child frame’s load can keep the shared native
+loop busy while an earlier parent timer becomes due. The owner now retains
+that timer until its callback can run. The maintained fixture covers a
+timeout, an interval and cancellation through that boundary
+(**D6.3.3 / D6.4.1 / D8.4.4**).
+
+**Comand clears high severity.** Two ordinary preceding release captures
+omit the hero video and each log four timer handoff failures. The repaired
+release shows the video and preserves RI-254’s corrected hero placement on
+two captures. Against the same current Chromium reference, error falls from
+17.07% to 2.70% and 2.09%. The repeat has 1.50% changed area.
+
+All 36 focused loading checks and five MIR checks pass. The ordinary pair
+uses the existing 1000 ms frame (**D10.1.7**). The report has **64 high,
+zero critical and 1,003 low** across 1,067 pairs, and retains the previous
+Comand frames. [Evidence](comparison/repairs.html#round-208).
+
+
+Round 209 confirms **Stellar clears high severity**. Two ordinary pairs
+show the heading, copy, navigation, action and visible project cards.
+The native images are identical and both comparisons have **3.92% mean
+error / 9.72% changed area**. Both use the preceding verified release
+and the existing snapshot policy (**D10.1.7**).
+
+Homerun customers remains high after a blank isolated native repeat.
+Both Homerun pages call the current pending font API (JS13-L33).
+The severity report has **63 high, zero critical and 1,004 low** across
+1,067 pairs. Stellar’s prior frames are retained.
+[Evidence](comparison/repairs.html#round-209).
+
+
+Round 210 restores **Homerun and Homerun customer stories**. The preceding
+release leaves the homepage transparent and customer stories can also be
+transparent on a repeat. Both pages call `document.fonts.load` seven times.
+JS13-L33 now settles CSS-connected font requests from decoded sources.
+Radiant validates downloaded font bytes before installing them, which lets a
+usable fallback render after a corrupt response
+(**D6.3.3 / D6.4.1 / D9.1.2v2 / D9.5.6v2**).
+
+Two independent ordinary comparisons use the existing 1000 ms post-load
+frame (**D10.1.7**). Each page’s two native frames are identical. The
+homepage measures **1.10% mean error / 2.46% changed area** and the customer
+stories page measures **0.52% / 0.33%**. The severity report now has **61
+high, zero critical and 1,006 low** across 1,067 pairs. Prior paired frames
+are retained. [Evidence](comparison/repairs.html#round-210).
+
+
+Round 211 clears **Agora, Dia and Supabase customer stories**. JS13-L89
+advances Web Animations on the document clock and composites overlapping
+effects in creation order (**D9.1.3v2 / D9.5.6v2 / D10.1.7**).
+Two independent ordinary pairs per page show the content that was missing.
+The repeat mean errors are **0.86%**, **3.13%** and **2.77%**, respectively.
+All 32 focused checks, the forced-GC control and all 630 JS layout checks
+pass. The report has **58 high, zero critical and 1,009 low** across 1,067
+pairs. [Evidence](comparison/repairs.html#round-211).
+
+
+Round 212 clears **Hera and Anam** using the installed round 211 release.
+Hera’s title is visible as its reveal progresses. Anam’s introduction and
+signup and demo actions are visible in both native attempts and two of three
+ordinary Chromium references. Each page’s native attempts are identical.
+The selected ordinary frames (**D10.1.7**) measure **2.13%** and **3.87%**
+mean error, respectively. Ease Health still lacks its product illustration.
+The report has **56 high, zero critical and 1,011 low** across 1,067 pairs.
+[Evidence](comparison/repairs.html#round-212).
+
+
+Round 213 clears **Refrakt**. RI-256 preserves the 750 px height transferred
+from the declared aspect ratio across flex layout and late text wrapping
+(**D9.1.3v2 / D5.5.1**). Both ordinary frames restore the centered title
+and photo gallery at the existing frame (**D10.1.7**), at **0.52%** and
+**0.54% mean error**. All 62 focused controls and all 630 JS layout checks
+pass. The static baseline has 3,851 passes and the same `dom_view_role_nested`
+failure on both releases. The report now has **55 high, zero critical and
+1,012 low** across 1,067 pairs. [Evidence](comparison/repairs.html#round-213).
+
+
+Round 214 clears **Ease Health**. JS13-L90 decodes its Lottie archive.
+JS13-L91 samples geometry after the frame’s queued writes, and RI-257
+removes excess wrapper height from a width-constrained SVG
+(**D6.3.3 / D8.4.4 / D9.1.3v2 / D9.5.6v2**). Both ordinary pairs at the
+existing frame (**D10.1.7**) show all three product cards at **6.93%** and
+**7.12% mean error**, down from **16.21%**. The rightmost card still has a
+clipped edge. All 124 focused controls and 630 JS layout checks pass. The
+static baseline has 3,851 passes and its existing `dom_view_role_nested`
+failure. The report has **54 high, zero critical and 1,013 low** across
+1,067 pairs. [Evidence](comparison/repairs.html#round-214).
+
+
+Round 215 clears **Shopify**. JS10-L2 implements `Intl.PluralRules` using
+pinned CLDR rule data and the native decimal codec
+(**D6.3.3 / D7.2.2 / D8.4.4**). Both ordinary comparisons restore the
+headline, primary action and video at **5.91%** and **6.06% mean error**
+(**D10.1.7**). Cequence recovers its navigation, call to action and artwork.
+Its heading and description remain missing, so it stays high. The report
+has **53 high, zero critical and 1,014 low** across 1,067 pairs.
+[Evidence](comparison/repairs.html#round-215).
+
+
+Round 216 clears **Cequence**. JS13-L92 replaces the contents of a reused
+HTML template in place and keeps the fragment owned by the native template
+(**D5.5.1 / D6.3.3 / D9.1.1v4 / D9.5.4 / D9.5.6v2**). Both ordinary pairs
+at the existing frame (**D10.1.7**) show the full hero copy, demo action and
+illustration at **0.39% mean error and 0.04% changed area**. The preceding
+release still omitted the copy at 25.55%. Twenty-two focused checks,
+Chromium and forced GC controls, and all 630 JS layout checks pass. The
+static baseline has identical per-case metrics and the existing
+`dom_view_role_nested` failure. The report has **52 high, zero critical
+and 1,015 low** across 1,067 pairs. [Evidence](comparison/repairs.html#round-216).
+
+
+Round 217 clears **Sierra**. JS10-L3 implements `Intl.ListFormat` using
+pinned Unicode CLDR patterns and the shared iterable protocol
+(**D6.3.3 / D7.2.2 / D8.4.4**). Both ordinary comparisons show the hero
+video, navigation and consent at **3.04% mean error**, down from 45.56%
+(**D10.1.7**). The hero text is at a different visible phase. Fourteen
+focused native runs and all 630 JS layout cases pass. Each backend passes
+160 direct Test262 variants. Both variants of the foreign-realm case
+still fail in the existing cross-realm profile. The report has **51 high,
+zero critical and 1,016 low** across 1,067 pairs.
+[Evidence](comparison/repairs.html#round-217).
+
+
+Round 218 clears **Craft**. LI-126 and RI-041 admit, resolve and paint a
+single CSS URL image as an alpha or luminance mask
+(**D5.5.1 / D9.1.1v4 / D9.1.2v2 / D9.1.3v2**). Both ordinary pairs
+show the torn edges at **1.53% mean error** and **1.92% changed area**
+(**D10.1.7**). Wordmark and button contrast differ. Dock’s saved page
+shows the recovered masked hero. Its ordinary native capture still times
+out at 150 seconds. All 126 Input parser cases, 107 display-list cases,
+42 local fixtures, 30 radial-mask assertions and 630 JS layout cases
+pass. Static layout is identical to the preceding control with 3,851
+passes, six skips and the existing `dom_view_role_nested` failure. The
+report has **50 high, zero critical and 1,017 low** across 1,067 pairs.
+[Evidence](comparison/repairs.html#round-218).
+
+
+Round 219 clears **Draftbit**. Native CSS mask layers retain their own
+location and size, and composite their alpha from bottom to top
+(RI-041, **D5.5.1 / D9.1.3v2**). Both ordinary pairs show the repaired
+hero backdrop, copy and phone preview at **0.75% mean error** and
+**0.77% changed area** (**D10.1.7**). The star fills and blur differ.
+RI-258 reduces repeated container-query work on Dock. The ordinary Dock
+capture still times out. All 105 local cases, 107 display-list cases,
+the transformed mask raster test, and 13 UI fixtures pass. JS and static
+layout match the preceding result, including the existing static
+`dom_view_role_nested` failure. The report has **49 high, zero critical
+and 1,018 low** across 1,067 comparisons.
+[Evidence](comparison/repairs.html#round-219).

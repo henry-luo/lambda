@@ -94,6 +94,9 @@ struct JsAstLiteralCache {
     RootVector values = {};
 };
 
+struct JsTimerHandle;
+struct JsCssFontRequest;
+
 struct JsEventLoopState {
     // Each queue owns a GC Array of one RuntimeJob shape. Queue order stays
     // policy-specific while storage and captured context are shared (JSCU30).
@@ -122,6 +125,10 @@ struct JsEventLoopState {
     bool negative_warning_emitted = false;
     bool virtual_clock_enabled = false;
     double virtual_clock_ms = 0.0;
+    // Ready wall timers still belong to their resource table while a foreign realm runs.
+    JsTimerHandle* deferred_timer_first = nullptr;
+    JsTimerHandle* deferred_timer_last = nullptr;
+    JsCssFontRequest* font_loads = nullptr;
 };
 struct JsRegexpLastMatch {
     // Slots 0/1 are input and full match; remaining slots are capture groups.

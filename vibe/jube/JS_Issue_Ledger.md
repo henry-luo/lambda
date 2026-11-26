@@ -676,7 +676,9 @@ browser/saas_landing_582,intl-observer/calls.json}`.
 
 <a id="js10-l2"></a>
 
-### JS10-L2 — Missing PluralRules aborts Shopify localization — **FEATURE GAP**
+<a id="js10-l2"></a>
+
+### JS10-L2 — Missing PluralRules aborts Shopify localization — **FIXED**
 
 **2026-11-22.** Shared JavaScript behavior follows **D8.4.4**. The Intl
 namespace in js_runtime.cpp has no PluralRules constructor. Shopify's admitted
@@ -706,24 +708,51 @@ frame to an engine regression. Cequence remains high. Evidence:
 `temp/online-visual-round215/{live/saas_landing_134/after,
 plural-control/browser/saas_landing_134,browser/saas_landing_134}/`.
 
-### JS10-L3 — Missing ListFormat aborts Sierra localization — **FEATURE GAP**
+**2026-11-26.** The constructor, locale lookup and cardinal, ordinal and
+range selection use generated Unicode CLDR 48 rule tables. The existing
+decimal codec derives the operands from the selected digit and rounding
+settings. The branded object owns a precisely traced private record
+(**D6.3.3 / D7.2.2 / D8.4.4**). The shared locale parser supplies the
+current locale normalization profile. The range operation follows the
+published same-formatted-value rule. [ECMA-402 §17](https://tc39.es/ecma402/2025/#pluralrules-objects).
 
-**2026-11-25.** Shared JavaScript behavior follows **D8.4.4**. Sierra's
-localization hook constructs `new Intl.ListFormat(t,e)` in its admitted
-`2pidxksmlzggh.js` bundle. The native Intl namespace has no ListFormat
-constructor; the traced first generic TypeError is at that construction.
-React subsequently renders Sierra's own “Something went wrong” boundary.
-Deleting only `Intl.ListFormat` in Chromium reproduces that boundary and
-reports `TypeError: Intl.ListFormat is not a constructor`; the unchanged
-Chromium control renders the customer-facing hero.
+Twelve focused Intl and DOM checks across AST and MIR, the forced-GC
+control and all 630 JS layout comparisons pass. Two ordinary frames clear
+Shopify. Cequence recovers the navigation, action and illustration while its
+heading and description remain absent (**D10.1.7**).
+[Regression](../../test/js/intl_plural_rules.js) ·
+[Round 215](../../test/online/comparison/repairs.html#round-215).
 
-Locale-aware list formatting is a substantial new Intl feature, outside this
-existing-bug round. No English-only formatter, hidden capability or forced
-fallback is introduced. Sierra remains high; the older annotation describing
-only a missing headline does not describe this current error frame. Evidence:
-`temp/online-visual-round208/error-source-filtered/live/saas_landing_494/after/`,
-`list-format-control/browser/saas_landing_494/` and
-`browser/saas_landing_494/`.
+### JS10-L3 — Missing ListFormat aborts Sierra localization — **FIXED**
+
+**2026-11-26.** Sierra's localization hook constructs `new Intl.ListFormat`
+in its admitted `2pidxksmlzggh.js` bundle. The missing native constructor
+stopped React at Sierra's error boundary. Deleting that constructor in
+Chromium reproduced the failure. A fresh preceding-release pair measures
+45.56% mean error and shows the storefront video only in Chromium.
+
+The constructor uses pinned Unicode CLDR 48 list templates and default
+content tags. It provides locale lookup, all three types and styles,
+`formatToParts`, `resolvedOptions` and `supportedLocalesOf`. Spanish and
+Hebrew contextual forms follow ICU’s conjunction rules and the Unicode 17
+script data. Parts preserve input strings and IteratorClose preserves the
+original exception. The service shares native setup and precise roots with
+the existing Intl APIs (**D6.3.3 / D7.2.2 / D8.4.4**).
+
+The maintained fixture passes in AST and MIR, including forced GC. The
+Chromium control agrees on the supported locale cases. That Chromium build
+falls back for Māori and Tigrinya and omits the empty string’s element part.
+ECMA-402’s list algorithm retains that part. Of 81 local Test262 files, 80
+pass in both default and strict mode in each backend. Both variants of the
+same cross-realm prototype case fail. The existing `$262.createRealm()`
+profile supplies neither an Intl namespace nor the foreign default
+prototype (**D6.4.1 / D7.2.2**).
+
+Both ordinary Sierra pairs restore navigation, hero video and consent at
+3.04% mean error. The title enters during a different visible phase
+(**D10.1.7**). [Regression](../../test/js/intl_list_format.js) ·
+[ECMA-402 ListFormat](https://tc39.es/ecma402/2025/#listformat-objects) ·
+[Round 217](../../test/online/comparison/repairs.html#round-217).
 
 <a id="js10-l4"></a>
 
@@ -807,9 +836,197 @@ high review resolves; localized card and text differences remain.
 
 ## 13. Web Platform: DOM, CSSOM, Events & Fetch (JS13)
 
+<a id="js13-l93"></a>
+
+### JS13-L93 — Size-only container queries make ordinary inline style writes trigger a broad cascade — **FIXED**
+
+**2026-11-26.** Dock updates multiple CSS custom properties and reads
+geometry between writes. The host treated a size-only container rule as
+an attribute selector dependency, even for a write whose inline style
+path already performs layout. On the reduced page, both writes forced
+broad relational rebuilds because an unrelated shadow root was present.
+The opposite error occurred when only a shadow stylesheet inspected the
+actual `style` string. A sibling stayed at 30 px instead of changing to
+60 px.
+
+Layout-capable writes settle size queries through the existing inline
+style path. The paint-only path keeps its geometry checks. The mutation
+record retains a complete recascade when the changed `style` attribute
+can affect a live shadow selector. Scope and `attr()` still take the
+dependency path (**D5.5.1 / D9.1.3v2 / D9.5.6v2**).
+
+Both reduced controls pass in native and Chromium and report widths of
+30, 60 and 30 px. The unrelated shadow control avoids broad rebuilds.
+All 70 focused fixtures and 14 UI cases pass. The release artifact and
+baseline control are under `temp/online-visual-round246/`.
+[Regression](../../test/online/render_style_attribute_dependencies.test.cjs).
+
+<a id="js13-l92"></a>
+
+### JS13-L92 — Reused HTML templates lose their contents after markup replacement — **FIXED**
+
+**2026-11-26.** Cequence’s live HTML-to-React parser reads `template.content`
+to detect template support, repeatedly assigns `innerHTML` and walks the
+fragment’s children. The preceding implementation cached an empty fragment
+and wrote subsequent markup to the template element’s child chain. After
+JS10-L2 restored startup, this left the revealed heading and description
+wrappers empty. The reduced case shows one child on the old template
+element and none in its existing fragment. Chromium updates the fragment.
+
+Markup replacement parses with the HTML template context and targets its
+inert fragment. The native template owns that fragment across wrapper
+collection, with separate ownership and DOM ancestry. HTML/XML
+serialization, cloning and host adoption follow the owned fragment.
+Insertion checks prevent cycles through the host. Cross-document adoption
+of the fragment on its own remains outside this native document model
+(**D5.5.1 / D6.3.3 / D9.1.1v4 / D9.5.4 / D9.5.6v2**).
+
+Repeated replacement, nested contents, serialization, clone/import,
+host adoption, inert resources and cycle rejection pass. The maintained
+template check passes in Chromium and under forced native GC. Six existing
+DOM checks across AST and MIR and all 630 JS layout comparisons pass.
+Full HTML template insertion-mode coverage is still tracked with LI-074.
+[DOM regression](../../test/online/render_dom_clone_comments.test.cjs) ·
+[Resource regression](../../test/online/render_css_resource_discovery.test.cjs) ·
+[HTML markup insertion](https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#the-innerhtml-property).
+
+<a id="js13-l91"></a>
+
+### JS13-L91 — Geometry observers sample before queued document writes settle — **FIXED**
+
+**2026-11-26.** `observe()` queued a geometry-sampling microtask. A
+ResizeObserver reported a temporary 20 px box between Promise jobs and
+then reported the final size again. Chromium reported only the settled box.
+The release sample for Ease Health also showed this microtask rebuilding
+the document during network completion.
+
+Observer registration and layout now request a sample at the document's
+rendering opportunity. The frame runs author callbacks and their Promise
+jobs, commits their writes, then samples once. The initial sample still
+establishes the first layout when no author query has done so. The realm owns
+its pending flag, and observation uses the already selected frame
+(**D6.4.1 / D9.5.6v2 / D10.1.7**).
+
+The reduced test sees one 160 px entry after a frame callback completes the
+resize in both Radiant and Chromium. The test passes under forced GC, eight
+existing DOM observer checks pass in AST and MIR, and all 630 JS layout
+comparisons pass. [Regression](../../test/online/render_observers.test.cjs).
+
+<a id="js13-l90"></a>
+
+### JS13-L90 — Missing decompression streams stop Lottie archive loading — **FIXED for zlib formats**
+
+**2026-11-26.** Ease Health's replacement loader reads its ZIP directory,
+passes the raw DEFLATE entries to `DecompressionStream`, and drains the
+reader before parsing the animation and image assets. The preceding release
+throws `ReferenceError` on nine animations and leaves the main artwork absent.
+
+The browser constructor now runs `deflate`, `deflate-raw` and `gzip` through
+the shared native zlib stream provider and the existing Web Streams transport.
+The writable side accepts a `BufferSource`, and the readable side yields
+`Uint8Array` chunks. Format errors, truncated input, invalid checksums and
+trailing bytes reject both stream sides. A private native backing record
+follows the precisely traced transform closures until the codec is closed,
+errored or collected (**D6.3.3 / D7.2.4 / D8.4.4 / D9.1.3v2**).
+
+The archive fixture passes in Chromium, Radiant and forced GC. All 78
+focused controls and all 630 JS layout comparisons pass. An isolated replay
+of the actual animated SVG paints in Radiant at an explicit frame and through
+the author's normal observer-driven playback. Two ordinary pairs on the
+combined release show the three cards and clear Ease Health (**D10.1.7**).
+Brotli and complete Web Streams conformance remain open.
+[Regression](../../test/online/render_decompression_stream.test.cjs) ·
+[Round 214](../../test/online/comparison/repairs.html#round-214).
+
+<a id="js13-l89"></a>
+
+### JS13-L89 — Element animations lack automatic playback — **FIXED for document-timeline playback**
+
+**2026-11-26.** `Element.animate()` created a sample at time zero without
+putting the effect on the document clock. The same local markup paints an
+explicitly sought effect in the preceding release and in Chromium. Only
+Chromium reaches the forwards-fill frame for an automatically played effect.
+
+`Element.animate()` and `Animation.play()` now start a document-owned
+driver. Pause, seek and cancellation use the same timing state. Idle
+construction leaves the effect idle, and the effect sampler applies delay,
+duration, iterations and fill at the selected document frame. The compositor
+samples all effects on a target in creation order, including paused and
+forwards-filled effects. That preserves the priority of a later effect when
+an earlier effect is still running. Coercion roots protect timing getters
+(**D6.3.3**). The provider and captured frame follow
+**D9.1.3v2 / D9.5.6v2 / D10.1.7**.
+
+The Chromium-backed playback fixture and forced-GC run pass. All 32 focused
+playback, frame and font checks and all 630 JS layout checks pass.
+Alternate timelines, playback-rate changes and the full ready, finished and
+event lifecycle remain open. [Regression](../../test/online/render_web_animation_playback.test.cjs).
+
+<a id="js13-l88"></a>
+
+### JS13-L88 — A child frame can consume a ready parent timer — **FIXED**
+
+**2026-11-26.** A parent timer becomes due while a child frame holds the
+active evaluator during a delayed script load. The shared libuv loop
+consumes the timeout, then the runtime refuses the callback's foreign
+context switch. The timer is no longer scheduled when its owner resumes.
+A local HTTP fixture reproduces the lost timeout, wrong paint and handoff
+error on the preceding release.
+
+The event loop now keeps the due handle on the owning realm's ready list.
+The resource table retains its callback roots (**D6.3.3**) and its existing
+cancellation path. Owning turns run ready callbacks in order. Cancel,
+refresh and retirement unlink the handle. When capture switches to virtual
+time, already ready timers keep their deadlines and order. The active
+context rule and the selected snapshot frame follow **D6.4.1 / D10.1.7**.
+
+The maintained regression checks timeout order, interval delivery and
+cancellation through the child load. All 36 focused loading checks and five
+MIR checks pass under **D8.4.4**. Two ordinary Comand captures on the
+preceding release each log four timer handoff failures and omit the video.
+Both repaired captures complete without those failures and show the
+background video alongside the geometry restored by RI-254. Mean error
+against the same Chromium reference falls from 17.07% to 2.70% and 2.09%.
+The exact video also decodes from a local file and over loopback HTTP.
+Comand clears high severity in
+[round 208](../../test/online/comparison/repairs.html#round-208).
+Evidence is in `temp/online-visual-round236/`.
+
+<a id="js13-l87"></a>
+
+### JS13-L87 — Rive artwork requires the unavailable WebAssembly runtime — **FEATURE GAP**
+
+**2026-11-26.** Affinity's current main, vendor and dynamic chunks execute
+under the corrected normal source-admission policy. Its four large hero
+artwork panels remain absent. A behavior-preserving Chromium trace identifies
+the actual canvas as Canvas2D, with HTMLImageElement/Blob-URL image sources.
+Denying both WebGL2 and WebGL still renders the artwork: the GPU capability
+probe does not establish its cause. No font-loading calls are observed on
+this traced path.
+
+The canvas initialization stack points to the admitted Rive chunk batch
+`09036264ad89c61e.vendor.js+4b68c60404f2b3ac.vendor.js+0f3c766ce2eb44b6.js`.
+Its unchanged source waits for `RuntimeLoader.awaitInstance()` before
+`runtime.makeRenderer(canvas, ...)`, and loads the runtime through
+`WebAssembly.instantiateStreaming` / `instantiate`. Native reports
+`typeof WebAssembly === "undefined"`. Removing only that namespace in
+Chromium leaves the Rive canvas at its initial 300×150 buffer, opacity0 and
+no drawing calls, reproducing the artwork omission. The ordinary control
+has a 1200×800 visible buffer and hundreds of drawImage calls. This assigns
+the Rive initialization dependency, not every smaller layout difference.
+
+WebAssembly execution is a substantial missing platform feature outside the
+current existing-bug repair (**D8.4.4 / D9.5.6v2**). Affinity stays high. No
+native API is hidden, Blob image behavior altered, artwork substituted or
+capture limit changed. Diagnostic API-deletion frames are excluded from
+canonical comparisons. Evidence: `temp/online-visual-round233/`:
+`affinity-contexts.json`, `affinity-no-webgl.json`, `affinity-no-wasm.json`,
+the unchanged `affinity-canvas.js`, `platform-capabilities.json`, and the
+ordinary matched pair. This does not block independent remaining-page work.
+
 <a id="js13-l86"></a>
 
-### JS13-L86 — Elapsed loading suppresses animation-frame opportunities — **FIXED in focused controls; online qualification pending**
+### JS13-L86 — Elapsed loading suppresses animation-frame opportunities — **FIXED for loader opportunities**
 
 Found 2026-11-25 while reviewing remaining hidden startup content. With an
 admitted resource held for 1200ms, the preceding pinned native renderer runs
@@ -843,6 +1060,43 @@ load-frames-final-prior.log,load-frames-final-ast-chromium.log,checkpoint.md}`.
 Final candidate SHA256:
 `49c93174f6d5ea9bb514adfc99a34fab1cfbab610b6fabfe62da174ea4f51f73`.
 No broad baseline repeated after this bounded repair.
+
+**2026-11-26 online qualification.** A fresh release build includes Input,
+Radiant, the runtime, loader adapter and node-core at Root `cc14c63e1`, Input
+`291c6ec` and Radiant `c520417`. All three ordinary native captures complete
+with exit0/loadOk and have matching current Chromium references. Family now
+renders its supporting copy and both primary actions; heading, navigation and
+large artwork match the reference at 2.58% mean error / 8.02% changed area.
+Its manual major omission clears. Anam completes without reproducing the
+earlier experimental crash, but its heading/actions remain absent; the current
+reference also captures them hidden, so it does not clear the historical
+omission. Frame.io retains a large montage opacity/position difference.
+No unique remaining root is assigned to either page.
+
+Five current AST checks (four frame controls and the existing CSS-age control)
+and four MIR frame controls pass. Two inherited custom-property motion probes
+also pass and do not justify an unrelated cascade fix. The prior two Chromium
+fixture controls remain separately recorded; three current page references
+qualify this loader path. No broad baseline repeats. Report204 is severity
+sorted at **68 high / zero critical / 999 low**, with three refreshed pairs,
+previous frames retained and all URLs preserved. Evidence:
+`temp/online-visual-round231/`; final installed release SHA256
+`7de45c00af5f8fd408f231048cabe1eaf7d450e112dde32590e94f98b5e079b6`.
+Mixed CDP timestamp alignment and the broader animation lifecycle remain
+unqualified; no capture-policy change is made (**D10.1.7 / D8.4.4**).
+
+**CSS-age follow-up, 2026-11-26:** the original CSS-age controls omitted
+pending rAF. Combining those paths exposed a native scheduler rebasing
+regression, now repaired as [RI-253](<../Radiant_Issue_Ledger (fixed).md#ri-253>).
+The shared pixel assertion now checks each frame fixture. Both elapsed
+script/image groups fail before repair and pass afterward in AST/MIR;
+Chromium controls also pass. The accumulated JS-layout gate passes630/630.
+Family stays resolved; Frame.io remains high. A separate browser-clock
+reduction confirms that global CDP pause can leave a performance-based
+animation startTime ahead of its document timeline. Individually pausing
+animations is rejected because it resumes an author pause during loading.
+Neither capture policy nor authored visibility is overridden. This remaining
+mixed-timeline limitation is preserved in `temp/online-visual-round232/`.
 
 <a id="js13-l85"></a>
 
@@ -2624,7 +2878,29 @@ instrumented saved document. Evidence: `temp/online-visual-round133/`,
 including `fetch-before.log`, `xhr-before.log`, `focused-after.log`,
 `browser-base.json`, `local-js-controls.json` and the frozen source/pin.
 
-### JS13-L33 — Font-loading promises lack native resource completion — **OPEN feature gap**
+<a id="js13-l33"></a>
+
+### JS13-L33 — Font-loading promises lack native resource completion — **CSS-connected `load` repaired**
+
+**2026-11-26.** Both Homerun pages call `document.fonts.load` for two
+Inconsolata weights and five Inter weights. Their WebFont loading state can
+leave the visible page transparent at the ordinary capture frame.
+Lambda now settles the CSS-connected promise from Radiant’s selected source
+and Input’s font decoder (**D9.1.1v4 / D9.1.2v2 / D9.5.6v2**). Each pending
+request retains its promise in its owning realm and releases the native request
+before running promise reactions (**D6.3.3 / D6.4.1**).
+
+The local fixture fails on the preceding release and passes in Lambda and
+Chromium. It covers delayed valid bytes after a corrupt HTTP 200 response,
+usable font metrics, Unicode exclusions and both syntax and network errors.
+The first candidate settled the promise but left monospace metrics. Swapping
+source order or replacing the corrupt HTTP 200 with a 404 restored the metrics.
+The shared Radiant completion handler now validates downloaded bytes before
+installing a face in the renderer. [Regression](../../test/online/render_css_font_load.test.cjs).
+
+Programmatic `FontFace.load`, shared CSS-connected face identity and the full
+`FontFaceSet.ready` and event lifecycle remain open. Diagnostic evidence is
+under `temp/online-visual-round237/`.
 
 **2026-11-21.** The browser preamble exposes `FontFace` and
 `document.fonts.load`, but their promises deliberately remain pending: there
@@ -3494,10 +3770,9 @@ Inline shadow stylesheets now participate in the owning root's author cascade
 in source order. `ShadowRoot.styleSheets` is a live, same-object list using the
 same traversal. These sheets stay out of `document.styleSheets`. CSSOM edits,
 text changes, media changes, moves between roots and host insertion update the
-computed style and PNG paint. Selector parent relations stop at the shadow
-fragment boundary. Initial scoped link styles also enter the root cascade.
-Live linked-sheet lifecycle, adopted sheets, shadow name registries, `:host`
-and `::slotted` remain open (**D9.1.1v4 / D9.1.3v2 / D5.5.1**).
+computed style and PNG paint. Initial scoped link styles also enter the root
+cascade. Live linked-sheet lifecycle, adopted sheets, shadow name registries,
+`:host-context()` and `::slotted` remain open (**D9.1.1v4 / D9.1.3v2 / D5.5.1**).
 
 The 2026-11-25 Linktree post-script layout places its visible consent aside at
 y=9262.3, width 1200 and height 264.8, with no fixed-position style. Its shadow
@@ -3517,7 +3792,16 @@ fill and unstyled text overlapping the product interface. The original shadow
 markup/CSS replay confirms this separate styling limitation; it does not
 justify overriding the page styles. Evidence: `temp/online-visual-round203/`
 (`cookie-authored-shadow.html`, `cookie-tree-{before,after}.json`) under
-**D9.1.1v4 / D9.1.3v2**. This remaining scope feature is deferred.
+**D9.1.1v4 / D9.1.3v2**.
+
+The 2026-11-26 LI-125 and RI-255 repairs apply `:host` and `:host(...)` in
+the owning shadow stylesheet. A bare ordinary selector cannot see the host
+at that boundary. Host variables reach shadow descendants, and live class,
+attribute, CSSOM and media changes update the same cascade
+(**D9.1.1v4 / D9.1.3v2 / D5.5.1**). Linktree and Bento clear high severity
+with their consent panel visible. Teachable's panel styles are restored, and
+its ordinary pair remains high against current Chromium's panel-free frame.
+[Round 207](../../test/online/comparison/repairs.html#round-207).
 
 Declarative templates attach in navigation and explicit unsafe HTML parsing
 through the shared DOM root provider (Input LI-081). Root flags, closed

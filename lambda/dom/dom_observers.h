@@ -32,6 +32,8 @@ void dom_observers_children_replace_notify(void* parent, Item added, Item remove
 Item dom_observers_node_snapshot(void* first, bool siblings);
 void dom_observers_signal_slot_change(DomElement* slot);
 void dom_observers_post_layout(void);
+bool dom_observers_geometry_pending(void);
+bool dom_observers_sample_frame(void);
 void dom_observers_release_document(DomDocument* document);
 void dom_observers_reset(void);
 

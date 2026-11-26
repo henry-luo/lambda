@@ -1,0 +1,21 @@
+[{
+    text: "\\textbackslash{}count41/1264",
+    messages: [],
+    diagnostics: []
+  }, {
+    text: "20/124",
+    messages: [],
+    diagnostics: []
+  }, {
+    text: "\\textbackslash{}count43/-50000",
+    messages: [],
+    diagnostics: []
+  }, {
+    text: "\\textbackslash{}count125/125",
+    messages: ["\\l_my_int=\\count125"],
+    diagnostics: []
+  }, {
+    text: "1/0",
+    messages: [],
+    diagnostics: []
+  }, null, null]
