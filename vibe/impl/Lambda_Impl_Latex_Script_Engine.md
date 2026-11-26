@@ -34,13 +34,26 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Unicode reader scaling, 2026-11-26:** A release-only reader probe took
+  0.16 seconds for 4,001 characters and 3.95 seconds for 32,001 characters
+  when the source contained one non-ASCII scalar; an otherwise comparable
+  32,001-character ASCII source took 0.67 seconds. The reader repeatedly
+  slices the complete source at character offsets, and the runtime's Unicode
+  substring path recounts and rescans it (S1.8, D10.2.2v2). A temporary
+  character-array cache increased both 32,001-character cases to about
+  4.65 seconds, so it was not applied. A lower-overhead indexed-source design
+  and representative document measurements remain open. The probe and the
+  uncommitted experiment are under `temp/latex-retirement/`.
+
 - **External shape fingerprint cost, 2026-11-26:** Input now combines pointer
   identities as words instead of hashing each pointer byte; collision matches
   still check the complete shape (D3.4.3, D9.1.3v2). The 96-case MarkBuilder
   suite passes against the candidate. Two release bundled-fixture comparisons
   took 53.43/49.82 and 52.24/48.17 seconds for control/candidate, with exact
-  golden output. These are individual measurements, not a statistical
-  benchmark. The corpus timeout remains open; see LI-123 in the input ledger.
+  golden output. The previously timed-out bundled GTest now passes with the
+  optimized release executable and unchanged 60-second limit. These are
+  individual measurements, not a statistical benchmark. The corpus timeout
+  remains open; see LI-123 in the input ledger.
 
 - **Stream whitespace in math, 2026-11-26:** A broader 48-case retired-engine
   comparison found that `readline` can emit a category-12 carriage return
