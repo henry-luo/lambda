@@ -4090,6 +4090,8 @@ pub fn digest(expanded: map) Digested^ {
         {ast: null, issue: "latex-digest-unsupported", unsupported: "font token source mapping"}
     else if (expanded.mathchardef_emission_seen == true)
         {ast: null, issue: "latex-digest-unsupported", unsupported: "math character source mapping"}
+    else if (expanded.expl3_regex_seen == true)
+        {ast:null, issue:"latex-digest-unsupported", unsupported:"expl3 regex source mapping"}
     else if (expanded.expl3_bool_expr_seen == true)
         {ast: null, issue: "latex-digest-unsupported", unsupported: "expl3 boolean expression source mapping"}
     else if (expanded.expl3_str_case_seen == true)

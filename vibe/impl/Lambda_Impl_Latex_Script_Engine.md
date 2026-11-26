@@ -34,13 +34,28 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Expl3 regex matching, 2026-11-26:** The Script engine implements the
+  public protected `regex_match:nnTF`, `nnT` and `nnF` macros with a bounded
+  matcher for ASCII character and control-sequence tokens (D10.2.2v2). It
+  supports unanchored search, anchors, literals, dot, digit/word/whitespace
+  classes, bracket ranges, negation and `*`, `+`, `?`; other patterns,
+  non-ASCII and active character subjects, and unqualified assignment scopes
+  remain explicit unsupported results. The internal matcher is currently a
+  Script primitive rather than the native introspectable macro. A 180-case
+  generated matrix and targeted character-category, branching and meaning
+  checks agree with TeX Live 2025. Interpreter and JIT forced-GC checks pass.
+  The four-case focused GTest passed three cases; the existing integer-compare
+  case exceeded its unchanged 60-second limit and is being checked separately.
+  Regex document source mapping is guarded pending native tree qualification.
+  The full phase-five CSV expansion now reaches `str_if_eq:VnT`; its six table
+  assertions remain unresolved, and no CSV rendering parity is claimed.
+
 - **Expl3 `exp_args:NnV`, 2026-11-26:** Script preloads the native expandable
   helper, preserving the first argument and expanding the second variable's
   value (D10.2.2v2). Five TeX Live comparisons cover unexpanded control tokens,
   grouping, integer registers, empty values and aliases. Three focused GTests
   and interpreter/JIT forced-GC runs pass. Its value-argument document mapping
-  remains guarded. The complete phase-five CSV fixture now advances to the
-  unsupported `regex_match:nnTF`; CSV rendering is still failing.
+  remains guarded. The subsequent regex checkpoint records the next CSV blocker.
 
 - **Counter diagnostics and generated commands, 2026-11-26:** Counter errors
   and exhausted register allocation now retain the native messages and source

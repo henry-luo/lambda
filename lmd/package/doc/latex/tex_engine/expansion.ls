@@ -3,6 +3,7 @@ import stream: .stream
 import reader: .reader
 import primitives: .primitives
 import expl3: .expl3
+import regex: .regex
 import fp: .fp
 import dimension: .dimension
 import glue: .glue
@@ -2482,6 +2483,37 @@ fn expl3_ior_action(st: State, name, budget) State^ {
     else if (name == "ior_open:Nn") ior_open(current, target.token, budget)
     else if (name == "ior_close:N") ior_close_target(current, target.token)
     else ior_get(current, target.token, name == "ior_str_get:NN")
+}
+
+// Match only the ordinary compiled-pattern entry until other regex forms are ported.
+fn expl3_regex_match(st: State, budget) State^ {
+    let pattern_arg = stream.argument(st.input, true)^;
+    let subject = if (pattern_arg.error == null) stream.argument(pattern_arg.stream, true)^
+        else {stream:pattern_arg.stream,tokens:[],error:null};
+    let current = {*:st,input:subject.stream};
+    if (pattern_arg.error != null) fail(current,pattern_arg.error)
+    else if (subject.error != null) fail(current,subject.error)
+    else if (parameter_value(current,"globaldefs") != 0 or current.after_assignment != null)
+        unsupported(current,"expl3 regex assignment scope")
+    else {
+        let input = stream.push(stream.from_reader(reader.reader("")),pattern_arg.tokens)^;
+        let first = nonspace(input)^;
+        let pattern = stream.argument(first.stream,true)^;
+        let tail = nonspace(pattern.stream)^;
+        let builder = meaning(current,control_token("__regex_build:n"))^;
+        if (not is_control(first.token) or first.token.value != "__regex_build:n" or
+                builder.source_mapping_guard != "regex_builder" or pattern.error != null or tail.token != null)
+            unsupported(current,"expl3 regex builder")
+        else {
+            let result = regex.evaluate(pattern.tokens,subject.tokens,budget - current.expansions)^;
+            if (result.issue == "budget") fail(current,"tex-budget")
+            else if (result.issue != null) unsupported(current,"expl3 regex " ++ result.issue)
+            else {
+                let value = meaning(current,control_token(if (result.matched) "c_true_bool" else "c_false_bool"))^;
+                assign_meaning({*:current,expl3_regex_seen:true},"control:g__regex_success_bool",value,true)
+            }
+        }
+    }
 }
 
 fn expl3_ior_eof(st: State, name) State^ {
@@ -6466,6 +6498,8 @@ fn step(st: State, budget) State^ {
         expl3_keys_begin(current, cmd)
     else if (st.script_expl3 and expl3.clist_map(cmd))
         expl3_clist_map(current, cmd)
+    else if (st.script_expl3 and expl3.regex_action(cmd))
+        expl3_regex_match(current, budget)
     else if (st.script_expl3 and expl3.ior_action(cmd))
         after_assignment(current, expl3_ior_action(current, cmd, budget))
     else if (st.script_expl3 and expl3.token_assignment(cmd))
@@ -7000,6 +7034,11 @@ pub fn enable_script_expl3(st: State) State^ {
         {source: "\\tl_head:v{\\exp_args:Nv\\tl_head:n}", protected_flag: false},
         {source: "\\tl_tail:v{\\exp_args:Nv\\tl_tail:n}", protected_flag: false},
         {source: "\\exp_args:NV#1#2{\\exp_after:wN#1\\exp_after:wN{\\exp:w\\__exp_eval_register:N#2}}", protected_flag: false, source_mapping_guard: "exp_args_value"},
+        {source:"\\__regex_build:n{\\__regex_build_aux:Nn\\c_true_bool}",protected_flag:true,source_mapping_guard:"regex_builder"},
+        {source:"\\__regex_return:{\\if_meaning:w\\c_true_bool\\g__regex_success_bool\\prg_return_true:\\else:\\prg_return_false:\\fi:}",protected_flag:true},
+        {source:"\\regex_match:nnTF#1#2{\\__regex_if_match:nn{\\__regex_build:n{#1}}{#2}\\__regex_return:\\exp_end:}",protected_flag:true,argument_unqualified:true},
+        {source:"\\regex_match:nnT#1#2{\\__regex_if_match:nn{\\__regex_build:n{#1}}{#2}\\__regex_return:\\exp_end:\\use:n\\use_none:n}",protected_flag:true,argument_unqualified:true},
+        {source:"\\regex_match:nnF#1#2{\\__regex_if_match:nn{\\__regex_build:n{#1}}{#2}\\__regex_return:\\exp_end:{}}",protected_flag:true,argument_unqualified:true},
         // Preserve the first argument while expanding the second variable's value.
         {source: "\\exp_args:NnV#1#2#3{\\tex_expanded:D{\\exp_not:N#1{\\exp_not:n{#2}}{\\__kernel_exp_not:w\\exp_after:wN{\\exp:w\\__exp_eval_register:N#3}}}}", protected_flag:false, source_mapping_guard:"exp_args_value"},
         {source: "\\tl_head:V{\\exp_args:NV\\tl_head:n}", protected_flag: false},
