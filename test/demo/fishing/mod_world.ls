@@ -72,7 +72,7 @@ fn rock(i: int) any^ {
     return {i: i, x: p.x, z: p.z, y: y, r: r, h: h, yaw: roll(100 + i, 4)^ * u.TAU, top: y + r * h}
 }
 pub let ROCKS = [for (i in 0 to 71, let k = rock(i) ^ { null } where k != null and (clear_of_start(k) ^ { false })) k]
-// rocks whose tops reach near the surface stop the boat, the beaver and fish
+// rocks whose tops reach near the surface stop the boat, the otter and fish
 pub let OBSTACLES = [for (k in ROCKS where k.top > -0.35) {x: k.x, z: k.z, r: k.r * 0.95}]
 
 // water lilies: pads in clusters near the banks and scattered singles across the shallows; about one in
@@ -100,6 +100,9 @@ pub let LETTUCE = [for (i in 0 to 55, let p = spot(1700 + i, 0.3, 0.9) ^ { null 
 pub let KELP = [for (i in 0 to 39, let p = spot(1800 + i, 0.0, 0.7) ^ { null } where p != null and p.y < -1.2) p]
 pub let FANS = [for (i in 0 to 19, let p = spot(1900 + i, 0.25, 0.85) ^ { null } where p != null and p.y < -0.8) p]
 pub let MOSS_BALLS = [for (i in 0 to 49, let p = spot(2100 + i, 0.25, 0.95) ^ { null } where p != null and p.y < -0.3) p]
+// broad-leaved sword plants, and the carpet of leafy sheets over most of the floor
+pub let SWORDS = [for (i in 0 to 47, let p = spot(2200 + i, 0.2, 0.9) ^ { null } where p != null and p.y < -0.45) p]
+pub let CARPET = [for (i in 0 to 899, let p = spot(2400 + i, 0.0, 0.93) ^ { null } where p != null and p.y < -0.42) p]
 // reeds and cattails along the waterline, grass tufts on the banks
 // a point on a ring around the shore at a seeded angle and radius fraction
 fn rim(i: int, lo: float, hi: float) any^ => (let a = roll(i, 0)^ * u.TAU, let f = between(i, 1, lo, hi)^,

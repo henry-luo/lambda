@@ -20,11 +20,11 @@ fn target(body, position, q) => {type: "target", body: body, position: position,
 pub let PARKED = [0.0, -30.0, 0.0]
 pub fn targets(st) any^ {
     let b = st.boat
-    let o = st.beaver
+    let o = st.otter
     let fishes = [for (f in st.fish) if (f.mode == "hooked") (let p = sim.hooked_pose(st, f, st.t)^, target(f.id, p.position, u.quat(p.yaw, p.pitch, p.roll)))
         else target(f.id, [f.x, f.y, f.z], u.quat(f.h, f.pitch, f.roll))];
     [target("boat", [b.x, b.y, b.z], u.quat(b.h, b.pitch, b.roll)), target("camera-rig", st.camera.position, cam.look(st.camera.position, st.camera.target)^),
-     target("beaver", [o.x, o.y, o.z], u.quat(o.h, o.pitch, o.roll)), *fishes]
+     target("otter", [o.x, o.y, o.z], u.quat(o.h, o.pitch, o.roll)), *fishes]
 }
 fn identity(rows, key, id) any^ => (let hit = [for (r in rows where ((string(r[key]) == id) ^ { false })) r], if (len(hit) > 0) hit[0].identity else null)
 fn envelope(snap, sequence, tick) => {session: snap.session, generation: snap.generation, service_generation: snap.service_generation,

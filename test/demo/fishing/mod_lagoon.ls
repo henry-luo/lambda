@@ -1,6 +1,8 @@
 // The cove's static meshes, built once from mod_world: the floor and banks, the water and caustic
 // films, rocks, lily pads, floor life (tube sponges, starfish, urchins, pebbles), the jetty, and
-// instanced seagrass, reeds and bank tufts that sway in the shared wind clip. Everything that does
+// instanced reeds and bank tufts that sway in the shared wind clip, and instanced underwater plants
+// (strap weed, kelp, sword plants, lettuce and a carpet of leafy sheets) whose leaves wave in the plant
+// shader. Everything that does
 // not move shares a few merged buffers; colour lives in the vertices (linear light).
 import s: lambda.scene3d
 import o: lambda.scene3d.outdoor
@@ -91,14 +93,11 @@ fn jetty_buffer() any^ {
 pub let LANTERN = [w.JETTY.x + w.JETTY.width / 2.0 - 0.1, w.JETTY.deck + 0.95, w.JETTY.z1 + 0.1]
 
 // ---- instanced plants: one clump each, rooted at its origin so the wind bends it from the base
-let BLADE_BASE = w.col("#2f5e33")
-let BLADE_TIP = w.col("#9cc86c")
 fn ribbon(a, lean, height, width, base, tip) => (let c = cos(a), let sn = sin(a), let lx = cos(a + 1.57) * lean, let lz = sin(a + 1.57) * lean,
     {positions: [-c * width, 0.0, -sn * width, c * width, 0.0, sn * width,
         lx * 0.5 + c * width * 0.7, height * 0.55, lz * 0.5 + sn * width * 0.7, lx * 0.5 - c * width * 0.7, height * 0.55, lz * 0.5 - sn * width * 0.7,
         lx, height, lz],
      normals: [for (k in 0 to 4, x in [lx, 0.6, lz]) x], colors: [*base, *base, *tip, *tip, *tip], indices: [0, 1, 2, 0, 2, 3, 3, 2, 4]})
-pub fn seagrass_buffer() any^ => m.merge([for (k in 0 to 10) ribbon(k * 2.4, 0.1 + 0.05 * (k % 3), 0.5 + 0.14 * (k % 4), 0.03, BLADE_BASE, BLADE_TIP)])
 let REED = w.col("#6f8f45")
 let REED_TIP = w.col("#b5c27a")
 let CATTAIL = w.col("#6a4428")
@@ -115,15 +114,26 @@ fn instances(spots, size, tall = null) any^ => [for (p in spots, let k = size + 
 
 // ---- the cove as scene children
 pub let SUN = v.unit([-0.32, 0.78, -0.54])^
+// the underwater plants' wave shader, one material per kind of plant: [amplitude, reference height,
+// wavelength along the leaf, rate]
+// the plants' (and dipped oars') lighting, plus each one's own uniforms. refraction: how far what lies under
+// the surface wavers per metre of water above it; haze: the colour the water veils it in
+fn lit_material(id, vertex, uniforms) any^ => s.shader_material(vertex, glsl.PLANT_FRAGMENT, {time: 0.0, sun: SUN,
+    sun_color: [for (c in w.col("#fff1d9")) c * 0.95], sky: [for (c in w.col("#cdebf0")) c * 0.62], ground: [for (c in w.col("#40583a")) c * 0.62], *: uniforms},
+    {id: id, side: 'double'})
+fn plant_material(id, wave) any^ => lit_material(id, glsl.PLANT_VERTEX, {wave: wave, refraction: 0.025, haze: w.col("#4f7f6c")})^
+let PLANTS = {['m-weed']: [0.16, 0.9, 0.85, 1.25], ['m-kelp']: [0.3, 1.4, 1.2, 0.9], ['m-sword']: [0.06, 0.45, 0.7, 1.1],
+    ['m-lettuce']: [0.04, 0.25, 0.5, 1.2], ['m-carpet']: [0.025, 0.1, 0.45, 1.0]}
 pub fn materials() any^ => [
     s.material('lambert', {id: "m-ground", color: "#ffffff"}),
     s.material('lambert', {id: "m-plant", color: "#ffffff", side: 'double', 'wind-strength': 0.07, 'wind-height': 0.5, 'wind-frequency': 0.35}),
     s.material('lambert', {id: "m-reed", color: "#ffffff", side: 'double', 'wind-strength': 0.06, 'wind-height': 1.0, 'wind-frequency': 0.25}),
-    s.material('lambert', {id: "m-kelp", color: "#ffffff", side: 'double', 'wind-strength': 0.22, 'wind-height': 1.2, 'wind-frequency': 0.3}),
     s.material('lambert', {id: "m-lotus", color: "#ffffff", side: 'double', 'wind-strength': 0.025, 'wind-height': 0.6, 'wind-frequency': 0.4}),
     s.shader_material(glsl.SURFACE_VERTEX, glsl.WATER_FRAGMENT, {time: 0.0, sun: SUN,
         shallow: [0.06, 0.6, 0.56], deep: [0.0, 0.3, 0.36], sky: [0.62, 0.86, 0.9]}, {id: "m-water", transparent: true}),
-    s.shader_material(glsl.SURFACE_VERTEX, glsl.CAUSTIC_FRAGMENT, {time: 0.0, strength: 0.3}, {id: "m-caustic", transparent: true})]
+    s.shader_material(glsl.SURFACE_VERTEX, glsl.CAUSTIC_FRAGMENT, {time: 0.0, strength: 0.3}, {id: "m-caustic", transparent: true}),
+    *[for (id, wave in PLANTS) plant_material(string(id), wave)^],
+    lit_material("m-oar", glsl.IMMERSED_VERTEX, {refraction: 0.15, haze: w.col("#3d8c86")})^]
 pub fn elements() any^ => [
     s.mesh(m.geometry("g-floor", floor_buffer()^), "m-ground", {id: "floor", 'cast-shadow': false, 'receive-shadow': true}),
     s.mesh(m.geometry("g-rocks", m.merge([for (k in w.ROCKS) flora.rock_buffer(k)^])), "m-ground", {id: "rocks", 'cast-shadow': true, 'receive-shadow': true}),
@@ -133,18 +143,21 @@ pub fn elements() any^ => [
     s.mesh(m.geometry("g-pads", m.merge([*[for (p in w.PADS) flora.pad_buffer(p)^], *[for (p in w.PADS where p.flower != null) flora.lily_buffer(p)^]])),
         "m-plant", {id: "pads", 'cast-shadow': true, 'receive-shadow': true}),
     s.mesh(m.geometry("g-lotus", m.merge([for (st in w.LOTUS) flora.lotus_buffer(st)^])), "m-lotus", {id: "lotus", 'cast-shadow': true, 'receive-shadow': true}),
-    s.mesh(m.geometry("g-lettuce", flora.lettuce_buffer()^), "m-plant", {id: "lettuce", instances: instances(w.LETTUCE, 1.0, 0.3)^, 'cast-shadow': true}),
+    s.mesh(m.geometry("g-carpet", flora.carpet_buffer()^), "m-carpet", {id: "carpet", instances: instances(w.CARPET, 1.1, 0.12)^, 'cast-shadow': false}),
+    s.mesh(m.geometry("g-lettuce", flora.lettuce_buffer()^), "m-lettuce", {id: "lettuce", instances: instances(w.LETTUCE, 1.5, 0.3)^, 'cast-shadow': true}),
+    s.mesh(m.geometry("g-swords", flora.sword_buffer()^), "m-sword", {id: "swords", instances: instances(w.SWORDS, 1.1, 0.5)^, 'cast-shadow': true}),
     s.mesh(m.geometry("g-kelp", flora.kelp_buffer()^), "m-kelp", {id: "kelp", instances: instances(w.KELP, 1.0, 1.65)^, 'cast-shadow': true}),
     s.mesh(m.geometry("g-fans", flora.fan_buffer()^), "m-plant", {id: "fans", instances: instances(w.FANS, 1.2, 0.45)^, 'cast-shadow': true}),
     s.mesh(m.geometry("g-moss", flora.moss_buffer()^), "m-ground", {id: "moss", instances: instances(w.MOSS_BALLS, 0.9, 0.2)^, 'cast-shadow': true}),
-    s.mesh(m.geometry("g-seagrass", seagrass_buffer()^), "m-plant", {id: "seagrass", instances: instances(w.GRASS_CLUMPS, 1.0, 0.92)^, 'cast-shadow': true}),
+    s.mesh(m.geometry("g-weed", flora.weed_buffer()^), "m-weed", {id: "weed", instances: instances(w.GRASS_CLUMPS, 1.0, 1.0)^, 'cast-shadow': true}),
     s.mesh(m.geometry("g-reeds", reed_buffer()^), "m-reed", {id: "reeds", instances: instances(w.REEDS, 1.0)^, 'cast-shadow': true}),
     s.mesh(m.geometry("g-tufts", tuft_buffer()^), "m-plant", {id: "tufts", instances: instances(w.TUFTS, 1.2)^, 'cast-shadow': false}),
-    s.mesh(m.geometry("g-caustic", film_buffer(0.025)^), "m-caustic", {id: "caustics", 'cast-shadow': false, 'receive-shadow': false}),
-    s.mesh(m.geometry("g-water", film_buffer(0.0)^), "m-water", {id: "water", 'cast-shadow': false, 'receive-shadow': false})]
+    s.mesh(m.geometry("g-caustic", film_buffer(0.025)^), "m-caustic", {id: "caustics", 'cast-shadow': false, 'receive-shadow': false})]
+// the water film, its own element so the scene places it right after the cove's other meshes
+pub fn water() any^ => s.mesh(m.geometry("g-water", film_buffer(0.0)^), "m-water", {id: "water", 'cast-shadow': false, 'receive-shadow': false})
 // one long clip carries the water clock; the plants share the wind clip
 pub let TIDE = 600.0
 pub fn clips() any^ => [
-    s.clip("tide", [s.track("m-water.uniforms.time", [0.0, TIDE], [0.0, TIDE]), s.track("m-caustic.uniforms.time", [0.0, TIDE], [0.0, TIDE])],
+    s.clip("tide", [for (id in ["m-water", "m-caustic", "m-oar", *[for (k, wave in PLANTS) string(k)]]) s.track(id ++ ".uniforms.time", [0.0, TIDE], [0.0, TIDE])],
         {duration: TIDE, autoplay: true}),
-    o.wind("m-plant", 5.0)^, o.wind("m-reed", 7.0)^, o.wind("m-kelp", 6.0)^, o.wind("m-lotus", 8.0)^]
+    o.wind("m-plant", 5.0)^, o.wind("m-reed", 7.0)^, o.wind("m-lotus", 8.0)^]

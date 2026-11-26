@@ -133,21 +133,53 @@ pub fn lotus_buffer(st) any^ {
 }
 
 // ---- underwater clumps, rooted at their origin so the wind clip bends them from the base
-let LETTUCE = w.col("#5f9f5c")
-let LETTUCE_EDGE = w.col("#9fce78")
-let LETTUCE_VEIN = w.col("#b9dc94")
-// a rosette of broad ruffled leaves curling outward
-fn lettuce_leaf(yaw, size) any^ {
+// a sheet's outline fades toward the floor's colour, so seen through the water its edge is soft
+let RIM = w.col("#6d8460")
+let LETTUCE = {base: w.col("#5f9f5c"), edge: w.col("#9fce78"), vein: w.col("#b9dc94")}
+// a broad leaf sheet with a pale midrib and a ruffled edge: `rise` stands it up from the floor (lettuce
+// stands, a carpet leaf lies low), `wide` its width over its length
+fn sheet_leaf(yaw, size, rise, wide, ruffle, colours) any^ {
     let rows = 5, cols = 4
-    let grid = [for (j in 0 to rows, i in 0 to cols, let v = j / float(rows), let x = (i / float(cols) - 0.5) * size * 0.8 * sin(math.pi * (0.15 + 0.8 * v)))
-        {p: [x, size * (0.5 * v - 0.25 * v * v) + 0.03 * size * sin(i * 2.6 + j * 1.7) * v, size * (0.15 + 0.7 * v)],
-         c: if (i == 2) LETTUCE_VEIN else rig.mix(LETTUCE, LETTUCE_EDGE, v)^}]
+    let grid = [for (j in 0 to rows, i in 0 to cols, let v = j / float(rows), let x = (i / float(cols) - 0.5) * size * wide * sin(math.pi * (0.15 + 0.8 * v)))
+        {p: [x, size * rise * (v - 0.5 * v * v) + ruffle * size * sin(i * 2.6 + j * 1.7) * v, size * (0.15 + 0.7 * v)],
+         c: rig.mix(if (i == 2) colours.vein else rig.mix(colours.base, colours.edge, v)^, RIM, if (i == 0 or i == cols or j == rows) 0.8 else if (i == 1 or i == cols - 1 or j == rows - 1) 0.3 else 0.0)^}]
     let q = u.quat(yaw)^
     let pts = [for (g in grid) rig.qrot(q, g.p)^];
     {positions: [for (p in pts, c in p) c], normals: [for (p in pts, c in [0.0, 1.0, 0.0]) c], colors: [for (g in grid, c in g.c) c],
      indices: [for (j in 0 to rows - 1, i in 0 to cols - 1, q2 in cell(j * (cols + 1) + i, cols + 1)) q2]}
 }
-pub fn lettuce_buffer() any^ => m.merge([for (k in 0 to 8) lettuce_leaf(k * 2.4, 0.22 + 0.04 * (k % 3))^])
+pub fn lettuce_buffer() any^ => m.merge([for (k in 0 to 8) sheet_leaf(k * 2.4, 0.22 + 0.04 * (k % 3), 0.5, 0.8, 0.03, LETTUCE)^])
+// the floor carpet: broad rounded sheets lying low and overlapping, in mixed greens and teals (each
+// clump is shaded a little differently by the plant shader, so the floor reads as a patchwork)
+let CARPET = [{base: w.col("#346738"), edge: w.col("#5d8f4d"), vein: w.col("#71a05e")}, {base: w.col("#275d58"), edge: w.col("#46857a"), vein: w.col("#5b9a8d")},
+    {base: w.col("#4a7233"), edge: w.col("#7f9f4c"), vein: w.col("#95b262")}]
+// one carpet patch: a dozen sheets spread over a disc about a metre across (golden-angle spacing)
+pub fn carpet_buffer() any^ => m.merge([for (k in 0 to 11, let a = k * 2.39996, let r = 0.42 * sqrt((k + 0.5) / 12.0))
+    m.placed(sheet_leaf(k * 1.9 + 0.5 * (k % 3), 0.2 + 0.05 * (k % 3), 0.2, 1.05, 0.05, CARPET[k % 3])^, t.compose([cos(a) * r, 0.0, sin(a) * r], [0.0, 0.0, 0.0, 1.0], [1.0, 1.0, 1.0]))^])
+// a long leaf of `rows` segments (enough for the plant shader to send a wave up it): it arches out by
+// `lean`, tapers to a point, and keeps a little twist; `stem` is the share that is a thin stalk before
+// the blade widens (0 for straps)
+fn blade(yaw, lean, height, width, stem, base, tip, rows = 9) any^ {
+    let pts = [for (j in 0 to rows, side in [-1.0, 0.0, 1.0], let v = j / float(rows), let tw = yaw + 0.5 * v,
+        // a strap keeps its width to near the tip; a stalked leaf swells into a pointed blade
+        let leaf = if (stem <= 0.0) min(1.0, 0.5 + 5.0 * v) * (1.0 - v * v * v * v) else if (v < stem) 0.12
+            else sin(math.pi * min(1.0, (v - stem) / (1.0 - stem)) * 0.92 + 0.08) * (1.0 - 0.5 * v * v),
+        let wv = width * leaf * 0.5 * side, let out = lean * v * v)
+        [cos(yaw) * out + cos(tw + 1.5708) * wv, height * v * (1.0 - 0.25 * lean * v), sin(yaw) * out + sin(tw + 1.5708) * wv]]
+    // the midrib stays a little darker than the edges toward the tip
+    let shades = [for (j in 0 to rows, side in [-1.0, 0.0, 1.0]) rig.mix(base, tip, j / float(rows) * (if (side == 0.0) 0.7 else 1.0))^];
+    {positions: [for (p in pts, c in p) c], normals: [for (j in 0 to rows, side in [-1.0, 0.0, 1.0], c in [cos(yaw) * 0.4, 0.8, sin(yaw) * 0.4]) c],
+     colors: [for (rgb in shades, c in rgb) c],
+     indices: [for (j in 0 to rows - 1, k in 0 to 1, q in cell(j * 3 + k, 3)) q]}
+}
+let WEED = w.col("#4b8a46")
+let WEED_TIP = w.col("#b7da84")
+// broad strap weed: long ribbons a hand's width across, arching out from one root
+pub fn weed_buffer() any^ => m.merge([for (k in 0 to 9) blade(k * 2.4, 0.2 + 0.08 * (k % 3), 0.6 + 0.15 * (k % 4), 0.09 + 0.015 * (k % 3), 0.0, WEED, WEED_TIP)^])
+let SWORD = w.col("#4a8b49")
+let SWORD_TIP = w.col("#a9d47b")
+// a sword plant: broad pointed leaves on short stalks, arching out from a rosette
+pub fn sword_buffer() any^ => m.merge([for (k in 0 to 8) blade(k * 2.5, 0.28 + 0.06 * (k % 3), 0.38 + 0.08 * (k % 3), 0.17 + 0.03 * (k % 2), 0.25, SWORD, SWORD_TIP)^])
 let KELP = w.col("#6e7f37")
 let KELP_TIP = w.col("#a8aa55")
 // tall straps with wavy edges and a slow twist

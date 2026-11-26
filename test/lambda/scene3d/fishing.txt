@@ -14,6 +14,8 @@
   kelp: 39,
   fans: 18,
   moss: 44,
+  swords: 41,
+  carpet: 796,
   centre_depth: 2.15,
   start_shore: 0.65,
   start_navigable: true,
@@ -32,23 +34,42 @@
 {
   ready_tip: [-0.52, 1.67, 1.31],
   floating: [-0.8, 0.01, 4.4],
-  blades_at_catch: [[-1.74, -0.04, 0.56], [1.74, -0.04, 0.56]],
+  blades_at_catch: [[-1.48, -0.09, 0.58], [1.48, -0.09, 0.58]],
   hook_at_show: [-0.78, 0.95, 0.55],
   released: [-1.95, -0.12, 0.9],
-  clips: [["idle", 16, 2.99], ["row", 16, 1.15], ["ready", 16, 2.99], ["to-fish", 16, 1.8], ["to-row", 16, 1.8], ["cast", 16, 2.25], ["wait", 16, 3], ["nibble", 16, 1.7], ["bite", 16, 2.35], ["reel", 16, 1.9], ["strike", 16, 5.6]]
+  clips: [["idle", 20, 2.99], ["row", 20, 1.6], ["ready", 20, 2.99], ["to-fish", 20, 1.8], ["to-row", 20, 1.8], ["rest-oars", 20, 1.7], ["cast", 20, 2.25], ["wait", 20, 3], ["nibble", 20, 1.7], ["bite", 20, 2.35], ["reel", 20, 1.9], ["strike", 20, 5.6]]
+}
+"otter"
+{
+  bones: 20,
+  parts: 39,
+  clips: [["otter-float", 19, 4], ["otter-paddle", 19, 0.8], ["otter-swim", 19, 0.9], ["otter-dive", 19, 2.5], ["otter-surface", 19, 2.3], ["otter-to-paddle", 19, 1.25], ["otter-to-float", 19, 1.5]],
+  dive_mid: [-0.09, 1.2, 6.28],
+  surfaced: [-0.03, 0, 3.14]
+}
+{
+  idle: ["float", "dive", "swim", "surface", "float"],
+  side: -1,
+  idle_end: ["float", -0.03],
+  rowing: ["float", "dive", "swim"]
+}
+{
+  backing: ["float", "to-paddle", "paddle", "to-float", "float"],
+  clear_of_hull: true,
+  ended: ["float", -1.71]
 }
 "row"
 {
   mode: "row",
-  moved: 3.18,
-  speed: 1.52,
+  moved: 3.43,
+  speed: 1.33,
   kinds: [8, 4, 4, 4, 3, 10, 8, 3]
 }
 "cast"
 {
   glided: ["idle", 0.12],
   mode: "wait",
-  bobber: [1, 0.02, 0.94],
+  bobber: [1, 0.02, 0.72],
   hint: "Wait for a bite… Space reels in"
 }
 "reel"

@@ -39,6 +39,9 @@ pn frame(owner, st) {
     return {*: synced, token: dom.request_frame(owner, "fishing_frame")}
 }
 fn u_clamp(x, lo, hi) => if (x < lo) lo else if (x > hi) hi else x
+// a pointer drag: whether it has moved far enough to be a drag, and the orbit it has swung the camera to
+fn travelled(d, evt) => abs(evt.clientX - d.x) + abs(evt.clientY - d.y) >= 5
+fn orbited(d, evt) => {yaw: d.orbit.yaw - (evt.clientX - d.x) * 0.006, tilt: u_clamp(d.orbit.tilt + (evt.clientY - d.y) * 0.004, -0.6, 0.4)}
 
 view <fishing_session> state st: START { ~.rendered }
 on fishing_activate(evt) {
@@ -70,12 +73,35 @@ on keyup(evt) {
     st = {*: st, keys: set_key(st.keys, held, false)}
     return 'prevent-default'
 }
-// a tap or click on the water casts, reels in or strikes, like Space
+// a click or tap on the water (no drag) casts, reels in or strikes, like Space; a drag orbits the camera
+// round the boat (helpers above the view: across swings it round, up and down raise and lower it)
 on pointerdown(evt) {
-    if ((st.handles == null or evt.button != 0 or dom.closest(evt.target, "scene3d") == null)^) { return 'pass' }
-    dom.focus_set(st.handles.scene, false)
-    st = {*: st, press: true}
+    if ((st.handles == null or evt.button != 0)^) { return 'pass' }
+    let scene = dom.closest(evt.target, "scene3d")
+    if ((scene == null)^) { return 'pass' }
+    dom.focus_set((st.handles.scene)^, false)
+    st = {*: st, drag: {x: evt.clientX, y: evt.clientY, orbit: st.orbit, moved: false}}
+    dom.set_pointer_capture(scene, (evt.pointerId)^)
     return 'prevent-default'
+}
+on pointermove(evt) {
+    if ((st.drag == null)^) { return 'pass' }
+    let d = st.drag
+    if ((d.moved or travelled(d, evt))^) { st = {*: st, drag: {*: d, moved: true}, orbit: orbited(d, evt)} }
+    return 'prevent-default'
+}
+on pointerup(evt) {
+    if ((st.drag == null)^) { return 'pass' }
+    let d = st.drag
+    let scene = dom.query_selector(dom.root_node(evt.target), "scene3d")
+    if ((scene != null)^) dom.release_pointer_capture(scene, (evt.pointerId)^)
+    let clicked = not (d.moved or travelled(d, evt))
+    st = {*: st, drag: null, press: st.press or clicked, orbit: if (clicked) st.orbit else orbited(d, evt)}
+    return 'prevent-default'
+}
+on pointercancel(evt) {
+    st = {*: st, drag: null}
+    return 'pass'
 }
 on blur(evt) {
     st = {*: st, keys: sim.NO_KEYS}

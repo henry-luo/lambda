@@ -1,6 +1,6 @@
 // The game as a pure step over scene-clock time: rowing, the fishing sequence (cast, wait,
 // nibbles, a bite, the strike and release), fish that wander, school, shy from the boat and
-// come to the bobber, a beaver that keeps the angler company, and a camera that follows. Each
+// come to the bobber, a sea otter that keeps the angler company, and a camera that follows. Each
 // step also lists what the host must do this frame: clips to switch, fish swim rates to change,
 // and ripples and splashes to spawn. Headings are radians about +Y with forward [sin h, cos h].
 import t: lambda.scene3d.transform
@@ -8,9 +8,11 @@ import u: ~~.midtown.mod_util
 import w: .mod_world
 import fish: .mod_fish
 import angler: .mod_angler
-import beaver: .mod_beaver
+import otter: .mod_otter
 
 pub let NO_KEYS = {up: false, down: false, left: false, right: false}
+// the camera's orbit round the boat, set by dragging: yaw swings it round, tilt raises or lowers it
+pub let NO_ORBIT = {yaw: 0.0, tilt: 0.0}
 fn hash(a, b) => (let v = sin(a * 12.9898 + b * 78.233) * 43758.5453, v - floor(v))
 // turn toward a heading: proportional near it, capped at `rate`, so the turn rate eases in and out
 fn steer(h, target, rate, dt) any^ => (let d = u.wrap(target - h)^, h + u.clamp(d * min(1.0, 3.0 * dt), 0.0 - rate * dt, rate * dt)^)
@@ -40,12 +42,17 @@ fn place_fish(r, i) any^ {
 }
 pub fn initial() any^ {
     let b = {x: w.START.x, z: w.START.z, h: w.START.heading, y: 0.0, v: 0.0, turn: 0.0, pitch: 0.0, roll: 0.0, rock: 0.0}
-    let o = {x: w.START.x - 2.2, y: -0.1, z: w.START.z + 1.4, h: w.START.heading, v: 0.0, roll: 0.0, pitch: 0.0};
-    {t: 0.0, frame: 0, boat: b, keys: NO_KEYS, press: false, assist: false, mode: "idle", since: 0.0, clip: "idle", after: null,
+    // the otter starts at its spot on whichever side of the boat is open water
+    let left = otter_spot(b, 1.0)
+    let side = if ((otter_water(left[0], left[1], false) ^ { false })) 1.0 else -1.0
+    let at = otter_spot(b, side)
+    let o = {x: at[0], y: otter.FLOAT_Y, z: at[1], h: w.START.heading, v: 0.0, roll: math.pi, pitch: -0.05,
+        act: "float", since: 0.0, side: side, y0: otter.FLOAT_Y, next_dive: 9.0, band: 0};
+    {t: 0.0, frame: 0, boat: b, keys: NO_KEYS, oar_keys: NO_KEYS, press: false, assist: false, mode: "idle", since: 0.0, clip: "idle", after: null,
      fish: [for (i, r in fish.ROSTER) place_fish(r, i)^], target: null, nibbles: 0, next_nibble: 0.0, alone_since: 0.0, cooldown: 0.0,
-     beaver: o, beaver_clip: "beaver-swim", still_since: 0.0,
-     camera: camera_rig(b, null, 1.0), zoom: 1.0, catches: 0, best: {}, toast: "", toast_until: 0.0, celebrate: null,
-     next: {wake: 0.0, bow: 0.0, hull: 1.0, bob: 0.0, rise: 5.0, ambient: 1.0, beaver: 0.0},
+     otter: o, otter_clip: "otter-float", still_since: 0.0,
+     camera: camera_rig(b, null, 1.0)^, orbit: NO_ORBIT, drag: null, zoom: 1.0, catches: 0, best: {}, toast: "", toast_until: 0.0, celebrate: null,
+     next: {wake: 0.0, bow: 0.0, hull: 1.0, bob: 0.0, rise: 5.0, ambient: 1.0, otter: 0.0, swirl: 0.0},
      plan: [], rates: [], spawns: []}
 }
 
@@ -61,8 +68,13 @@ pub fn staged(st, stage) any^ {
 }
 
 // ---- camera: above and behind the boat looking north; it eases toward the bobber while fishing
-pub fn camera_rig(b, focus, zoom) => (let fx = if (focus == null) b.x else (b.x + focus[0]) / 2.0, let fz = if (focus == null) b.z - 0.5 else (b.z + focus[2]) / 2.0,
-    {position: [fx, 6.6 * zoom + 0.5, fz + 4.4 * zoom], target: [fx, -0.4, fz]})
+// the camera looks down on the boat (or between it and the bobber) from behind; dragging orbits it: yaw
+// swings it round, tilt raises it toward overhead or lowers it, within limits
+pub fn camera_rig(b, focus, zoom, orbit = NO_ORBIT) any^ => (let fx = if (focus == null) b.x else (b.x + focus[0]) / 2.0,
+    let fz = if (focus == null) b.z - 0.5 else (b.z + focus[2]) / 2.0,
+    let up = 6.6 * zoom + 0.9, let back = 4.4 * zoom, let r = sqrt(up * up + back * back),
+    let el = max(0.45, min(1.45, math.atan2(up, back) + orbit.tilt)),
+    {position: [fx + sin(orbit.yaw) * r * cos(el), -0.4 + r * sin(el), fz + cos(orbit.yaw) * r * cos(el)], target: [fx, -0.4, fz]})
 fn follow(c, want, k) => {position: [for (i in 0 to 2) c.position[i] + (want.position[i] - c.position[i]) * k],
     target: [for (i in 0 to 2) c.target[i] + (want.target[i] - c.target[i]) * k]}
 
@@ -72,7 +84,7 @@ pub fn line_out(mode) => contains(["wait", "nibble", "bite"], mode)
 fn moving(keys) => keys.up or keys.down or keys.left or keys.right
 pub fn bobber_world(st) any^ => to_world(st.boat, angler.CAST_SPOT)^
 fn engaged(st, f) => st.target == f.id
-pub fn hint(st) => if (st.mode == "idle" or st.mode == "row") "Arrows or WASD to row · Space to cast"
+pub fn hint(st) => if (st.mode == "idle" or st.mode == "row" or st.mode == "rest-oars") "Arrows or WASD to row · Space to cast"
     else if (st.mode == "wait") "Wait for a bite… Space reels in"
     else if (st.mode == "nibble") "Something's nibbling…" else if (st.mode == "bite") "Strike! Press Space"
     else if (st.mode == "strike") (if (st.t - st.since >= angler.LIFTED) "Nice catch!" else "Reeling in!") else if (st.mode == "ready") "Space to cast · arrows to row" else ""
@@ -81,7 +93,7 @@ pub fn toggle_assist(st) => {*: st, assist: not st.assist, toast: if (st.assist)
 // a press of Space or a tap: cast, reel in or strike, by what is happening
 pub fn press(st, now) any^ {
     let s1 = {*: st, press: false}
-    if (st.mode == "idle" or st.mode == "row") {
+    if (st.mode == "idle" or st.mode == "row" or st.mode == "rest-oars") {
         return if (abs(st.boat.v) > 0.7) {*: s1, toast: "Slow down to cast", toast_until: now + 1.2} else enter(s1, "to-fish", now, "cast")^
     }
     if (st.mode == "ready") { return enter(s1, "cast", now)^ }
@@ -103,6 +115,7 @@ fn timeline(st, now, before) any^ {
     if (st.mode == "stage") { return enter(st, "wait", now)^ }
     if (st.mode == "to-fish" and x >= 0.8) { return enter(st, if (st.after == "cast") "cast" else "ready", now)^ }
     if (st.mode == "to-row" and x >= 0.8) { return enter(st, "idle", now)^ }
+    if (st.mode == "rest-oars" and x >= angler.REST_TIME) { return enter(st, "idle", now)^ }
     if (st.mode == "cast") {
         let landed = if (crossed(angler.CAST_LANDS)) {*: st, spawns: [*st.spawns, *splash(bobber_world(st)^, 8)], alone_since: now} else st
         return if (x >= angler.CAST_TIME) {*: enter(landed, "wait", now)^, next: {*: st.next, bob: now + 1.4}} else landed
@@ -144,9 +157,14 @@ fn strike_timeline(st, now, x, crossed) any^ {
 // ---- rowing
 fn row_boat(st, dt) any^ {
     let b = st.boat
-    let rowing = st.mode == "idle" or st.mode == "row"
-    let thrust = if (not rowing) 0.0 else (if (st.keys.up) 1.0 else 0.0) - (if (st.keys.down) 0.6 else 0.0)
-    let turn_in = if (not rowing) 0.0 else (if (st.keys.left) 1.0 else 0.0) - (if (st.keys.right) 1.0 else 0.0)
+    let rowing = st.mode == "idle" or st.mode == "row" or st.mode == "rest-oars"
+    // a stroke finishing after the keys are let go still pulls the way it was rowing
+    let keys = if (st.mode == "row" and not moving(st.keys)) st.oar_keys else st.keys
+    // each drive pushes the boat on and it glides through the recovery (averages about 1)
+    let f = (st.t - st.since) / angler.ROW_PERIOD
+    let surge = if (st.mode != "row") 1.0 else if (f - floor(f) < angler.DRIVE) 0.55 + 1.6 * sin(math.pi * (f - floor(f)) / angler.DRIVE) else 0.55
+    let thrust = if (not rowing) 0.0 else ((if (keys.up) 1.0 else 0.0) - (if (keys.down) 0.6 else 0.0)) * surge
+    let turn_in = if (not rowing) 0.0 else (if (keys.left) 1.0 else 0.0) - (if (keys.right) 1.0 else 0.0)
     let v = b.v + (thrust * 1.4 - b.v * (if (rowing) 0.85 else 2.2)) * dt
     let turn = u.approach(b.turn, turn_in * 0.85, 2.6 * dt)
     let h = b.h + turn * dt
@@ -159,26 +177,36 @@ fn row_boat(st, dt) any^ {
      y: 0.012 * sin(st.t * 1.7) + 0.03 * rock * sin(st.t * 9.0), pitch: -0.025 * (thrust - v * 0.3) + 0.04 * rock * sin(st.t * 7.0 + 1.0),
      roll: 0.015 * sin(st.t * 1.3) + 0.06 * turn * v + 0.06 * rock * sin(st.t * 8.0)}
 }
-fn rowing_mode(st, now) any^ => if (st.mode == "idle" and moving(st.keys)) enter(st, "row", now)^
-    else if (st.mode == "row" and not moving(st.keys)) enter(st, "idle", now)^
+// letting go of the keys finishes the stroke under way, then the oars ease to rest; rowing again picks up at once
+// (`before` is the last frame's time: a slow frame steps further than the clamped dt and must not skip the stroke's end)
+fn stroke_done(st, now, before) => floor((now - st.since) / angler.ROW_PERIOD) > floor((max(before, st.since) - st.since) / angler.ROW_PERIOD)
+fn rowing_mode(st, now, before) any^ => if ((st.mode == "idle" or st.mode == "rest-oars") and moving(st.keys)) enter(st, "row", now)^
+    else if (st.mode == "row" and not moving(st.keys) and stroke_done(st, now, before)) enter(st, "rest-oars", now)^
     else if (st.mode == "ready" and moving(st.keys)) enter(st, "to-row", now)^
     else if (line_out(st.mode) and moving(st.keys)) release_target(enter(st, "reel", now, "row")^, now, st.mode == "bite")^
     else st
+fn bite(p) any^ => [spawn("ring-m", p, 1), spawn("ring-s", p, 1), spawn("splash", p, 3)]
+fn lift_out(p) any^ => [spawn("splash", p, 5), spawn("ring-s", p, 1)]
 // rings from the oar blades as they bite and leave the water, a wake while under way, and a lap at the hull at rest
 fn boat_rings(st, now, dt) any^ {
     let b = st.boat
     let phase = if (st.mode == "row") (now - st.since) / angler.ROW_PERIOD else 0.0
     let prev = phase - dt / angler.ROW_PERIOD
     let entry = st.mode == "row" and floor(phase - 0.02) != floor(prev - 0.02)
-    let exit = st.mode == "row" and floor(phase - 0.5) != floor(prev - 0.5)
-    let blades = angler.blades(angler.row(phase))
-    let strokes = if (entry) [for (p in blades) spawn("ring-s", to_world(b, p)^, 1)] else if (exit) [for (p in blades) spawn("splash", to_world(b, p)^, 3)] else []
-    let wake = if (abs(b.v) > 0.35 and now >= st.next.wake) [spawn("ring-m", to_world(b, [0.0, 0.0, -1.15])^, 1)] else []
+    let exit = st.mode == "row" and floor(phase - angler.DRIVE) != floor(prev - angler.DRIVE)
+    let blades = [for (p in angler.blades(angler.row(phase))^) to_world(b, p)^]
+    // the blades bite with a ring, a foam crown and a few drops, trail swirls as they pull through, and
+    // lift out at the finish with a splash
+    let pulling = st.mode == "row" and phase - floor(phase) > 0.06 and phase - floor(phase) < angler.DRIVE - 0.04
+    let strokes = if (entry) [for (p in blades, e in bite(p)^) e] else if (exit) [for (p in blades, e in lift_out(p)^) e] else []
+    let swirls = if (pulling and now >= st.next.swirl) [for (p in blades) spawn("ring-s", p, 1)] else []
+    // the hull's own ripples are ovals along the boat, centred toward the stern
+    let wake = if (abs(b.v) > 0.35 and now >= st.next.wake) [spawn("wake-ring", to_world(b, [0.0, 0.0, -1.0])^, 1)] else []
     let bow = if (abs(b.v) > 0.6 and now >= st.next.bow) [spawn("ring-s", to_world(b, [0.0, 0.0, 1.2])^, 1)] else []
-    let hull = if (abs(b.v) < 0.2 and now >= st.next.hull) [spawn("ring-m", [b.x, 0.0, b.z], 1)] else []
+    let hull = if (abs(b.v) < 0.2 and now >= st.next.hull) [spawn("hull-ring", to_world(b, [0.0, 0.0, -0.55])^, 1)] else []
     let bob = if (st.mode == "wait" and now >= st.next.bob) [spawn("ring-s", bobber_world(st)^, 1)] else [];
-    {*: st, spawns: [*st.spawns, *strokes, *wake, *bow, *hull, *bob],
-     next: {*: st.next, wake: if (len(wake) > 0) now + 0.42 else st.next.wake, bow: if (len(bow) > 0) now + 0.6 else st.next.bow,
+    {*: st, spawns: [*st.spawns, *strokes, *swirls, *wake, *bow, *hull, *bob],
+     next: {*: st.next, swirl: if (len(swirls) > 0) now + 0.13 else st.next.swirl, wake: if (len(wake) > 0) now + 0.42 else st.next.wake, bow: if (len(bow) > 0) now + 0.6 else st.next.bow,
         hull: if (len(hull) > 0) now + 3.3 else st.next.hull, bob: if (len(bob) > 0) now + 2.7 else st.next.bob}}
 }
 
@@ -307,31 +335,108 @@ fn rises(st, now) any^ {
      next: {*: s1.next, ambient: if (len(ambient) > 0) now + 1.2 + 2.0 * hash(st.frame, 13.0) else s1.next.ambient}}
 }
 
-// ---- the beaver: keeps the boat company, gnaws its twig while the boat rests, slaps its tail for joy at a catch
-fn step_beaver(st, now, dt) any^ {
-    let o = st.beaver, b = st.boat
-    let still = now - st.still_since
-    let side = [b.x + cos(b.h) * 2.2 - sin(b.h) * 1.0, b.z - sin(b.h) * 2.2 - cos(b.h) * 1.0]
-    let dx = side[0] - o.x, dz = side[1] - o.z
+// ---- the otter: floats on its back beside the boat with a clam on its chest and paddles on its back
+// to keep up. Now and then, and whenever the boat rows hard, it rolls over and dives, swims under the
+// boat (to its other side when idle) and surfaces, rolling onto its back again. A catch earns a happy roll.
+pub let SPIN_TIME = 1.0
+// beside the stern quarter, clear of the oars; beside the bow quarter while the boat backs up, out of its way
+fn otter_spot(b, side) => (let back = if (b.v < -0.12) -1.4 else 1.3,
+    [b.x + side * cos(b.h) * 1.6 - sin(b.h) * back, b.z - side * sin(b.h) * 1.6 - cos(b.h) * back])
+// the boat bearing down on the otter: in its path (forward or astern) within a couple of seconds' travel.
+// Returns the side to escape to (1 or -1, the boat's left or right), or 0 when it is clear
+fn bearing_down(o, b) => (let rx = o.x - b.x, let rz = o.z - b.z,
+    let along = rx * sin(b.h) + rz * cos(b.h), let across = rx * cos(b.h) - rz * sin(b.h),
+    let ahead = if (b.v < 0.0) 0.0 - along else along,
+    if (abs(b.v) > 0.15 and abs(across) < 1.25 and ahead > -1.6 and ahead < 1.6 + 2.0 * abs(b.v)) (if (across >= 0.0) 1.0 else -1.0) else 0.0)
+let OTTER_CLIPS = {float: "otter-float", spin: "otter-float", paddle: "otter-paddle", swim: "otter-swim", dive: "otter-dive",
+    surface: "otter-surface", ['to-paddle']: "otter-to-paddle", ['to-float']: "otter-to-float"}
+fn crossed(k0, k1, mark) => k0 < mark and k1 >= mark
+// water the otter can be in: deep enough for what it is doing, and on the surface its body clear of the jetty
+fn by_jetty(x, z) => abs(x - w.JETTY.x) < w.JETTY.width / 2.0 + 0.7 and z > w.JETTY.z1 - 0.7 and z < w.JETTY.z0 + 0.7
+fn otter_water(x, z, under) any^ => (w.shore(x, z) ^ { 2.0 }) < 0.97 and (w.depth(x, z) ^ { 0.0 }) > (if (under) 0.6 else 0.3) and (under or not by_jetty(x, z))
+// the boat lies across the straight way from the otter to its spot (it goes under, never through the hull)
+fn across_boat(o, b, spot) => (let ax = spot[0] - o.x, let az = spot[1] - o.z, let len2 = max(0.0001, ax * ax + az * az),
+    let k = max(0.0, min(1.0, ((b.x - o.x) * ax + (b.z - o.z) * az) / len2)),
+    let dx = o.x + ax * k - b.x, let dz = o.z + az * k - b.z, len2 > 0.64 and dx * dx + dz * dz < 1.44)
+// what the otter does next, from how long it has been at it and where the boat is
+fn otter_act(o, st, now, dt, dist, danger) any^ {
+    let t = now - o.since
+    // only rowing hard ahead sends it under; backing up it paddles out of the way
+    let fast = st.boat.v > 0.9
+    let cheer = st.celebrate != null and now - st.celebrate < dt * 1.5
+    if (o.act == "dive") { return if (t >= otter.DIVE_TIME) "swim" else "dive" }
+    if (o.act == "surface") { return if (t >= otter.SURFACE_TIME) "float" else "surface" }
+    if (o.act == "spin") { return if (t >= SPIN_TIME) "float" else "spin" }
+    if (o.act == "to-paddle") { return if (t >= otter.TO_PADDLE_TIME) "paddle" else "to-paddle" }
+    if (o.act == "to-float") { return if (t >= otter.TO_FLOAT_TIME) "float" else "to-float" }
+    if (o.act == "swim") {
+        // surface on a stroke boundary, where the swim pose matches the surfacing clip's first pose
+        let stroke = floor(t / otter.SWIM_PERIOD) > floor((t - dt) / otter.SWIM_PERIOD)
+        return if (stroke and ((t > 2.5 and dist < 1.0 and not fast) or t > 10.0)) "surface" else "swim"
+    }
+    let blocked = across_boat(o, st.boat, otter_spot(st.boat, o.side))
+    if (o.act == "paddle") { return if (danger) "paddle" else if (dist < 0.6 or fast or blocked) "to-float" else "paddle" }
+    return if (danger) "to-paddle" else if (cheer) "spin" else if (fast or blocked or (now > o.next_dive and dist < 2.0)) "dive" else if (dist > 1.1) "to-paddle" else "float"
+}
+fn step_otter(st, now, dt) any^ {
+    let o1 = st.otter, b = st.boat
+    // keep to the boat's other side while this one is shallows or jetty
+    let near_spot = otter_spot(b, o1.side), far_spot = otter_spot(b, 0.0 - o1.side)
+    let o0 = if (not (otter_water(near_spot[0], near_spot[1], false)^) and otter_water(far_spot[0], far_spot[1], false)^) {*: o1, side: 0.0 - o1.side} else o1
+    let spot0 = otter_spot(b, o0.side)
+    let escape = if (o0.act == "float" or o0.act == "paddle" or o0.act == "to-paddle") bearing_down(o0, b) else 0.0
+    let act = otter_act(o0, st, now, dt, u.dist(o0.x, o0.z, spot0[0], spot0[1]) ^ { 0.0 }, escape != 0.0)^
+    let fresh = act != o0.act
+    // an idle dive heads under the boat for its other side (a dive to get past the boat already has its side)
+    // an idle dive heads under the boat for its other side; an escape keeps to the side it gets clear on
+    let side = if (escape != 0.0) escape else if (fresh and act == "dive" and abs(b.v) <= 0.9 and not across_boat(o0, b, spot0)) 0.0 - o0.side else o0.side
+    let o = if (fresh) {*: o0, act: act, since: now, side: side, y0: o0.y,
+        next_dive: if (act == "float" and o0.act == "surface") now + 14.0 + 14.0 * hash(now, 7.0) else o0.next_dive} else o0
+    let t = now - o.since
+    // escaping, it makes for a point well out to the side; otherwise its spot by the boat
+    let spot = if (escape != 0.0) [o.x + escape * cos(b.h) * 1.8, o.z - escape * sin(b.h) * 1.8] else otter_spot(b, o.side)
+    let dx = spot[0] - o.x, dz = spot[1] - o.z
     let dist = sqrt(dx * dx + dz * dz)
-    let resting = still > 5.0 and dist < 2.5 and st.mode != "strike"
-    let slapped = if (st.celebrate == null) 99.0 else now - st.celebrate
-    let slapping = slapped < beaver.SLAP_TIME
-    let speed = if (resting or slapping) 0.05 else u.clamp(dist * 0.9, 0.0, 1.8)
-    let target_h = if (resting) o.h + 0.1 * dt else if (dist > 0.3) math.atan2(dx, dz) else b.h
-    let h = steer(o.h, target_h, 2.0, dt)^
-    let v = u.approach(o.v, speed, 1.4 * dt)
-    let nx = o.x + sin(h) * v * dt, nz = o.z + cos(h) * v * dt
-    let wet = (w.shore(nx, nz) ^ { 2.0 }) < 0.97 and (w.depth(nx, nz) ^ { 0.0 }) > 0.25
-    let clip = if (slapping) "beaver-slap" else if (resting) "beaver-rest" else "beaver-swim"
-    let rings = if (now >= st.next.beaver) [spawn("ring-s", [o.x + sin(o.h) * 0.35, 0.0, o.z + cos(o.h) * 0.35], 1)] else []
-    // the tail cracks down on the water partway through the slap
-    let at = beaver.SLAP_AT * beaver.SLAP_TIME
-    let crack = if (slapped >= at and slapped - dt < at) splash([o.x - sin(o.h) * 0.55, 0.0, o.z - cos(o.h) * 0.55], 14) else [];
-    {*: st, beaver: {*: o, x: if (wet) nx else o.x, z: if (wet) nz else o.z, h: h, v: if (wet) v else 0.0, roll: 0.0,
-        y: (if (resting) -0.055 else -0.075 + 0.008 * sin(now * 3.0)), pitch: o.pitch + ((if (resting) -0.18 else 0.0) - o.pitch) * u.ease(2.0, dt)},
-     plan: if (clip != st.beaver_clip) [*st.plan, {stop: st.beaver_clip, play: clip}] else st.plan, beaver_clip: clip,
-     spawns: [*st.spawns, *rings, *crack], next: {*: st.next, beaver: if (len(rings) > 0) now + (if (resting) 3.0 else if (v > 0.3) 0.45 else 2.0) else st.next.beaver}}
+    let toward = math.atan2(dx, dz)
+    let under = act == "swim" or act == "dive"
+    let fast = abs(b.v) > 0.9
+    let speed = if (act == "paddle") (if (escape != 0.0) 1.4 else min(1.3, 0.4 + dist * 0.8)) else if (act == "to-paddle") (if (escape != 0.0) 0.7 else 0.35)
+        else if (act == "dive") 0.5
+        else if (act == "swim") (if (fast) max(1.0, abs(b.v) * 1.15) else min(1.0, 0.3 + dist * 0.6)) else if (act == "surface") 0.3 else 0.0
+    let turning = act == "paddle" or act == "to-paddle" or under
+    let h = if (turning) steer(o.h, toward, if (under) 2.5 else 3.5, dt)^ else o.h
+    let v = u.approach(o.v, speed, 2.6 * dt)
+    // floating drifts gently toward the spot without turning
+    let drift = if (act == "float" and dist > 0.05) min(0.2, dist * 0.3) * dt / dist else 0.0
+    let nx = o.x + sin(h) * v * dt + dx * drift, nz = o.z + cos(h) * v * dt + dz * drift
+    let floor = w.floor_y(nx, nz) ^ { -2.0 }
+    let wet = otter_water(nx, nz, under)^
+    let k = t / (if (act == "dive") otter.DIVE_TIME else otter.SURFACE_TIME), k0 = (t - dt) / (if (act == "dive") otter.DIVE_TIME else otter.SURFACE_TIME)
+    let dive = otter.dive_root(k), rise = otter.surface_root(k, o.y0)
+    let swim_y = max(otter.SWIM_Y, floor + 0.2)
+    let y = if (act == "dive") dive.y else if (act == "surface") rise.y else if (act == "swim") o.y + (swim_y - o.y) * u.ease(2.0, dt)
+        else otter.FLOAT_Y + 0.012 * sin(now * 1.7)
+    let pitch = if (act == "dive") dive.pitch else if (act == "surface") rise.pitch
+        else if (act == "swim") o.pitch + (u.clamp((o.y - swim_y) * 3.0, -0.5, 0.5) - o.pitch) * u.ease(3.0, dt) else -0.05
+    let roll = if (act == "dive") dive.roll else if (act == "surface") rise.roll else if (act == "swim") 0.0
+        else if (act == "spin") math.pi + u.TAU * (t / SPIN_TIME) * (t / SPIN_TIME) * (3.0 - 2.0 * t / SPIN_TIME)
+        else math.pi + (if (act == "paddle") 0.07 * sin(now * u.TAU / otter.PADDLE_PERIOD) else 0.05 * sin(now * 0.9))
+    let ahead = [nx + sin(h) * 0.35, 0.0, nz + cos(h) * 0.35], behind = [nx - sin(h) * 0.5, 0.0, nz - cos(h) * 0.5], centre = [nx, 0.0, nz]
+    // rings while it floats or paddles, bubbles over it under water, splashes as it dives, surfaces and rolls
+    let tick = now >= st.next.otter
+    let rings = if (not tick) [] else if (act == "paddle") [spawn("ring-s", behind, 1)] else if (act == "swim" and y > -0.7) [spawn("ring-s", centre, 1)]
+        else if (act == "float" or act == "spin") [spawn("ring-s", centre, 1)] else []
+    let bursts = if (act == "dive" and crossed(k0, k, 0.2)) [spawn("ring-m", centre, 1)] else if (act == "dive" and crossed(k0, k, 0.62)) splash(behind, 8)
+        else if (act == "surface" and crossed(k0, k, 0.35)) [spawn("ring-m", ahead, 1), spawn("foam", ahead, 1)]
+        else if (act == "spin" and crossed((t - dt) / SPIN_TIME, t / SPIN_TIME, 0.45)) splash(centre, 12) else []
+    let clip = OTTER_CLIPS[act]
+    // a fast paddle kicks quicker
+    let band = if (act == "paddle" and v > 0.7) 1 else 0
+    let tempo = if (act == "paddle" and (band != o.band or clip != st.otter_clip)) [{clip: "otter-paddle", rate: [1.0, 1.7][band], weight: 1.0}] else [];
+    {*: st, otter: {*: o, x: if (wet) nx else o.x, z: if (wet) nz else o.z, h: h, v: if (wet) v else 0.0, y: y, pitch: pitch, roll: roll, band: band},
+     plan: if (clip != st.otter_clip) [*st.plan, {stop: st.otter_clip, play: clip}] else st.plan, otter_clip: clip, rates: [*st.rates, *tempo],
+     spawns: [*st.spawns, *rings, *bursts],
+     next: {*: st.next, otter: if (len(rings) > 0) now + (if (act == "paddle") 0.4 else if (act == "swim") 1.1 else 2.6) else st.next.otter}}
 }
 
 // ---- one frame
@@ -340,18 +445,19 @@ pub fn step(st, now, dt) any^ {
     let assisted = st.assist and st.mode == "bite" and now - st.since > 0.3
     let s0 = {*: st, t: now, frame: st.frame + 1, plan: [], rates: [], spawns: [], press: st.press or assisted}
     let s1 = if (st.press) press(s0, now)^ else s0
-    let s2 = rowing_mode(s1, now)^
+    let s2 = rowing_mode(s1, now, st.t)^
     let s3 = timeline(s2, now, now - dt)^
-    let s4 = {*: s3, boat: row_boat(s3, dt)^, still_since: if (abs(s3.boat.v) > 0.15 or moving(s3.keys)) now else s3.still_since}
+    let s4 = {*: s3, boat: row_boat(s3, dt)^, still_since: if (abs(s3.boat.v) > 0.15 or moving(s3.keys)) now else s3.still_since,
+        oar_keys: if (s3.mode == "row" and moving(s3.keys)) s3.keys else s3.oar_keys}
     // each school follows its first member still schooling
     let leads = {minnow: first_schooling(s4.fish, "minnow"), tang: first_schooling(s4.fish, "tang")}
     let fishes = [for (f in s4.fish) step_fish(f, s4, if (f.kind == "minnow" or f.kind == "tang") leads[f.kind] else null, now, dt)^]
     let s5 = fishing({*: s4, fish: fishes, rates: [*s4.rates, *swim_rates(s4.fish, fishes)^]}, now)^
     let s6 = rises(boat_rings(s5, now, dt)^, now)^
-    let s7 = step_beaver(s6, now, dt)^
+    let s7 = step_otter(s6, now, dt)^
     let focus = if (line_out(s7.mode) or s7.mode == "cast") bobber_world(s7)^ else null
     let zoom = u.approach(s7.zoom, if (s7.mode == "strike") 0.78 else 1.0, 0.5 * dt);
-    {*: s7, zoom: zoom, camera: follow(s7.camera, camera_rig(s7.boat, focus, zoom), u.ease(2.4, dt))}
+    {*: s7, zoom: zoom, camera: follow(s7.camera, camera_rig(s7.boat, focus, zoom, s7.orbit)^, u.ease(2.4, dt))}
 }
 // the hooked fish's pose in the world while the strike plays
 pub fn hooked_pose(st, f, now) any^ => (let c = angler.catch_pose(now - st.since, f.L)^, let p = to_world(st.boat, c.p)^,

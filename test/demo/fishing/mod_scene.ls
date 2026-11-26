@@ -1,5 +1,5 @@
 // The whole Willow Cove scene, built once: physics world (only kinematic bodies move: the boat,
-// every fish, the beaver and the camera rig), sun and sky light, the cove, the ripple and splash
+// every fish, the otter and the camera rig), sun and sky light, the cove, the ripple and splash
 // emitters, and every clip. After this the host only sends pose targets, clip commands and
 // particle spawns; the scene's DOM never changes, so it is never re-projected.
 import s: lambda.scene3d
@@ -11,12 +11,15 @@ import lagoon: .mod_lagoon
 import boat: .mod_boat
 import angler: .mod_angler
 import fish: .mod_fish
-import beaver: .mod_beaver
+import otter: .mod_otter
 
 pub let NOBODY = {membership: 0, filter: 0}
 // rings: final diameter, lifetime, band width at full size
 // ripples: final diameter, lifetime, and how many trailing rings follow the leading crest
 pub let RINGS = {'ring-s': {size: 1.5, life: 1.9, rings: 2}, 'ring-m': {size: 2.5, life: 2.4, rings: 3}, 'ring-l': {size: 3.8, life: 2.9, rings: 3}}
+// the boat's own ripples: ovals stretched along the hull (aspect is their width over length). Their
+// emitters ride the boat, so each ripple takes the hull's heading when it is born, then stays put.
+pub let HULL_RINGS = {'hull-ring': {size: 4.0, life: 2.8, rings: 3, aspect: 0.5}, 'wake-ring': {size: 2.8, life: 2.3, rings: 3, aspect: 0.58}}
 fn ring_geometry(band) any^ {
     let seg = 56, inner = 0.5 - band
     let positions = [for (i in 0 to seg - 1, c in ring_pair(i * u.TAU / float(seg), inner)) c]
@@ -38,19 +41,19 @@ fn ripple_band(r, rings) any^ => (let crest = 0.62 * bump(r, 0.9, 0.035) + (if (
     let a = min(0.85, crest + trough), let k = crest / max(crest + trough, 0.0001),
     [TROUGH[0] + (CREST[0] - TROUGH[0]) * k, TROUGH[1] + (CREST[1] - TROUGH[1]) * k, TROUGH[2] + (CREST[2] - TROUGH[2]) * k, a])
 fn wobble(a) => 1.0 + 0.03 * sin(3.0 * a + 1.3) + 0.018 * sin(7.0 * a + 0.4) + 0.01 * sin(13.0 * a + 2.0)
-fn ripple_geometry(rings) any^ {
+fn ripple_geometry(rings, aspect = 1.0) any^ {
     let seg = 64, radial = 26
     let rs = [for (j in 0 to radial) 0.4 + 0.6 * j / float(radial)]
-    let positions = [for (j in 0 to radial, i in 0 to seg - 1, c in ripple_point(rs[j], i * u.TAU / float(seg))^) c]
+    let positions = [for (j in 0 to radial, i in 0 to seg - 1, c in ripple_point(rs[j], i * u.TAU / float(seg), aspect)^) c]
     let colors = [for (j in 0 to radial, i in 0 to seg - 1, c in ripple_band(rs[j], rings)^) c]
     let indices = [for (j in 0 to radial - 1, i in 0 to seg - 1, k in ripple_quad(j * seg + i, j * seg + (i + 1) % seg, seg)) k];
     s.geometry(positions, {normals: [for (j in 0 to radial, i in 0 to seg - 1, c in [0.0, 1.0, 0.0]) c], colors: colors, indices: indices})
 }
-fn ripple_point(r, a) any^ => (let q = 0.5 * r * wobble(a), [cos(a) * q, 0.0, sin(a) * q])
+fn ripple_point(r, a, aspect) any^ => (let q = 0.5 * r * wobble(a), [cos(a) * q * aspect, 0.0, sin(a) * q])
 fn ripple_quad(a, b, seg) => [a, b, a + seg, b, b + seg, a + seg]
 fn ring_emitter(id, spec) any^ => <'particle-emitter' id: id, backend: "cpu", space: "world", rate: 0.0, burst: 0, capacity: 96,
     lifetime: spec.life, gravity: [0.0, 0.0, 0.0], speed: 0.0, angle: 0.0, size: spec.size,
-    ripple_geometry(spec.rings)^; s.material('basic', {color: "#ffffff", transparent: true, side: 'double'});
+    ripple_geometry(spec.rings, spec.aspect or 1.0)^; s.material('basic', {color: "#ffffff", transparent: true, side: 'double'});
     <'particle-size-curve' times: [0.0, 0.3, 1.0], values: [0.1, 0.58, 1.0]>
     <'particle-opacity-curve' times: [0.0, 0.07, 0.45, 1.0], values: [0.0, 1.0, 0.6, 0.0]>>
 // droplets thrown up by a splash, and a short-lived foam crown
@@ -64,7 +67,7 @@ fn foam_emitter() any^ => <'particle-emitter' id: "foam", backend: "cpu", space:
     ring_geometry(0.22)^; s.material('basic', {color: "#ffffff", transparent: true, side: 'double'});
     <'particle-size-curve' times: [0.0, 1.0], values: [0.35, 1.0]>
     <'particle-opacity-curve' times: [0.0, 0.15, 1.0], values: [0.0, 0.95, 0.0]>>
-pub let EMITTERS = ["ring-s", "ring-m", "ring-l", "splash", "foam"]
+pub let EMITTERS = ["ring-s", "ring-m", "ring-l", "hull-ring", "wake-ring", "splash", "foam"]
 
 // the camera rides its own kinematic body, so following the boat is a pose command, not an attribute edit
 fn camera_body(c) any^ => physics.body("camera-rig", [physics.collider("camera-rig-shape", 'sphere', {radius: 0.05, groups: NOBODY}),
@@ -78,13 +81,13 @@ pub fn scene(st, attributes) any^ => s.scene([
         'cast-shadow': true, 'shadow-cascades': 2, 'shadow-distance': 40.0, 'shadow-map-size': 2048, 'shadow-normal-bias': 0.03, 'shadow-softness': 1.6}),
     s.light('hemisphere', {id: "sky", position: [0.0, 1.0, 0.0], color: "#cdebf0", 'ground-color': "#40583a", intensity: 0.62}),
     s.resources([*(lagoon.materials()^), *(boat.materials()^), s.material('lambert', {id: "m-fish", color: "#ffffff", side: 'double'}),
-        *(beaver.materials()^)]),
-    *(lagoon.elements()^),
-    boat.body(st.boat.x, st.boat.z, st.boat.h)^,
+        *(otter.materials()^)]),
+    *(lagoon.elements()^), lagoon.water()^,
+    boat.body(st.boat.x, st.boat.z, st.boat.h, [for (id, spec in HULL_RINGS) ring_emitter(string(id), spec)^])^,
     *[for (f in st.fish, let r = fish.ROSTER[f.i]) fish.body(r, f.x, f.y, f.z, f.h)^],
-    beaver.body(st.beaver.x, st.beaver.y, st.beaver.z, st.beaver.h)^,
+    otter.body(st.otter.x, st.otter.y, st.otter.z, st.otter.h)^,
     camera_body(st.camera)^,
     *[for (id, spec in RINGS) ring_emitter(string(id), spec)^], splash_emitter()^, foam_emitter()^,
-    *(lagoon.clips()^), *(angler.clips()^), *[for (r in fish.ROSTER) fish.swim_clip(r)^], *(beaver.clips()^)
+    *(lagoon.clips()^), *(angler.clips()^), *[for (r in fish.ROSTER) fish.swim_clip(r)^], *(otter.clips()^)
 ], {id: "cove", camera: "cam", width: 1280, height: 800, background: "#6f9a4a", 'max-pixel-ratio': 1.5, tabindex: "0",
     role: "img", 'aria-label': "Willow Cove: a rowboat on a clear lagoon. Arrow keys or WASD row; Space casts and strikes.", *: attributes})

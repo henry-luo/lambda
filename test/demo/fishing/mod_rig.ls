@@ -1,8 +1,9 @@
-// Shared helpers for the skinned characters (beaver, fisher, fish): quaternion aiming and a two-bone
+// Shared helpers for the skinned characters (otter, fisher, fish): quaternion aiming and a two-bone
 // IK solve for posing limbs at targets, automatic skin weights from bone segments, smooth grid
 // surfaces whose normals come from the surface itself, and buffers that carry their bone blend.
 // A skinned buffer is {positions, normals, colors, indices, skin, weights}, four influences per
-// vertex with the last two unused.
+// vertex. A vertex's bone blend `b` is [i0, i1, w0, w1], or [i0, i1, i2, i3, w0, w1, w2, w3] for
+// sculpted bodies that blend up to four bones.
 import s: lambda.scene3d
 import t: lambda.scene3d.transform
 import v: lambda.scene3d.camera
@@ -71,8 +72,9 @@ pub fn merge(parts) any^ {
     let offsets = math.cumsum([0, *[for (q in parts) len(q.verts)]])
     let verts = [for (q in parts, x in q.verts) x];
     {positions: [for (x in verts, c in x.p) c], normals: [for (x in verts, c in x.n) c], colors: [for (x in verts, c in x.c) c],
-     indices: [for (i, q in parts, k in q.tris) k + offsets[i]], skin: [for (x in verts, c in [x.b[0], x.b[1], 0, 0]) c],
-     weights: [for (x in verts, c in [x.b[2], x.b[3], 0.0, 0.0]) c]}
+     indices: [for (i, q in parts, k in q.tris) k + offsets[i]],
+     skin: [for (x in verts, c in (if ((len(x.b) ^ { 4 }) == 8) slice(x.b, 0, 4) else [x.b[0], x.b[1], 0, 0])) c],
+     weights: [for (x in verts, c in (if ((len(x.b) ^ { 4 }) == 8) slice(x.b, 4, 8) else [x.b[2], x.b[3], 0.0, 0.0])) c]}
 }
 pub fn geometry(id, b) any^ => s.geometry(b.positions, {id: id, normals: b.normals, colors: b.colors, indices: b.indices,
     'skin-indices': b.skin, 'skin-weights': b.weights})
