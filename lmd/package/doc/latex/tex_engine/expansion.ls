@@ -585,6 +585,7 @@ fn expand_one(st: State, t, budget) State^ {
             let marked = if (macro.source_mapping_guard == "cs_eq") {*:st, expl3_cs_eq_seen: true}
                 else if (macro.source_mapping_guard == "dynamic_assignment") {*:st, expl3_dynamic_assignment_seen: true}
                 else if (macro.source_mapping_guard == "dynamic_read") {*:st, expl3_dynamic_read_seen: true}
+                else if (macro.source_mapping_guard == "tl_trim") {*:st, expl3_tl_trim_seen: true}
                 else if (macro.source_mapping_guard == "tl_head") {*:st, expl3_tl_head_seen: true}
                 else if (macro.source_mapping_guard == "tl_tail") {*:st, expl3_tl_tail_seen: true}
                 else if (macro.source_mapping_guard == "exp_args_once") {*:st, expl3_exp_args_once_seen: true}
@@ -6716,6 +6717,7 @@ pub fn enable_script_expl3(st: State) State^ {
         {name: "s__str_mark", kind: "primitive", value: "relax"},
         {name: "s__str_stop", kind: "primitive", value: "relax"},
         {name: "s__tl_stop", kind: "primitive", value: "relax"},
+        {name: "s__tl_nil", kind: "primitive", value: "relax"},
         {name: "if_int_compare:w", kind: "primitive", value: "ifnum"},
         {name: "if_int_odd:w", kind: "primitive", value: "ifodd"},
         {name: "int_value:w", kind: "primitive", value: "number"},
@@ -7067,6 +7069,17 @@ pub fn enable_script_expl3(st: State) State^ {
         {source: "\\tl_head:N{\\exp_args:No\\tl_head:n}", protected_flag: false},
         {source: "\\tl_tail:N{\\exp_args:No\\tl_tail:n}", protected_flag: false},
         {source: "\\tl_tail:n#1{\\__kernel_exp_not:w\\if:w\\scan_stop:\\__kernel_tl_to_str:w\\exp_after:wN{\\use_none:n#1?}\\scan_stop:\\__prg_TF_true:w\\fi:\\use_ii:nn{{}}{\\exp_after:wN{\\use_none:n#1}}}", protected_flag: false, source_mapping_guard: "tl_tail"},
+        // Keep TeX's delimiter-driven trimming so group and token identity survive.
+        {source:"\\tl_trim_spaces:n#1{\\__tl_trim_spaces:nn{\\__tl_trim_mark:#1}{\\__kernel_exp_not:w\\exp_after:wN}}",protected_flag:false,source_mapping_guard:"tl_trim"},
+        {source:"\\__tl_trim_spaces:nn#1{\\__tl_trim_spaces_auxi:w#1\\s__tl_nil\\__tl_trim_mark:~{}\\__tl_trim_mark:\\__tl_trim_spaces_auxii:w\\__tl_trim_spaces_auxiii:w~\\s__tl_nil\\__tl_trim_spaces_auxiv:w\\s__tl_stop}",protected_flag:false,literal_spaces:true},
+        {source:"\\__tl_trim_spaces_auxi:w#1\\__tl_trim_mark:~#2\\__tl_trim_mark:#3{#3\\__tl_trim_spaces_auxi:w\\__tl_trim_mark:#2\\__tl_trim_mark:~{#1}}",protected_flag:false,literal_spaces:true},
+        {source:"\\__tl_trim_spaces_auxii:w\\__tl_trim_spaces_auxi:w\\__tl_trim_mark:\\__tl_trim_mark:#1{\\__tl_trim_spaces_auxiii:w#1}",protected_flag:false},
+        {source:"\\__tl_trim_spaces_auxiii:w#1~\\s__tl_nil#2{#2#1\\s__tl_nil\\__tl_trim_spaces_auxiii:w}",protected_flag:false,literal_spaces:true},
+        {source:"\\__tl_trim_spaces_auxiv:w#1\\s__tl_nil#2\\s__tl_stop#3{#3{#1}}",protected_flag:false},
+        {source:"\\__tl_trim_mark:{}",protected_flag:false},
+        {source:"\\tl_trim_spaces:V{\\exp_args:NV\\tl_trim_spaces:n}",protected_flag:false},
+        {source:"\\tl_trim_spaces:N#1{\\__kernel_tl_set:Nx#1{\\exp_args:No\\tl_trim_spaces:n{#1}}}",protected_flag:true,argument_unqualified:true},
+        {source:"\\tl_gtrim_spaces:N#1{\\__kernel_tl_gset:Nx#1{\\exp_args:No\\tl_trim_spaces:n{#1}}}",protected_flag:true,argument_unqualified:true},
         {source: "\\tl_head:n#1{\\__kernel_exp_not:w\\tex_expanded:D{{\\if_false:{\\fi:\\__tl_head_aux:n#1{}}}}}", protected_flag: false, source_mapping_guard: "tl_head"},
         {source: "\\__tl_head_aux:n#1{\\__kernel_exp_not:w{#1}\\exp_after:wN\\use_none:n\\exp_after:wN{\\if_false:}\\fi:}", protected_flag: false},
         {source: "\\int_if_zero_p:n#1{\\if_int_compare:w\\__int_eval:w#1=\\c_zero_int\\__prg_p_true:w\\fi:\\c_false_bool}", protected_flag: false},
@@ -7335,9 +7348,13 @@ fn enable_expl_macro_sources(st: State, definitions, index = 0) State^ {
     if (index >= len(definitions)) st
     else {
         let definition = definitions[index];
+        let codes = expl3.syntax_codes({'{': 1, '}': 2, '&': 4, '#': 6, [chr(0)]: 13, '?': if (definition.question_letters == true) 11 else 12});
+        // A marker survives control-word scanning before becoming a delimiter space.
         let source_reader = {*:reader.reader(definition.source, -1), endline: -1,
-            catcodes: expl3.syntax_codes({'{': 1, '}': 2, '&': 4, '#': 6, [chr(0)]: 13, '?': if (definition.question_letters == true) 11 else 12})};
-        let scanned = expl3_definition_tokens(source_reader)^;
+            catcodes: if (definition.literal_spaces == true) {*:codes, [chr(126)]:12} else codes};
+        let raw = expl3_definition_tokens(source_reader)^;
+        let scanned = if (definition.literal_spaces == true) [for (token in raw)
+            if (token.kind == "char" and token.value == "~") {*:token,value:" ",cat:10} else token] else raw;
         // Some expl3 names contain operator characters and are normally made with csname.
         let tokens = if (definition.install_as is string)
             [{*:scanned[0], value:definition.install_as}, *slice(scanned, 1, len(scanned))^] else scanned;

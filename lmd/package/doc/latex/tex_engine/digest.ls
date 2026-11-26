@@ -4106,6 +4106,8 @@ pub fn digest(expanded: map) Digested^ {
         {ast: null, issue: "latex-digest-unsupported", unsupported: "expl3 replication source mapping"}
     else if (expanded.expl3_tl_replace_seen == true)
         {ast: null, issue: "latex-digest-unsupported", unsupported: "expl3 token replacement source mapping"}
+    else if (expanded.expl3_tl_trim_seen == true)
+        {ast: null, issue: "latex-digest-unsupported", unsupported: "expl3 token trimming source mapping"}
     // Expanded tail results still need the native emission-origin mapping.
     else if (expanded.expl3_tl_tail_seen == true)
         {ast: null, issue: "latex-digest-unsupported", unsupported: "expl3 token tail source mapping"}

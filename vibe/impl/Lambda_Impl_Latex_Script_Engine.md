@@ -34,6 +34,16 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Expl3 token trimming, 2026-11-26:** Script preloads TeX's original
+  delimiter-driven `tl_trim_spaces:n`, its value/local/global variants and
+  auxiliaries (D10.2.2v2). The macro loader preserves explicit space tokens in
+  parameter delimiters. Thirteen TeX Live comparisons cover grouped and
+  protected tokens, category-12 spaces, scope, and macro meanings. Five
+  focused GTests pass; the new fixture also matches in interpreter and JIT
+  with forced GC. CSV expansion now resolves all named columns and retains
+  the expected filtered rows. Trimming and other complex output remain
+  guarded at the document source-mapping boundary.
+
 - **Expl3 Boolean assignments and predicate tokens, 2026-11-26:** Script now
   evaluates `bool_set:Nn` and `bool_gset:Nn` with TeX's f-expansion and ordinary
   scoped character definitions, and implements `int_compare_p:nNn` using its
@@ -44,8 +54,8 @@ The existing native engine design and historical Phase IV work are in
   after-assignment. Seven focused GTests pass, and the new fixture matches in
   interpreter and JIT under forced GC. The full CSV expansion now completes
   without diagnostics and filters the intended rows, but its named columns
-  still contain an unexpanded `tl_trim_spaces:n` and its document tree remains
-  guarded; the six phase-five table assertions are not yet qualified.
+  were subsequently resolved by the token-trimming checkpoint; its document
+  tree remains guarded and the six phase-five table assertions still fail.
 
 - **Expl3 string comparison variants, 2026-11-26:** The native `VnTF`, `VnT`
   and `VnF` value variants reuse the existing register-expansion and string
