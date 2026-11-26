@@ -34,6 +34,18 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Scoped expl3 input streams, 2026-11-26:** The input-stream free list and
+  allocated stream variable now follow TeX assignment scope under negative
+  `globaldefs`; physical open and close effects remain visible across group
+  boundaries (S1.8, D10.2.2v2). Eight TeX Live comparisons cover root and
+  nested groups, reuse, counter restoration and a later global override. The
+  new fixture passes interpreter and JIT under forced GC; six focused stream
+  and group GTests and the interpreter/JIT file-authority checks pass.
+  The broader counter fixture also fails against the pre-change Script
+  snapshot: production parsing reports incomplete diagnostics or missing
+  reconstructed origins for several cases. That failure and missing-file
+  diagnostics remain open.
+
 - **Included environment definitions, 2026-11-26:** Twelve complete trees from
   the retired native engines match Script for included multiline environment
   definitions, blank lines, comments, CRLF and adjacent definitions
@@ -224,9 +236,9 @@ The existing native engine design and historical Phase IV work are in
   TeX Live comparisons cover raw/tokenized lines, EOF and no-value behavior,
   slot reuse, reopening, dynamic names, filename spacing and scoped/global
   reads. An authorized file and denied symlink pass the security runtime check
-  in interpreter and JIT. Missing-file diagnostics and negative `globaldefs`
-  pool scoping remain explicitly unsupported. The later document mapping work
-  and csvsimple blocker are recorded in the current checkpoint above.
+  in interpreter and JIT. Missing-file diagnostics remain explicitly
+  unsupported. Later negative-`globaldefs` scoping, document mapping and the
+  csvsimple blocker are recorded in the current checkpoint above.
 
 - **Expl3 stream declarations and integer registers, 2026-11-26:** Script now
   creates closed input-stream variables with TeX's terminal-stream meaning and

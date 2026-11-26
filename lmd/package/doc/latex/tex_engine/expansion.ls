@@ -2396,19 +2396,29 @@ fn ior_slot(st, token) any^ {
     if (value.kind == "chardef" or value.kind == "mathchardef") value.value else null
 }
 
+// The free-slot list follows TeX assignment scope, but physical streams do not.
+fn save_ior_slots(st: State, value, global) State^ {
+    let depth = len(st.groups);
+    let prior = if (st.ior_free_slots is array) st.ior_free_slots else [];
+    {*:st, ior_free_slots:value, groups:[for (i, scope in st.groups)
+        if (global and scope.ior_pool_saved != null) {*:scope, ior_pool_saved:value}
+        else if (not global and i == depth - 1 and scope.ior_pool_saved == null)
+            {*:scope, ior_pool_saved:prior}
+        else scope]}
+}
+
 // Closed ior slots are returned to the same reusable pool as expl3's stream allocator.
 fn ior_close_target(st: State, target) State^ {
     let slot = ior_slot(st, target)^;
     if (slot == null) unsupported(st, "expl3 input stream variable")
     else if (slot < 0 or slot >= 16) st
-    // The stream pool is global; localizing its updates needs scoped pool state.
-    else if (parameter_value(st, "globaldefs") < 0) unsupported(st, "expl3 input stream globaldefs")
     else {
         let free = if (st.ior_free_slots is array) st.ior_free_slots else [];
+        let global = effective_global(st, true)^;
         let closed = {*:st, input_stream_state_seen:true,
-            input_streams:{*:st.input_streams, *:map([string(slot), {open:false}])},
-            ior_free_slots:if (contains(free, slot)) free else [slot, *free]};
-        assign_meaning(closed, key(target), {kind:"mathchardef", value:16}, true)
+            input_streams:{*:st.input_streams, *:map([string(slot), {open:false}])}};
+        let saved = save_ior_slots(closed, if (contains(free, slot)) free else [slot, *free], global)^;
+        assign_meaning(saved, key(target), {kind:"mathchardef", value:16}, global)
     }
 }
 
@@ -2416,7 +2426,6 @@ fn ior_open(st: State, target, budget) State^ {
     let arg = stream.argument(st.input, true)^;
     let current = {*:st, input:arg.stream};
     if (arg.error != null) fail(current, arg.error)
-    else if (parameter_value(current, "globaldefs") < 0) unsupported(current, "expl3 input stream globaldefs")
     else {
         let filename = expand_argument_name(current, arg.tokens, budget)^;
         if (filename.state.issue != null) filename.state
@@ -2432,12 +2441,13 @@ fn ior_open(st: State, target, budget) State^ {
                 if (closed.issue != null) closed
                 else if (slot < 0 or slot >= 16) fail(closed, "tex-no-room")
                 else {
-                    let allocated = if (len(free) > 0) {*:closed, ior_free_slots:slice(free, 1, len(free))}
-                        else save_count(closed, 16, slot, true)^;
+                    let global = effective_global(closed, true)^;
+                    let allocated = if (len(free) > 0) save_ior_slots(closed, slice(free, 1, len(free)), global)^
+                        else save_count(closed, 16, slot, global)^;
                     let opened = {*:allocated, input_stream_state_seen:true,
                         input_streams:{*:allocated.input_streams,
                             *:map([string(slot), {open:true, data:resource.data, position:0, id:resource.id}])}};
-                    assign_meaning(opened, key(target), {kind:"chardef", value:slot}, true)
+                    assign_meaning(opened, key(target), {kind:"chardef", value:slot}, global)
                 }
             }
         }
@@ -4688,7 +4698,8 @@ fn end_group(st: State, token, explicit, environment = false, math = false, reco
         let restored = {*:stream.configure(st.input, scope.catcodes, scope.parameters.endlinechar),
             everyeof: if (scope.toks["-1"] == null) [] else scope.toks["-1"]};
         let captured = if (scope.box_target != null) slice(st.output,scope.box_start,len(st.output))^ else null;
-        let returned = {*:st, expl_syntax: scope.expl_syntax, definitions: scope.definitions, counts: scope.counts, dimens: scope.dimens, skips: scope.skips, muskips: scope.muskips, boxes: scope.boxes, toks: scope.toks,
+        let scoped = if (scope.ior_pool_saved is array) {*:st, ior_free_slots:scope.ior_pool_saved} else st;
+        let returned = {*:scoped, expl_syntax: scope.expl_syntax, definitions: scope.definitions, counts: scope.counts, dimens: scope.dimens, skips: scope.skips, muskips: scope.muskips, boxes: scope.boxes, toks: scope.toks,
             lowercase: scope.lowercase, uppercase: scope.uppercase, code_tables: scope.code_tables, current_font: scope.current_font, parameters: scope.parameters,
             input: stream.push(restored, scope.aftergroup), groups: slice(st.groups, 0, depth - 1),
             output: if (scope.box_target != null) slice(st.output,0,scope.box_start)^
