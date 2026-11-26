@@ -84,27 +84,27 @@
     diagnostics_match: true
   }]
 [{
-    issue: "latex-digest-unsupported",
-    unsupported: "prefixed macro source mapping",
-    matches: null,
+    issue: null,
+    unsupported: null,
+    matches: true,
     actual: null,
     native: null
   }, {
-    issue: "latex-digest-unsupported",
-    unsupported: "prefixed macro source mapping",
-    matches: null,
+    issue: null,
+    unsupported: null,
+    matches: true,
     actual: null,
     native: null
   }, {
-    issue: "latex-digest-unsupported",
-    unsupported: "prefixed macro source mapping",
-    matches: null,
+    issue: null,
+    unsupported: null,
+    matches: true,
     actual: null,
     native: null
   }, {
-    issue: "latex-digest-unsupported",
-    unsupported: "prefixed macro source mapping",
-    matches: null,
+    issue: null,
+    unsupported: null,
+    matches: true,
     actual: null,
     native: null
   }]

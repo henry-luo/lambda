@@ -34,6 +34,20 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Prefixed macro source mapping, 2026-11-26:** The definition continuation
+  and reconstructed-segment argument handling now cover the source-group
+  joining that originally required the global prefixed-macro guard
+  (D10.2.2v2). The four original cases, 48 additional assignment/group cases,
+  and 192 placement, comment, conditional, expansion and prefix cases match
+  complete retired-engine document trees; another 16 cases remain explicitly
+  blocked by the independent accent mapping guard. A 20-case regression checks
+  complete native trees through direct digestion and public `parse`. The old
+  four guard expectations now assert those independently captured trees. Three
+  focused GTests and both forced-GC execution tiers pass in the isolated home.
+  The other CSV operation and provenance guards remain active. Verification
+  uses an isolated Script home while another change edits the shared math
+  digester.
+
 - **Table alignment categories, 2026-11-26:** The document digester now treats
   an ampersand as a cell separator only when its TeX category is alignment
   (D10.2.2v2). Four complete document trees, including category-11,
@@ -44,8 +58,8 @@ The existing native engine design and historical Phase IV work are in
   produces the expected six HTML checks, including `Tea &amp; cake`; this is
   evidence for further provenance work, not a production guard removal.
   The normal phase-five table GTest still fails its six CSV assertions because
-  those guards remain active. Prefixed macro provenance is an additional
-  guard that must be qualified alongside the expl3 and input-stream guards.
+  those guards remain active. Prefixed macro provenance is covered by the
+  later checkpoint; the expl3 and input-stream guards remain to qualify.
 
 - **Expl3 token trimming, 2026-11-26:** Script preloads TeX's original
   delimiter-driven `tl_trim_spaces:n`, its value/local/global variants and

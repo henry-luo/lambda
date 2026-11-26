@@ -467,9 +467,9 @@ fn guarded_expl_let(st: State, token) State^ => if (meaning(st, token).source_ma
 
 fn prefixed(st: State, global, long_ok, protected_flag, budget) State^ {
     // TeX expands macros while searching for the assignment after a prefix.
-    let read = expanded_nonspace({*:st, prefix_scan: true}, budget)^;
+    let read = expanded_nonspace(st, budget)^;
     let t = read.token;
-    let advanced = {*:read.state, prefix_scan: false};
+    let advanced = read.state;
     let cmd = primitive(advanced, t);
     let apply_global = effective_global(advanced, global)^;
     if (advanced.issue != null) advanced
@@ -600,8 +600,7 @@ fn expand_one(st: State, t, budget) State^ {
                 else if (macro.source_mapping_guard == "tl_map") {*:st, expl3_tl_map_seen:true}
                 else if (macro.source_mapping_guard == "replicate") {*:st, expl3_replicate_seen:true}
                 else if (macro.source_mapping_guard == "int_math") {*:st, expl3_int_math_seen: true} else st;
-            let traced = if (st.prefix_scan == true) {*:marked, prefixed_macro_seen: true} else marked;
-            expand_macro(traced, macro, budget, t)
+            expand_macro(marked, macro, budget, t)
         }
     }
     else if (primitive(st, t) == "noexpand") noexpand(st, budget)
@@ -7460,7 +7459,7 @@ pub fn resume(st: State, source: string, name: string = "<input>", budget: int =
             catcodes: st.input.reader.catcodes, endline: parameter_value(st, "endlinechar")};
         let next_input = {*:stream.from_reader(next_reader), everyeof: st.input.everyeof};
         let resumed = {*:st, input: next_input, finished: false, output: [], messages: [], terminal_line: "", expansions: 0,
-            main_file: id, echo_incomplete: false, prefixed_macro_seen: false, prefix_scan: false,
+            main_file: id, echo_incomplete: false,
             mathchardef_emission_seen: false,
             expl3_tl_head_seen: false, expl3_tl_tail_seen: false, expl3_keyval_seen: false, expl3_keys_seen:false,
             expl3_clist_map_seen:false, expl3_bool_expr_seen:false, expl3_tl_replace_seen:false, expl3_str_case_seen:false,

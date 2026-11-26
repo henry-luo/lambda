@@ -3153,6 +3153,7 @@ fn inline(tokens, sources, index = 0, text = "", items = [], stop_blocks = true,
             let can_map = following != null and token.output_end != null and following.output_start != null and
                 following.output_text != null and following.output_start >= token.output_end;
             let gap = if (can_map) utf8.decode(slice(mapped_bytes(following)^,token.output_end,following.output_start))^ else null;
+            // Prefix expansion can consume source inside a following definition argument.
             let joined_group = gap != null and (gap == "" or comment_gap(gap)^);
             let definition = definition_span(token, sources, false, mapped_end)^;
             if (definition.issue != null) {
@@ -4075,9 +4076,6 @@ pub fn digest(expanded: map) Digested^ {
     // non-text source after the document needs full source-aware digestion.
     else if (expanded.trailing_source != null and not plain_trailing_text(expanded.trailing_source.text)^)
         {ast: null, issue: "latex-digest-unsupported", unsupported: "post-document source mapping"}
-    // macro-expanded assignments can join following groups to echoed definitions.
-    else if (expanded.prefixed_macro_seen == true and any([for (token in expanded.output) token.kind == "source-span"]))
-        {ast: null, issue: "latex-digest-unsupported", unsupported: "prefixed macro source mapping"}
     // consumed paragraph data can change native argument and math source mapping.
     else if (expanded.paragraph_data_seen == true)
         {ast: null, issue: "latex-digest-unsupported", unsupported: "paragraph assignment source mapping"}
