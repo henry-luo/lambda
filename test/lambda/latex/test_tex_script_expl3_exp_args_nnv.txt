@@ -1,0 +1,35 @@
+[{
+    name: "tokens",
+    issue: null,
+    unsupported: null,
+    text: "[\\foo ]/[B\\foo ]",
+    matches: true
+  }, {
+    name: "group",
+    issue: null,
+    unsupported: null,
+    text: "[{X} Y]/[A{B} C]",
+    matches: true
+  }, {
+    name: "integer",
+    issue: null,
+    unsupported: null,
+    text: "[number]/[-42]",
+    matches: true
+  }, {
+    name: "empty",
+    issue: null,
+    unsupported: null,
+    text: "[]/[]",
+    matches: true
+  }, {
+    name: "alias",
+    issue: null,
+    unsupported: null,
+    text: "[Q]/[\\q_no_value ]",
+    matches: true
+  }]
+{
+  issue: "latex-digest-unsupported",
+  unsupported: "expl3 value argument source mapping"
+}

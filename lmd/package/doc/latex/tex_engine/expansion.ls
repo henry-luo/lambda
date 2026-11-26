@@ -7000,6 +7000,8 @@ pub fn enable_script_expl3(st: State) State^ {
         {source: "\\tl_head:v{\\exp_args:Nv\\tl_head:n}", protected_flag: false},
         {source: "\\tl_tail:v{\\exp_args:Nv\\tl_tail:n}", protected_flag: false},
         {source: "\\exp_args:NV#1#2{\\exp_after:wN#1\\exp_after:wN{\\exp:w\\__exp_eval_register:N#2}}", protected_flag: false, source_mapping_guard: "exp_args_value"},
+        // Preserve the first argument while expanding the second variable's value.
+        {source: "\\exp_args:NnV#1#2#3{\\tex_expanded:D{\\exp_not:N#1{\\exp_not:n{#2}}{\\__kernel_exp_not:w\\exp_after:wN{\\exp:w\\__exp_eval_register:N#3}}}}", protected_flag:false, source_mapping_guard:"exp_args_value"},
         {source: "\\tl_head:V{\\exp_args:NV\\tl_head:n}", protected_flag: false},
         {source: "\\tl_tail:V{\\exp_args:NV\\tl_tail:n}", protected_flag: false},
         {source: "\\exp_args:No#1#2{\\exp_after:wN#1\\exp_after:wN{#2}}", protected_flag: false, source_mapping_guard: "exp_args_once"},

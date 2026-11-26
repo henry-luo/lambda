@@ -34,6 +34,14 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Expl3 `exp_args:NnV`, 2026-11-26:** Script preloads the native expandable
+  helper, preserving the first argument and expanding the second variable's
+  value (D10.2.2v2). Five TeX Live comparisons cover unexpanded control tokens,
+  grouping, integer registers, empty values and aliases. Three focused GTests
+  and interpreter/JIT forced-GC runs pass. Its value-argument document mapping
+  remains guarded. The complete phase-five CSV fixture now advances to the
+  unsupported `regex_match:nnTF`; CSV rendering is still failing.
+
 - **Counter diagnostics and generated commands, 2026-11-26:** Counter errors
   and exhausted register allocation now retain the native messages and source
   locations, rather than only their codes (S1.8, D10.2.2v2). Generated counter
