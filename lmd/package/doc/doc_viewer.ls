@@ -12,6 +12,7 @@ import dom
 import pdf_html: lambda.doc.pdf.html
 import latex: lambda.doc.latex.latex
 import latex_css: lambda.doc.latex.css
+import html_fragment: lambda.doc.latex.to_html
 import math_renderer: lambda.doc.math.math
 import graph_doc: lambda.graph.document
 import tikz: lambda.doc.tikz.tikz
@@ -35,6 +36,8 @@ import source_editor: lambda.editor.surface.source
 import publish: lambda.ui.core.publish
 
 let PROJECT_ROOT = "."
+let PREVIEW_CACHE_ENTRIES = 16
+let PREVIEW_CACHE_BYTES = 16 * 1024 * 1024
 // Transformed browsers retain the source directory as their URL, so bundle the icon font.
 let ICON_FONT = media.data_uri(input(sys.lambda.home ++ "/package/doc/icons/seti.woff", 'binary')^, "font/woff")^
 
@@ -68,6 +71,23 @@ fn tree_hit_class(path) any^ => "tree-hit-" ++ replace(replace(path, "/", "_"), 
 fn event_hits_row(evt, hit_class) =>
   (contains(evt["target_class"], hit_class ++ " ") ^ { false }) or
   (contains(evt["target_parent_class"], hit_class ++ " ") ^ { false })
+
+pn select_tree_row(panel, path, row = null) {
+  if (panel == null) { return }
+  let previous = dom.query_selector(panel, ".tree-row.selected")
+  let selected = if (row != null) row else {
+    let entry = [for (candidate in dom.query_selector_all(panel, ".tree-entry")
+      where dom.get_attribute(candidate, "data-tree-path") == path) candidate][0]
+    if (entry == null) null else dom.query_selector(entry, ".tree-row")
+  }
+  if (previous != null and previous != selected) {
+    publish.attr(previous, "class", replace(dom.get_attribute(previous, "class"), " selected", "")^)^
+  }
+  if (selected != null and not (contains(dom.get_attribute(selected, "class"), " selected") ^ { false })) {
+    publish.attr(selected, "class", dom.get_attribute(selected, "class") ++ " selected")^
+  }
+  publish.attr(panel, "data-selected-path", path)^
+}
 
 // A tree-wide redraw needs the expansion currently owned by individual rows.
 fn visible_open_paths(target) {
@@ -378,7 +398,13 @@ fn selected_preview(file) any^ {
       // Render in this document's runtime; a nested PDF iframe cannot start another runtime.
       let parsed = input(selected_path, 'pdf') ^ { null }
       if (parsed == null) { <p class:"preview-error", "Unable to read selected PDF"> }
-      else { pdf.pdf_to_html(parsed, null) ^ { <p class:"preview-error", "Unable to render selected PDF"> } }
+      else {
+        let preview = pdf.pdf_to_html(parsed, null) ^ { <p class:"preview-error", "Unable to render selected PDF"> }
+        // keep page and text-run attributes when mounting the PDF body as a fragment.
+        if (name(preview) == 'html') {
+          <div class:"document-body", *[for (body in content(preview)^ where name(body)^ == 'body') *content(body)^]>
+        } else preview
+      }
     }
     else if (is_latex_document(file["extension"])) {
       // Parse through the package so the TeX engine sees its adapter registry (D10.2.2);
@@ -408,6 +434,26 @@ fn selected_preview(file) any^ {
     else if (format == null) { null }
     else { input(selected_path, format) ^ { <p class:"preview-error", "Unable to render selected file"> } }
   }
+}
+
+fn transforms_preview(file) {
+  let ext = file["extension"] ^ { "" }
+  let markup = document_format(ext) ^ { null };
+  is_pdf_document(ext) or is_latex_document(ext) or is_pgf_document(ext) or graph_flavor(ext) != null or
+    markup != null and markup != "html"
+}
+
+pn capture_preview(file, target, revision) map^ {
+  let model = selected_preview(file)^
+  let rendered = if (is_pdf_document(file["extension"])) model else apply(model)
+  let markup = html_fragment.to_html(rendered)^
+  let node = if (target == null) null else dom.create_element(dom.owner_document(target), "div")
+  if (node != null) {
+    dom.style_set_property(node, "display", "contents")
+    dom.set_inner_html(node, markup)
+  }
+  return {markup:if (node == null) markup else null, token:string(revision), node:node,
+    bytes:len(binary(markup))^, failed:model.class == "preview-error"}
 }
 
 fn property_children(value, format) {
@@ -857,11 +903,6 @@ view <tree_entry> state children: null, is_open: ~.initial_open {
   let entry_path = child_path(~.parent_path, ~.name)
   let indent = (~.depth * 16) ++ "px"
   let hit_class = tree_hit_class(entry_path)
-  let row_class = if (~.selected_path == entry_path) {
-    hit_class ++ " tree-row selected"
-  } else {
-    hit_class ++ " tree-row"
-  }
   let matching_children = if (~.is_dir and is_open) {
     let current_children = if (children == null) { directory_entries(~.source) ^ { [] } } else { children };
     if (type(current_children) != array) [] else
@@ -870,7 +911,7 @@ view <tree_entry> state children: null, is_open: ~.initial_open {
 
   <div class:"tree-entry", 'data-tree-path':entry_path,
     'data-tree-open':(if (~.is_dir and is_open) "true" else "false")
-  , <div class:row_class, style:("padding-left:" ++ indent)
+  , <div class:(hit_class ++ " tree-row"), style:("padding-left:" ++ indent)
     , if (~.is_dir) {
         <button class:"tree-toggle",
           if (is_open) "▾" else "▸">
@@ -896,7 +937,6 @@ view <tree_entry> state children: null, is_open: ~.initial_open {
             initial_open:path_is_open(~.open_paths,
                                       child_path(entry_path, child.name)),
             open_paths:~.open_paths,
-            selected_path:~.selected_path,
             filter_text:~.filter_text
           >)
       >
@@ -913,11 +953,24 @@ on click(evt) {
     if (not is_open and children == null) { children = directory_entries(~.source) ^ { ^.message } }
     is_open = not is_open
   } else if (not ~.is_dir) {
-    if ((~.selected_path != entry_path)^) { reset_document_scroll(evt.target)^ }
+    let panel = dom.closest(evt.target, ".file-panel")
+    if ((panel == null or dom.get_attribute(panel, "data-selected-path") != entry_path)^) {
+      reset_document_scroll(evt.target)^
+    }
     emit("file_select", {file_path:entry_path, source:~.source, name:~.name, extension:~.extension,
       target:evt.target,
       text_width_px:(if (is_pgf_document(~.extension)) pgf_text_width_px(evt.target) else null)})
   }
+}
+on render(evt) {
+  if (evt.event_phase == 2) {
+    let panel = dom.closest(evt.target, ".file-panel")
+    let path = if (panel == null) null else dom.get_attribute(panel, "data-selected-path")
+    if (path != null and path == dom.get_attribute(evt.target, "data-tree-path")) {
+      select_tree_row(panel, path, dom.query_selector(evt.target, ".tree-row"))^
+    }
+  }
+  return 'pass'
 }
 
 pn update_preview_scrollbars(panel) {
@@ -990,16 +1043,9 @@ view <document_pane> () any^ state preview_mode: ~.initial_preview_mode or "view
             if (not (~.file.ebook.error is null)) <p class:"preview-error", ~.file.ebook.error>
             else ebook_reader.reader(~.file.ebook)^>
         } else if (is_pdf_document(~.file["extension"])) {
-          let preview = selected_preview(~.file);
-          <section id:"pdf-preview", class:"rendered-preview pdf-preview",
-            // keep the renderer's page and text-run attributes through the preview.
-            if (name(preview) == 'html') {
-              <div class:"document-body", *[for (body in content(preview)^ where name(body)^ == 'body') *content(body)^]>
-            } else preview>
+          <section id:"pdf-preview", class:"rendered-preview pdf-preview">
         } else if (document_format(~.file["extension"]) == "rtf") {
-          let preview = selected_preview(~.file);
-          <section id:"rtf-preview", class:"rendered-preview rtf-preview",
-            apply(preview)>
+          <section id:"rtf-preview", class:"rendered-preview rtf-preview">
         } else if (document_format(~.file["extension"]) == "html") {
           // defer optional document transforms until their file is selected.
           if (type(~.file["source"]) == element) {
@@ -1011,9 +1057,7 @@ view <document_pane> () any^ state preview_mode: ~.initial_preview_mode or "view
         } else if (framed_format(~.file)) {
           <iframe class:"document-preview", src:absolute_file_path(~.file["file_path"]), title:~.file["name"]>
         } else {
-          let preview = selected_preview(~.file);
-          <section id:"rendered-preview", class:"rendered-preview",
-            apply(preview)>
+          <section id:"rendered-preview", class:"rendered-preview">
         }
       } else {
         // ZIP bytes are not document source; expose the converter's escaped HTML instead.
@@ -1042,10 +1086,19 @@ view <document_pane> () any^ state preview_mode: ~.initial_preview_mode or "view
 }
 on render(evt) {
   if (evt.event_phase == 2) {
+    if (preview_mode == "view" and ~.preview_token != null) {
+      let host = dom.query_selector(evt.target, "#rendered-preview,#rtf-preview,#pdf-preview")
+      if (host != null and dom.get_attribute(host, "data-preview-token") != ~.preview_token) {
+        emit("viewer_mount_preview", {host:host,panel:evt.target,token:~.preview_token})
+      }
+    }
     dom.watch_window(evt.target, "resize", true)
     update_preview_scrollbars(evt.target)^
   }
   return 'pass'
+}
+on viewer_preview_measured(evt) {
+  update_preview_scrollbars(evt.target)^
 }
 on resize(evt) {
   update_preview_scrollbars(evt.target)^
@@ -1112,7 +1165,7 @@ on property_more(path) {
 // Project browser application
 // --------------------------------------------------------------------------
 
-edit <project_tree> state root_open: true, open_paths: [], filter_text: "", selected_path: "" {
+edit <project_tree> state root_open: true, open_paths: [], filter_text: "" {
   let matching_root_entries = [for (entry in ~.entries where ((entry_matches_filter(entry, ~.root_path, filter_text)) ^ { false })) entry];
 
   <aside class:"file-panel"
@@ -1149,7 +1202,6 @@ edit <project_tree> state root_open: true, open_paths: [], filter_text: "", sele
                 initial_open:path_is_open(open_paths,
                                           child_path(~.root_path, entry.name)),
                 open_paths:open_paths,
-                selected_path:selected_path,
                 filter_text:filter_text
               >)
           >
@@ -1193,20 +1245,18 @@ on keydown(evt) {
   }
 }
 on file_select(entry) {
-  // Row-local toggles do not rebuild the tree; snapshot open rows only when
-  // selection will rebuild it for the selected highlight.
-  open_paths = visible_open_paths(entry["target"])
-  emit("document_select", entry)
+  let pane = dom.query_selector(dom.root_node(entry.target), ".viewer-content")
+  if (pane != null) { dom.dispatch(pane, {type:"viewer_tree_select",detail:entry}) }
 }
-on viewer_selected(evt) { selected_path = evt.detail }
 
-fn document_pane_model(file, property_data, open_paths, eml_data, office_data, csv_data, csv_widths, csv_visible_rows, preview_mode = null) =>
+fn document_pane_model(file, property_data, open_paths, eml_data, office_data, csv_data, csv_widths, csv_visible_rows,
+    preview_mode = null, preview_token = null) =>
   <document_pane file:file, property_data:property_data, initial_open_paths:open_paths,
     eml_data:eml_data, office_data:office_data, csv_data:csv_data, csv_widths:csv_widths, csv_visible_rows:csv_visible_rows,
-    initial_preview_mode:preview_mode>
+    initial_preview_mode:preview_mode, preview_token:preview_token>
 
 // Capture the format's model once for both direct opens and tree selections.
-pn load_pane(entry) element^ {
+pn load_pane(entry, revision = 0) map^ {
   let format = property_format(entry["extension"])
   let parsed = if (format == null) null else input(entry["source"], format) ^ { null }
   let publication = if (is_epub_document(entry["extension"]))
@@ -1224,19 +1274,51 @@ pn load_pane(entry) element^ {
   let table = if (is_table_document(entry["extension"]))
     input(entry["source"], lower(entry["extension"])) ^ { null } else null
   let widths = [for (column in csv_columns(table)^) CSV_DEFAULT_WIDTH]
-  return document_pane_model(file, properties, open_paths, eml, office, table, widths, CSV_PAGE_SIZE, entry.preview_mode)
+  let result = if (transforms_preview(file)) capture_preview(file, entry.target, revision)^ else null
+  return {pane:document_pane_model(file, properties, open_paths, eml, office, table, widths, CSV_PAGE_SIZE,
+    entry.preview_mode, result.token), preview:result}
 }
 
 fn table_pane(pane:element, widths, rows) element^ =>
   document_pane_model(pane.file, pane.property_data, pane.initial_open_paths,
     pane.eml_data, pane.office_data, pane.csv_data, widths, rows)
 
-edit <doc_editor_app> state csv_resize: null, pane: ~.initial_pane, editing: null {
-  <div class:"doc-editor",
-    if (~.tree_model != null) apply(~.tree_model, {mode:"edit"});
+fn preview_cache_prefix(entries, budget, index = 0) {
+  if (index >= len(entries) or entries[index].preview.bytes > budget) []
+  else [entries[index],*preview_cache_prefix(entries,budget-entries[index].preview.bytes,index+1)]
+}
+
+pn navigate_pane(entry, previous, cache, revision, reload = false) map^ {
+  let key = {path:entry.file_path, width:entry.text_width_px}
+  let prior = [for (candidate in cache where candidate.key == key) candidate][0]
+  let rest = [for (candidate in cache where candidate.key.path != key.path) candidate]
+  // Selecting the active file reloads external dependencies. Cache only completed transforms.
+  if (prior != null and not reload and previous.file.file_path != entry.file_path) {
+    return {pane:prior.pane,preview:prior.preview,cache:[prior,*rest],revision:revision}
+  }
+  let next = load_pane(entry, revision + 1)^
+  let cached = if (next.preview == null or next.preview.failed or next.preview.bytes > PREVIEW_CACHE_BYTES) rest
+    else preview_cache_prefix([{key:key,*:next},*take(rest,PREVIEW_CACHE_ENTRIES-1)], PREVIEW_CACHE_BYTES)
+  return {*:next,cache:cached,revision:revision + 1}
+}
+
+edit <doc_editor_app> state csv_resize: null, pane: ~.initial_pane, editing: null, previews: [],
+    active_preview: ~.initial_preview, preview_revision: 0 {
+  <div class:"viewer-content",
     if (editing != null) <div class:"viewer-edit-host", <style editor.stylesheet> editor.surface(editing, true, editing.modes)>
     else apply(pane)
   >
+}
+on viewer_mount_preview(req) {
+  if (active_preview == null or active_preview.token != req.token) { return }
+  if (active_preview.node == null) { dom.set_inner_html(req.host, active_preview.markup) }
+  else {
+    // This app owns the cached nodes. Pane models carry only a token, so eviction releases the fragment.
+    for (child in [for (node in dom.child_nodes(req.host)) node]) { dom.remove_child(req.host, child) }
+    dom.append_child(req.host, active_preview.node)
+  }
+  dom.set_attribute(req.host, "data-preview-token", req.token)
+  dom.request_frame_once(req.panel, "viewer_preview_measured")
 }
 on viewer_edit(document) { editing = document }
 on viewer_preview(req) {
@@ -1246,22 +1328,8 @@ on viewer_preview(req) {
     dom.dispatch(surface, {type:"editor_navigate", detail:{preview_mode:req.mode}})
   }
 }
-on click(evt) {
-  if (editing != null) {
-    let root = dom.root_node(evt.target)
-    let target = if (dom.node_type(evt.target) == 1) evt.target else dom.parent_node(evt.target)
-    // The file panel is outside the editor's event subtree.
-    if (target == null or dom.closest(target, ".viewer-edit-host") == null) {
-      let menu = dom.query_selector(root, ".viewer-edit-host .edit-table-menu,.viewer-edit-host .property-menu,.viewer-edit-host .edit-compact[open]")
-      if (menu != null) {
-        let surface = dom.query_selector(root, ".viewer-edit-host .edit-app")
-        if (surface != null) { dom.dispatch(surface, {type:"editor_dismiss_menu"}) }
-      }
-    }
-  }
-  return 'pass'
-}
-on document_select(entry) {
+on viewer_tree_select(evt) {
+  let entry = evt.detail
   if (editing != null) {
     let root = dom.root_node(entry.target)
     let surface = dom.query_selector(root, ".viewer-edit-host .edit-app")
@@ -1274,9 +1342,13 @@ on document_select(entry) {
     return
   }
   csv_resize = null
-  pane = load_pane(entry)^
+  let next = navigate_pane(entry, pane, previews, preview_revision)^
+  pane = next.pane
+  previews = next.cache
+  active_preview = next.preview
+  preview_revision = next.revision
   let tree = dom.closest(entry.target, ".file-panel")
-  if (tree != null) { dom.dispatch(tree, {type:"viewer_selected", detail:entry.file_path}) }
+  select_tree_row(tree, entry.file_path, dom.closest(entry.target, ".tree-row"))^
 }
 on viewer_navigation(req) {
   // Keep the current editor and its close guard if the next document fails to load.
@@ -1284,14 +1356,19 @@ on viewer_navigation(req) {
   let entry = if (mode == null) req.entry
     else if (req.edit_path == pane.file.file_path) {*:pane.file, preview_mode:mode}
     else {*:local_file_entry(req.edit_path)^, preview_mode:mode}
-  let next = load_pane(entry)^
+  // A save may update the edited file even when the user navigates to a different one.
+  let cache = [for (candidate in previews where candidate.key.path != req.edit_path) candidate]
+  let next = navigate_pane({*:entry,target:req.node}, pane, cache, preview_revision, true)^
   let root = dom.root_node(req.node)
   let tree = dom.query_selector(root, ".file-panel")
-  if (tree != null) { dom.dispatch(tree, {type:"viewer_selected", detail:entry.file_path}) }
+  select_tree_row(tree, entry.file_path)^
   dom.set_close_guard(req.node, false)
-  dom.set_window_title(req.node, if (~.tree_model == null) entry.name else "Lambda Document Viewer")
+  dom.set_window_title(req.node, if (~.browser) "Lambda Document Viewer" else entry.name)
   csv_resize = null
-  pane = next
+  pane = next.pane
+  previews = next.cache
+  active_preview = next.preview
+  preview_revision = next.revision
   editing = null
 }
 // A release can land over the file panel after shrinking a wide column.
@@ -1314,7 +1391,26 @@ on mouseup(evt) {
 // Page shell
 // --------------------------------------------------------------------------
 
-fn viewer_document(tree_model, initial_pane = <document_pane file:null, initial_open_paths:[]>) {
+view <viewer_shell> {
+  <div class:"doc-editor",
+    if (~.tree != null) apply(~.tree, {mode:"edit"});
+    apply(<doc_editor_app browser:(~.tree != null), initial_pane:~.pane, initial_preview:~.preview>, {mode:"edit"})>
+}
+on click(evt) {
+  let target = if (dom.node_type(evt.target) == 1) evt.target else dom.parent_node(evt.target)
+  // The shell owns outside clicks, including clicks in the independently rendered tree.
+  if (target == null or dom.closest(target, ".viewer-edit-host") == null) {
+    let root = dom.root_node(evt.target)
+    let menu = dom.query_selector(root, ".viewer-edit-host .edit-table-menu,.viewer-edit-host .property-menu,.viewer-edit-host .edit-compact[open]")
+    if (menu != null) {
+      let surface = dom.query_selector(root, ".viewer-edit-host .edit-app")
+      if (surface != null) { dom.dispatch(surface, {type:"editor_dismiss_menu"}) }
+    }
+  }
+  return 'pass'
+}
+
+fn viewer_document(tree_model, initial_pane = <document_pane file:null, initial_open_paths:[]>, initial_preview = null) {
 <html lang:"en",
   <head
     <meta charset:"UTF-8">
@@ -1334,6 +1430,7 @@ fn viewer_document(tree_model, initial_pane = <document_pane file:null, initial_
       body { margin: 0; height: 100vh; overflow: hidden; background: #eef1f5; color: #20242c;
              font-family: var(--document-font); }
       .doc-editor { display: flex; height: 100vh; overflow: hidden; }
+      .viewer-content { display:flex; flex:1; min-width:0; min-height:0; }
       .viewer-edit-host { flex: 1; min-width: 0; min-height: 0; height: 100%; overflow: hidden; }
       .viewer-edit-host body.edit-app { height: 100%; min-height: 0; overflow: hidden; }
       .viewer-edit-host .edit-main { min-height: 0; overflow: auto; }
@@ -1535,7 +1632,7 @@ fn viewer_document(tree_model, initial_pane = <document_pane file:null, initial_
     ">
   >
   <body
-    apply(<doc_editor_app tree_model:tree_model, initial_pane:initial_pane>, {mode:"edit"})
+    apply(<viewer_shell tree:tree_model, pane:initial_pane, preview:initial_preview>)
   >
 >
 }
@@ -1556,7 +1653,7 @@ fn local_file_entry(source: string) map^ {
 
 pub pn open_file(source: string, options) element^ {
   let pane = load_pane(local_file_entry(source)^)^
-  return viewer_document(null, pane)
+  return viewer_document(null, pane.pane, pane.preview)
 }
 
 // Keep the root identity stable across document selections.

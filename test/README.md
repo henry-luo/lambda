@@ -368,7 +368,7 @@ still require native checks. Design: [Radiant Fullscreen](../vibe/radiant/Radian
 | `make test` | every suite except `jube`, and minus `test_radiant_online_view_gtest`. This is not `test-all`, despite what `make help` says |
 | `make test-all` / `test-all-baseline` / `test-extended` | all suites / `--category=baseline` / `--category=extended`. `test-extended` also runs `dom-ui-run`. |
 | `make test-lambda-baseline` | Lambda-owned `lambda` suite baseline (excludes `test_node_prelim_gtest`, `test_lambda_concurrency_gtest`, and `test/lambda/latex` script cases) |
-| `make test-lambda-full` | the above, nine focused JavaScript GTest suites, LaTeX script cases, the input owner's baseline, WebSocket interoperability, concurrency, extended runtime, and the four relocated unit suites retained by the full gate |
+| `make test-lambda-full` | the above, nine focused JavaScript GTest suites, LaTeX script cases, the input owner's baseline, WebSocket interoperability, concurrency, extended runtime, the four relocated unit suites, and the viewer memory replay |
 | `make -C ../lambda-input test-input-baseline` | input-owned native library, parser, formatter, model, CSS, archive and offline network suites, including HTML, Markdown and YAML corpora |
 | `make -C ../radiant test-radiant-baseline` | Radiant-owned native layout, rendering, media and host-interface unit suites |
 | `make test-radiant-baseline` | Lambda-owned Radiant integration checks, layout suites, page snapshot, UI/DOM fixtures and render visual checks run through `test/test_run.js` within a shared worker budget; layout partials, skips and baseline verdicts are retained |
@@ -516,7 +516,8 @@ Focused targets agents commonly need (`make help` lists ~113; the Makefile has ~
   100-word paragraph; timings are written to `temp/spelling_vocab_poc/front/benchmark.json`.
   `python3 utils/spelling_lookup_bench.py --executable <release-executable>`
   compares full-validation loading with read-and-index loading in isolated alternating runs.
-- **Other:** `test-wasm`, `test-coverage`, `lint`, `check-tutorial`, `check-doc-code`, `semantics-verify` (the semantics model as a second oracle over `test/lambda`, see §4; also the last step of `test-lambda-full`).
+- **Viewer navigation memory:** `make test-viewer-navigation-memory` runs the GTest included in `test-lambda-full`. One headless release viewer visits seven local documents in each of 12 rounds. It checks the active document and rendered preview on every visit and samples process memory after garbage collection. The median of the final three samples may grow by up to 64 MiB over the median of rounds 4–6 (D5.5.1–D5.5.3). macOS measures footprint, Linux measures RSS, and Windows measures private bytes.
+- **Other:** `test-wasm`, `test-coverage`, `lint`, `check-tutorial`, `check-doc-code`, `semantics-verify` (the semantics model as a second oracle over `test/lambda`, see §4).
 
 The shared image codec suite is `./test/test_image_io_gtest.exe` (library
 baseline). It covers PNG/JPEG/GIF/WebP/AVIF/BMP/TIFF/ICO, thumbnail planning,

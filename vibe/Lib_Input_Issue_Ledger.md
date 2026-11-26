@@ -15,6 +15,10 @@ Resolved records are in the [fixed issue ledger](<Lib_Input_Issue_Ledger (fixed)
 
 ## Open issues
 
+<a id="li-125"></a>
+
+- [LI-125 — Re-registering a math font grows the font resource registry](<Lib_Input_Issue_Ledger (fixed).md#li-125>).
+
 <a id="li-124"></a>
 
 ### LI-124 — Malformed UTF-8 text has inconsistent length and slice boundaries

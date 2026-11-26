@@ -536,6 +536,7 @@ extern "C" bool dom_is_rule_style_decl(Item item) {
 
 extern "C" Item dom_cssom_wrap_stylesheet(void* stylesheet) {
     if (!stylesheet) return ItemNull;
+    ((CssStylesheet*)stylesheet)->cssom_exposed = true;
     Item cached = cssom_cached_wrapper(stylesheet, CSSOM_CACHE_SHEET);
     if (cached.item != ITEM_NULL) return cached;
     DomDocument* document = cssom_sheet_document((CssStylesheet*)stylesheet);

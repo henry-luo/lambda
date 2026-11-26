@@ -14,6 +14,23 @@ are unchanged. Full evidence is under `../../lambda/temp/kianhup-style/`.
 
 ## Fixed issues
 
+<a id="ri-253"></a>
+
+### RI-253 — Cached previews repeat stylesheet, font and layout allocation
+
+**Fixed 2026-11-26.** Switching between the math Markdown and intensive TeX
+fixtures in `lambda view` recreated 298 parsed inline sheets per round in
+the same document pool. Reconnecting an unchanged style element now reuses
+its unexposed sheet. Stylesheet removal still withdraws its rules from the
+cascade. An author that obtained the old CSSOM object retains its own copy.
+Animation and font caches are invalidated when the changed sheets contribute
+their at-rules. CSS font registration publishes directly to the shared font
+registry (D5.5.1, D5.5.3, D10.2.4 and LI-125).
+
+Retained layout replay now allocates live text rectangles from the same list
+to which it returns them. Retiring a border releases its computed corners,
+with layout and paint sharing the currently owned snapshot (D5.5.1, D5.5.3).
+
 <a id="ri-252"></a>
 
 ### RI-252 — Demo tile hover triggers a full catalog layout

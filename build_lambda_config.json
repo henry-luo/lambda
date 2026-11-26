@@ -6560,6 +6560,19 @@
             "icon": "\ud83d\udfe8"
           },
           {
+            "source": "test/test_viewer_navigation_memory_gtest.cpp",
+            "name": "Viewer Navigation Memory Tests",
+            "category": "extended",
+            "dependencies": [
+              "lambda-lib"
+            ],
+            "binary": "test_viewer_navigation_memory_gtest.exe",
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ]
+          },
+          {
             "source": "test/test_js_c_parser_gtest.cpp",
             "name": "JavaScript C Parser Tests",
             "category": "extended",

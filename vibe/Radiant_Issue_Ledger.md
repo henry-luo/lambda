@@ -20,6 +20,23 @@ observations still require re-verification. Add new Radiant issues here.
 
 ## Open issues
 
+<a id="ri-254"></a>
+
+### RI-254 — Detached frame documents accumulate during viewer navigation
+
+**Open, observed 2026-11-26.** Repeatedly switch between a local HTML page
+and a text file in `lambda view`. The allocator report retains a separate
+set of document, view and Input pools for each retired frame. The frame
+teardown path transfers ownership to the parent's resources, which preserve
+storage for exposed wrappers and adopted nodes until parent close. Timely
+retirement needs to track those lifetime edges and wait until the relevant
+evaluators are quiescent (D5.5.1, D6.3.3). This affects the mixed-document
+memory gate. Transformed inline previews have a separate lifetime.
+
+<a id="ri-253"></a>
+
+- [RI-253 — Cached previews repeat stylesheet, font and layout allocation](<Radiant_Issue_Ledger (fixed).md#ri-253>).
+
 <a id="ri-252"></a>
 
 - [RI-252 — Demo tile hover triggers a full catalog layout](<Radiant_Issue_Ledger (fixed).md#ri-252>).

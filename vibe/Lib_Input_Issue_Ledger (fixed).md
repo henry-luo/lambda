@@ -6,6 +6,19 @@ remain in the [active issue ledger](Lib_Input_Issue_Ledger.md).
 
 ## Fixed issues
 
+<a id="li-125"></a>
+
+### LI-125 — Re-registering a math font grows the font resource registry
+
+**Fixed 2026-11-26.** Repeatedly visiting the same LaTeX and math previews
+registered identical `@font-face` resources in the window's font context.
+Each pass added about 184 KiB to the font arena and lengthened font lookup.
+Equivalent descriptors now share the stored resource and loaded handle.
+Re-registering an equivalent face preserves last-rule precedence within its
+family. Distinct sources, faces, and Unicode ranges remain separate
+(D5.5.1, D10.2.4). The 31-case font-context suite passes, including a
+repeated-registration replay that checks precedence, count and arena usage.
+
 <a id="li-123"></a>
 
 ### LI-123 — External shape fingerprints hashed pointer identities byte by byte
