@@ -20,6 +20,22 @@ observations still require re-verification. Add new Radiant issues here.
 
 ## Open issues
 
+<a id="ri-249"></a>
+
+- [RI-249 — macOS clears the visible drawable during native resize](<Radiant_Issue_Ledger (fixed).md#ri-249>).
+
+<a id="ri-248"></a>
+
+- [RI-248 — Native resize presents a stale frame before repaint](<Radiant_Issue_Ledger (fixed).md#ri-248>).
+
+<a id="ri-247"></a>
+
+- [RI-247 — Collapsed table borders spill out of scroll panes](<Radiant_Issue_Ledger (fixed).md#ri-247>).
+
+<a id="ri-246"></a>
+
+- [RI-246 — Rounded inline backgrounds spill past rectangular scroll clips](<Radiant_Issue_Ledger (fixed).md#ri-246>).
+
 <a id="ri-245"></a>
 
 ### RI-245 — Textarea caret needs affinity at a soft-wrap boundary

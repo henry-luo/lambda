@@ -1,0 +1,12 @@
+{
+  kind: "sequence",
+  valid: true,
+  participants: ["son", "father", "friend"],
+  messages: [["son", "father"], ["friend", "father"], ["father", "father"]],
+  viewer_order: ["son", "father", "friend", "Can I borrow your car?", "Never lend your car to anyone to whom you have given birth.", "internal debate ensues"],
+  geometry: [true, true, true, true, true, true, true],
+  explicit_actors: ["Public API", "Queue Worker", "Browser"],
+  operator_endpoints: [["Client", "Worker"], ["Gateway", "Worker"], ["Gateway", "Client"], ["Client", "Client"]],
+  operator_arrows: 4,
+  rendered: true
+}

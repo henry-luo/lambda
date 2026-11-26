@@ -1,5 +1,6 @@
 // Convert the package's semantic workbook to Sheet's bounded editable format.
 import xlsx: lambda.doc.xlsx
+import cells: lambda.doc.xlsx.cells
 import m: .mod_model
 import f: .mod_formula
 
@@ -13,13 +14,13 @@ fn raw(cell) any^ {
 fn width_cells(span) any^ {
     if (span.width<=0 or span.min>=m.MAX_COLUMNS or span.max<0 or span.min>span.max) []
     else [for (index in max(0,span.min) to min(m.MAX_COLUMNS-1,span.max))
-        {key:string(index),value:max(40,min(1000,round(span.width*7+5)))}]
+        {key:string(index),value:cells.column_width(span.width)}]
 }
 fn dimension_sizes(sheet,axis) any^ {
     let entries=if (axis=="column") [for (span in sheet.column_widths,
         entry in ((width_cells(span)) ^ { [] })) entry]
         else [for (row in sheet.row_heights where row.row>=0 and row.row<m.MAX_ROWS and row.height>0)
-            {key:string(row.row),value:max(27,min(500,round(row.height*4/3)))}];
+            {key:string(row.row),value:cells.row_height(row.height)}];
     map([for (entry in entries) (entry.key,entry.value)])
 }
 // Sheet's bounded grid clips formatting ranges without discarding the workbook.

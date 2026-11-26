@@ -1176,6 +1176,8 @@
       "exclude_macos_libraries": [
         "Cocoa",
         "AppKit",
+        "QuartzCore",
+        "IOSurface",
         "Carbon",
         "IOKit",
         "WebKit"
@@ -2207,6 +2209,18 @@
           "name": "AppKit",
           "include": null,
           "lib": "-framework AppKit",
+          "link": "dynamic"
+        },
+        {
+          "name": "QuartzCore",
+          "include": null,
+          "lib": "-framework QuartzCore",
+          "link": "dynamic"
+        },
+        {
+          "name": "IOSurface",
+          "include": null,
+          "lib": "-framework IOSurface",
           "link": "dynamic"
         },
         {

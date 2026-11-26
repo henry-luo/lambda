@@ -176,7 +176,14 @@ fn statement(s, first: int) map^ {
         return {nodes: [], next: value.next, direction:direction,
             issues: if (direction != null) [] else [scan.problem(pos + 1, "Expected D2 direction up, down, left, or right")]}
     }
-    if (b == 58) { return node_value(s, id.value, if (quoted) null else property_separator(id.value), first, pos)^ }
+    if (b == 58) {
+        let parsed = node_value(s, id.value, if (quoted) null else property_separator(id.value), first, pos)^
+        // A root sequence shape selects a diagram family rather than declaring a participant.
+        if (not quoted and id.value == "shape" and parsed.nodes[0].label == "sequence_diagram") {
+            return {*:parsed, nodes:[], kind:"sequence"}
+        }
+        return parsed
+    }
     let op = connector(s, pos)^
     if (op != null) { return edge_chain(s, id.value, first, op)^ }
     return {nodes: [node(s, id.value, first, pos)^], next: pos, issues: []}
@@ -190,6 +197,7 @@ pub fn read(bytes: binary?) map^ {
     var statements = null
     var issues = []
     var direction = null
+    var kind = null
     while ((pos < length and len(issues) < 100) ^) {
         pos = trivia(s, pos)^
         if ((pos == length)^) { break }
@@ -197,11 +205,14 @@ pub fn read(bytes: binary?) map^ {
         if (len(parsed.nodes)^ > 0) { statements = scan.add(statements, parsed.nodes) }
         if (len(parsed.issues)^ > 0) { issues = [*issues, *parsed.issues] }
         if (parsed.direction != null) { direction = parsed.direction }
+        if (parsed.kind != null) { kind = parsed.kind }
         let next = parsed.next
         pos = if (scan.byte(s, next)^ == 59) next + 1 else scan.line_end(s, next)^ + 1
     }
     let children = [for (nodes in scan.finish(statements)^, value in nodes) value];
-    {root: <graph type:"directed", layout:"hierarchical", flavor:"d2", 'ir-stage':"source",
+    {root: <graph type:"directed", layout:if (kind == "sequence") "sequence" else "hierarchical",
+        flavor:"d2", 'ir-stage':"source",
+        *:if (kind == null) {} else {kind:kind, 'diagram-type':kind},
         *:if (direction == null) {} else {'rank-dir':direction}, *children>,
      errors: issues}
 }

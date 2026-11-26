@@ -22,6 +22,8 @@ import docx_view: .docx.view
 import docx_css: .docx.css
 import pptx: .pptx
 import pptx_view: .pptx.view
+import xlsx: .xlsx
+import xlsx_view: .xlsx.preview
 import slide_html: lambda.slide.html
 import ebook: .ebook
 import ebook_reader: .ebook.reader
@@ -31,6 +33,7 @@ import paths: lambda.io.path
 import editor: lambda.editor.app
 import editor_session: lambda.editor.session
 import source_editor: lambda.editor.surface.source
+import publish: lambda.ui.core.publish
 
 let PROJECT_ROOT = "."
 // Transformed browsers retain the source directory as their URL, so bundle the icon font.
@@ -41,7 +44,7 @@ let ICON_FONT = media.data_uri(input(sys.lambda.home ++ "/package/doc/icons/seti
 // --------------------------------------------------------------------------
 
 fn archive_extension(extension) => contains(
-  ["zip", "xlsx", "jar", "war", "odt", "ods", "odp", "7z", "tar", "rar", "gz", "tgz", "bz2", "tbz2", "xz", "txz", "zst", "tzst"], lower(extension)) ^ { false }
+  ["zip", "jar", "war", "odt", "ods", "odp", "7z", "tar", "rar", "gz", "tgz", "bz2", "tbz2", "xz", "txz", "zst", "tzst"], lower(extension)) ^ { false }
 fn archive_input_format(extension) => if (extension == "7z") '7z'
   else if (extension == "rar") 'rar'
   else if (contains(["tar", "gz", "tgz", "bz2", "tbz2", "xz", "txz", "zst", "tzst"], extension)) 'tar'
@@ -176,7 +179,8 @@ fn is_latex_document(extension) {
 fn is_pdf_document(extension) => lower(extension) == "pdf"
 fn is_docx_document(extension) => lower(extension) == "docx"
 fn is_pptx_document(extension) => lower(extension) == "pptx"
-fn is_office_document(extension) => is_docx_document(extension) or is_pptx_document(extension)
+fn is_xlsx_document(extension) => lower(extension) == "xlsx"
+fn is_office_document(extension) => is_docx_document(extension) or is_pptx_document(extension) or is_xlsx_document(extension)
 fn is_epub_document(extension) => lower(extension) == "epub"
 fn is_eml_document(extension) => lower(extension) == "eml"
 fn is_pgf_document(extension) => lower(extension) == "pgf"
@@ -274,7 +278,7 @@ fn file_icon(extension) any^ {
   else if (ext == "json") { SETI_JSON }
   else if (contains(["yaml", "yml"], ext)) { SETI_YAML }
   else if (contains(["toml", "ini", "properties", "props"], ext)) { SETI_CONFIG }
-  else if (is_table_document(ext)) { SETI_CSV }
+  else if (is_table_document(ext) or is_xlsx_document(ext)) { SETI_CSV }
   else if (ext == "xml") { SETI_XML }
   else if (contains(["db", "sqlite", "sqlite3"], ext)) { SETI_DB }
   else if (contains(["md", "markdown", "mdown", "mkdn", "mdx", "wiki", "mediawiki",
@@ -337,6 +341,7 @@ fn selected_office(file) map^ {
   let document = if (type(source) != element) file["file_path"]
     else if (source.entry_path == "") source else input(source, 'zip')^;
   if (is_pptx_document(file["extension"])) pptx.convert(document)^
+  else if (is_xlsx_document(file["extension"])) xlsx.convert(document)^
   else docx.convert(document,{include_empty_paragraphs:true,presentation:"source"})^
 }
 
@@ -916,6 +921,15 @@ on click(evt) {
   }
 }
 
+pn update_preview_scrollbars(panel) {
+  let preview = dom.query_selector(panel, ".rendered-preview")
+  if (preview == null) { return }
+  let metrics = dom.scroll_metrics(preview)
+  // Radiant's auto tracks appear on hover. Keep the viewer's overflowing axes visible.
+  publish.style(preview, "overflow-x", if (metrics.scroll_width > metrics.client_width) "scroll" else "auto")^
+  publish.style(preview, "overflow-y", if (metrics.scroll_height > metrics.client_height) "scroll" else "auto")^
+}
+
 // Pane-local controls are state on a pane model the app rebuilds only for a
 // new file or a CSV change, so a property toggle, tab switch or property
 // filter edit re-renders this pane alone instead of the whole project tree.
@@ -926,7 +940,7 @@ view <document_pane> () any^ state preview_mode: "view", property_filter: "", pr
       , <div class:"empty-preview-icon", "▤">
         <h1 "Open a file">
         <p "Choose a file from the project tree to inspect it.">
-        <p class:"empty-preview-note", "CSV and TSV open as resizable tables. JSON, YAML, TOML, INI, ICS, and VCF open as property trees. XML opens as a node tree or with its declared stylesheet. Email shows its headers and body. EPUB books, Word DOCX, PowerPoint PPTX, Markdown, HTML, RTF, LaTeX, PDF, diagrams, and images open as rendered documents; other files open as source.">
+        <p class:"empty-preview-note", "CSV and TSV open as resizable tables, and XLSX opens as a workbook. JSON, YAML, TOML, INI, ICS, and VCF open as property trees. XML opens as a node tree or with its declared stylesheet. Email shows its headers and body. EPUB books, Word DOCX, PowerPoint PPTX, Markdown, HTML, RTF, LaTeX, PDF, diagrams, and images open as rendered documents; other files open as source.">
       >
     >
   } else if (is_renderable_document(~.file["extension"]) or framed_format(~.file)) {
@@ -957,6 +971,8 @@ view <document_pane> () any^ state preview_mode: "view", property_filter: "", pr
             apply(docx_view.preview(~.office_data))>
         } else if (is_pptx_document(~.file["extension"])) {
           <section id:"pptx-preview", class:"rendered-preview pptx-preview",apply(pptx_view.preview(~.office_data))>
+        } else if (is_xlsx_document(~.file["extension"])) {
+          xlsx_view.preview(~.office_data)
         } else if (is_epub_document(~.file["extension"])) {
           <section id:"epub-preview", class:"epub-preview",
             if (not (~.file.ebook.error is null)) <p class:"preview-error", ~.file.ebook.error>
@@ -1000,13 +1016,15 @@ view <document_pane> () any^ state preview_mode: "view", property_filter: "", pr
         <section class:"source-tab-panel", source_editor.readonly(path, source)>
       }
       >
-      <nav class:"document-tabs"
-      , <button class:(if (preview_mode == "view") "document-tab tab-view active" else "document-tab tab-view"), "View">
-        if (not is_raster_document(~.file["extension"])) {
-          <button class:(if (preview_mode == "source") "document-tab tab-source active" else "document-tab tab-source"), "Source">
-        }
-        if (type(~.file.source) != element) <button class:"document-tab tab-edit", "Edit"> else null
-      >
+      if (not is_xlsx_document(~.file["extension"]))
+        <nav class:"document-tabs"
+        , <button class:(if (preview_mode == "view") "document-tab tab-view active" else "document-tab tab-view"), "View">
+          if (not is_raster_document(~.file["extension"])) {
+            <button class:(if (preview_mode == "source") "document-tab tab-source active" else "document-tab tab-source"), "Source">
+          }
+          if (type(~.file.source) != element) <button class:"document-tab tab-edit", "Edit"> else null
+        >
+      else null
       if (edit_error != null) <div class:"preview-error", role:"alert", edit_error> else null
     >
   } else {
@@ -1018,6 +1036,17 @@ view <document_pane> () any^ state preview_mode: "view", property_filter: "", pr
       if (edit_error != null) <div class:"preview-error", role:"alert", edit_error> else null
     >
   }
+}
+on render(evt) {
+  if (evt.event_phase == 2) {
+    dom.watch_window(evt.target, "resize", true)
+    update_preview_scrollbars(evt.target)^
+  }
+  return 'pass'
+}
+on resize(evt) {
+  update_preview_scrollbars(evt.target)^
+  return 'pass'
 }
 on click(evt) {
   let target_class = evt["target_class"]
@@ -1280,6 +1309,7 @@ fn viewer_document(tree_model, initial_pane = <document_pane file:null, initial_
     <style latex_css.STYLESHEET>
     <style docx_css.STYLESHEET>
     <style (slide_html.stage_css ++ pptx_view.css)>
+    <style xlsx_view.css>
     <style (ebook_reader.stylesheet ++ ".epub-preview .ebook-reader{height:calc(100vh - 180px);min-height:400px}")>
     <style ("@font-face { font-family: 'Seti Icons'; src: url('" ++ ICON_FONT ++ "') format('woff'); }")>
     <style "
@@ -1340,7 +1370,8 @@ fn viewer_document(tree_model, initial_pane = <document_pane file:null, initial_
          intrinsic-size pass while preserving the preview's own scrolling. */
       .document-content { position: relative; min-width: 0; min-height: 0; flex: 1; overflow: hidden; }
       .document-content > .rendered-preview, .document-content > .source-tab-panel,
-      .document-content > .document-preview { position: absolute; top: 0; right: 0; bottom: 0; left: 0; }
+      .document-content > .document-preview, .document-content > .xlsx-preview {
+        position: absolute; top: 0; right: 0; bottom: 0; left: 0; }
       .document-header { min-height: 77px; display: flex; align-items: center; justify-content: space-between;
                          gap: 18px; padding: 15px 28px; border-bottom: 1px solid var(--document-rule);
                          background: var(--document-chrome); }
@@ -1351,9 +1382,13 @@ fn viewer_document(tree_model, initial_pane = <document_pane file:null, initial_
       .empty-preview h1 { margin: 14px 0 7px; color: #2b3545; font-size: 24px; }
       .empty-preview p { margin: 5px 0; line-height: 1.5; }
       .empty-preview-note { margin-top: 18px !important; color: #8491a1; font-size: 13px; }
-      .source-tab-panel { min-height: 0; flex: 1; overflow: hidden; background: var(--document-source); }
-      .source-tab-panel body.edit-format-source { height: 100%; min-height: 0; }
-      .rendered-preview { min-height: 0; flex: 1; overflow: auto; padding: 30px clamp(24px, 6vw, 80px) 60px; }
+      .source-tab-panel { min-height: 0; flex: 1; display: flex; flex-direction: column;
+                          overflow: hidden; background: var(--document-source); }
+      /* Give the nested source flex layout a definite height during its layout pass. */
+      .source-tab-panel body.edit-format-source { height: auto; flex: 1; min-height: 0; }
+      /* Keep positioned preview content below the scrollport's overflow controls. */
+      .rendered-preview { min-height: 0; flex: 1; isolation: isolate; overflow: auto;
+                          padding: 30px clamp(24px, 6vw, 80px) 60px; }
       .rtf-preview { background: #eef1f5; }
       .rtf-preview .document-body { box-sizing: border-box; min-height: 100%; padding: 42px 52px;
                                     background: #fff; box-shadow: 0 2px 14px #d9dee7; }

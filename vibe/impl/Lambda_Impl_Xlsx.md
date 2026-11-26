@@ -1,5 +1,18 @@
 # XLSX Import for Sheet
 
+## Workbook preview in `lambda view`
+
+- `lambda view` opens XLSX through the bundled `lambda.doc.xlsx` package
+  (**D9.3.4**). The file tree treats workbooks as documents, including members
+  of another archive. The explicit `--archive` option exposes the workbook's
+  package parts.
+- The preview uses the shared ZIP and OPC reader for local and archive-backed
+  sources (**D9.1.2v2**, **D11.1.2**). A read-only grid mounts the visible
+  worksheet cells, projects saved formula results, and preserves supported
+  styles, merged cells, hidden dimensions, and row and column sizes.
+- The workbook package now owns the cell display helpers used by the preview
+  and the Sheet demo. Formula calculation and editing stay in Sheet.
+
 ## Current checkpoint
 
 - **Goal:** implement `lambda.doc.xlsx` workbook import and convert it to the

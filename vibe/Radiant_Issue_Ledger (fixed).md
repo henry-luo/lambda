@@ -14,6 +14,83 @@ are unchanged. Full evidence is under `../../lambda/temp/kianhup-style/`.
 
 ## Fixed issues
 
+<a id="ri-249"></a>
+
+### RI-249 — macOS clears the visible drawable during native resize
+
+**Fixed, 2026-11-26.** Radiant owns the native present and graphics
+resources under D9.1.3v2 and D9.5.1. After RI-248 removed the interim
+swap, a native probe still found black pixels in the NSGL front buffer
+after both growing and shrinking the window and before reflow. The
+drawable's storage is coupled to the window's size.
+
+On macOS the existing GL presenter now draws the completed frame into a
+separate IOSurface and publishes it through a non-animating Core
+Animation transaction. The layer keeps the completed image at the
+top left at its original pixel scale during reflow. A resized backing
+buffer becomes visible after paint and GPU composition finish. The
+presenter checks the native current GL context because nested Cocoa
+resize callbacks can restore it without updating GLFW's bookkeeping.
+
+The native regression verifies identical retained pixels after growth and
+shrink, followed by replacement with the completed frame at the new size.
+Native Markdown and GPU resize replays pass. Pixel checks across Markdown,
+Scene3D and WebGL presentations report no differences beyond tolerance.
+Fifteen native tests and ten focused UI tests pass.
+
+<a id="ri-248"></a>
+
+### RI-248 — Native resize presents a stale frame before repaint
+
+**Fixed, 2026-11-26.** Radiant owns native presentation under D9.1.1v4 and
+D9.1.3v2. Dragging a `lambda view` window edge showed the previous
+viewport's frame in the new drawable. The framebuffer resize helper
+explicitly presented the previous image before the window turn laid out,
+painted, and presented the new viewport.
+
+Framebuffer resize now allocates the new surface and invalidates paint. The
+existing live resize turn publishes the completed frame after reflow. The
+native regression checks that allocation leaves GL draw state untouched and
+that the new pixels reach the front buffer after repaint at each size.
+The draw-state check fails at all three sizes with the original resize code
+and passes with the fix. Ten focused UI cases and the layout integer-cast
+check pass.
+This supersedes the early swap recorded in
+[Proc Gen §2l–2m](impl/Lambda_Impl_Proc_Gen.md#2l-native-resize-presentation-2026-10-27).
+
+<a id="ri-247"></a>
+
+### RI-247 — Collapsed table borders spill out of scroll panes
+
+**Fixed, 2026-11-26.** Radiant owns native paint under D9.1.1v4,
+D9.1.2v2 and D9.1.3v2. Horizontal scrolling in the embedded CSV editor
+painted cell borders over the file sidebar. The raster table painter
+recorded resolved borders without the rectangular block clip. It now
+applies that clip when a cell's border paint can cross the viewport.
+
+The scroll replay checks both axes and the visible borders at the clip
+edges. Five pixels outside the pane failed before the fix. All nine
+assertions pass at 1× and 2×. The before-and-after replay in
+`test_tab.csv` changes only pixels in the sidebar where borders spilled.
+[`collapsed_table_overflow_clip.json`](../test/ui/collapsed_table_overflow_clip.json).
+
+<a id="ri-246"></a>
+
+### RI-246 — Rounded inline backgrounds spill past rectangular scroll clips
+
+**Fixed, 2026-11-26.** Radiant owns native paint under D9.1.1v4 and D9.1.3v2.
+In `lambda view AGENTS.md`, a rounded inline code background could extend
+from the scrollable preview into the bottom toolbar. The rounded background's
+vector fill bypassed the rectangular block clip.
+
+The raster text painter now records the rectangular clip around a rounded fill
+that can cross the clip boundary. The regression checks that the background
+stays visible inside the pane and stops at its bottom edge before scrolling
+and its top edge afterward. Both outside pixels failed before the fix. The
+case passes at 1× and 2× display scale. A headless capture of the default
+`AGENTS.md` viewer confirms that the fill stops at the toolbar boundary.
+[`inline_code_overflow_clip.json`](../test/ui/inline_code_overflow_clip.json).
+
 <a id="ri-244"></a>
 
 ### RI-244 — Textarea caret geometry ignores soft-wrapped lines

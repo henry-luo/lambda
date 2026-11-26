@@ -409,7 +409,7 @@ lambda view [document_file] [options]
 | | `--event-log <file>` / `--state-dump <file>` | Record events / dump interaction state (testing) | |
 | | `--headless` | Run without creating a window | |
 | | `--view-key <key>` | Select a named view when the source defines several | |
-| | `--archive` | Browse ZIP package parts, including those inside DOCX/PPTX | |
+| | `--archive` | Browse the underlying parts of a ZIP-backed document | |
 | | `--font-dir <dir>` | Additional font directory (repeatable, up to 16) | |
 | | `--autoplay` | Grant audio activation up front, so network documents may start music and speech without a click (D11.3.1) | off |
 | `-h` | `--help` | Show help | |
@@ -430,7 +430,7 @@ and honors `LAMBDA_HOME`.
 **Directory and archive browsing:** `lambda view directory/` and
 `lambda view archive.zip` open the bundled file tree rooted at that source.
 ZIP32/ZIP64 files and JAR packages are detected by their content even when
-renamed or extensionless. DOCX opens as a Word document by default; use
+renamed or extensionless. DOCX, PPTX and XLSX open as documents by default. Use
 `lambda view report.docx --archive` to inspect its ZIP parts. Expand directories and
 archive rows, then select members to read source, inspect structured data or
 preview documents/images. Archive capture is eager; member decompression stays
@@ -460,6 +460,12 @@ previews and converted HTML; `--archive` exposes the original package parts.
 Slides Open also accepts PPTX and saves its editable copy as `.slides`.
 Unsupported content can produce warnings; see the [import profile](Lambda_Packages.md#29-pptx--powerpoint-import).
 
+**Excel workbooks** open as a read-only worksheet grid through `lambda.doc.xlsx`
+(**D9.3.4**). Run `lambda view budget.xlsx` or select the file in the browser.
+Use the worksheet tabs to switch sheets and scroll the grid to reach more rows
+and columns. The preview displays saved formula results, common cell formatting,
+and merged ranges. Use `--archive` to inspect the original ZIP parts.
+
 **EPUB books:** `lambda view book.epub` opens the `lambda.doc.ebook` reader
 (D9.3.4), with chapter/contents navigation, source anchors, generated pages,
 search, bookmarks, reading preferences and local resume. Fixed-layout
@@ -478,7 +484,7 @@ See [DocBook support and limitations](Markup_Formats_Support.md#312-docbook).
 
 **Supported formats:**
 
-`.epub`, `.docx`, `.pptx`, `.pdf`, `.html`/`.htm`, `.xhtml`/`.xht`, `.md`/`.markdown`, `.tex`/`.latex`, `.ls`, `.xml`, `.rst`, `.wiki`, `.svg`, `.mmd`, `.d2`, `.dot`/`.gv`, `.structurizr`/`.dsl`, `.glb`, `.png`, `.jpg`/`.jpeg`, `.gif`, `.json`, `.yaml`/`.yml`, `.toml`, `.txt`, `.csv`, `.ini`, `.conf`, `.cfg`, `.log`
+`.epub`, `.docx`, `.pptx`, `.xlsx`, `.pdf`, `.html`/`.htm`, `.xhtml`/`.xht`, `.md`/`.markdown`, `.tex`/`.latex`, `.ls`, `.xml`, `.rst`, `.wiki`, `.svg`, `.mmd`, `.d2`, `.dot`/`.gv`, `.structurizr`/`.dsl`, `.glb`, `.png`, `.jpg`/`.jpeg`, `.gif`, `.json`, `.yaml`/`.yml`, `.toml`, `.txt`, `.csv`, `.ini`, `.conf`, `.cfg`, `.log`
 
 XHTML uses strict XML parsing and the same HTML DOM/CSS/layout pipeline (**D10.1.4**).
 `.xhtml`/`.xht` files and HTTP `application/xhtml+xml` responses select it.
@@ -512,6 +518,7 @@ lambda view assets.zip
 lambda view book.epub
 lambda view report.docx
 lambda view report.docx --archive
+lambda view budget.xlsx
 lambda view test/input/docbook/showcase.xml
 lambda view application.jar
 ```
@@ -604,7 +611,7 @@ suffix (D9.3.4, D10.2.1).
 | `.man`, `.1`–`.9`, `.1m`, `.3p` | Rich text when the document survives the man format's round trip; otherwise source |
 | `.rtf` | Rich text for basic paragraphs and simple tables, page breaks, alignment, nonnegative indents and spacing, emphasis, small capitals, superscript, subscript, RGB text colors and highlights, and ordinary font and size changes; run languages and default-language, page setup, information and generator headers are retained, while unsupported controls and metadata open in source |
 | `.properties`, `.props`, `.ini` | Property values, names and simple insertions/deletions; unsupported constructs open in source |
-| `.csv`, `.tsv` | Editable grid with numbered rows and columns; quoting is handled on save |
+| `.csv`, `.tsv` | Editable grid with numbered rows and columns. Right-click the grid or press Shift+F10 from a cell or the Row heading for row, column, and field actions. Quoting is handled on save. |
 | `.json` | Property tree for objects and arrays; values use JSON literals, including quotes around strings |
 | `.yaml`, `.yml` | Property trees for supported mappings, sequences, flow values and document streams; unsupported constructs open in source |
 | `.toml` | Property fields and table headings, with expandable arrays and inline tables |
@@ -631,8 +638,10 @@ XML outside edited runs and preserves other package members, including their
 ZIP records. Signed packages open read-only. DOCX has no source editor; a
 package that cannot be parsed cannot be opened for editing (D9.3.4, D10.2.1).
 
-The property surface preserves the rest of the source when a value changes;
-use the disclosure buttons to collapse or expand nested entries.
+The property surface preserves the rest of the source when a value changes.
+Use the disclosure buttons to collapse or expand nested entries. Right-click
+a property or press Shift+F10 from a focused row, name, or value to open its
+actions. The Add action creates a child of a container or a sibling of a value.
 Java property keys and values that span lines appear as single entries. Values
 use properties-file escape spelling; unchanged continuations are retained
 when possible, and the edited value is rewritten when necessary. Bare keys

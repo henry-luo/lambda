@@ -92,7 +92,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 | `rtf` | `lambda.doc.rtf` | Experimental reader | Parses RTF source into styled document elements; see [RTF support](Markup_Formats_Support.md#33-rtf) | Document viewer RTF preview |
 | `docx` | `lambda.doc.docx` | Library, bounded import and export profiles | Reads DOCX and writes editable Word packages from HTML elements (§15) | `lambda view report.docx`; `--archive` browses package parts |
 | `pptx` | `lambda.doc.pptx` | Library, initial editable import profile | Reads PowerPoint into slide elements, HTML handouts, text, metadata and diagnostics (§28) | `lambda view deck.pptx`; also `layout`, `render`, document-browser preview and Slides Open |
-| `xlsx` | `lambda.doc.xlsx` | Library, bounded workbook import | Reads spreadsheet values, formulas and basic styles into a semantic workbook (§31) | Sheet demo Open |
+| `xlsx` | `lambda.doc.xlsx` | Library, bounded workbook import and preview | Reads spreadsheet values, formulas and basic styles into a semantic workbook (§31) | `lambda view budget.xlsx`, Sheet demo Open |
 | `docbook` | `lambda.doc.docbook` | Library, initial core HTML profile | Native port of xslTNG 2.8.5 for DocBook 5.x HTML/CSS, including chunked publications (§16) | `lambda view file.xml` recognizes DocBook roots; scripts export HTML publications |
 | `pdf` | `lambda.doc.pdf.pdf` | Library, experimental | Renders PDF pages as SVG, and whole documents as HTML | `lambda view`, `layout` and `render` on `.pdf` |
 | `eps` | `lambda.doc.eps.eps` | Library, initial vector profile | Interprets EPS PostScript and produces standalone SVG | `convert -t svg`, `view`, `layout` and `render` on `.eps`/`.epsi` |
@@ -5141,12 +5141,18 @@ workbook.sheets[0].cells
 `convert(source)` and `load(source)` return `{title, date1904, sheets, defined_names,
 metadata, diagnostics}`. Defined names retain their formula and optional worksheet scope. Each sheet has a title, part path, sparse zero-based cells, column
 width ranges, row heights, merged ranges, hidden dimensions, frozen prefixes,
-split-pane geometry and selection, conditional rules and diagnostics. Cells expose their coordinates, XLSX
+split-pane geometry and selection, conditional rules and diagnostics. Hidden
+and very hidden sheets carry `hidden: true`. Cells expose their coordinates, XLSX
 type, typed value, raw value, formula, formula type and range, cached-value presence,
 and the supported style projection. Rich shared/inline text is flattened. The
 reader accepts ordinary non-macro XLSX workbooks and rejects invalid or missing
 package parts. Diagnostics report selected unsupported features; their absence
 does not guarantee a lossless import.
+
+The viewer mounts the visible rows and columns of a read-only worksheet grid
+(**D9.3.4**). It shows visible worksheet tabs, saved formula results, supported
+cell styles, row and column sizes, and merged ranges. The Sheet demo uses the
+same cell formatting helpers.
 
 The [Sheet demo](../test/demo/sheet/README.md) converts that model to its own
 editable workbook and opens it through **Open**. It supports at most 50 sheets,

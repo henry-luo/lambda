@@ -11,16 +11,17 @@
       }
     },
     {
-      "type": "click",
-      "target": {
-        "selector": ".property-toolbar_add"
-      }
+      "type": "key_combo",
+      "key": "F10",
+      "mods_str": "shift"
     },
     {
-      "type": "click",
-      "target": {
-        "selector": ".property-menu .property-add_element"
-      }
+      "type": "key_press",
+      "key": "ArrowDown"
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
     },
     {
       "type": "type",

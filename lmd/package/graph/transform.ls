@@ -23,7 +23,7 @@ pub fn layout(parent, children, ctx) {
 
 pub fn to_html(graph, opts = null) any^ {
   let canonical = normalize.normalize(graph).graph;
-  if (canonical is element and canonical.flavor == "mermaid" and
+  if (canonical is element and canonical.flavor in ["mermaid", "d2"] and
       canonical.kind == "sequence") sequence.to_html(canonical, opts)
   else html.to_html(canonical, opts)
 }

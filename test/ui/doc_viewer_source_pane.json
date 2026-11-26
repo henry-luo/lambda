@@ -1,0 +1,44 @@
+{
+  "name": "Source fills the viewer pane and scrolls only when its rows overflow",
+  "html": "temp/viewer-source-pane-fixtures",
+  "prepare": ["python3", "test/ui/gen_viewer_source_pane.py", "temp/viewer-source-pane-fixtures"],
+  "viewport": {"width": 1100, "height": 700},
+  "events": [
+    {"type": "click", "target": {"selector": ".tree-entry[data-tree-path$='wide.css'] .tree-label"}},
+    {"type": "assert_rect", "target": {"selector": ".src-main"}, "height": 584, "tolerance": 2},
+    {"type": "assert_rect", "target": {"selector": ".src-gutter"}, "height": 584, "tolerance": 2},
+    {"type": "assert_count", "target": {"selector": ".src-num"}, "count": 2},
+    {"type": "assert_count", "target": {"selector": ".src-scroll"}, "count": 0},
+    {"type": "assert_rect", "target": {"selector": ".src-hscroll"}, "y": 649, "height": 12, "tolerance": 2},
+    {"type": "click", "target": {"selector": "#edit-surface", "offset_x": 24, "offset_y": 10}},
+    {"type": "key_combo", "key": "z", "mods_str": "alt"},
+    {"type": "assert_count", "target": {"selector": ".src-scroll"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": ".src-hscroll"}, "count": 0},
+    {"type": "key_combo", "key": "z", "mods_str": "alt"},
+    {"type": "assert_count", "target": {"selector": ".src-scroll"}, "count": 0},
+
+    {"type": "click", "target": {"selector": ".tree-entry[data-tree-path$='short.mark'] .tree-label"}},
+    {"type": "assert_rect", "target": {"selector": ".src-gutter"}, "height": 584, "tolerance": 2},
+    {"type": "assert_count", "target": {"selector": ".src-num"}, "count": 21},
+    {"type": "assert_text", "target": {"selector": ".src-num[data-line='1']"}, "equals": "2"},
+    {"type": "assert_count", "target": {"selector": ".src-scroll, .src-hscroll"}, "count": 0},
+    {"type": "resize", "width": 1100, "height": 380},
+    {"type": "assert_count", "target": {"selector": ".src-scroll"}, "count": 1},
+    {"type": "scroll", "target": {"selector": ".src-viewport"}, "dx": 0, "dy": -100},
+    {"type": "assert_text", "target": {"selector": "#source-preview"}, "contains": "source row 21"},
+    {"type": "assert_text", "target": {"selector": "#source-preview"}, "not_contains": "source row 01"},
+    {"type": "resize", "width": 1100, "height": 700},
+    {"type": "assert_count", "target": {"selector": ".src-scroll"}, "count": 0},
+    {"type": "assert_text", "target": {"selector": ".src-num", "index": 0}, "equals": "1"},
+
+    {"type": "click", "target": {"selector": ".tree-entry[data-tree-path$='empty.txt'] .tree-label"}},
+    {"type": "assert_rect", "target": {"selector": ".src-gutter"}, "height": 584, "tolerance": 2},
+    {"type": "assert_count", "target": {"selector": ".src-num, .src-scroll"}, "count": 0},
+
+    {"type": "click", "target": {"selector": ".tree-entry[data-tree-path$='notes.md'] .tree-label"}},
+    {"type": "click", "target": {"selector": ".tab-source"}},
+    {"type": "assert_rect", "target": {"selector": ".src-main"}, "height": 584, "tolerance": 2},
+    {"type": "assert_count", "target": {"selector": ".src-num"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": ".src-scroll"}, "count": 0}
+  ]
+}

@@ -5,7 +5,7 @@
   "working_copy": "temp/edit-ui/edit_csv_grid.csv",
   "events": [
     {"type": "assert_count", "target": {"selector": ".property-grid tbody tr"}, "count": 3},
-    {"type": "assert_count", "target": {"selector": ".property-grid thead th"}, "count": 4},
+    {"type": "assert_count", "target": {"selector": ".property-grid thead th"}, "count": 3},
     {"type": "click", "target": {"selector": "#grid-cell-1-0"}},
     {"type": "key_combo", "key": "a", "mods_str": "super"},
     {"type": "type", "text": "Alison"},

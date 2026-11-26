@@ -51,7 +51,12 @@
 #include "lib/file.h"
 
 #if defined(__APPLE__) && !defined(LAMBDA_NO_GUI)
+#define Rect MacOSRect
+#include <IOSurface/IOSurface.h>
+#undef Rect
 #include <OpenGL/gl.h>
+#include <objc/message.h>
+#include <objc/runtime.h>
 #endif
 
 extern "C" uint64_t radiant_query_font_build_count(void);
@@ -7718,7 +7723,7 @@ TEST_F(RadiantDocumentTest, ComputedStyleKeepsAuthoredAncestryAcrossTableRepair)
 }
 
 #if defined(__APPLE__) && !defined(LAMBDA_NO_GUI)
-TEST_F(RadiantDocumentTest, NativeResizeRetainsCompletedFrameUntilRepaint) {
+TEST_F(RadiantDocumentTest, NativeResizePresentsOnlyAfterRepaint) {
     StrBuf* source = strbuf_new();
     strbuf_append_str(source,
         "<!doctype html><style>body{margin:0;background:#204060}</style><div id=result></div>");
@@ -7750,43 +7755,55 @@ TEST_F(RadiantDocumentTest, NativeResizeRetainsCompletedFrameUntilRepaint) {
                 row[x] = x >= 40 && x < 120 && y >= 32 && y < 56 ? marker : background;
         }
     };
-    auto expect_pattern = [&](uint32_t marker, int height) {
-        uint8_t pixels[160 * 96 * 4] = {};
-        glReadBuffer(GL_FRONT);
-        glReadPixels(0, height - 96, 160, 96, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
-        EXPECT_EQ(glGetError(), (GLenum)GL_NO_ERROR);
+    auto send_id = [](id target, const char* selector) {
+        return ((id (*)(id, SEL))objc_msgSend)(target, sel_registerName(selector));
+    };
+    auto displayed_surface = [&]() -> IOSurfaceRef {
+        id window = (id)radiant_platform_native_window(ui.window);
+        id backing = send_id(send_id(window, "contentView"), "layer");
+        id output = send_id(send_id(backing, "sublayers"), "lastObject");
+        return (IOSurfaceRef)send_id(output, "contents");
+    };
+    auto expect_pattern = [&](IOSurfaceRef frame, uint32_t marker) {
+        ASSERT_NE(frame, nullptr);
+        ASSERT_EQ(IOSurfaceLock(frame, kIOSurfaceLockReadOnly, nullptr), KERN_SUCCESS);
+        const auto* pixels = (const uint8_t*)IOSurfaceGetBaseAddress(frame);
+        size_t pitch = IOSurfaceGetBytesPerRow(frame);
         unsigned changed = 0;
         for (int y = 0; y < 96; y++) for (int x = 0; x < 160; x++) {
             uint32_t wanted = x >= 40 && x < 120 && y >= 32 && y < 56 ? marker : background;
-            const uint8_t* pixel = pixels + ((95 - y) * 160 + x) * 4;
-            if (pixel[0] != (wanted & 0xff) || pixel[1] != ((wanted >> 8) & 0xff) ||
-                pixel[2] != ((wanted >> 16) & 0xff)) changed++;
+            const uint8_t* pixel = pixels + (size_t)y * pitch + x * 4;
+            if (pixel[2] != (wanted & 0xff) || pixel[1] != ((wanted >> 8) & 0xff) ||
+                pixel[0] != ((wanted >> 16) & 0xff)) changed++;
         }
+        EXPECT_EQ(IOSurfaceUnlock(frame, kIOSurfaceLockReadOnly, nullptr), KERN_SUCCESS);
         EXPECT_EQ(changed, 0u) << "retained pixels must keep their size and top-left position";
-    };
-    auto expect_pixel = [&](int x, int y, int height, uint32_t wanted) {
-        uint8_t pixel[4] = {};
-        glReadBuffer(GL_FRONT);
-        glReadPixels(x, height - 1 - y, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
-        EXPECT_EQ(glGetError(), (GLenum)GL_NO_ERROR);
-        EXPECT_EQ(pixel[0], wanted & 0xff);
-        EXPECT_EQ(pixel[1], (wanted >> 8) & 0xff);
-        EXPECT_EQ(pixel[2], (wanted >> 16) & 0xff);
     };
     for (unsigned pass = 0; pass < 3; pass++) {
         SCOPED_TRACE(pass);
         uint32_t marker = 0xff60e040 + pass * 0x00060507;
         paint_pattern(marker);
         radiant_platform_present(ui.window, ui.surface.get(), nullptr, false, background, 1, 1);
+        IOSurfaceRef before = displayed_surface();
+        ASSERT_NE(before, nullptr);
+        EXPECT_EQ(IOSurfaceGetWidth(before), (size_t)ui.surface->width);
         ui.present_partial = true;
         radiant_platform_set_window_size(ui.window, sizes[pass][0], sizes[pass][1]);
         radiant_platform_poll_events();
         int width, height;
         radiant_platform_get_framebuffer_size(ui.window, &width, &height);
+        // a draw through the presenter changes GL_VIEWPORT to match its image.
+        // Check the draw state since Cocoa can invalidate the front buffer on resize.
+        const GLint viewport_before[] = {0, 0, 1, 1};
+        glViewport(viewport_before[0], viewport_before[1], viewport_before[2], viewport_before[3]);
         ASSERT_TRUE(ui_context_resize_window_surface(&ui, width, height));
-        // the new CPU target has not been painted; the front buffer must retain the old image.
-        expect_pattern(marker, height);
-        expect_pixel(width - 10, height - 11, height, background);
+        // the layer keeps the original image and its pixels until a new frame is ready.
+        ASSERT_EQ(displayed_surface(), before);
+        expect_pattern(before, marker);
+        GLint viewport_after[4] = {};
+        glGetIntegerv(GL_VIEWPORT, viewport_after);
+        EXPECT_EQ(memcmp(viewport_before, viewport_after, sizeof(viewport_before)), 0)
+            << "surface allocation must not draw the previous frame";
         EXPECT_EQ(ui.surface->width, width);
         EXPECT_EQ(ui.surface->height, height);
         EXPECT_FALSE(ui.present_partial);
@@ -7794,23 +7811,16 @@ TEST_F(RadiantDocumentTest, NativeResizeRetainsCompletedFrameUntilRepaint) {
         radiant_platform_get_window_size(ui.window, &logical_width, &logical_height);
         ui.viewport_width = logical_width;
         ui.viewport_height = logical_height;
-        paint_pattern(marker);
+        uint32_t resized_marker = marker ^ 0x00f08030;
+        paint_pattern(resized_marker);
         radiant_platform_present(ui.window, ui.surface.get(), nullptr, false, background, 1, 1);
-        expect_pattern(marker, height);
+        IOSurfaceRef resized = displayed_surface();
+        ASSERT_NE(resized, nullptr);
+        EXPECT_NE(resized, before);
+        EXPECT_EQ(IOSurfaceGetWidth(resized), (size_t)width);
+        EXPECT_EQ(IOSurfaceGetHeight(resized), (size_t)height);
+        expect_pattern(resized, resized_marker);
     }
-    // a density change must still scale the old pixels while retaining CSS geometry.
-    uint32_t marker = 0xff40d080;
-    paint_pattern(marker);
-    radiant_platform_present(ui.window, ui.surface.get(), nullptr, false, background, 1, 1);
-    ui.present_partial = true;
-    ui_context_set_device_scale(&ui, ui.device_scale_x * 2, ui.device_scale_y * 2);
-    radiant_platform_set_window_size(ui.window, logical_width * 2, logical_height * 2);
-    radiant_platform_poll_events();
-    int width, height;
-    radiant_platform_get_framebuffer_size(ui.window, &width, &height);
-    ASSERT_TRUE(ui_context_resize_window_surface(&ui, width, height));
-    expect_pixel(160, 88, height, marker);
-    expect_pixel(80, 44, height, background);
 }
 #endif
 

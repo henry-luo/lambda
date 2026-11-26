@@ -191,7 +191,7 @@ Files (proposed): `lmd/package/edit/source.ls` (descriptor, surface view, handle
 ### 6.2 Scrolling
 
 - `wheel`: `top_line += round(deltaY / line_h)` (accumulating fractional remainders), clamped to `[0, count − visible]`; `'prevent-default'`.
-- Own scrollbar: a track element with a thumb positioned at `top_line / count` and sized `max(min_thumb, visible / count)`; `mousedown` on the thumb starts a drag gesture in state, `mousemove` maps the pointer delta to lines, `mouseup` ends it (the drawing surface's gesture pattern). Click on the track pages.
+- Under D10.2.1, the editor shows its vertical track when the source exceeds the visible row capacity. The thumb uses `top_line / count` for position and `max(min_thumb, visible / count)` for height. The editor starts a drag on thumb press, maps pointer movement to lines, and ends the drag on release. A click on the track pages.
 - Keyboard: PageUp/PageDown move the caret a page and the window follows; Home/End/arrows move the caret; `ensure_visible(sel.head)` adjusts `top_line` after every caret change.
 - Horizontal: the editor holds the first visible display column in `left` and shifts the text inside a fixed clip box. The horizontal track appears when unwrapped lines in the window overflow. Its thumb, track, wheel and caret movement use the same column range. A resize keeps the scroll origin within the new bounds. Soft wrap resets the horizontal offset.
 - A text-selection drag near the clip box edge scrolls the virtual window. The editor keeps the original model anchor. Each frame uses D10.2.1 hit testing to find the selection head under the pointer in the current window. Releasing the button ends edge scrolling.

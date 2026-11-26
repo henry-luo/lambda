@@ -7,12 +7,14 @@
     {"type": "click", "target": {"selector": "#grid-cell-0-0"}},
     {"type": "key_combo", "key": "a", "mods_str": "super"},
     {"type": "type", "text": "Title"},
-    {"type": "click", "target": {"selector": "button[title='Add column']"}},
+    {"type": "click", "target": {"selector": "#property-grid-corner"}, "button": 1},
+    {"type": "click", "target": {"selector": "#property-grid-menu [aria-label='Add column']"}},
     {"type": "click", "target": {"selector": "#grid-cell-1-2"}},
     {"type": "type", "text": "new"},
     {"type": "key_combo", "key": "s", "mods_str": "super"},
     {"type": "assert_file", "path": "temp/edit-ui/edit_tsv_columns.tsv", "equals": "Title\tNotes\t\nAlice\tPlain\tnew\n"},
-    {"type": "click", "target": {"selector": "button[title='Remove column 2']"}},
+    {"type": "click", "target": {"selector": ".property-grid thead [data-grid-column='1']"}, "button": 1},
+    {"type": "click", "target": {"selector": "#property-grid-menu [aria-label='Remove column']"}},
     {"type": "key_combo", "key": "s", "mods_str": "super"},
     {"type": "assert_file", "path": "temp/edit-ui/edit_tsv_columns.tsv", "equals": "Title\t\nAlice\tnew\n"}
   ]
