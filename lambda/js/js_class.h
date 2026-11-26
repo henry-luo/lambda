@@ -161,6 +161,8 @@ enum JsClass : uint8_t {
     JS_CLASS_COMMAND_EVENT,
     JS_CLASS_NODE_ITERATOR,
     JS_CLASS_INTERSECTION_OBSERVER_ENTRY,
+    JS_CLASS_INTL_PLURAL_RULES,
+    JS_CLASS_INTL_LIST_FORMAT,
     JS_CLASS__COUNT  // sentinel
 };
 
@@ -377,6 +379,8 @@ static inline const char* js_class_to_name(JsClass cls) {
         case JS_CLASS_CRYPTO_KEY: return "CryptoKey";
         case JS_CLASS_INTL_LOCALE: return "Intl.Locale";
         case JS_CLASS_INTL_NUMBER_FORMAT: return "Intl.NumberFormat";
+        case JS_CLASS_INTL_PLURAL_RULES: return "Intl.PluralRules";
+        case JS_CLASS_INTL_LIST_FORMAT: return "Intl.ListFormat";
         case JS_CLASS_ANIMATION: return "Animation";
         case JS_CLASS_PERFORMANCE_ENTRY: return "PerformanceEntry";
         case JS_CLASS_PERFORMANCE_MARK: return "PerformanceMark";

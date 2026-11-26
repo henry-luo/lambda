@@ -5612,6 +5612,10 @@ TEST(PaintIrRasterTest, SemanticMasksApplyOnceAcrossDensityTransformsAndRejectRe
         {Color{0x00000000u}, 1, false, nullptr}};
     RadialGradient gradient = {}; gradient.shape = RADIAL_SHAPE_CIRCLE; gradient.size = RADIAL_SIZE_CLOSEST_SIDE;
     gradient.cx = gradient.cy = .5f; gradient.stops = lam::own_arr(stops); gradient.stop_count = 4;
+    MaskProp style = {};
+    style.image_count = 1;
+    style.first.has_image = true;
+    style.images.radial_gradient = lam::own(&gradient);
     Arena* arena = arena_create_default();
     DisplayList backdrop = {}; dl_init(&backdrop, arena);
     dl_fill_rect(&backdrop, 0, 0, 32, 32, Color{0xffff0000u});
@@ -5623,7 +5627,10 @@ TEST(PaintIrRasterTest, SemanticMasksApplyOnceAcrossDensityTransformsAndRejectRe
         SCOPED_TRACE(nested);
         PaintEffectGroup group = {}; group.bounds = {0, 0, 8, 8}; group.opacity = opacity;
         group.blend_mode = blend ? CSS_VALUE_MULTIPLY : 0;
-        group.mask = {lam::up(&gradient), {0, 0, 8, 8}, rdt_matrix_scale(1, 1), true};
+        group.mask.style = lam::up(&style);
+        group.mask.border_box = {0, 0, 8, 8};
+        group.mask.inverse = rdt_matrix_identity();
+        group.mask.invertible = true;
         PaintList paint; paint_begin_effect_group(&paint, &group);
         RdtPath* clip = rdt_path_new(); ASSERT_NE(clip, nullptr);
         rdt_path_add_rect(clip, 0, 0, 5, 8, 0, 0);
@@ -5640,10 +5647,10 @@ TEST(PaintIrRasterTest, SemanticMasksApplyOnceAcrossDensityTransformsAndRejectRe
         int masked = 0;
         for (int index = 0; index < foreground.item_count(); index++) {
             const DisplayItem* item = &foreground.data()[index];
-            if (item->op == DL_COMPOSITE_OPACITY && item->composite_opacity.mask.gradient) {
+            if (item->op == DL_COMPOSITE_OPACITY && item->composite_opacity.mask.active()) {
                 masked++;
                 EXPECT_FALSE(dl_item_is_retainable_for_fragment(item));
-                EXPECT_FLOAT_EQ(item->composite_opacity.mask.rect.width, 8);
+                EXPECT_FLOAT_EQ(item->composite_opacity.mask.border_box.width, 8);
                 EXPECT_FLOAT_EQ(item->composite_opacity.mask.inverse.e11, 1 / density);
             }
         }

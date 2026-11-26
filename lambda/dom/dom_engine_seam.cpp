@@ -126,6 +126,18 @@ DOM_ENGINE_WEAK bool dom_engine_event_cascade_active(void) { return false; }
 DOM_ENGINE_WEAK bool dom_engine_exec_command(void* d, const char* c, const char* v) {
     (void)d; (void)c; (void)v; return false;
 }
+DOM_ENGINE_WEAK CssFontLoad* dom_engine_css_font_load_begin(DomDocument*, const char*, size_t,
+    const char*, size_t, CssFontLoadStatus* status) {
+    *status = CSS_FONT_LOAD_FAILED;
+    return nullptr;
+}
+DOM_ENGINE_WEAK CssFontLoadStatus dom_engine_css_font_load_poll(DomDocument*, CssFontLoad*) {
+    return CSS_FONT_LOAD_FAILED;
+}
+DOM_ENGINE_WEAK bool dom_engine_css_font_load_face(const CssFontLoad*, size_t, CssFontLoadFaceInfo*) {
+    return false;
+}
+DOM_ENGINE_WEAK void dom_engine_css_font_load_destroy(CssFontLoad*) {}
 DOM_ENGINE_WEAK bool dom_engine_history_initialize(DomDocument* d) { (void)d; return false; }
 DOM_ENGINE_WEAK int dom_engine_history_length(DomDocument* d) { (void)d; return 0; }
 DOM_ENGINE_WEAK const char* dom_engine_history_scroll_restoration(DomDocument* d) { (void)d; return "auto"; }
@@ -223,7 +235,7 @@ DOM_ENGINE_WEAK bool dom_engine_image_decode_request(DomElement* e, uint64_t gen
     (void)e; (void)generation; return false;
 }
 DOM_ENGINE_WEAK void dom_engine_install_animation_globals(void) {}
-DOM_ENGINE_WEAK void dom_engine_animation_frame_prepare(void* d,double t) {(void)d;(void)t;}
+DOM_ENGINE_WEAK void dom_engine_animation_frame_prepare(void* d,double t,bool p) {(void)d;(void)t;(void)p;}
 DOM_ENGINE_WEAK uint64_t dom_engine_frame_request(void* n, const char* e) {
     (void)n; (void)e; return 0;
 }

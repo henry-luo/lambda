@@ -6346,13 +6346,20 @@ static bool dom_js_transform_keeps_containing_block(DomElement* element, const C
         transform_has_functions(element->transform_prop());
 }
 
+static bool dom_js_property_can_commit_without_layout(CssPropertyCode property) {
+    return property == CSS_PROPERTY_STROKE_DASHOFFSET || property == CSS_PROPERTY_OPACITY ||
+        property == CSS_PROPERTY_VISIBILITY || property == CSS_PROPERTY_FILTER ||
+        property == CSS_PROPERTY_BACKGROUND_POSITION_X || property == CSS_PROPERTY_BACKGROUND_POSITION_Y ||
+        property == CSS_PROPERTY_TRANSFORM || css_individual_transform_index(property) >= 0;
+}
+
 struct AttributeValueDependency {
     const char* name;
     const char* before = nullptr;
     const char* after = nullptr;
     bool compare_values = false;
     bool case_sensitive = true;
-    bool preserves_container_size = false;
+    bool handles_size_queries = false;
 };
 
 static bool dom_js_selector_mentions_attribute(CssSelector* selector, void* data) {
@@ -6380,11 +6387,10 @@ static bool dom_js_rule_has_attribute_value_dependency(CssRule* rule, void* data
         pool_destroy(scratch);
         return dependency;
     }
-    // retained opacity/transform paint does not change a size-query input.
     auto* dependency = (AttributeValueDependency*)data;
     if (rule->type == CSS_RULE_SCOPE) return true;
     if (rule->type == CSS_RULE_CONTAINER)
-        return !dependency->preserves_container_size ||
+        return !dependency->handles_size_queries ||
             !css_container_query_is_size_only(rule->data.conditional_rule.condition);
     if (radiant_css_rule_selector_has_match(rule, dom_js_selector_mentions_attribute, data)) return true;
     if (rule->type != CSS_RULE_STYLE && rule->type != CSS_RULE_NESTING && rule->type != CSS_RULE_NESTED_DECLARATIONS)
@@ -6426,20 +6432,24 @@ extern "C" bool dom_engine_inline_style_has_css_dependency(DomDocument* doc, Dom
     if (!doc || !element) return true;
     AttributeValueDependency dependency = {"style", old_value, element->get_attribute("style"),
         true, !dom_element_uses_quirks_css(element)};
+    // ordinary inline layout already settles size-only queries; their presence
+    // does not make a declaration write a selector-affecting attribute edit.
+    dependency.handles_size_queries = !dom_js_property_can_commit_without_layout((CssPropertyCode)property);
     if (property == CSS_PROPERTY_OPACITY) {
         // opacity can flatten a preserve-3d subtree; retain its existing layout path.
-        dependency.preserves_container_size = element->transformp()->transform_style != CSS_VALUE_PRESERVE_3D;
+        dependency.handles_size_queries = element->transformp()->transform_style != CSS_VALUE_PRESERVE_3D;
     } else if (property == CSS_PROPERTY_TRANSFORM) {
         CssRule* block = dom_element_inline_declaration_block(element);
         for (size_t i = block ? block->data.style_rule.declaration_count : 0; i > 0; i--) {
             CssDeclaration* declaration = block->data.style_rule.declarations[i - 1];
             if (declaration && declaration->property_code == CSS_PROPERTY_TRANSFORM) {
-                dependency.preserves_container_size = dom_js_transform_keeps_containing_block(element, declaration->value);
+                dependency.handles_size_queries = dom_js_transform_keeps_containing_block(element, declaration->value);
                 break;
             }
         }
     }
-    return attribute_value_has_css_dependency(doc, element, &dependency);
+    return attribute_value_has_css_dependency(doc, element, &dependency) ||
+        radiant_css_shadow_rule_tree_has_match(doc, dom_js_rule_has_attribute_value_dependency, &dependency);
 }
 
 struct CursorAttributeDependency { const char* name; bool found = false; };
@@ -6909,6 +6919,11 @@ static bool dom_js_mutation_can_incremental(DomDocument* doc,
             // the notifier proved no relational attribute match can change.
             // a later stylesheet mutation still forces the broad path.
             continue;
+        }
+        if (record->kind == DOM_JS_MUTATION_ATTRIBUTE &&
+                record->attribute == DOM_JS_MUTATION_ATTRIBUTE_SHADOW_SELECTOR) {
+            if (reason) *reason = "shadow-style-selector";
+            return false;
         }
         if (record->kind == DOM_JS_MUTATION_ATTRIBUTE &&
             record->attribute == DOM_JS_MUTATION_ATTRIBUTE_CLASS) {
@@ -7417,13 +7432,11 @@ static DomElement* dom_js_svg_paint_only_target(DomDocument* doc, const DomJsMut
 
 static DomElement* dom_js_paint_only_target(DomDocument* doc, const DomJsMutationRecord* record) {
     CssPropertyCode property = record->presentation_property;
+    if (!dom_js_property_can_commit_without_layout(property)) return nullptr;
     if (property == CSS_PROPERTY_STROKE_DASHOFFSET) return dom_js_svg_paint_only_target(doc, record);
     bool background_position = property == CSS_PROPERTY_BACKGROUND_POSITION_X ||
         property == CSS_PROPERTY_BACKGROUND_POSITION_Y;
-    bool transform_property = property == CSS_PROPERTY_TRANSFORM || css_individual_transform_index(property) >= 0;
     bool color_filter = property == CSS_PROPERTY_FILTER;
-    if (property != CSS_PROPERTY_OPACITY && !transform_property &&
-        property != CSS_PROPERTY_VISIBILITY && !background_position && !color_filter) return nullptr;
     if (!record->target || !record->target->is_element() || !record->was_connected) return nullptr;
     DomElement* element = record->target->as_element();
     if (element->doc != doc || element->is_synthetic() || element->view_type == RDT_VIEW_NONE ||
@@ -7719,21 +7732,9 @@ static void post_html_handler_rebuild_impl(EventContext* evcon,
 
     DocState* state = (DocState*)doc->state;
 
-    // the fallback drops layout resources; transient owners survive until the
-    // post-layout prune checks their DOM identity (D5.5.1).
-
-    // Broad DOM fallback is a layout-resource epoch change, not a DOM/view-node
-    // identity change; keep the ViewTree shell and retained nodes for StateStore.
-    if (!doc->view_tree) {
-        doc->view_tree = view_tree_shell_create(doc);
-        view_pool_reset_retained(doc->view_tree);
-    } else {
-        view_pool_reset_retained(doc->view_tree);
-    }
-
     DomDocument* saved_doc = evcon->ui_context ? evcon->ui_context->document : nullptr;
     if (evcon->ui_context) evcon->ui_context->document = lam::up(doc);
-    layout_html_doc(evcon->ui_context, doc, true);
+    layout_rebuild_document(evcon->ui_context, doc);
     if (evcon->ui_context) evcon->ui_context->document = lam::up(saved_doc);
 
     int state_pruned = 0;
@@ -12540,7 +12541,7 @@ static bool navigation_async_commit(AsyncScriptNavigation* job) {
         if (same_target) {
             DocumentJsHostConfig host_config = document_js_host_config_inherit(uicon, source);
             document_apply_js_host_config(loaded, &host_config);
-            complete_deferred_html_scripts(loaded);
+            same_target = complete_deferred_html_scripts(loaded);
         }
         if (same_target && navigation_async_follow_redirect(job, iframe)) {
             navigated = true;
@@ -12567,10 +12568,10 @@ static bool navigation_async_commit(AsyncScriptNavigation* job) {
     } else if (live) {
         DocumentJsHostConfig host_config = document_js_host_config_inherit(uicon, source);
         document_apply_js_host_config(loaded, &host_config);
-        complete_deferred_html_scripts(loaded);
-        if (navigation_async_follow_redirect(job, nullptr)) {
+        bool scripts_ready = complete_deferred_html_scripts(loaded);
+        if (scripts_ready && navigation_async_follow_redirect(job, nullptr)) {
             navigated = true;
-        } else {
+        } else if (scripts_ready) {
             BrowsingSession* session = uicon->browsing_session;
             navigation_save_session_scroll(session, source);
             if (session) {

@@ -38,6 +38,7 @@ typedef void (*JsDocumentSourceLoadObserver)(size_t source_length);
 // loading reports recursively acquired source so its budget covers the graph.
 void js_set_document_source_load_observer(JsDocumentSourceLoadObserver observer);
 Item js_dom_media_poll_pending(void);
+void js_dom_css_font_load_poll_pending(void);
 // Host cancellation is checked at guest boundaries and returned in the Item lane.
 typedef bool (*JsExecutionInterruptCheck)(void);
 void js_set_execution_interrupt_check(JsExecutionInterruptCheck check);

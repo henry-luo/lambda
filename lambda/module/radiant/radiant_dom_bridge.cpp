@@ -16,6 +16,7 @@
 #include "../../js/js_class.h"
 #include "../../dom/dom.h"
 #include "../../dom/dom_core.h"
+#include "../../dom/dom_engine.h"
 #include "../../js/js_runtime.h"
 #include "../../runtime/heap_api.h"
 #include "../../runtime/gc/gc_heap.h"
@@ -25,18 +26,19 @@
 #include "radiant/radiant.hpp"
 #include "radiant/render.hpp"
 #include "radiant/event.hpp"
+#include "radiant/document_font_load.hpp"
 #include "lib/log.h"
 #include "lib/hashmap_helpers.h"
 #include "lib/mem.h"
 #include "lib/str.h"
 #include "lib/strbuf.h"
 
-extern "C" void dom_engine_animation_frame_prepare(void* document,double timestamp_ms) {
+extern "C" void dom_engine_animation_frame_prepare(void* document,double timestamp_ms,bool preserve_css_time) {
     auto* doc=(DomDocument*)document;
     AnimationScheduler* scheduler=doc&&doc->state?doc->state->animation_scheduler:nullptr;
     if(!scheduler||!scheduler->has_active_animations) return;
     // sample native bindings at the same host timestamp before a rAF callback submits its Three.js draw.
-    animation_scheduler_anchor_host_time(scheduler,timestamp_ms/1000.0);
+    animation_scheduler_anchor_host_time(scheduler,timestamp_ms/1000.0,preserve_css_time);
     animation_scheduler_tick(scheduler,timestamp_ms/1000.0,nullptr,false,nullptr,true);
 }
 #include "lib/url.h"
@@ -191,6 +193,25 @@ RADIANT_C_API Item dom_dataset_property(Item elem_item);
 #define dom_document_create_event_bridge radiant_host_api->realm->document_create_event_bridge
 #define dom_document_exec_command_bridge radiant_host_api->dom_catalog->exec_command
 #define dom_document_query_command_bridge radiant_host_api->dom_catalog->query_command
+
+extern "C" CssFontLoad* dom_engine_css_font_load_begin(DomDocument* doc, const char* font,
+    size_t font_len, const char* text, size_t text_len, CssFontLoadStatus* status) {
+    return radiant_css_font_load_begin(doc, font, font_len, text, text_len, status);
+}
+
+extern "C" CssFontLoadStatus dom_engine_css_font_load_poll(DomDocument* doc, CssFontLoad* request) {
+    UiContext* ui = radiant_host_api && dom_get_ui_context ? (UiContext*)dom_get_ui_context() : nullptr;
+    return radiant_css_font_load_poll(doc, ui, request);
+}
+
+extern "C" bool dom_engine_css_font_load_face(const CssFontLoad* request, size_t index,
+    CssFontLoadFaceInfo* result) {
+    return radiant_css_font_load_face(request, index, result);
+}
+
+extern "C" void dom_engine_css_font_load_destroy(CssFontLoad* request) {
+    radiant_css_font_load_destroy(request);
+}
 
 static const char s_radiant_dom_vmap_type_marker = 0;
 static __thread bool s_radiant_dom_geometry_layout_active;

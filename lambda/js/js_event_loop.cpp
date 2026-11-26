@@ -11,6 +11,7 @@
 #include "js_event_loop.h"
 #include "../dom/dom.h"
 #include "../dom/dom_engine.h"
+#include "../dom/dom_observers.h"
 #include "lambda/input/css/dom_element.hpp"
 #include "js_runtime.h"
 #include "js_runtime_state.hpp"
@@ -209,6 +210,7 @@ extern "C" Item js_microtask_flush_result(void) {
     if (!js_active_runtime_state || !js_runtime_state.event_loop) return ItemNull;
     RootFrame roots(1);
     Rooted<Item> first_error_root(roots, js_dom_media_poll_pending());
+    js_dom_css_font_load_poll_pending();
     int safety = 0;
     while ((runtime_job_queue_size(&next_tick_queue) > 0 ||
             runtime_job_queue_size(&microtask_queue) > 0) &&
@@ -284,7 +286,8 @@ extern "C" void js_cancelAnimationFrame(Item request_id) {
 JS_FORWARD_EXPRESSION(int, js_animation_frame_has_pending, (void),
     // the host loop can outlive a document's JS capsule, so do not read its
     // per-runtime animation-frame queue after script teardown.
-    js_active_runtime_state && runtime_job_queue_size(&animation_frame_queue) > 0 ? 1 : 0)
+    js_active_runtime_state && (runtime_job_queue_size(&animation_frame_queue) > 0 ||
+        dom_observers_geometry_pending()) ? 1 : 0)
 
 static void js_event_loop_render_checkpoint(void) {
     js_fetch_dispatch_pending();
@@ -305,7 +308,7 @@ static void js_event_loop_render_checkpoint(void) {
 
 extern "C" int js_animation_frame_flush(double timestamp_ms) {
     int called = 0;
-    if (runtime_job_queue_size(&animation_frame_queue) <= 0) return 0;
+    if (!js_animation_frame_has_pending()) return 0;
     // snapshot handles per HTML §8.12; cancellations cannot admit newly scheduled callbacks into this frame.
     const int64_t frame_limit = next_raf_id;
     // The frame clock supplies absolute monotonic time; DOMHighResTimeStamp is
@@ -318,7 +321,8 @@ extern "C" int js_animation_frame_flush(double timestamp_ms) {
     // Headless draining advances synthetic frames faster than wall time, so
     // exposing wall time here prevented animation libraries from completing.
     js_performance_frame_clock_begin(timestamp_ms);
-    dom_engine_animation_frame_prepare(dom_get_document(),timestamp_ms);
+    dom_engine_animation_frame_prepare(dom_get_document(),timestamp_ms,
+        auto_close_mode && !auto_close_after_load && !js_event_loop_virtual_clock_enabled());
 
     for (;;) {
         callback_root.set(raf_pop(frame_limit));
@@ -332,12 +336,17 @@ extern "C" int js_animation_frame_flush(double timestamp_ms) {
             js_microtask_flush();
         }
     }
-    js_performance_frame_clock_end();
+    // Commit writes from frame callbacks before sampling the observers for
+    // this frame. An initial sample can also establish the first layout.
     js_event_loop_render_checkpoint();
-    return called;
+    bool sampled_geometry = dom_observers_sample_frame();
+    js_performance_frame_clock_end();
+    if (sampled_geometry) js_event_loop_render_checkpoint();
+    return called + sampled_geometry;
 }
 
 static thread_local bool animation_frame_drain_active = false;
+static int event_loop_run_uv_turn(uv_loop_t* loop, uv_run_mode mode);
 
 extern "C" int js_animation_frame_drain(int max_frames) {
     // Frame callbacks may queue microtasks and ready timers. Pump those without
@@ -347,10 +356,10 @@ extern "C" int js_animation_frame_drain(int max_frames) {
     int called = 0;
     double timestamp_ms = js_performance_monotonic_now_ms();
     animation_frame_drain_active = true;
-    while (runtime_job_queue_size(&animation_frame_queue) > 0 && frames < max_frames) {
+    while (js_animation_frame_has_pending() && frames < max_frames) {
         timestamp_ms += 16.6667;
         called += js_animation_frame_flush(timestamp_ms);
-        lambda_uv_run_loop(lambda_uv_loop(), UV_RUN_NOWAIT);
+        event_loop_run_uv_turn(lambda_uv_loop(), UV_RUN_NOWAIT);
         js_event_loop_render_checkpoint();
         frames++;
     }
@@ -384,6 +393,8 @@ typedef struct JsTimerHandle {
     bool       virtual_active;
     bool       virtual_refed;
     bool       resume_overdue_interval;
+    JsTimerHandle* deferred_next;
+    JsTimerHandle* deferred_previous;
 } JsTimerHandle;
 
 #define timer_resources (*js_runtime_resource_table())
@@ -402,6 +413,33 @@ static void close_all_timer_handles(void);
 static void timer_close_native_handle(JsTimerHandle* th);
 static void timer_start(uv_loop_t* loop, JsTimerHandle* timer,
     uint64_t timeout_ms, uint64_t repeat_ms);
+
+static bool timer_is_deferred(JsTimerHandle* timer) {
+    return timer->runtime_state &&
+        (timer->deferred_previous || timer->runtime_state->event_loop->deferred_timer_first == timer);
+}
+
+static void timer_remove_deferred(JsTimerHandle* timer) {
+    if (!timer_is_deferred(timer)) return;
+    JsEventLoopState* owner = timer->runtime_state->event_loop;
+    if (timer->deferred_previous) timer->deferred_previous->deferred_next = timer->deferred_next;
+    else owner->deferred_timer_first = timer->deferred_next;
+    if (timer->deferred_next) timer->deferred_next->deferred_previous = timer->deferred_previous;
+    else owner->deferred_timer_last = timer->deferred_previous;
+    timer->deferred_previous = timer->deferred_next = nullptr;
+}
+
+static void timer_defer_due(JsTimerHandle* timer) {
+    if (timer_is_deferred(timer)) return;
+    JsEventLoopState* owner = timer->runtime_state->event_loop;
+    timer->deferred_previous = owner->deferred_timer_last;
+    if (owner->deferred_timer_last) owner->deferred_timer_last->deferred_next = timer;
+    else owner->deferred_timer_first = timer;
+    owner->deferred_timer_last = timer;
+    // libuv has already consumed a one-shot. Pause an interval until its one
+    // pending callback can run. The resource table keeps the callback rooted.
+    uv_timer_stop(&timer->timer);
+}
 
 static unsigned html_timer_next_nesting(unsigned parent, uint64_t& delay_ms) {
     // browser timers count tasks, including interval repetitions (HTML 8.7);
@@ -534,6 +572,7 @@ static void timer_close_cb(uv_handle_t *handle) {
 
 static void timer_close_native_handle(JsTimerHandle *th) {
     if (!th || th->closing) return;
+    timer_remove_deferred(th);
     th->closing = true;
     th->virtual_active = false;
     if (!timer_force_shutdown) {
@@ -569,6 +608,7 @@ static void timer_mark_object_destroyed(JsTimerHandle* th) {
 
 static void timer_forget_unsafe_handle(JsTimerHandle* th) {
     if (!th) return;
+    timer_remove_deferred(th);
     th->runtime_doc = nullptr;
     th->runtime_heap = nullptr;
     th->runtime_name_pool = nullptr;
@@ -604,6 +644,11 @@ static void timer_abandon_all_without_uv(const char* reason_prefix) {
 
 static void timer_fire_cb(uv_timer_t *handle) {
     JsTimerHandle *th = (JsTimerHandle *)handle->data;
+    if (th && th->runtime_state && th->runtime_context &&
+            context && context != th->runtime_context && context->execution_depth) {
+        timer_defer_due(th);
+        return;
+    }
     JsTimerRuntimeScope scope;
     if (!timer_runtime_enter(th, &scope)) {
         log_error("event_loop: timer fired without captured JS runtime");
@@ -665,6 +710,31 @@ static void timer_fire_cb(uv_timer_t *handle) {
     timer_runtime_exit(&scope);
     js_event_loop_render_checkpoint();
 }
+
+static int timer_run_deferred(void) {
+    JsRuntimeState* state = js_active_runtime_state;
+    if (!state || !state->event_loop || !state->event_loop->deferred_timer_first ||
+            microtask_running || state->event_loop->callback_running ||
+            event_loop_shutting_down || lambda_uv_is_running()) return 0;
+    int fired = 0;
+    while (state == js_active_runtime_state && fired < TASK_FLUSH_WORK_BUDGET) {
+        JsTimerHandle* timer = state->event_loop->deferred_timer_first;
+        if (!timer) break;
+        timer_remove_deferred(timer);
+        if (timer->is_interval && !timer->html_nesting)
+            timer_start(timer->timer.loop, timer, timer->repeat_ms, timer->repeat_ms);
+        timer_fire_cb(&timer->timer);
+        fired++;
+    }
+    return fired;
+}
+
+static int event_loop_run_uv_turn(uv_loop_t* loop, uv_run_mode mode) {
+    // The owning realm observes ready timers before blocking for further I/O.
+    if (timer_run_deferred() && mode == UV_RUN_ONCE) mode = UV_RUN_NOWAIT;
+    return lambda_uv_run_loop(loop, mode);
+}
+
 static double item_to_ms(Item delay) {
     if (get_type_id(delay) == LMD_TYPE_FLOAT) {
         return it2d(delay);
@@ -853,6 +923,7 @@ static JsTimerHandle* find_timer_handle(Item timer_id) {
 static void timer_start(uv_loop_t* loop, JsTimerHandle* timer,
                         uint64_t timeout_ms, uint64_t repeat_ms) {
     if (!loop || !timer) return;
+    timer_remove_deferred(timer);
     timer->repeat_ms = repeat_ms;
     if (virtual_clock_enabled) {
         // A virtual timer stays initialized as a libuv handle for common close
@@ -891,7 +962,9 @@ extern "C" void js_event_loop_freeze_load_clock(void) {
     double wall_now_ms = (double)uv_now(loop);
     for (int index = 0; index < timer_slot_count; index++) {
         JsTimerHandle* timer = timer_handle_at(index);
-        if (!timer || timer->closing || !uv_is_active((uv_handle_t*)&timer->timer)) continue;
+        if (!timer || timer->closing ||
+                (!uv_is_active((uv_handle_t*)&timer->timer) && !timer_is_deferred(timer))) continue;
+        timer_remove_deferred(timer);
         // retain deadlines and ordering, including timers already overdue after a long task.
         timer->due_ms = now_ms + (timer->due_ms - wall_now_ms);
         timer->resume_overdue_interval = timer->is_interval && timer->due_ms <= now_ms;
@@ -1654,6 +1727,12 @@ static void event_loop_refed_handle_cb(uv_handle_t* h, void* arg) {
 extern "C" bool js_event_loop_has_refed_handles(void) {
     uv_loop_t* loop = lambda_uv_loop();
     if (!loop) return false;
+    if (js_active_runtime_state) {
+        for (JsTimerHandle* timer = js_runtime_state.event_loop->deferred_timer_first;
+             timer; timer = timer->deferred_next) {
+            if (uv_has_ref((uv_handle_t*)&timer->timer)) return true;
+        }
+    }
     JsRefedHandleState state;
     state.has_refed = false;
     uv_walk(loop, event_loop_refed_handle_cb, &state);
@@ -1788,7 +1867,7 @@ extern "C" int js_await_bounded_drain(int (*predicate)(void*), void* user,
 
     for (int turn = 0; turn < max_turns; turn++) {
         int before = js_microtask_pending_count();
-        lambda_uv_run_loop(loop, UV_RUN_NOWAIT);
+        event_loop_run_uv_turn(loop, UV_RUN_NOWAIT);
         int after_uv = js_microtask_pending_count();
         int frame_callbacks = js_animation_frame_has_pending()
             ? js_animation_frame_flush(js_performance_monotonic_now_ms()) : 0;
@@ -1825,7 +1904,7 @@ extern "C" void js_event_loop_pump_nowait(void) {
     uv_loop_t* loop = lambda_uv_loop();
     if (!loop) return;
     for (int turn = 0; turn < 4; turn++) {
-        int active = lambda_uv_run_loop(loop, UV_RUN_NOWAIT);
+        int active = event_loop_run_uv_turn(loop, UV_RUN_NOWAIT);
         js_microtask_flush();
         if (!active) break;
     }
@@ -1853,6 +1932,7 @@ static bool event_loop_pump_native_wait(int max_wait_ms) {
     bool had_microtasks = js_microtask_pending_count() > 0;
     js_microtask_flush();
     if (had_microtasks) return true;
+    if (timer_run_deferred()) return true;
 
     uv_loop_t* loop = lambda_uv_loop();
     if (!loop || max_wait_ms <= 0) {
@@ -1999,7 +2079,7 @@ static int js_event_loop_drain_impl(bool keep_intervals) {
                 int remaining_ms = (int)((budget_ns - elapsed_ns + 999999ULL) / 1000000ULL);
                 if (event_loop_has_pending_requests()) event_loop_pump_native_wait(remaining_ms);
             }
-            int active = lambda_uv_run_loop(loop, UV_RUN_NOWAIT);
+            int active = event_loop_run_uv_turn(loop, UV_RUN_NOWAIT);
             js_event_loop_render_checkpoint();
             // Headless layout has no native frame clock; drain queued rAF work
             // so scripts using two-frame rendering checkpoints can commit their
@@ -2039,7 +2119,7 @@ static int js_event_loop_drain_impl(bool keep_intervals) {
 
         // existing page-load drains retain their interval cleanup policy; host programs opt in.
         if (!keep_intervals) stop_all_interval_timers();
-        lambda_uv_run_loop(loop, UV_RUN_NOWAIT);
+        event_loop_run_uv_turn(loop, UV_RUN_NOWAIT);
         if (dom_get_ui_context() && !animation_frame_drain_active &&
             js_animation_frame_has_pending()) {
             // Headless pages need rendering opportunities while timers are
@@ -2053,7 +2133,7 @@ static int js_event_loop_drain_impl(bool keep_intervals) {
             // Give each native turn a rendering opportunity before blocking on
             // a later timer, otherwise fetched HTML waits for timeout callbacks.
             do {
-                result = lambda_uv_run_loop(loop, UV_RUN_NOWAIT);
+                result = event_loop_run_uv_turn(loop, UV_RUN_NOWAIT);
                 // Standalone documents have no window loop to advance their offline audio clock.
                 if (!virtual_clock_enabled)
                     dom_engine_frame_tick((DomDocument*)dom_get_document(), js_performance_monotonic_now_ms());
@@ -2063,7 +2143,7 @@ static int js_event_loop_drain_impl(bool keep_intervals) {
                     continue;
                 }
                 if (!result || watchdog_state.fired) break;
-                result = lambda_uv_run_loop(loop, UV_RUN_ONCE);
+                result = event_loop_run_uv_turn(loop, UV_RUN_ONCE);
                 js_event_loop_render_checkpoint();
                 if (js_animation_frame_has_pending()) js_animation_frame_drain(64);
             } while (!watchdog_state.fired && (result || js_animation_frame_has_pending()));

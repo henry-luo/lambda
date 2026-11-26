@@ -74,6 +74,14 @@ MARKUP_TRAILING_ENTRIES = [
     ("DOM_GENERATED", "::generated"),
     ("DOM_LEADER", "::leader"),
     ("DOM_MARGIN", "::margin"),
+    ("CSS_MASK", "mask"),
+    ("CSS_MASK_POSITION", "mask-position"),
+    ("CSS_MASK_SIZE", "mask-size"),
+    ("CSS_MASK_REPEAT", "mask-repeat"),
+    ("CSS_MASK_ORIGIN", "mask-origin"),
+    ("CSS_MASK_CLIP", "mask-clip"),
+    ("CSS_MASK_MODE", "mask-mode"),
+    ("CSS_MASK_COMPOSITE", "mask-composite"),
 ]
 MARKUP_ENTRY_SYMBOLS = {
     spelling: symbol for symbol, spelling in MARKUP_TAG_ENTRIES + MARKUP_EXTRA_ENTRIES + MARKUP_TRAILING_ENTRIES
@@ -149,6 +157,7 @@ page string-set footnote-policy
 x y cx cy r rx ry
 shape-outside shape-margin shape-image-threshold
 anchor-name anchor-scope position-anchor position-area color-scheme
+mask mask-position mask-size mask-repeat mask-origin mask-clip mask-mode mask-composite
 """.split()
 
 CSS_PROPERTY_ENTRIES = [

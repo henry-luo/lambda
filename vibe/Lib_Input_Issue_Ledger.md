@@ -15,6 +15,14 @@ Resolved records are in the [fixed issue ledger](<Lib_Input_Issue_Ledger (fixed)
 
 ## Open issues
 
+<a id="li-125"></a>
+
+- [LI-125 — The CSS mask shorthand and its geometry had no property dispatch](<Lib_Input_Issue_Ledger (fixed).md#li-125>).
+
+<a id="li-124"></a>
+
+- [LI-124 — CSS matching loses the meaning of shadow host selectors](<Lib_Input_Issue_Ledger (fixed).md#li-124>).
+
 <a id="li-123"></a>
 
 - [LI-123 — External shape fingerprints hashed pointer identities byte by byte](<Lib_Input_Issue_Ledger (fixed).md#li-123>).

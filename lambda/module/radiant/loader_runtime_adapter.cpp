@@ -660,12 +660,19 @@ static bool loader_register_event_hooks(RadiantEventEmitFn emit) {
     return true;
 }
 
+static bool loader_execute_html_scripts(Element* root, DomDocument* document, Pool* pool,
+                                        Url* base_url, DocumentScriptPhaseTiming* timing) {
+    execute_document_scripts_profiled(root, document, pool, base_url, timing);
+    // signal recovery bypasses activation destructors; its abandoned realm cannot serve another host turn.
+    return !script_runner_js_batch_cleanup_unsafe();
+}
+
 bool lambda_loader_runtime_host_register() {
     static const RadiantLoaderRuntimeHostOps operations = {
         loader_runtime_get, loader_runtime_finish, release_layout_runtime,
         loader_begin_script, loader_cancel_script, loader_finish_script, loader_prepare_script,
         loader_render_embedded, lambda_document_transform_for_input_type,
-        execute_document_scripts_profiled, collect_and_compile_event_handlers,
+        loader_execute_html_scripts, collect_and_compile_event_handlers,
         loader_begin_document_timing, loader_end_document_timing, script_runner_cleanup_js_state,
         script_runner_defer_js_state_cleanup,
         loader_cleanup_owners, loader_release_observers, loader_release_dom, loader_cancel_timers,

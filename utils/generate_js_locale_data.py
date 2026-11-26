@@ -1,15 +1,31 @@
 #!/usr/bin/env python3
-"""Generate Intl.Locale likely-subtag lookup data from pinned Unicode CLDR 48."""
+"""Generate JavaScript locale data from pinned Unicode CLDR 48."""
 
 import argparse
 import hashlib
 import json
+import re
+import tarfile
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent.parent
-SOURCE = "https://raw.githubusercontent.com/unicode-org/cldr-json/48.0.0/cldr-json/cldr-core/supplemental/likelySubtags.json"
+CLDR = "https://raw.githubusercontent.com/unicode-org/cldr-json/48.0.0/cldr-json/cldr-core/supplemental/"
+SOURCE = CLDR + "likelySubtags.json"
 SHA256 = "38345946ad457213fb39e9645ab50f36b61681bf674b2eef2979a3b58d04afc8"
+PLURAL_SOURCES = {
+    "plurals": "6c0a48e9bcfc25856f90202f703c2c7f89c105d6868f7712a943a6ed2dcbe8f4",
+    "ordinals": "8a945afc483a4f677fb5641f08a2ccc62948ee05f316d21996be6561c2f83155",
+    "pluralRanges": "fb56214321fb18675196eda503779b8576fe785084bc0573e1def41dd0e39027",
+}
+CATEGORIES = ("zero", "one", "two", "few", "many", "other")
+RELATION = re.compile(r"([nivwftce])(?: % ([0-9]+))? (!?=) ([0-9.,]+)")
+LIST_ARCHIVE = "https://registry.npmjs.org/cldr-misc-full/-/cldr-misc-full-48.0.0.tgz"
+LIST_ARCHIVE_SHA256 = "c72d7aef0022206f0c65bbad9fb3d5524078c89066febb397d94cca9e2983176"
+LIST_DEFAULTS = CLDR.removesuffix("supplemental/") + "defaultContent.json"
+LIST_DEFAULTS_SHA256 = "ceeae676236ada8b2c9610c417447280230c1355260a78a2452541e2e1ac6e6c"
+LIST_SCRIPTS = "https://www.unicode.org/Public/17.0.0/ucd/Scripts.txt"
+LIST_SCRIPTS_SHA256 = "9f5e50d3abaee7d6ce09480f325c706f485ae3240912527e651954d2d6b035bf"
 
 
 def generate(source):
@@ -33,18 +49,191 @@ def generate(source):
     return "\n".join(lines + ["};", ""])
 
 
+def plural_sources(source_dir):
+    for stem, expected in PLURAL_SOURCES.items():
+        raw = (source_dir / f"{stem}.json").read_bytes()
+        if hashlib.sha256(raw).hexdigest() != expected:
+            raise ValueError(f"expected pinned CLDR 48 {stem}.json")
+        yield json.loads(raw)["supplemental"]
+
+
+def generate_plurals(source_dir):
+    cardinal, ordinal, plural_ranges = plural_sources(source_dir)
+    cardinal = cardinal["plurals-type-cardinal"]
+    ordinal = ordinal["plurals-type-ordinal"]
+    plural_ranges = plural_ranges["plurals"]
+    bounds, relations, conjunctions, rules = [], [], [], [(0, 0)]
+    rule_sets, range_sets, range_entries = [], {(): (0, 0)}, []
+    rule_id, rule_set_id = {"": 0}, {}
+
+    def add_rule(source):
+        condition = source.split("@", 1)[0].strip()
+        if condition in rule_id:
+            return rule_id[condition]
+        clauses = condition.split(" or ")
+        rule_id[condition] = len(rules)
+        rules.append((len(conjunctions), len(clauses)))
+        for clause in clauses:
+            terms = clause.split(" and ")
+            conjunctions.append((len(relations), len(terms)))
+            for term in terms:
+                match = RELATION.fullmatch(term)
+                if not match:
+                    raise ValueError(f"unhandled CLDR plural condition: {term}")
+                operand, modulo, operator, values = match.groups()
+                value_ranges = values.split(",")
+                relations.append((f"JS_PLURAL_{operand.upper()}", int(modulo or "0"),
+                                  len(bounds), len(value_ranges), "true" if operator == "!=" else "false"))
+                for value in value_ranges:
+                    first, separator, last = value.partition("..")
+                    bounds.append((int(first), int(last if separator else first)))
+        return rule_id[condition]
+
+    def add_rule_set(data):
+        rule_set = tuple(add_rule(data.get(f"pluralRule-count-{category}", ""))
+                         for category in CATEGORIES[:-1])
+        if rule_set not in rule_set_id:
+            rule_set_id[rule_set] = len(rule_sets)
+            rule_sets.append(rule_set)
+        return rule_set_id[rule_set]
+
+    def add_range_set(data):
+        entries = []
+        for key, category in sorted(data.items()):
+            match = re.fullmatch(r"pluralRange-start-(\w+)-end-(\w+)", key)
+            if not match:
+                raise ValueError(f"unhandled CLDR plural range: {key}")
+            first, last = map(CATEGORIES.index, match.groups())
+            entries.append((first, last, CATEGORIES.index(category)))
+        signature = tuple(entries)
+        if signature not in range_sets:
+            range_sets[signature] = (len(range_entries), len(entries))
+            range_entries.extend(entries)
+        return range_sets[signature]
+
+    locales = []
+    for locale in sorted(set(cardinal) | set(ordinal) | set(plural_ranges)):
+        language = locale.split("-", 1)[0]
+        first, count = add_range_set(plural_ranges.get(locale, plural_ranges.get(language, {})))
+        locales.append((json.dumps(locale), add_rule_set(cardinal.get(locale, cardinal.get(language, {}))),
+                        add_rule_set(ordinal.get(locale, ordinal.get(language, {}))), first, count))
+
+    if not all(len(items) < 65536 for items in (bounds, relations, conjunctions, rules, rule_sets, range_entries)):
+        raise ValueError("CLDR plural table exceeds its index width")
+    if max(count for _, count in conjunctions + rules + list(range_sets.values())) > 255:
+        raise ValueError("CLDR plural table exceeds its sequence width")
+    lines = [
+        "// generated by utils/generate_js_locale_data.py; do not edit.",
+        "// Unicode CLDR 48; Copyright (c) 1991-2026 Unicode, Inc.",
+        "// SPDX-License-Identifier: Unicode-3.0; see ../../lambda-input/lib/UNICODE_LICENSE.txt.",
+    ]
+    lines.extend(f"// source: {CLDR}{name}.json ({digest})" for name, digest in PLURAL_SOURCES.items())
+    for declaration, rows in (
+        ("JsPluralBounds js_plural_bounds", bounds),
+        ("JsPluralRelation js_plural_relations", relations),
+        ("JsPluralSlice js_plural_conjunctions", conjunctions),
+        ("JsPluralSlice js_plural_rules", rules),
+        ("uint16_t js_plural_rule_sets[][5]", rule_sets),
+        ("JsPluralRangeEntry js_plural_range_entries", range_entries),
+        ("JsPluralLocale js_plural_locales", locales),
+    ):
+        suffix = "" if declaration.endswith("]") else "[]"
+        lines.append(f"static const {declaration}{suffix} = {{")
+        lines.extend("    {" + ", ".join(map(str, row)) + "}," for row in rows)
+        lines.append("};")
+    return "\n".join(lines + [""])
+
+
+def write_generated(output, result, check):
+    if check:
+        if output.read_text() != result:
+            raise SystemExit(f"Generated locale data is stale: {output}")
+    else:
+        output.write_text(result)
+
+
+def generate_lists(pattern_archive, default_content, script_data):
+    for path, digest in ((pattern_archive, LIST_ARCHIVE_SHA256), (default_content, LIST_DEFAULTS_SHA256),
+                         (script_data, LIST_SCRIPTS_SHA256)):
+        if hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+            raise ValueError(f"Unexpected CLDR list format source: {path}")
+
+    patterns, sets, locales = {}, {}, {}
+    types = ("standard", "or", "unit")
+    styles = ("", "-short", "-narrow")
+    forms = ("2", "start", "middle", "end")
+    with tarfile.open(pattern_archive) as archive:
+        members = sorted((entry for entry in archive.getmembers() if entry.name.endswith("/listPatterns.json")),
+                         key=lambda entry: entry.name)
+        for entry in members:
+            locale, values = next(iter(json.load(archive.extractfile(entry))["main"].items()))
+            data = values["listPatterns"]
+            rows = []
+            for kind in types:
+                for style in styles:
+                    row = []
+                    for form in forms:
+                        pattern = data[f"listPattern-type-{kind}{style}"][form]
+                        literal = re.fullmatch(r"([^{}]*)\{0\}([^{}]*)\{1\}([^{}]*)", pattern)
+                        if not literal:
+                            raise ValueError(f"Unexpected CLDR list pattern for {locale}: {pattern}")
+                        row.append(patterns.setdefault(literal.groups(), len(patterns)))
+                    rows.append(tuple(row))
+            locales[locale] = sets.setdefault(tuple(rows), len(sets))
+
+    # CLDR omits separate files for these locales because they reuse their parent's content.
+    for locale in json.loads(default_content.read_bytes())["defaultContent"]:
+        parent = locale.rpartition("-")[0]
+        while parent and parent not in locales:
+            parent = parent.rpartition("-")[0]
+        if parent:
+            locales.setdefault(locale, locales[parent])
+
+    if max(len(patterns), len(sets), len(locales)) > 65535:
+        raise ValueError("CLDR list format table exceeds its index width")
+    lines = [
+        "// generated by utils/generate_js_locale_data.py; do not edit.",
+        "// Unicode CLDR 48; Copyright (c) 1991-2026 Unicode, Inc.",
+        "// SPDX-License-Identifier: Unicode-3.0; see ../../lambda-input/lib/UNICODE_LICENSE.txt.",
+        f"// source: {LIST_ARCHIVE} ({LIST_ARCHIVE_SHA256})",
+        f"// source: {LIST_DEFAULTS} ({LIST_DEFAULTS_SHA256})",
+        f"// source: {LIST_SCRIPTS} ({LIST_SCRIPTS_SHA256})",
+        "static const JsListLiterals js_list_literals[] = {",
+    ]
+    for pattern in patterns:
+        lines.append("    {" + ", ".join(json.dumps(text, ensure_ascii=False) for text in pattern) + "},")
+    lines.extend(("};", "static const uint16_t js_list_patterns[][9][4] = {"))
+    for rows in sets:
+        lines.append("    {" + ", ".join("{" + ",".join(map(str, row)) + "}" for row in rows) + "},")
+    lines.extend(("};", "static const JsListLocale js_list_locales[] = {"))
+    lines.extend(f'    {{"{locale}", {index}}},' for locale, index in sorted(locales.items()))
+    lines.extend(("};", "static const uint32_t js_list_hebrew_script[][2] = {"))
+    for line in script_data.read_text().splitlines():
+        entry, _, script = line.partition("#")[0].partition(";")
+        if script.strip() == "Hebrew":
+            low, _, high = entry.strip().partition("..")
+            lines.append(f"    {{0x{low}, 0x{high or low}}},")
+    return "\n".join(lines + ["};", ""])
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("source", type=Path)
+    parser.add_argument("source", type=Path, nargs="?")
     parser.add_argument("--output", type=Path, default=ROOT / "lambda/js/js_intl_likely_subtags.h")
+    parser.add_argument("--plural-data-dir", type=Path)
+    parser.add_argument("--plural-output", type=Path, default=ROOT / "lambda/js/js_intl_plural_data.h")
+    parser.add_argument("--list-data", type=Path, nargs=3, metavar=("ARCHIVE", "DEFAULT_CONTENT", "SCRIPTS"))
+    parser.add_argument("--list-output", type=Path, default=ROOT / "lambda/js/js_intl_list_data.h")
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
-    result = generate(args.source.read_bytes())
-    if args.check:
-        if args.output.read_text() != result:
-            raise SystemExit("Intl.Locale likely-subtag data is stale")
-    else:
-        args.output.write_text(result)
+    if not (args.source or args.plural_data_dir or args.list_data):
+        parser.error("supply a likely-subtags source, --plural-data-dir or --list-data")
+    if args.source:
+        write_generated(args.output, generate(args.source.read_bytes()), args.check)
+    if args.plural_data_dir:
+        write_generated(args.plural_output, generate_plurals(args.plural_data_dir), args.check)
+    if args.list_data:
+        write_generated(args.list_output, generate_lists(*args.list_data), args.check)
 
 
 if __name__ == "__main__":

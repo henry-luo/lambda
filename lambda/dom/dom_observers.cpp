@@ -111,9 +111,6 @@ static JsObserverRuntimeState* js_observer_runtime_state() {
 extern __thread EvalContext* context;
 extern "C" uint64_t js_get_heap_epoch(void);
 
-static Item js_geometry_observer_initial_sample(void);
-
-
 // Re-register every live observer's two Item slots after a heap replacement.
 // Only live observers are walked now; the old table registered 128 slots up
 // front, most of them for observers that never existed.
@@ -1059,27 +1056,30 @@ extern "C" void dom_observers_post_layout(void) {
         !context_capsule(context, CONTEXT_CAPSULE_DOM_OBSERVER)) return;
     JsObserverRuntimeState* state = js_observer_runtime_state();
     if (state->geometry_sampling || state->geometry_sample_scheduled) return;
-    bool observed = false;
     for (int i = 0; i < observer_count; i++) {
         if (observers[i]->kind != JS_OBSERVER_MUTATION && observers[i]->target_count) {
-            observed = true;
-            break;
+            // A later rendering opportunity samples the geometry after Promise
+            // jobs and frame callbacks have finished their writes.
+            state->geometry_sample_scheduled = true;
+            return;
         }
     }
-    if (!observed) return;
-    // forced geometry reads can expose temporary sizes inside one script turn.
-    // sample the settled box once, rather than queueing feedback from each read.
-    state->geometry_sample_scheduled = true;
-    dom_schedule_microtask(dom_realm_new_function(js_geometry_observer_initial_sample));
 }
 
-static Item js_geometry_observer_initial_sample(void) {
+extern "C" bool dom_observers_geometry_pending(void) {
+    auto* state = context && js_active_runtime_state
+        ? (JsObserverRuntimeState*)context_capsule(context, CONTEXT_CAPSULE_DOM_OBSERVER) : nullptr;
+    return state && state->geometry_sample_scheduled;
+}
+
+extern "C" bool dom_observers_sample_frame(void) {
+    if (!dom_observers_geometry_pending()) return false;
     JsObserverRuntimeState* state = js_observer_runtime_state();
     state->geometry_sample_scheduled = false;
     state->geometry_sampling = true;
     observer_sample_geometry();
     state->geometry_sampling = false;
-    return make_js_undefined();
+    return true;
 }
 
 extern "C" void dom_observers_release_document(DomDocument* document) {

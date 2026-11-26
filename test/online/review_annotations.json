@@ -5,7 +5,7 @@
     {
       "label": "saas_landing_365",
       "url": "https://supabase.com/customers",
-      "manual_major_remaining": "Customer-stories heading, supporting copy, filters and all customer cards remain absent. Chromium records 52 Element.animate calls, confirming the existing automatic Web Animations playback gap (JS13-L44 / JS13-L66).",
+      "manual_major_remaining": "",
       "rechecks": [
         {
           "rechecked_at": "2026-11-18T04:43:31.020Z",
@@ -19,7 +19,12 @@
           "previous_manual_major_remaining": "Customer-stories heading, supporting copy and all customer cards remain absent.",
           "manual_major_remaining": "Customer-stories heading, supporting copy, filters and all customer cards remain absent. Chromium records 52 Element.animate calls, confirming the existing automatic Web Animations playback gap (JS13-L44 / JS13-L66)."
         }
-      ]
+      ],
+      "resolved_at": "2026-11-26T10:18:39.074Z",
+      "resolution": "JS13-L89 advances the authored document-timeline animations. Supabase’s customer stories title, supporting copy, filters and visible story cards are present. Two ordinary pairs show the restoration. The repeat has 2.77% mean error.",
+      "resolution_evidence": "comparison/repairs.html#round-211",
+      "resolved_previous_manual_major_remaining": "Customer-stories heading, supporting copy, filters and all customer cards remain absent. Chromium records 52 Element.animate calls, confirming the existing automatic Web Animations playback gap (JS13-L44 / JS13-L66).",
+      "resolved_capture_settle_ms": 1000
     },
     {
       "label": "saas_landing_505",
@@ -83,7 +88,7 @@
     {
       "label": "saas_landing_134",
       "url": "https://cequence.io/",
-      "manual_major_remaining": "The current application renders its own error screen because startup constructs the missing Intl.PluralRules (JS10-L2). Deleting only that constructor in Chromium reproduces this screen; the ordinary Chromium reference renders the full page. This substantial Intl feature gap remains high.",
+      "manual_major_remaining": "",
       "rechecks": [
         {
           "rechecked_at": "2026-11-18T04:43:31.020Z",
@@ -97,7 +102,12 @@
           "previous_manual_major_remaining": "Entire left-column hero heading, copy and primary action are absent.",
           "manual_major_remaining": "The current application renders its own error screen because startup constructs the missing Intl.PluralRules (JS10-L2). Deleting only that constructor in Chromium reproduces this screen; the ordinary Chromium reference renders the full page. This substantial Intl feature gap remains high."
         }
-      ]
+      ],
+      "resolved_at": "2026-11-26T12:15:16.246Z",
+      "resolution": "JS13-L92 restores Cequence’s hero heading and description after JS10-L2 restores startup. Both ordinary pairs show the navigation, full hero copy, actions and product illustration at 0.39% mean error and 0.04% changed area.",
+      "resolution_evidence": "comparison/repairs.html#round-216",
+      "resolved_previous_manual_major_remaining": "The current application renders its own error screen because startup constructs the missing Intl.PluralRules (JS10-L2). Deleting only that constructor in Chromium reproduces this screen; the ordinary Chromium reference renders the full page. This substantial Intl feature gap remains high.",
+      "resolved_capture_settle_ms": 1000
     },
     {
       "label": "saas_landing_399",
@@ -161,7 +171,7 @@
     {
       "label": "saas_landing_436",
       "url": "https://www.craft.do/",
-      "manual_major_remaining": "Large paper decorations still lack their authored URL image masks (RI-041), although heading, action and product panel are present.",
+      "manual_major_remaining": "",
       "rechecks": [
         {
           "rechecked_at": "2026-11-18T04:43:31.020Z",
@@ -169,7 +179,12 @@
           "previous_manual_major_remaining": "Hero heading, button, spacing and product placement are restored after the flex sizing and CSS math-gap repairs. Large paper decorations still render without their authored URL-based image masks, an unsupported consumer recorded as RI-041.",
           "manual_major_remaining": "Large paper decorations still lack their authored URL image masks (RI-041), although heading, action and product panel are present."
         }
-      ]
+      ],
+      "resolved_at": "2026-11-26T13:15:46.323Z",
+      "resolution": "LI-125 and RI-041 restore Craft’s torn-paper artwork. It appears in both ordinary pairs at 1.53% mean error and 1.92% changed area. The wordmark and button contrast differ.",
+      "resolution_evidence": "comparison/repairs.html#round-218",
+      "resolved_previous_manual_major_remaining": "Large paper decorations still lack their authored URL image masks (RI-041), although heading, action and product panel are present.",
+      "resolved_capture_settle_ms": 1000
     },
     {
       "label": "saas_landing_679",
@@ -401,7 +416,7 @@
     {
       "label": "saas_landing_446",
       "url": "https://www.affinity.studio/",
-      "manual_major_remaining": "Four large hero artwork panels remain absent around the heading; navigation labels are now readable and aligned after RI-136.",
+      "manual_major_remaining": "The four large artwork panels remain absent because the admitted Rive renderer waits for WebAssembly before initializing its Canvas2D hero (JS13-L87). Native WebAssembly is unavailable. Removing only that namespace in Chromium leaves the canvas uninitialized with no drawing; denying both WebGL contexts still renders the artwork. Retain high for this substantial runtime feature gap; no source-budget, GPU or Blob-decoder cause is assigned.",
       "reviewed_at": "2026-11-16T17:25:55.095666+00:00",
       "evidence": "comparison/repairs.html#round-45",
       "rechecks": [
@@ -416,6 +431,12 @@
           "evidence": "comparison/repairs.html#round-89",
           "previous_manual_major_remaining": "Four large hero artwork panels are absent around the heading, and the main navigation breaks into vertical fragments.",
           "manual_major_remaining": "Four large hero artwork panels remain absent around the heading; navigation labels are now readable and aligned after RI-136."
+        },
+        {
+          "rechecked_at": "2026-11-26T02:43:58.617Z",
+          "evidence": "comparison/repairs.html#round-206",
+          "previous_manual_major_remaining": "Four large hero artwork panels remain absent around the heading; navigation labels are now readable and aligned after RI-136.",
+          "manual_major_remaining": "The four large artwork panels remain absent because the admitted Rive renderer waits for WebAssembly before initializing its Canvas2D hero (JS13-L87). Native WebAssembly is unavailable. Removing only that namespace in Chromium leaves the canvas uninitialized with no drawing; denying both WebGL contexts still renders the artwork. Retain high for this substantial runtime feature gap; no source-budget, GPU or Blob-decoder cause is assigned."
         }
       ]
     },
@@ -603,7 +624,7 @@
     {
       "label": "saas_landing_382",
       "url": "https://frame.io/customers",
-      "manual_major_remaining": "The normal native frame renders outer photographs but still omits the central customer-image montage. The normal post-script layout has central image boxes and nonzero opacity; a static reduction of the captured browser hero paints all central images. Basic transform/clip probes pass. The remaining live startup difference is unisolated; no new paint, image-download or scheduler root is claimed.",
+      "manual_major_remaining": "The current native montage remains substantially darker and lower than Chromium. Images exist, and simple inherited custom-property opacity/transform mutations pass focused controls. Browser tracing records Web Animation calls on logo walls, not the hero, so those calls do not establish its cause. Retain major review for the remaining live animation/style difference.",
       "reviewed_at": "2026-11-18T04:43:31.020Z",
       "evidence": "comparison/repairs.html#round-83",
       "rechecks": [
@@ -612,13 +633,19 @@
           "evidence": "comparison/repairs.html#round-197",
           "previous_manual_major_remaining": "The entire main customer-image montage remains absent below the header.",
           "manual_major_remaining": "The normal native frame renders outer photographs but still omits the central customer-image montage. The normal post-script layout has central image boxes and nonzero opacity; a static reduction of the captured browser hero paints all central images. Basic transform/clip probes pass. The remaining live startup difference is unisolated; no new paint, image-download or scheduler root is claimed."
+        },
+        {
+          "rechecked_at": "2026-11-26T01:58:30.464Z",
+          "evidence": "comparison/repairs.html#round-204",
+          "previous_manual_major_remaining": "The normal native frame renders outer photographs but still omits the central customer-image montage. The normal post-script layout has central image boxes and nonzero opacity; a static reduction of the captured browser hero paints all central images. Basic transform/clip probes pass. The remaining live startup difference is unisolated; no new paint, image-download or scheduler root is claimed.",
+          "manual_major_remaining": "The current native montage remains substantially darker and lower than Chromium. Images exist, and simple inherited custom-property opacity/transform mutations pass focused controls. Browser tracing records Web Animation calls on logo walls, not the hero, so those calls do not establish its cause. Retain major review for the remaining live animation/style difference."
         }
       ]
     },
     {
       "label": "saas_landing_494",
       "url": "https://sierra.ai/",
-      "manual_major_remaining": "The current application renders its own error boundary because localization constructs the missing Intl.ListFormat (JS10-L3). Deleting only Intl.ListFormat in Chromium reproduces that boundary. Locale-aware list formatting remains a major feature gap.",
+      "manual_major_remaining": "",
       "reviewed_at": "2026-11-18T04:43:31.020Z",
       "evidence": "comparison/repairs.html#round-83",
       "rechecks": [
@@ -628,12 +655,17 @@
           "previous_manual_major_remaining": "The main hero headline over the photograph remains absent; header and media are present.",
           "manual_major_remaining": "The current application renders its own error boundary because localization constructs the missing Intl.ListFormat (JS10-L3). Deleting only Intl.ListFormat in Chromium reproduces that boundary. Locale-aware list formatting remains a major feature gap."
         }
-      ]
+      ],
+      "resolved_at": "2026-11-26T12:37:18.292Z",
+      "resolution": "JS10-L3 restores Sierra’s localized storefront. The navigation, consent request and hero video appear in both ordinary pairs at 3.04% mean error and 8.45% changed area. A fading hero text overlay differs at the selected frame.",
+      "resolution_evidence": "comparison/repairs.html#round-217",
+      "resolved_previous_manual_major_remaining": "The current application renders its own error boundary because localization constructs the missing Intl.ListFormat (JS10-L3). Deleting only Intl.ListFormat in Chromium reproduces that boundary. Locale-aware list formatting remains a major feature gap.",
+      "resolved_capture_settle_ms": 1000
     },
     {
       "label": "saas_landing_542",
       "url": "https://www.diabrowser.com/",
-      "manual_major_remaining": "The giant DIA wordmark, introductory heading and download action remain absent despite a low coarse score. The exact hero module and diagnostic Chromium trace confirm opacity [0,1] Web Animations for these regions. Automatic playback remains outside the existing explicit-seek profile (JS13-L66/L44); no forced visibility or API hiding is used.",
+      "manual_major_remaining": "",
       "reviewed_at": "2026-11-18T04:43:31.020Z",
       "evidence": "comparison/repairs.html#round-83",
       "rechecks": [
@@ -643,7 +675,12 @@
           "previous_manual_major_remaining": "The giant DIA headline, introductory line and main download action remain absent.",
           "manual_major_remaining": "The giant DIA wordmark, introductory heading and download action remain absent despite a low coarse score. The exact hero module and diagnostic Chromium trace confirm opacity [0,1] Web Animations for these regions. Automatic playback remains outside the existing explicit-seek profile (JS13-L66/L44); no forced visibility or API hiding is used."
         }
-      ]
+      ],
+      "resolved_at": "2026-11-26T10:18:39.039Z",
+      "resolution": "JS13-L89 advances the authored document-timeline animations. Dia’s large wordmark, introduction and download action are visible. Two ordinary pairs show the restoration. The repeat has 3.13% mean error.",
+      "resolution_evidence": "comparison/repairs.html#round-211",
+      "resolved_previous_manual_major_remaining": "The giant DIA wordmark, introductory heading and download action remain absent despite a low coarse score. The exact hero module and diagnostic Chromium trace confirm opacity [0,1] Web Animations for these regions. Automatic playback remains outside the existing explicit-seek profile (JS13-L66/L44); no forced visibility or API hiding is used.",
+      "resolved_capture_settle_ms": 1000
     },
     {
       "label": "saas_landing_456",
@@ -687,9 +724,14 @@
     {
       "label": "saas_landing_463",
       "url": "https://hera.travel/",
-      "manual_major_remaining": "The primary animated headline remains absent in the matched browser/native frame, despite the restored blue background and logo.",
+      "manual_major_remaining": "",
       "reviewed_at": "2026-11-20T13:31:07.541Z",
-      "evidence": "comparison/repairs.html#round-114"
+      "evidence": "comparison/repairs.html#round-114",
+      "resolved_at": "2026-11-26T10:33:54.979Z",
+      "resolution": "Hera’s animated hero title is visible in both independent Radiant captures and both ordinary Chromium references. It is still revealing letters at the selected frame. The round 211 release qualifies at 2.13% mean error.",
+      "resolution_evidence": "comparison/repairs.html#round-212",
+      "resolved_previous_manual_major_remaining": "The primary animated headline remains absent in the matched browser/native frame, despite the restored blue background and logo.",
+      "resolved_capture_settle_ms": 1000
     },
     {
       "label": "saas_landing_310",
@@ -728,15 +770,33 @@
     {
       "label": "saas_landing_173",
       "url": "https://mode.com/",
-      "manual_major_remaining": "The consent dialog and hero heading now render, but the main navigation remains unstyled and large hero photographs and the query illustration remain absent.",
-      "evidence": "comparison/repairs.html#round-149"
+      "manual_major_remaining": "",
+      "evidence": "comparison/repairs.html#round-149",
+      "resolved_at": "2026-11-26T02:43:58.572Z",
+      "resolution": "The current ordinary release renders the complete navigation, hero heading, large photographs, query illustration, primary action and consent panel. Its previously declined 142207-byte framework now executes under the corrected normal admission policy. Clear the historical major omission: 1.16% mean error / 1.54% changed area against current Chromium. This qualifies accumulated repairs; no new Mode-specific implementation or unique attribution from the fresh pair.",
+      "resolution_evidence": "comparison/repairs.html#round-206",
+      "resolved_previous_manual_major_remaining": "The consent dialog and hero heading now render, but the main navigation remains unstyled and large hero photographs and the query illustration remain absent.",
+      "resolved_capture_settle_ms": 1000
     },
     {
       "label": "saas_landing_516",
       "url": "https://anam.ai/",
-      "manual_major_remaining": "Portrait cards and consent panel are restored. The main animated headline, introductory tag and primary signup/demo actions remain absent at the selected frame; retain major review despite the lower coarse score.",
+      "manual_major_remaining": "",
       "reviewed_at": "2026-11-23T09:09:54.737Z",
-      "evidence": "comparison/repairs.html#round-166"
+      "evidence": "comparison/repairs.html#round-166",
+      "rechecks": [
+        {
+          "rechecked_at": "2026-11-26T01:58:30.421Z",
+          "evidence": "comparison/repairs.html#round-204",
+          "previous_manual_major_remaining": "Portrait cards and consent panel are restored. The main animated headline, introductory tag and primary signup/demo actions remain absent at the selected frame; retain major review despite the lower coarse score.",
+          "manual_major_remaining": "The final loader-linked release completes without the earlier experimental crash and renders the portrait cards and consent panel. The animated heading and signup/demo actions remain absent. Current Chromium also captures those regions hidden, so this early reference cannot clear the historical major omission. Retain review; no unique remaining cause is assigned."
+        }
+      ],
+      "resolved_at": "2026-11-26T10:33:55.028Z",
+      "resolution": "Anam’s introduction, headline and signup and demo actions are visible in both independent Radiant captures. They are visible in two of the three ordinary Chromium references. The round 211 release qualifies at 3.87% mean error.",
+      "resolution_evidence": "comparison/repairs.html#round-212",
+      "resolved_previous_manual_major_remaining": "The final loader-linked release completes without the earlier experimental crash and renders the portrait cards and consent panel. The animated heading and signup/demo actions remain absent. Current Chromium also captures those regions hidden, so this early reference cannot clear the historical major omission. Retain review; no unique remaining cause is assigned.",
+      "resolved_capture_settle_ms": 1000
     },
     {
       "label": "saas_landing_072",
@@ -794,14 +854,27 @@
     {
       "label": "saas_landing_281",
       "url": "https://family.co/",
-      "manual_major_remaining": "Heading, navigation and hero artwork now render, but supporting copy remains faint and the primary download/video actions remain absent in the matched frame. Retain the major action omission despite the low image score."
+      "manual_major_remaining": "",
+      "resolved_at": "2026-11-26T01:58:30.374Z",
+      "resolution": "The final release including JS13-L86 restores the supporting copy and both primary download/video actions. Navigation, heading and large artwork match current Chromium: 2.58% mean error / 8.02% changed area. Clear the major action omission; small font, decoration and animation-phase differences remain. No visibility, timer-budget or page-specific override.",
+      "resolution_evidence": "comparison/repairs.html#round-204",
+      "resolved_previous_manual_major_remaining": "Heading, navigation and hero artwork now render, but supporting copy remains faint and the primary download/video actions remain absent in the matched frame. Retain the major action omission despite the low image score.",
+      "resolved_capture_settle_ms": 1000
     },
     {
       "label": "saas_landing_342",
       "url": "https://teachable.com/",
-      "manual_major_remaining": "Main navigation, heading, actions and product media now render. RI-227 repairs the consent notice width and fixed positioning, but missing :host custom-property styles leave transparent fill and unstyled text/buttons overlapping the product interface. Retain this large overlay defect under JS13-L2.",
+      "manual_major_remaining": "LI-124 and RI-248 restore the consent panel background, typography and button. The ordinary native panel still covers the lower offer area, where current Chromium shows the primary action without a panel. Retain high at 17.30% mean error and 35.60% changed area while the consent state and remaining hero differences are unresolved.",
       "reviewed_at": "2026-11-24T13:29:24.734Z",
-      "evidence": "comparison/repairs.html#round-179"
+      "evidence": "comparison/repairs.html#round-179",
+      "rechecks": [
+        {
+          "rechecked_at": "2026-11-26T08:54:20.771Z",
+          "evidence": "comparison/repairs.html#round-207",
+          "previous_manual_major_remaining": "Main navigation, heading, actions and product media now render. RI-227 repairs the consent notice width and fixed positioning, but missing :host custom-property styles leave transparent fill and unstyled text/buttons overlapping the product interface. Retain this large overlay defect under JS13-L2.",
+          "manual_major_remaining": "LI-124 and RI-248 restore the consent panel background, typography and button. The ordinary native panel still covers the lower offer area, where current Chromium shows the primary action without a panel. Retain high at 17.30% mean error and 35.60% changed area while the consent state and remaining hero differences are unresolved."
+        }
+      ]
     },
     {
       "label": "saas_landing_129",
@@ -861,9 +934,14 @@
     {
       "label": "saas_landing_475",
       "url": "https://www.agora.xyz/about",
-      "manual_major_remaining": "The main wrapper remains invisible. Its actual browser animation is opacity [0,1], 500ms with fill both; the announcement also uses automatic playback. This matches the existing substantial Web Animations lifecycle gap (JS13-L66/L44), which is deferred. No visibility or API workaround is applied.",
+      "manual_major_remaining": "",
       "reviewed_at": "2026-11-25T11:34:10.765Z",
-      "evidence": "comparison/repairs.html#round-195"
+      "evidence": "comparison/repairs.html#round-195",
+      "resolved_at": "2026-11-26T10:18:38.985Z",
+      "resolution": "JS13-L89 advances the authored document-timeline animations. Agora’s main artwork, heading, text, navigation and announcement are visible. Two ordinary pairs show the restoration. The repeat has 0.86% mean error.",
+      "resolution_evidence": "comparison/repairs.html#round-211",
+      "resolved_previous_manual_major_remaining": "The main wrapper remains invisible. Its actual browser animation is opacity [0,1], 500ms with fill both; the announcement also uses automatic playback. This matches the existing substantial Web Animations lifecycle gap (JS13-L66/L44), which is deferred. No visibility or API workaround is applied.",
+      "resolved_capture_settle_ms": 1000
     },
     {
       "label": "saas_landing_083",
@@ -875,7 +953,7 @@
     {
       "label": "saas_landing_141",
       "url": "https://linktr.ee/",
-      "manual_major_remaining": "JS13-L83 restores the hero through default-stream branching. JS13-L84/L85 repair consent configuration decoding and inherited message listeners. The panel now exists and is visible in the post-script tree, but its :host-scoped fixed positioning is unsupported (JS13-L2): it remains below the viewport. Retain manual high for the large missing consent panel; no full SDK or shadow-scope conformance claim.",
+      "manual_major_remaining": "",
       "reviewed_at": "2026-11-25T12:13:34.624Z",
       "evidence": "comparison/repairs.html#round-198",
       "rechecks": [
@@ -891,14 +969,24 @@
           "previous_manual_major_remaining": "JS13-L83 restores the main heading, supporting copy, signup controls and large portraits through real default-stream branching. The large consent panel visible in the current Chromium reference remains absent. Retain manual high review despite the cleared automated broad-difference flag; consent startup is unisolated and later fingerprinting/analytics failures are separate.",
           "manual_major_remaining": "JS13-L83 restores the hero through default-stream branching. JS13-L84/L85 repair consent configuration decoding and inherited message listeners. The panel now exists and is visible in the post-script tree, but its :host-scoped fixed positioning is unsupported (JS13-L2): it remains below the viewport. Retain manual high for the large missing consent panel; no full SDK or shadow-scope conformance claim."
         }
-      ]
+      ],
+      "resolved_at": "2026-11-26T08:54:20.678Z",
+      "resolution": "LI-124 and RI-248 apply the consent host positioning and inheritance from its own shadow stylesheet. The ordinary paired capture restores the full consent panel at the reference position with a 1.45% mean difference. Clear the major omission.",
+      "resolution_evidence": "comparison/repairs.html#round-207",
+      "resolved_previous_manual_major_remaining": "JS13-L83 restores the hero through default-stream branching. JS13-L84/L85 repair consent configuration decoding and inherited message listeners. The panel now exists and is visible in the post-script tree, but its :host-scoped fixed positioning is unsupported (JS13-L2): it remains below the viewport. Retain manual high for the large missing consent panel; no full SDK or shadow-scope conformance claim.",
+      "resolved_capture_settle_ms": 1000
     },
     {
       "label": "saas_landing_198",
       "url": "https://bento.me/en/home",
-      "manual_major_remaining": "Bento now redirects to Linktree. Shared stream/startup repairs restore the heading, copy, actions and large portrait; the large consent panel remains absent, matching the known host-scoped cascade gap (JS13-L2). Retain manual high despite the cleared automatic broad-difference flag.",
+      "manual_major_remaining": "",
       "reviewed_at": "2026-11-25T13:36:32.950Z",
-      "evidence": "comparison/repairs.html#round-202"
+      "evidence": "comparison/repairs.html#round-202",
+      "resolved_at": "2026-11-26T08:54:20.727Z",
+      "resolution": "Both ordinary captures navigate from Bento to Linktree. LI-124 and RI-248 restore the full consent panel in the native viewport with a 1.14% mean difference. Clear the major omission.",
+      "resolution_evidence": "comparison/repairs.html#round-207",
+      "resolved_previous_manual_major_remaining": "Bento now redirects to Linktree. Shared stream/startup repairs restore the heading, copy, actions and large portrait; the large consent panel remains absent, matching the known host-scoped cascade gap (JS13-L2). Retain manual high despite the cleared automatic broad-difference flag.",
+      "resolved_capture_settle_ms": 1000
     }
   ]
 }

@@ -86,6 +86,7 @@ typedef enum RuntimeResourceKind {
     RUNTIME_RESOURCE_PROCESS_IPC,
     RUNTIME_RESOURCE_RDB_CONNECTION,
     RUNTIME_RESOURCE_DOM_DOCUMENT,
+    RUNTIME_RESOURCE_DOM_FONT_LOAD,
 } RuntimeResourceKind;
 
 typedef enum RuntimeResourceGroup {

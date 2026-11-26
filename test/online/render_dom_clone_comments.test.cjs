@@ -1,6 +1,6 @@
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
-const {renderFixtures, rgb} = require('./render_fixture.cjs');
+const {renderFixtures, rgb, loggedResult} = require('./render_fixture.cjs');
 const render = renderFixtures('dom-clone-comments');
 
 test('DOM queries stop at parsed template content boundaries', async () => {
@@ -24,6 +24,65 @@ test('DOM queries stop at parsed template content boundaries', async () => {
     const match = log.match(/TEMPLATE_QUERY (\{[^\n]+\})/);
     assert(match, log.slice(-3000));
     assert.deepEqual(JSON.parse(match[1]), {document:true,element:true,fragment:true,inner:true});
+});
+
+test('HTML template markup replaces the existing content fragment', async () => {
+    const {log} = await render('template-inner-html', `<!doctype html><body>
+        <template id="parsed"><!--anchor-->Text<b>Parsed</b></template>
+        <script>
+            const template = document.createElement('template');
+            const content = template.content;
+            template.innerHTML = '<!--before--><span>Initial label</span>';
+            const old = content.lastChild;
+            const checks = {
+                initial: content.firstChild?.nodeType === 8 && old?.textContent === 'Initial label' &&
+                    template.childNodes.length === 0
+            };
+            const markup = '<strong>Updated label</strong><template><i>Detail</i></template>';
+            template.innerHTML = markup;
+            const nested = content.lastChild?.content;
+            const copy = template.cloneNode(true);
+            const foreign = document.implementation.createHTMLDocument('');
+            const imported = foreign.importNode(template, true);
+            checks.replace = content === template.content && content.childNodes.length === 2 &&
+                content.firstChild?.textContent === 'Updated label' && old?.parentNode === null;
+            checks.nested = nested?.firstChild?.textContent === 'Detail';
+            checks.serialize = template.innerHTML === markup &&
+                template.outerHTML === '<template>' + markup + '</template>' &&
+                new XMLSerializer().serializeToString(template).endsWith('>' + markup + '</template>');
+            checks.clone = copy.childNodes.length === 0 && copy.content !== content &&
+                copy.content.lastChild?.content?.firstChild?.textContent === 'Detail' &&
+                imported.innerHTML === markup && template.cloneNode(false).innerHTML === '';
+            try { content.appendChild(template); }
+            catch (error) { checks.cycle = error.name === 'HierarchyRequestError'; }
+            try {
+                const range = document.createRange();
+                range.setStart(content, 0);
+                range.insertNode(template);
+            } catch (error) { checks.rangeCycle = error.name === 'HierarchyRequestError'; }
+            const copyContent = copy.content;
+            foreign.adoptNode(copy);
+            copy.innerHTML = '<b>Adopted</b>';
+            checks.adopt = copy.ownerDocument === foreign && copy.content === copyContent &&
+                copyContent.firstChild?.textContent === 'Adopted';
+            document.body.appendChild(template);
+            template.setHTMLUnsafe('<section id="templateInertProbe"><em>Unsafe markup</em></section>');
+            checks.unsafeMarkup = content.firstChild?.localName === 'section' &&
+                content.querySelector('em')?.textContent === 'Unsafe markup' && !content.isConnected &&
+                content.parentNode === null && window.templateInertProbe === undefined;
+            template.innerHTML = '';
+            checks.empty = content === template.content && content.childNodes.length === 0 &&
+                template.innerHTML === '';
+            const parsed = document.getElementById('parsed');
+            const initial = parsed.innerHTML;
+            checks.parsed = parsed.content.childNodes.length === 3 && parsed.innerHTML === initial &&
+                initial === '<!--anchor-->Text<b>Parsed</b>';
+            console.log('TEMPLATE_MARKUP', JSON.stringify(checks));
+        </script>`);
+    assert.deepEqual(loggedResult(log, 'TEMPLATE_MARKUP'), {
+        initial: true, replace: true, nested: true, serialize: true, clone: true,
+        cycle: true, rangeCycle: true, adopt: true, unsafeMarkup: true, empty: true, parsed: true
+    });
 });
 
 for (const operation of ['clone', 'import', 'foreign-import']) {
