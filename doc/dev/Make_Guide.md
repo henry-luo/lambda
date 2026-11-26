@@ -137,7 +137,8 @@ When `grammar.js` is modified, the Lambda CST parser artifacts are regenerated b
 | `test` | Run every suite except `jube` and `test_radiant_online_view_gtest`; `test-all` runs everything. |
 | `test-all` | Run ALL test suites (baseline + extended) in parallel. |
 | `test-all-baseline` | Run ALL baseline test suites. **Must pass 100%.** |
-| `test-lambda-baseline` | Run Lambda-owned engine and integration baseline tests. Sibling-owned unit tests run in their owners' `test-native` targets. **Must pass 100%.** |
+| `test-lambda-baseline` | Run Lambda-owned engine and integration baseline tests. TeX security runtime cases run in `test-lambda-full`. Sibling-owned unit tests run in their owners' `test-native` targets. **Must pass 100%.** |
+| `test-lambda-full` | Run the Lambda baseline plus focused JavaScript, TeX security, concurrency, extended-runtime and input gates. |
 | `make -C ../lambda-input test-input-baseline` | Run the input owner's native unit and parser suites. |
 | `make -C ../radiant test-radiant-baseline` | Run the Radiant owner's native unit suites. |
 | `test-radiant-baseline` | Build and run the reduced Lambda-owned Radiant integration baseline with one console/JSON report; run `make -C ../radiant test-native` for Radiant-owned unit tests. Paged media, document/text queries and UI automation use the explicit cases in `test/radiant_baseline_cases.json`; the runner checks that every selected case runs. UI automation includes all view fixtures and a representative subset of DOM fixtures in the same runner. EPUB persistence, native GeoMap and the original Three.js demo-page renderer cases run in the full gate. Native and script pools share a worker budget; layout and snapshots use isolated scratch directories. `RADIANT_TEST_CONFIG=release_native` selects optimized native runners after `make build-release-compile`; the default is `debug_native`. |

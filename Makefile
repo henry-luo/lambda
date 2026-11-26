@@ -586,7 +586,7 @@ help:
 	@echo "  test-all      - Run ALL test suites (baseline + extended)"
 	@echo "  test-all-baseline - Run ALL BASELINE test suites (core functionality, must pass 100%)"
 	@echo "  test-lambda-baseline - Run LAMBDA baseline test suite only"
-	@echo "  test-lambda-full - Lambda baseline plus focused JavaScript, concurrency, extended-runtime and input gates"
+	@echo "  test-lambda-full - Lambda baseline plus focused JavaScript, TeX, concurrency, extended-runtime and input gates"
 	@echo "  test-gc-rooting - Run exact-root forced-GC JIT/interpreter/root-effect gates"
 	@echo "  test-mir-gc-stress - Run batched GC stress and reviewed backend-parity probes"
 	@echo "  test-mir-gc-stress-full - Force GC for every MIR corpus fixture"
@@ -1668,6 +1668,8 @@ test-lambda-full: test-lambda-baseline
 	@LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js $(LAMBDA_FULL_EXTRA_SELECTION) --parallel
 	@echo "Running Lambda LaTeX script tests..."
 	@./test/test_lambda_gtest.exe --gtest_filter='AutoDiscovered/LambdaScriptTest.ExecuteAndCompare/latex_*'
+	@echo "Running Lambda TeX security tests..."
+	@./test/test_security_runtime_gtest.exe --gtest_filter='*Tex*:*InlineParsing*:*CapturedMemberParsing*'
 	@$(PYTHON) test/latex/test_http_handoff.py
 	@$(MAKE) -C "$(SPLIT_INPUT_ROOT)" PROFILE=debug test-input-baseline
 	@echo "Running WebSocket interoperability gate..."
