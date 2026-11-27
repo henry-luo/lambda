@@ -15,6 +15,10 @@ Resolved records are in the [fixed issue ledger](<Lib_Input_Issue_Ledger (fixed)
 
 ## Open issues
 
+<a id="li-130"></a>
+
+- [LI-130 — Attribute reads scanned all managed DOM backings](<Lib_Input_Issue_Ledger (fixed).md#li-130>).
+
 <a id="li-129"></a>
 
 - [LI-129 — A constructed document can have an indeterminate retired-frame owner](<Lib_Input_Issue_Ledger (fixed).md#li-129>).

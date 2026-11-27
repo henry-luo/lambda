@@ -20,6 +20,10 @@ observations still require re-verification. Add new Radiant issues here.
 
 ## Open issues
 
+<a id="ri-268"></a>
+
+- [RI-268 — Scene3D animation repeatedly revalidated live targets](<Radiant_Issue_Ledger (fixed).md#ri-268>).
+
 <a id="ri-267"></a>
 
 - [RI-267 — Flex aspect ratios use the wrong width or wrapping height](<Radiant_Issue_Ledger (fixed).md#ri-267>).

@@ -16,10 +16,12 @@ import otter: .mod_otter
 pub let NOBODY = {membership: 0, filter: 0}
 // ripples: final diameter, lifetime, and how many crests (one, or a second trailing well behind); each
 // spawn gives a round one its own turn (mod_sim.spawn), so no two wavy outlines repeat
-pub let RINGS = {'ring-s': {size: 1.7, life: 1.9, rings: 1}, 'ring-m': {size: 2.9, life: 2.4, rings: 2}, 'ring-l': {size: 4.2, life: 2.9, rings: 2}}
+pub let RINGS = {'ring-s': {size: 1.7, life: 1.9, geometry: "single-ripple"},
+    'ring-m': {size: 2.9, life: 2.4, geometry: "double-ripple"}, 'ring-l': {size: 4.2, life: 2.9, geometry: "double-ripple"}}
 // the boat's own ripples: ovals stretched along the hull (aspect is their width over length). Their
 // emitters ride the boat, so each ripple takes the hull's heading when it is born, then stays put.
-pub let HULL_RINGS = {'hull-ring': {size: 4.4, life: 2.8, rings: 2, aspect: 0.5}, 'wake-ring': {size: 3.0, life: 2.3, rings: 1, aspect: 0.58}}
+pub let HULL_RINGS = {'hull-ring': {size: 4.4, life: 2.8, geometry: "hull-ripple"},
+    'wake-ring': {size: 3.0, life: 2.3, geometry: "wake-ripple"}}
 // A natural ripple as one disc of vertex colour and alpha, drawn like the wavy lines the moving surface
 // throws rather than as ruled circles. The leading crest is a broad bright line with a soft glow, a faint
 // trough shades it from behind, and a weaker crest may trail it well back. Each ring meanders on its own (its lobes
@@ -47,30 +49,46 @@ fn wobble(a, r) => 1.0 + 0.055 * sin(3.0 * a + 1.3 + 4.0 * r) + 0.032 * sin(5.0 
     0.018 * sin(9.0 * a + 2.0 + 9.0 * r) + 0.008 * sin(17.0 * a - 0.7 - 11.0 * r)
 // the disc from 0.4 to 1.0 of its radius, fine enough round the ring and across it that a crest stays a
 // smooth curve when a ripple spreads to several metres; band(r, a) gives each vertex its colour
-fn ripple_geometry(band, aspect = 1.0) any^ {
-    let seg = 128, radial = 50
-    let rs = [for (j in 0 to radial) 0.4 + 0.6 * j / float(radial)]
-    let positions = [for (j in 0 to radial, i in 0 to seg - 1, c in ripple_point(rs[j], i * u.TAU / float(seg), aspect)^) c]
-    let colors = [for (j in 0 to radial, i in 0 to seg - 1, c in band(rs[j], i * u.TAU / float(seg))^) c]
-    let indices = [for (j in 0 to radial - 1, i in 0 to seg - 1, k in ripple_quad(j * seg + i, j * seg + (i + 1) % seg, seg)) k];
-    s.geometry(positions, {normals: [for (j in 0 to radial, i in 0 to seg - 1, c in [0.0, 1.0, 0.0]) c], colors: colors, indices: indices})
-}
-fn ripple_point(r, a, aspect) => (let q = 0.5 * r * wobble(a, r), [cos(a) * q * aspect, 0.0, sin(a) * q])
+let RIPPLE_SEGMENTS = 128
+let RIPPLE_ROWS = 50
+let RIPPLE_RADII = [for (j in 0 to RIPPLE_ROWS) 0.4 + 0.6 * j / float(RIPPLE_ROWS)]
+let RIPPLE_ANGLES = [for (i in 0 to RIPPLE_SEGMENTS - 1) i * u.TAU / float(RIPPLE_SEGMENTS)]
+fn ripple_colors(band) any^ => [for (r in RIPPLE_RADII, a in RIPPLE_ANGLES, c in band(r, a)^) c]
+fn ripple_point(r, a) => (let q = 0.5 * r * wobble(a, r), [cos(a) * q, 0.0, sin(a) * q])
 fn ripple_quad(a, b, seg) => [a, b, a + seg, b, b + seg, a + seg]
+fn ripple_stretch(positions, aspect) => [for (i, v in positions) if (i % 3 == 0) v * aspect else v]
 // the emitters only the sim fires, through spawn commands: world space, no births of their own, no gravity
 // unless given
 fn fired(id, geometry, material, options, curves) element => s.particle_emitter(geometry, material,
     {id: id, backend: "cpu", space: "world", rate: 0.0, burst: 0, gravity: [0.0, 0.0, 0.0], *: options}, curves)
-let FILM = s.material('basic', {color: "#ffffff", transparent: true, side: 'double'})
-fn ring_emitter(id, spec) any^ => (let rings = int(spec.rings) ^ { 1 },
-    fired(id, ripple_geometry((r, a) => ripple_band(r, a, rings), spec.aspect or 1.0)^, FILM,
+// all ripples use the same tessellation; only their profile and aspect vary.
+fn ripple_resources() any^ {
+    let seg = RIPPLE_SEGMENTS
+    let positions = [for (r in RIPPLE_RADII, a in RIPPLE_ANGLES, c in ripple_point(r, a)^) c]
+    let normals = [for (r in RIPPLE_RADII, a in RIPPLE_ANGLES, c in [0.0, 1.0, 0.0]) c]
+    let indices = [for (j in 0 to RIPPLE_ROWS - 1, i in 0 to seg - 1,
+        k in ripple_quad(j * seg + i, j * seg + (i + 1) % seg, seg)) k]
+    let single = ripple_colors((r, a) => ripple_band(r, a, 1))^
+    let double = ripple_colors((r, a) => ripple_band(r, a, 2))^
+    let mesh = (id, vertices, colors) => s.geometry(vertices, {id: id, normals: normals, indices: indices, colors: colors});
+    [
+        s.material('basic', {id: "ripple-film", color: "#ffffff", transparent: true, side: 'double'}),
+        mesh("single-ripple", positions, single),
+        mesh("double-ripple", positions, double),
+        mesh("hull-ripple", ripple_stretch(positions, 0.5), double),
+        mesh("wake-ripple", ripple_stretch(positions, 0.58), single),
+        mesh("foam-ripple", positions, ripple_colors(foam_band)^)
+    ]
+}
+fn ring_emitter(id, spec) any^ =>
+    fired(id, spec.geometry, "ripple-film",
         {capacity: 96, lifetime: spec.life, speed: 0.0, angle: 0.0, size: spec.size},
-        [s.particle_curve('size', [0.0, 0.3, 1.0], [0.1, 0.58, 1.0])^, s.particle_curve('opacity', [0.0, 0.07, 0.45, 1.0], [0.0, 1.0, 0.6, 0.0])^]))
+        [s.particle_curve('size', [0.0, 0.3, 1.0], [0.1, 0.58, 1.0])^, s.particle_curve('opacity', [0.0, 0.07, 0.45, 1.0], [0.0, 1.0, 0.6, 0.0])^])
 // droplets thrown up by a splash, and a short-lived foam crown
 fn splash_emitter() any^ => fired("splash", s.sphere(4, 6), s.material('basic', {color: "#f2fbff", transparent: true}),
     {capacity: 320, shape: "cone", angle: 32.0, speed: 2.1, spread: 0.6, lifetime: 0.7, 'lifetime-min': 0.45, gravity: [0.0, -9.81, 0.0], size: 0.05},
     [s.particle_curve('size', [0.0, 1.0], [1.0, 0.55])^, s.particle_curve('opacity', [0.0, 0.7, 1.0], [0.95, 0.85, 0.0])^])
-fn foam_emitter() any^ => fired("foam", ripple_geometry(foam_band)^, FILM, {capacity: 48, lifetime: 0.55, speed: 0.0, angle: 0.0, size: 0.8},
+fn foam_emitter() any^ => fired("foam", "foam-ripple", "ripple-film", {capacity: 48, lifetime: 0.55, speed: 0.0, angle: 0.0, size: 0.8},
     [s.particle_curve('size', [0.0, 1.0], [0.35, 1.0])^, s.particle_curve('opacity', [0.0, 0.15, 1.0], [0.0, 0.95, 0.0])^])
 pub let EMITTERS = ["ring-s", "ring-m", "ring-l", "hull-ring", "wake-ring", "splash", "foam"]
 
@@ -86,7 +104,7 @@ pub fn scene(st, attributes) any^ => s.scene([
         'cast-shadow': true, 'shadow-cascades': 2, 'shadow-distance': 40.0, 'shadow-map-size': 2048, 'shadow-normal-bias': 0.03, 'shadow-softness': 1.6}),
     s.light('hemisphere', {id: "sky", position: [0.0, 1.0, 0.0], color: "#cdebf0", 'ground-color': "#40583a", intensity: 0.62}),
     s.resources([*(lagoon.materials()^), *(boat.materials()^), s.material('lambert', {id: "m-fish", color: "#ffffff", side: 'double'}),
-        *(otter.materials()^)]),
+        *(otter.materials()^), *(ripple_resources()^)]),
     *(lagoon.elements()^), lagoon.water()^,
     boat.body(st.boat.x, st.boat.z, st.boat.h, [for (id, spec in HULL_RINGS) ring_emitter(string(id), spec)^])^,
     *[for (f in st.fish, let r = fish.ROSTER[f.i]) fish.body(r, f.x, f.y, f.z, f.h)^],

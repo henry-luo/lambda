@@ -221,12 +221,14 @@ fn boat_rings(st, now, dt) any^ {
     let prev = phase - dt / angler.ROW_PERIOD
     let entry = st.mode == "row" and floor(phase - 0.02) != floor(prev - 0.02)
     let exit = st.mode == "row" and floor(phase - angler.DRIVE) != floor(prev - angler.DRIVE)
-    let blades = [for (p in angler.blades(angler.row(phase))^) to_world(b, p)^]
     // the blades bite with a ring, a foam crown and a few drops, trail swirls as they pull through, and
     // lift out at the finish with a splash
     let pulling = st.mode == "row" and phase - floor(phase) > 0.06 and phase - floor(phase) < angler.DRIVE - 0.04
+    let swirling = pulling and now >= st.next.swirl
+    // only sample the blades when a stroke or swirl can emit particles.
+    let blades = if (entry or exit or swirling) [for (p in angler.blades(angler.row(phase))^) to_world(b, p)^] else []
     let strokes = if (entry) [for (p in blades, e in bite(p)^) e] else if (exit) [for (p in blades, e in lift_out(p)^) e] else []
-    let swirls = if (pulling and now >= st.next.swirl) [for (p in blades) spawn("ring-s", p, 1)] else []
+    let swirls = if (swirling) [for (p in blades) spawn("ring-s", p, 1)] else []
     // the hull's own ripples are ovals along the boat, centred toward the stern
     let wake = if (abs(b.v) > 0.35 and now >= st.next.wake) [spawn("wake-ring", to_world(b, [0.0, 0.0, -1.0])^, 1)] else []
     let bow = if (abs(b.v) > 0.6 and now >= st.next.bow) [spawn("ring-s", to_world(b, [0.0, 0.0, 1.2])^, 1)] else []
@@ -238,7 +240,9 @@ fn boat_rings(st, now, dt) any^ {
 }
 
 // ---- fish
-fn habitat(x, z) any^ => (w.depth(x, z) ^ { 0.0 }) > 0.5 and (w.shore(x, z) ^ { 2.0 }) < 0.88
+fn habitat_at_height(y: float, shore: float) bool => y < -0.5 and shore < 0.88
+fn habitat(x: float, z: float) bool => (let shore = w.shore(x, z) ^ { 2.0 },
+    habitat_at_height(w.floor_y_at_shore(x, z, shore) ^ { 0.0 }, shore))
 // where a wandering fish heads next: usually a spot just outside the boat's shy radius (fish are curious,
 // and the cove's life stays where the player is looking), otherwise somewhere near itself
 fn wander_goal(f, b, now) any^ => (let a = hash(f.i * 7.1, now) * u.TAU, let near_boat = hash(f.i * 5.3, now + 0.9) < 0.72,
@@ -253,20 +257,38 @@ fn wander_goal(f, b, now) any^ => (let a = hash(f.i * 7.1, now) * u.TAU, let nea
     let gx = if (ok) x else if (ok2) x2 else f.x * 0.7, let gz = if (ok) z else if (ok2) z2 else f.z * 0.7,
     // rays glide a hand's breadth above the floor; the rest keep to their depth band
     [gx, if ((fish.bottom(f.kind) ^ { false })) (w.floor_y(gx, gz) ^ { -1.5 }) + 0.25 else 0.0 - min(deep, max(0.25, (w.depth(x, z) ^ { 1.0 }) - 0.18)), gz])
-fn avoid(f, h) any^ => (let close = [for (r in w.OBSTACLES where (u.dist(f.x + sin(h) * 0.9, f.z + cos(h) * 0.9, r.x, r.z) ^ { 1000.0 }) < r.r + 0.5) r],
+let OBSTACLE_BAND_WIDTH = 4.0
+fn obstacle_band(z: float) int^ => int(floor(z / OBSTACLE_BAND_WIDTH))
+// static shore rocks can only affect fish in bands intersecting their clearance radius.
+fn obstacle_bands(rocks) any^ {
+    if (len(rocks) == 0) { return {first: 0, bands: []} }
+    let bounds = [for (r in rocks, let reach = r.r + 0.5)
+        {x: r.x, z: r.z, reach: reach, lo: obstacle_band(r.z - reach)^, hi: obstacle_band(r.z + reach)^}]
+    let first = min([for (r in bounds) r.lo])
+    let band_end = max([for (r in bounds) r.hi]);
+    {first: first, bands: [for (i in first to band_end) [for (r in bounds where r.lo <= i and i <= r.hi) r]]}
+}
+let FISH_OBSTACLES = obstacle_bands(w.OBSTACLES)^
+fn avoid(f, h) any^ => (let x = f.x + sin(h) * 0.9, let z = f.z + cos(h) * 0.9,
+    let i = obstacle_band(z)^ - FISH_OBSTACLES.first,
+    let candidates = if (i >= 0 and i < len(FISH_OBSTACLES.bands)) FISH_OBSTACLES.bands[i] else [],
+    let close = [for (r in candidates where (u.dist(x, z, r.x, r.z) ^ { 1000.0 }) < r.reach) r],
     if (len(close) == 0) h else (let r = close[0], let away = math.atan2(f.x - r.x, f.z - r.z), h + u.wrap(away - h) * 0.6))
 // what a fish wants this frame: a point to swim to and a speed
-fn intent(f, st, leader, now) any^ {
+fn intent(f, st, leader) any^ {
     let sp = fish.SPECIES[f.kind]
     let b = st.boat
-    let bob = bobber_world(st)^
     if (f.mode == "approach") {
+        let bob = bobber_world(st)^
         let a = math.atan2(f.x - bob[0], f.z - bob[2])
         // it hurries over and only settles to a cautious pace in the last stretch
         let far = (u.dist(f.x, f.z, bob[0], bob[2]) ^ { 0.0 }) > 1.5
         return {goal: [bob[0] + sin(a) * 0.3, -0.22, bob[2] + cos(a) * 0.3], speed: sp.speed * (if (far) 2.0 else 0.9)}
     }
-    if (f.mode == "nibble" or (f.mode == "bite")) { return {goal: [bob[0], -0.16, bob[2]], speed: 0.12} }
+    if (f.mode == "nibble" or f.mode == "bite") {
+        let bob = bobber_world(st)^
+        return {goal: [bob[0], -0.16, bob[2]], speed: 0.12}
+    }
     if (f.mode == "flee") {
         let a = math.atan2(f.x - b.x, f.z - b.z)
         return {goal: [f.x + sin(a) * 3.0, -1.0, f.z + cos(a) * 3.0], speed: sp.speed * 2.6}
@@ -293,7 +315,7 @@ fn step_fish(f, st, leader, now, dt) any^ {
     let leading = f1.mode == "school" and leader != null and leader.id == f1.id
     let f2 = if ((f1.mode == "wander" or leading) and (arrived or now > f1.until)) {*: f1, goal: wander_goal(f1, st.boat, now)^, until: now + 5.0 + 6.0 * hash(f1.i, now),
         pace: if (hash(f1.i + 0.5, now) < 0.25) 0.15 else 0.6 + 0.4 * hash(f1.i + 0.9, now)} else f1
-    let want = intent(f2, st, leader, now)^
+    let want = intent(f2, st, leader)^
     let dx = want.goal[0] - f2.x, dz = want.goal[2] - f2.z
     let dist = sqrt(dx * dx + dz * dz)
     let target_h = avoid(f2, if (dist > 0.05) math.atan2(dx, dz) else f2.h)^
@@ -302,10 +324,13 @@ fn step_fish(f, st, leader, now, dt) any^ {
     let speed = min(want.speed, if (dist < 0.4) dist * 1.5 + 0.05 else want.speed)
     let v = u.approach(f2.v, speed, 1.2 * dt)
     let nx = f2.x + sin(h) * v * dt, nz = f2.z + cos(h) * v * dt
-    let ok = habitat(nx, nz)^ or f2.mode == "approach" or f2.mode == "nibble" or f2.mode == "bite" or f2.mode == "rise"
-    let floor_y = w.floor_y(nx, nz) ^ { -1.0 }
     let climb = (if (f2.mode == "rise") 3.0 else 1.0) * 0.25 * dt
-    let y = u.clamp(f2.y + u.clamp((want.goal[1] - f2.y) * min(1.0, 1.5 * dt), 0.0 - climb, climb), floor_y + 0.12, -0.05)
+    let swim_y = f2.y + u.clamp((want.goal[1] - f2.y) * min(1.0, 1.5 * dt), 0.0 - climb, climb)
+    let shore = w.shore(nx, nz)^
+    let terrain = w.floor_y_below(nx, nz, shore, min(-0.5, swim_y - 0.12))
+    let ok = habitat_at_height(terrain ^ { 0.0 }, shore) or f2.mode == "approach" or f2.mode == "nibble" or f2.mode == "bite" or f2.mode == "rise"
+    let floor_y = terrain ^ { -1.0 }
+    let y = u.clamp(swim_y, floor_y + 0.12, -0.05)
     // the body tilts with its climb and banks into turns, eased so neither snaps between frames
     let turning = u.wrap(h - f2.h) / max(dt, 0.001)
     let pitch_goal = u.clamp(0.0 - math.atan2((y - f2.y) / max(dt, 0.001), max(v, 0.15)), -0.35, 0.35)

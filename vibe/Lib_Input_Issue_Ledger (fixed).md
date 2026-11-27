@@ -6,6 +6,21 @@ remain in the [active issue ledger](Lib_Input_Issue_Ledger.md).
 
 ## Fixed issues
 
+<a id="li-130"></a>
+
+### LI-130 — Attribute reads scanned all managed DOM backings
+
+**Fixed, 2026-11-27.** In the debug Radiant baseline,
+`doc_editor_source_scroll_reset` took 46.2 s. CPU samples during its
+directory-row layout concentrated in `dom_node_refresh_managed_backing`.
+Each attribute read walked the document's list of registered backings.
+The document now indexes backings by node address. Root slots keep their
+registered addresses through index growth and cross-document adoption.
+Failed adoption withdraws the staged destination entries. This preserves
+the rooted-borrow and presentation lifetime rules (**D5.5.1–D5.5.3**).
+The six editor replays passed in 1.16–4.51 s in the full debug baseline.
+The focused DOM backing, retirement and copy checks passed all 52 cases.
+
 <a id="li-129"></a>
 
 ### LI-129 — A constructed document can have an indeterminate retired-frame owner

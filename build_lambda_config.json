@@ -4926,6 +4926,7 @@
               "test/test_radiant_view_scene3d.cpp"
             ],
             "case_workers": 7,
+            "case_worker_slots": 3,
             "case_workers_env": "LAMBDA_RADIANT_VIEW_TEST_JOBS",
             "case_worker_args": [
               "--radiant-case-worker"

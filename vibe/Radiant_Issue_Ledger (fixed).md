@@ -14,6 +14,21 @@ are unchanged. Full evidence is under `../../lambda/temp/kianhup-style/`.
 
 ## Fixed issues
 
+<a id="ri-268"></a>
+
+### RI-268 — Scene3D animation repeatedly revalidated live targets
+
+**Fixed, 2026-11-27.** In the Fishing assisted-catch replay, CPU samples
+showed repeated DOM ownership walks from `scene3d_animation_write`.
+Sampling passed each weak target by value, so a successful validation
+could not refresh its lifetime stamp after retirement elsewhere in the
+document. Scene3D retains the validated stamp and shares one ownership
+snapshot across bindings when a sampling tick needs to validate them
+again. Every target still checks its identity and whether it remains in
+the scene (**D5.5.1 / S12.1.5v2**).
+The debug baseline passed all 659 native Scene3D cases. With the scene
+and worker budget changes, the assisted-catch replay took 7.79 s.
+
 <a id="ri-267"></a>
 
 ### RI-267 — Flex aspect ratios use the wrong width or wrapping height

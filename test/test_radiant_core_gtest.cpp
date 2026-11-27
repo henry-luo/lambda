@@ -3294,11 +3294,14 @@ TEST_F(DomRetirementTest, ManualAssignmentsMoveWithEitherEndpoint) {
     EXPECT_EQ(hashmap_count(doc.services.manual_slot_endpoints), 0u);
 }
 
-TEST_F(DomRetirementTest, FailedSubtreeAdoptionPreservesEarlierMembersAndCanRetry) {
-    DomDocument destination;
-    ASSERT_TRUE(destination.init(input));
-    DomElement* branch = element("section");
-    DomElement* first = element("i");
+TEST_F(DomGcBackingTest, FailedSubtreeAdoptionPreservesEarlierMembersAndCanRetry) {
+    init_adoption_target(true);
+    ASSERT_TRUE(target_initialized);
+    DomElement* branch = runtime_element(1);
+    DomElement* first = runtime_element(1);
+    ASSERT_NE(branch, nullptr);
+    ASSERT_NE(first, nullptr);
+    ASSERT_EQ(heap.gc->root_slot_count, 2);
     ASSERT_TRUE(attach(branch, first));
     DomElement* shadow = dom_attach_shadow_root(branch, {});
     ASSERT_NE(shadow, nullptr);
@@ -3306,18 +3309,23 @@ TEST_F(DomRetirementTest, FailedSubtreeAdoptionPreservesEarlierMembersAndCanRetr
     ASSERT_NE(layout_only, nullptr);
     ASSERT_TRUE(attach(branch, layout_only));
     DomNodeRef ref = dom_node_ref(first);
-    ASSERT_FALSE(dom_adopt_detached_subtree(&doc, &destination, branch));
+    ASSERT_FALSE(dom_adopt_detached_subtree(&doc, &target_doc, branch));
     EXPECT_EQ(branch->doc.get(), &doc);
     EXPECT_EQ(shadow->doc.get(), &doc);
     EXPECT_EQ(dom_node_ref_validate(&doc, ref), first);
-    EXPECT_EQ(dom_node_ref_validate(&destination, ref), nullptr);
+    EXPECT_EQ(dom_node_ref_validate(&target_doc, ref), nullptr);
+    // rollback must withdraw the staged index entries without releasing their source roots.
+    dom_lifecycle_release_backing_roots(&target_doc);
+    ASSERT_EQ(heap.gc->root_slot_count, 2);
     ASSERT_TRUE(branch->remove_child(layout_only));
-    ASSERT_TRUE(dom_adopt_detached_subtree(&doc, &destination, branch));
-    EXPECT_EQ(branch->doc.get(), &destination);
-    EXPECT_EQ(first->doc.get(), &destination);
-    EXPECT_EQ(shadow->doc.get(), &destination);
-    EXPECT_TRUE(destination.js.has_shadow_roots);
-    destination.destroy();
+    ASSERT_TRUE(dom_adopt_detached_subtree(&doc, &target_doc, branch));
+    EXPECT_EQ(branch->doc.get(), &target_doc);
+    EXPECT_EQ(first->doc.get(), &target_doc);
+    EXPECT_EQ(shadow->doc.get(), &target_doc);
+    EXPECT_TRUE(target_doc.js.has_shadow_roots);
+    dom_lifecycle_release_backing_roots(&doc);
+    EXPECT_EQ(heap.gc->root_slot_count, 2);
+    EXPECT_EQ(target_heap.gc->root_slot_count, 0);
 }
 
 TEST_F(DomRetirementTest, SourceWrapperKeepsAdoptedNodeAliveUntilReleased) {
