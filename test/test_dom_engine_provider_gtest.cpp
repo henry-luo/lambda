@@ -74,7 +74,7 @@ static bool graphics_registration_round() {
         dom_canvas_engine_ops() == &graphics_test_canvas &&
         dom_webgl_engine_ops() == &graphics_test_webgl &&
         dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::fill_rect,
-            &graphics_error_count, 1, 2.0, 3.0f, 4);
+            &graphics_error_count, 1, 2.0, 3.0f, 4, nullptr);
     dom_provider_call(dom_webgl_engine_ops(), &DomWebGlEngineOps::error, 42, 0x0502);
     return accepted;
 }

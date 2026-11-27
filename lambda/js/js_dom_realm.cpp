@@ -1688,6 +1688,10 @@ extern "C" void dom_install_collection_globals(void) {
         js_new_native_body_constructor(dom_image_data_call, dom_image_data_construct, 2), true);
     dom_canvas_install_pixel_interface(js_get_key_cstr(global, "ImageData"),
         _iface_proto(global, "ImageData"), _iface_proto(global, "CanvasRenderingContext2D"));
+    js_dom_install_interface(global, "CanvasGradient");
+    dom_canvas_install_gradient_interface(js_get_key_cstr(global, "CanvasGradient"),
+        _iface_proto(global, "CanvasGradient"), js_get_key_cstr(global, "CanvasRenderingContext2D"),
+        _iface_proto(global, "CanvasRenderingContext2D"));
     dom_canvas_install_html_interface(_iface_proto(global, "HTMLCanvasElement"));
     _install_document_fragment_iface(global);
     _link_iface_proto(global, "DocumentFragment", "Node");
