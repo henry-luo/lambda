@@ -575,14 +575,17 @@ try {
             assert.equal(summary.total_tests, 4);
             const rows = fs.readdirSync(trace).map(file => JSON.parse(fs.readFileSync(path.join(trace, file), 'utf8')));
             assert.equal(rows.length, 4);
-            assert.ok(rows.every(row => row.cap === '1' && (!workerArg || row.args.includes(workerArg))));
+            const budget = Math.min(limit, Math.max(1, os.cpus().length - 1));
+            const slots = Math.min(budget, inventory.find(t => t.baseName === runner).caseWorkerSlots);
+            const workerLimit = Math.floor(budget / slots);
+            assert.ok(rows.every(row => Number(row.cap) === slots && (!workerArg || row.args.includes(workerArg))));
             // batched cases share a PID; count processes against the worker limit.
             const processes = [...new Map(rows.map(row => [row.pid, row])).values()];
             const events = processes.flatMap(row => [{ time: row.start, delta: 1 }, { time: row.end, delta: -1 }])
                 .sort((a, b) => a.time - b.time || a.delta - b.delta);
             let active = 0, peak = 0;
             for (const event of events) { active += event.delta; peak = Math.max(peak, active); }
-            assert.ok(peak > 1 && peak <= limit, `peak workers: ${peak}`);
+            assert.ok(peak >= Math.min(2, workerLimit) && peak <= workerLimit, `peak workers: ${peak}`);
         });
     }
     check('PDF case batches reuse bounded processes and retain discovery order', () => {

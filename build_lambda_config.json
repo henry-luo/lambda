@@ -4879,7 +4879,7 @@
           {
             "source": "test/test_ui_automation_gtest.cpp",
             "name": "UI Automation Tests",
-            "worker_slots": 7,
+            "worker_slots": 6,
             "worker_slots_env": "LAMBDA_UI_TEST_JOBS",
             "dependencies": [
               "lambda-data"

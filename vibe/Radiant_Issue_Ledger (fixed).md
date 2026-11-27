@@ -14,6 +14,30 @@ are unchanged. Full evidence is under `../../lambda/temp/kianhup-style/`.
 
 ## Fixed issues
 
+<a id="ri-270"></a>
+
+### RI-270 — Text measurement repeated writing-orientation queries
+
+**Fixed, 2026-11-27.** Intrinsic text measurement resolved orientation
+for every measured cluster without using the layout context's policy cache.
+Text runs now share that cache through their owning DOM node. The resolved
+inherited-declaration mask also proves when `text-orientation` or
+`text-combine-upright` has its default throughout an ancestor chain
+(D5.5.1). The debug layout baseline passed 5,632 cases. Profiles and
+case timings are under `temp/radiant-case-tuning/`.
+
+<a id="ri-269"></a>
+
+### RI-269 — The animation mixer scanned all bindings for each sampled track
+
+**Fixed, 2026-11-27.** CPU samples of the Fishing assisted-catch replay showed
+animation sampling walking the mixer's property list for each channel. An
+action now retains one binding per immutable channel when admitted, and the
+existing property reference counts govern the lifetime of those bindings
+(S12.1.5v2, D5.5.1). Sampling and root-motion extraction use the retained
+bindings. Removing an action releases its references before pruning unused
+properties. Evidence is in `temp/radiant-under-five/`.
+
 <a id="ri-268"></a>
 
 ### RI-268 — Scene3D animation repeatedly revalidated live targets

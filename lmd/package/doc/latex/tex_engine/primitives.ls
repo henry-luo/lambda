@@ -90,8 +90,12 @@ let EXPANDABLE = [
     "iffalse", "ifcase", "ifdefined", "ifcsname", "iffontchar", "ifpdfprimitive",
     "ifincsname", "unless", "fi", "else", "or"
 ]
-pub fn exists(name) bool => contains(PRIMITIVES, name)
-pub fn expandable(name) bool => contains(EXPANDABLE, name)
+// Resolve primitive names by key instead of scanning each catalog per token.
+fn index_names(names) map => map([for (name in names, part in [name, true]) part])
+let PRIMITIVE_INDEX = index_names(PRIMITIVES)
+let EXPANDABLE_INDEX = index_names(EXPANDABLE)
+pub fn exists(name) bool => name is string and (PRIMITIVE_INDEX[name] is bool)
+pub fn expandable(name) bool => name is string and (EXPANDABLE_INDEX[name] is bool)
 
 // the compatibility profile exposes the native engine's pdfTeX and e-TeX identities.
 let ENGINE_VERSIONS = {eTeXversion: 2, pdftexversion: 140}
@@ -102,8 +106,10 @@ pub fn engine_revision(name) string? => if (name is string) ENGINE_REVISIONS[nam
 // LaTeX names are enabled only in the LaTeX engine profile.
 let LATEX_PRIMITIVES = ["newcommand", "renewcommand", "providecommand", "DeclareRobustCommand", "newenvironment", "renewenvironment", "begin", "end", "@@end", "newcounter", "setcounter", "addtocounter", "stepcounter", "refstepcounter", "newlength", "setlength", "addtolength", "settowidth", "settoheight", "settodepth", "documentclass", "LoadClass", "LoadClassWithOptions", "usepackage", "RequirePackage", "RequirePackageWithOptions", "DeclareOption", "ExecuteOptions", "ProcessOptions", "PassOptionsToPackage", "PassOptionsToClass", "@yargdef", "filename@parse", "@ifpackagewith", "@ifclasswith", "IfFileExists", "InputIfFileExists", "AtBeginDocument", "AtEndDocument", "AtEndOfPackage", "AtEndOfClass", "verb", "lstinline", "Verb", "mint", "mintinline", "lambdaconstructor", "ProvidesPackage", "ProvidesClass", "ProvidesFile", "NeedsTeXFormat", "include", "newif", "@ifnextchar", "kernel@ifnextchar", "@ifstar", "@for", "@tfor", "arabic", "roman", "Roman", "alph", "Alph", "fnsymbol", "value", "(", ")", "[", "]", "lambda@Roman", "NewDocumentCommand", "RenewDocumentCommand", "ProvideDocumentCommand", "DeclareDocumentCommand", "NewDocumentEnvironment", "RenewDocumentEnvironment", "ProvideDocumentEnvironment", "DeclareDocumentEnvironment", "IfNoValueTF", "IfNoValueT", "IfNoValueF", "IfValueTF", "IfValueT", "IfValueF", "IfBooleanTF", "IfBooleanT", "IfBooleanF", "AddToHook", "IfFormatAtLeastTF", "lambda@xspace"]
 let LATEX_EXPANDABLE = ["@ifpackagewith", "@ifclasswith", "arabic", "roman", "Roman", "alph", "Alph", "fnsymbol", "value", "lambda@Roman", "IfNoValueTF", "IfNoValueT", "IfNoValueF", "IfValueTF", "IfValueT", "IfValueF", "IfBooleanTF", "IfBooleanT", "IfBooleanF", "IfFormatAtLeastTF", "lambda@xspace"]
-pub fn latex_exists(name) bool => contains(LATEX_PRIMITIVES, name)
-pub fn latex_expandable(name) bool => contains(LATEX_EXPANDABLE, name)
+let LATEX_PRIMITIVE_INDEX = index_names(LATEX_PRIMITIVES)
+let LATEX_EXPANDABLE_INDEX = index_names(LATEX_EXPANDABLE)
+pub fn latex_exists(name) bool => name is string and (LATEX_PRIMITIVE_INDEX[name] is bool)
+pub fn latex_expandable(name) bool => name is string and (LATEX_EXPANDABLE_INDEX[name] is bool)
 
 // latex's internal end control carries the native end primitive's printed name.
 pub fn meaning_name(name) => if (name == "@@end") "end" else name

@@ -29,6 +29,14 @@ pub fn canvas(plan,index:int,key,base=null) element^ {
     let scene = plan.slides[index]^;
     html.layer(plan,scene,[for (obj in scene.targets) sample.baseline(obj)],key,"",true,base)
 }
+// Edit canvases render baseline visuals. Cue, transition and note edits
+// affect their own panels and previews without changing this layer.
+pub fn same_canvas(before, after, match_index: bool = true) any^ =>
+    before == after or (before != null and after != null and
+        (not match_index or before.index == after.index) and before.id == after.id and
+        before.source.title == after.source.title and before.palette == after.palette and
+        html.layer_background(null,before)^ == html.layer_background(null,after)^ and
+        before.objects == after.objects and before.targets == after.targets)
 pub fn printout(st,deck) element^ {
     let pages = slide.slides(deck)^
     let document = html.document({*:st.plan,base_uri:st.base},<main class:"slide-print",

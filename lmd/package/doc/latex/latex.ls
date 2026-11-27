@@ -81,11 +81,13 @@ pub fn render_to_html(ast, options) any^ {
 // render a LaTeX AST (already parsed) to HTML elements
 // options: {standalone, base_uri, source_path, target, paged, citeproc, language}
 pub fn render(ast, options) {
-    render_result(ast, options).elements
+    render_impl(ast, options, false).elements
 }
 
 // Structured result keeps diagnostics and package metadata beside the element tree.
-pub fn render_result(ast, options) {
+pub fn render_result(ast, options) => render_impl(ast, options, true)
+
+fn render_impl(ast, options, details: bool) {
     let base_uri = resource_base(options)
     // extract macro definitions from AST (does not modify tree)
     let macro_defs = macros.get_defs(ast)
@@ -167,55 +169,59 @@ pub fn render_result(ast, options) {
     } else {
         completed
     }
-    // an aliased style is supported through CSL, so its unsupported-style report is dropped
-    let package_issues = if (style_alias == null) loaded.diagnostics
-        else [for (issue in loaded.diagnostics where ((not (issue.code == "unsupported-bib-style" and
-            issue.item == style_alias.biblatex_style)) ^ { false })) issue] ++ style_alias.diagnostics
-    let diagnostics = engine_diagnostics(ast) ++ package_issues ++ math_operators.diagnostics ++
-        bibliography.diagnostics ++ language_issues ++ cleveref_issues ++
-        registry.font_issues(loaded.packages) ++
-        (if (registry.active(loaded.packages, "fontspec"))
-            fontspec.issues(fontspec.declarations(ast), base_info.custom_colors) else []) ++
-        math_bridge.issues(ast, math_operators.definitions, loaded.packages) ++
-        hyperref.issues(link_settings, registry.offset_for(loaded.packages, "hyperref")) ++
-        (if (registry.active(loaded.packages, "tikzpeople"))
-            [util.diagnostic("tikzpeople-shape-approximation", "tikzpeople", null,
-                "Named people use reusable vector silhouettes; CTAN artwork detail differs",
-                registry.offset_for(loaded.packages, "tikzpeople"))] else []) ++
-        (if (bold_math_request(ast) == null) [] else
-            [util.diagnostic("math-bold-approximation", "latex", string(name(bold_math_request(ast))),
-                "Bold math uses CSS font weight until bold math fonts are available",
-                bold_math_request(ast).source_offset)]) ++
-        font_decl.substitution_issues(ast) ++
-        (if (polyglossia == null) [] else language_profile.polyglossia_issues(
-            polyglossia, registry.offset_for(loaded.packages, "polyglossia"))) ++
-        language_profile.target_issues(polyglossia, if (options == null) null else options.target,
-            registry.offset_for(loaded.packages, "polyglossia")) ++
-        running_style.diagnostics ++
-        dispatcher.running_diagnostics(info, if (options == null) null else options.target) ++
-        (if (options != null and options.target == "pdf" and options.paged != true and
-             (running_style.style == "fancy" or
-              running_style.style == "fancyplain"))
-            [util.diagnostic("unsupported-running-header", "fancyhdr", null,
-                "Running headers require the shared paged PDF export",
-                running_style.offset)] else []) ++
-        microtype.unsupported(registry.options_for(loaded.packages, "microtype"),
-            registry.offset_for(loaded.packages, "microtype")) ++
-        registry.reference_diagnostics(ast, info.labels, info.bibitems, info.packages,
-            bibliography.context != null) ++
-        registry.target_diagnostics(ast, if (options == null) null else options.target,
-            options != null and options.paged == true) ++
-        info.diagnostics ++
-        output_diagnostics(elements)
-    {body: html, elements: elements,
-     stylesheet: css.get_stylesheet() ++ math.stylesheet(options) ++ package_stylesheet(info),
-     metadata: if (csl_capture == null) hyperref.metadata(link_settings, info.title, info.author)
-         else {*:hyperref.metadata(link_settings, info.title, info.author),
-             bibliography: if (style_alias == null) bibliography.metadata
-                 else {*:bibliography.metadata, biblatex_style: style_alias.biblatex_style}},
-     packages: loaded.packages, diagnostics: diagnostics,
-     assets: registry.assets(ast, info.base_uri) ++ (if (csl_capture == null)
-         bib_data.resource_assets(ast, info.base_uri) else bibliography.assets)}
+    // Element-only callers never consume the report, which includes a second parse of aligned cells.
+    if (not details) {elements: elements}
+    else {
+        // an aliased style is supported through CSL, so its unsupported-style report is dropped
+        let package_issues = if (style_alias == null) loaded.diagnostics
+            else [for (issue in loaded.diagnostics where ((not (issue.code == "unsupported-bib-style" and
+                issue.item == style_alias.biblatex_style)) ^ { false })) issue] ++ style_alias.diagnostics
+        let diagnostics = engine_diagnostics(ast) ++ package_issues ++ math_operators.diagnostics ++
+            bibliography.diagnostics ++ language_issues ++ cleveref_issues ++
+            registry.font_issues(loaded.packages) ++
+            (if (registry.active(loaded.packages, "fontspec"))
+                fontspec.issues(fontspec.declarations(ast), base_info.custom_colors) else []) ++
+            math_bridge.issues(ast, math_operators.definitions, loaded.packages) ++
+            hyperref.issues(link_settings, registry.offset_for(loaded.packages, "hyperref")) ++
+            (if (registry.active(loaded.packages, "tikzpeople"))
+                [util.diagnostic("tikzpeople-shape-approximation", "tikzpeople", null,
+                    "Named people use reusable vector silhouettes; CTAN artwork detail differs",
+                    registry.offset_for(loaded.packages, "tikzpeople"))] else []) ++
+            (if (bold_math_request(ast) == null) [] else
+                [util.diagnostic("math-bold-approximation", "latex", string(name(bold_math_request(ast))),
+                    "Bold math uses CSS font weight until bold math fonts are available",
+                    bold_math_request(ast).source_offset)]) ++
+            font_decl.substitution_issues(ast) ++
+            (if (polyglossia == null) [] else language_profile.polyglossia_issues(
+                polyglossia, registry.offset_for(loaded.packages, "polyglossia"))) ++
+            language_profile.target_issues(polyglossia, if (options == null) null else options.target,
+                registry.offset_for(loaded.packages, "polyglossia")) ++
+            running_style.diagnostics ++
+            dispatcher.running_diagnostics(info, if (options == null) null else options.target) ++
+            (if (options != null and options.target == "pdf" and options.paged != true and
+                 (running_style.style == "fancy" or
+                  running_style.style == "fancyplain"))
+                [util.diagnostic("unsupported-running-header", "fancyhdr", null,
+                    "Running headers require the shared paged PDF export",
+                    running_style.offset)] else []) ++
+            microtype.unsupported(registry.options_for(loaded.packages, "microtype"),
+                registry.offset_for(loaded.packages, "microtype")) ++
+            registry.reference_diagnostics(ast, info.labels, info.bibitems, info.packages,
+                bibliography.context != null) ++
+            registry.target_diagnostics(ast, if (options == null) null else options.target,
+                options != null and options.paged == true) ++
+            info.diagnostics ++
+            output_diagnostics(elements)
+        {body: html, elements: elements,
+         stylesheet: css.get_stylesheet() ++ math.stylesheet(options) ++ package_stylesheet(info),
+         metadata: if (csl_capture == null) hyperref.metadata(link_settings, info.title, info.author)
+             else {*:hyperref.metadata(link_settings, info.title, info.author),
+                 bibliography: if (style_alias == null) bibliography.metadata
+                     else {*:bibliography.metadata, biblatex_style: style_alias.biblatex_style}},
+         packages: loaded.packages, diagnostics: diagnostics,
+         assets: registry.assets(ast, info.base_uri) ++ (if (csl_capture == null)
+             bib_data.resource_assets(ast, info.base_uri) else bibliography.assets)}
+    }
 }
 
 fn document_language(options, packages, polyglossia) any^ {

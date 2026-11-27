@@ -13,5 +13,8 @@
   text: "World  ",
   issue: null,
   repeated: "Again  ",
-  resource_probe_requires_captures: true
+  resource_probe_requires_captures: true,
+  resumed_requests: ["child", "child.tex"],
+  resumed_prefix: true,
+  resumed_matches_fresh: true
 }

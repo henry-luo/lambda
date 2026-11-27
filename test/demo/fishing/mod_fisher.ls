@@ -35,7 +35,8 @@ fn rel(i) any^ => (let p = BONES[i][3], if (p < 0) joint(i) else rig.sub(joint(i
 fn bone(i) any^ => <bone id: BONES[i][0], position: rel(i)^, *[for (k, b in BONES where b[3] == i) bone(k)^]>
 pub fn skeleton() any^ => <skeleton id: "fisher-rig", bone(0)^>
 fn segments(indices) => [for (i in indices) [i, BONES[i][1], BONES[i][2]]]
-fn rest_dir(i) any^ => rig.unit(rig.sub(BONES[i][2], BONES[i][1])^)^
+// The same rest directions serve every keyframe of every clip.
+let REST_DIRECTIONS = [for (b in BONES) rig.unit(rig.sub(b[2], b[1])^)^]
 
 // ---- palette
 let SKIN = w.col("#e2b08c")
@@ -57,7 +58,7 @@ let STRAW = w.col("#e3c27e")
 let STRAW_DARK = w.col("#c7a15c")
 let HAT_BAND = w.col("#c8583a")
 
-fn bind(indices, soft) any^ => (p) any^ => rig.weights(p, segments(indices), soft)^
+fn bind(indices, soft) any^ => (let bones = segments(indices), (p) any^ => rig.weights(p, bones, soft)^)
 fn ball(c, r, rgb, b) any^ => rig.ellipsoid(c, r, rig.IDENTITY, rig.flat(rgb)^, b)^
 fn on(i) any^ => rig.rigid(i)^
 
@@ -168,12 +169,12 @@ fn reach(torso_q, side, grip, axis) any^ {
     let pole = rig.add(shoulder, rig.qrot(torso_q, [side * 0.55, -0.75, -0.35])^)^
     let elbow = rig.knee(shoulder, grip, UPPER, FORE + GRIP_REACH, pole)^
     let wrist = rig.sub(grip, rig.scale(rig.unit(rig.sub(grip, elbow)^)^, GRIP_REACH)^)^
-    let turns = rig.chain(torso_q, shoulder, elbow, wrist, rest_dir(upper)^, rest_dir(upper + 1)^)^
+    let turns = rig.chain(torso_q, shoulder, elbow, wrist, REST_DIRECTIONS[upper], REST_DIRECTIONS[upper + 1])^
     // the wrist turns the fist about the forearm until its knuckles (across the boat at rest) lie along
     // the held line, the shorter way round; a line along the forearm itself leaves it unturned
     let fore_q = rig.qmul(rig.qmul(torso_q, turns[0])^, turns[1])^
     let local = rig.qrot(rig.qinv(fore_q)^, axis)^
-    let bone = rest_dir(upper + 2)^
+    let bone = REST_DIRECTIONS[upper + 2]
     let flat = rig.sub(local, rig.scale(bone, rig.dot(local, bone)^)^)^
     let lined = if (flat[0] < 0.0) rig.scale(flat, -1.0)^ else flat
     let twist = if (rig.length(flat)^ < 0.2) rig.IDENTITY else rig.aim([1.0, 0.0, 0.0], rig.unit(lined)^)^
@@ -184,11 +185,11 @@ pub fn tracks(poses, hands, times, track) any^ {
     let torso_q = [for (p in poses) quat3(p.torso)^]
     let right = [for (i, p in poses) reach(torso_q[i], -1.0, hands[i].r, hands[i].ar)^]
     let left = [for (i, p in poses) reach(torso_q[i], 1.0, hands[i].l, hands[i].al)^]
-    let half = (a) => [a[0] * 0.5, a[1] * 0.5, a[2] * 0.5];
+    let head_q = [for (p in poses, c in quat3([p.head[0] * 0.5, p.head[1] * 0.5, p.head[2] * 0.5])^) c];
     [track("f-spine.quaternion", times, [for (q in torso_q, c in q) c], 'quaternion')^,
      track("f-spine.scale", times, [for (p in poses, c in [2.0 - p.scale, p.scale, 2.0 - p.scale]) c], 'vector')^,
-     track("f-neck.quaternion", times, [for (p in poses, c in quat3(half(p.head))^) c], 'quaternion')^,
-     track("f-head.quaternion", times, [for (p in poses, c in quat3(half(p.head))^) c], 'quaternion')^,
+     track("f-neck.quaternion", times, head_q, 'quaternion')^,
+     track("f-head.quaternion", times, head_q, 'quaternion')^,
      track("f-arm-r.quaternion", times, [for (q in right, c in q[0]) c], 'quaternion')^,
      track("f-fore-r.quaternion", times, [for (q in right, c in q[1]) c], 'quaternion')^,
      track("f-hand-r.quaternion", times, [for (q in right, c in q[2]) c], 'quaternion')^,

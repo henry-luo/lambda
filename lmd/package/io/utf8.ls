@@ -53,9 +53,10 @@ fn decode_piece(bytes,at) string^ {
 }
 
 pub fn decode(bytes: binary?) string^ {
-    // A token's ASCII lane joins characters once instead of allocating per-byte recursive state.
     if (bytes == null) ""
-    else if (all([for (b in bytes) b < 128])) join([for (b in bytes) chr(b)],"")
-    // one join keeps long multilingual responses within a background task's stack (S13.3.1v2).
+    else if (len(bytes) == 1 and bytes[0] < 128) chr(bytes[0])
+    // Valid UTF-8 already has the same byte representation as the decoded text.
+    else if (is_valid(bytes)^) parse(bytes, "text")
+    // Keep the precise sequence or scalar diagnostic for invalid bytes.
     else join([for (at in 0 to len(bytes)-1) decode_piece(bytes,at)^],"")
 }

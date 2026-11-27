@@ -4035,26 +4035,43 @@ TEST(RadiantViewTest, BatchLoaderRuntimeMatchesFreshRuntimes) {
     };
     ShellOptions options = {0};
     options.merge_stderr = true;
-    ShellResult batch_result = shell_exec("./lambda.exe", batch_args, &options);
-    ASSERT_EQ(0, batch_result.exit_code)
-        << (batch_result.stdout_buf ? batch_result.stdout_buf : "");
-    shell_result_free(&batch_result);
-
-    for (const LoaderCase& loader_case : cases) {
-        char batch_path[256];
-        char single_path[256];
-        snprintf(batch_path, sizeof(batch_path), "%s/%s", output_dir, loader_case.batch_name);
-        snprintf(single_path, sizeof(single_path), "%s/single_%s", output_dir,
+    struct BatchExecution { const char** args; const ShellOptions* options; ShellResult result; };
+    BatchExecution batch = {batch_args, &options, {}};
+    auto run_batch = [](void* data) {
+        auto* execution = (BatchExecution*)data;
+        execution->result = shell_exec("./lambda.exe", execution->args, execution->options);
+    };
+    // Reference loads are independent of the batch, and produce distinct files.
+    ThreadPool* pool = test_radiant_view_default_jobs() > 1 ? tp_create(1) : nullptr;
+    if (!pool || !tp_submit(pool, run_batch, &batch)) run_batch(&batch);
+    constexpr size_t case_count = sizeof(cases) / sizeof(cases[0]);
+    char single_paths[case_count][256];
+    bool singles_ok[case_count];
+    for (size_t i = 0; i < case_count; i++) {
+        const LoaderCase& loader_case = cases[i];
+        snprintf(single_paths[i], sizeof(single_paths[i]), "%s/single_%s", output_dir,
                  loader_case.single_name);
         const char* single_args[] = {
-            "./lambda.exe", "layout", loader_case.path, "--view-output", single_path,
+            "./lambda.exe", "layout", loader_case.path, "--view-output", single_paths[i],
             "--no-log", NULL,
         };
         ShellResult single_result = shell_exec("./lambda.exe", single_args, &options);
-        ASSERT_EQ(0, single_result.exit_code)
-            << (single_result.stdout_buf ? single_result.stdout_buf : "");
+        EXPECT_EQ(0, single_result.exit_code)
+            << loader_case.path << ": " << (single_result.stdout_buf ? single_result.stdout_buf : "");
+        singles_ok[i] = single_result.exit_code == 0;
         shell_result_free(&single_result);
-        EXPECT_TRUE(test_radiant_view_same_view_tree(batch_path, single_path))
+    }
+    if (pool) tp_destroy(pool);
+    int batch_exit = batch.result.exit_code;
+    EXPECT_EQ(0, batch_exit) << (batch.result.stdout_buf ? batch.result.stdout_buf : "");
+    shell_result_free(&batch.result);
+    if (batch_exit != 0) return;
+    for (size_t i = 0; i < case_count; i++) {
+        if (!singles_ok[i]) continue;
+        const LoaderCase& loader_case = cases[i];
+        char batch_path[256];
+        snprintf(batch_path, sizeof(batch_path), "%s/%s", output_dir, loader_case.batch_name);
+        EXPECT_TRUE(test_radiant_view_same_view_tree(batch_path, single_paths[i]))
             << loader_case.path << " lays out differently on the shared loader runtime";
     }
     // Verify the embedded fence became a diagram instead of surviving as source code.

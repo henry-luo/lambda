@@ -7443,7 +7443,7 @@ static Item parse_tex_script(Item source, Item options, const char* format, cons
     } base_path(base);
     if (base && !base_path.value) return ItemError;
     // The kernel and all restart state must stay visible to the precise GC.
-    RootFrame roots(10);
+    RootFrame roots(12);
     Rooted<Item> text(roots, source);
     Rooted<Item> settings(roots, get_type_id(options) == LMD_TYPE_MAP ? options : ItemNull);
     Rooted<Item> result(roots, ItemNull);
@@ -7453,6 +7453,11 @@ static Item parse_tex_script(Item source, Item options, const char* format, cons
     Rooted<Item> base_item(roots, ItemNull);
     Rooted<Item> kernel_item(roots, ItemNull);
     Rooted<Item> preload(roots, ItemNull);
+    Rooted<Item> checkpoint(roots, ItemNull);
+    Rooted<Item> format_item(roots, ItemNull);
+    String* format_name = heap_strcpy(format, strlen(format));
+    if (!format_name) return ItemError;
+    format_item.set((Item){.item = s2it(format_name)});
     if (get_type_id(source) == LMD_TYPE_BINARY) {
         Binary* bytes = source.get_safe_binary();
         String* converted = heap_strcpy((const char*)binary_data(bytes), binary_length(bytes));
@@ -7511,15 +7516,16 @@ static Item parse_tex_script(Item source, Item options, const char* format, cons
         bool expl3_requested = false;
         for (;;) {
             bool reused = get_type_id(preload.get()) == LMD_TYPE_MAP;
-            Item args[] = {text.get(), settings.get(), math ? preload.get() : (Item){.item = i2it(20000000)}, preload.get()};
-            const char* entry = !strcmp(format, "tex") ? "tex" : math && reused ? "host_math" : math ? "math" : "latex";
-            result.set(interp_call_package_export(runtime, package, entry, args, reused ? (math ? 3 : 4) : 2));
+            Item args[] = {text.get(), settings.get(), format_item.get(), preload.get(), checkpoint.get()};
+            result.set(interp_call_package_export(runtime, package, "host_parse", args, 5));
             if (get_type_id(result.get()) != LMD_TYPE_MAP)
                 return runtime_error_itemf(ERR_PARSE_ERROR, "parse: Script %s engine failed", format);
             Item issue = MapReader(result.get().map).get("issue").item();
             if (!is_text_type_id(get_type_id(issue)) || strcmp(issue.get_chars(), "tex-expl3-preload-needed")) break;
             if (expl3_requested || !reused) return ItemError;
             expl3_requested = true;
+            // a different kernel must run the document from its initial state.
+            checkpoint.set(ItemNull);
             Item preload_args[] = {settings.get(), (Item){.item = b2it(math)}, preload.get()};
             preload.set(interp_call_package_export(runtime, package, "host_expl3_preload", preload_args, 3));
             if (get_type_id(preload.get()) != LMD_TYPE_MAP) return ItemError;
@@ -7536,6 +7542,7 @@ static Item parse_tex_script(Item source, Item options, const char* format, cons
                 is_text_type_id(get_type_id(detail)) ? ": " : "",
                 is_text_type_id(get_type_id(detail)) ? detail.get_chars() : "");
         }
+        checkpoint.set(reply.get("checkpoint").item());
         MapReader request = reply.get("request").asMap();
         scope.set(request.get("scope").item()); name.set(request.get("name").item());
         if (!is_text_type_id(get_type_id(scope.get())) || !is_text_type_id(get_type_id(name.get())))
@@ -7543,7 +7550,7 @@ static Item parse_tex_script(Item source, Item options, const char* format, cons
         if (memchr(scope.get().get_chars(), 0, scope.get().get_len()) ||
                 memchr(name.get().get_chars(), 0, name.get().get_len()))
             return runtime_error_itemf(ERR_PARSE_ERROR, "parse: TeX resource names cannot contain NUL");
-        // A restart must make progress and remains bounded even for absent files.
+        // Every retry still needs a new recorded lookup, including absent files.
         if (++requests > 20000000) return runtime_error_itemf(ERR_PARSE_ERROR, "parse: TeX resource request budget exceeded");
         char* bytes = nullptr; size_t length = 0; bool missing = false; bool no_base = false;
         bool local = !strcmp(scope.get().get_chars(), "local");
@@ -9127,7 +9134,11 @@ Item fn_substring(Item str_item, Item start_item, Item end_item) {
             return {.item = s2it(empty)};
         }
         long result_len = (long)(end - start);
-        if (is_symbol) return {.item = y2it(heap_create_symbol(chars + start, result_len))};
+        // Single-character slices can reuse the same immutable strings as indexing.
+        if (result_len == 1) {
+            String* shared = get_ascii_char_string((unsigned char)chars[start]);
+            if (shared) return {.item = s2it(shared)};
+        }
         String* result = (String *)heap_alloc(sizeof(String) + result_len + 1, LMD_TYPE_STRING);
         result->len = result_len;
         result->flags = 0;

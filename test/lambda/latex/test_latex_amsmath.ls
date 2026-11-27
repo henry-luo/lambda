@@ -1,10 +1,12 @@
 // Source-order math rows retain tags, labels and numbering suppression.
 import latex: lambda.doc.latex.latex
+import html_ser: lambda.doc.latex.to_html
 
 let ast = input("test/lambda/latex/fixtures/amsmath_annotations.tex", {type: "latex"}) ^ { null }
 let result = latex.render_result(ast, null)
 let html = latex.render_to_html(ast, null)
 
+"element-only render matches report:"; html == html_ser.to_html(result.elements)
 "diagnostics:"; [for (issue in result.diagnostics) issue.code]
 "numbered row:"; index_of(html, "latex-align-number") != null and index_of(html, "(1)") != null
 "suppressed row:"; len(split(html, "latex-align-number")) == 3

@@ -1,3 +1,5 @@
+"element-only render matches report:"
+true
 "diagnostics:"
 []
 "numbered row:"

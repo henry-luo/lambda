@@ -16,11 +16,17 @@ pub fn cache_sources(sources: map[]) array^ => [for (source in sources)
     {*:source, reconstruct_bytes:binary(source.data) ^ { null }}]
 pub fn source_bytes(source) any^ => if (source.reconstruct_bytes is binary) source.reconstruct_bytes
     else binary(source.data)
-fn source_text(sources: map[], file: int?, start: int, end: int) string | null | error {
-    let found = [for (source in sources where source.id == file) source];
-    if (len(found) == 0 or start < 0 or end < start) null
+fn find_source(sources: map[], file: int?, at: int = 0) map | null | error {
+    if (at >= len(sources)) null
     else {
-        let bytes = source_bytes(found[0])^;
+        let source = sources[at];
+        if (source.id == file) source else find_source(sources, file, at + 1)
+    }
+}
+fn source_text(source: map?, start: int, end: int) string | null | error {
+    if (source == null or start < 0 or end < start) null
+    else {
+        let bytes = source_bytes(source)^;
         // stale spans can end inside a UTF-8 character; canonicalize those tokens.
         if (end > len(bytes)) null else utf8.decode(slice(bytes, start, end)) ^ { null }
     }
@@ -105,10 +111,12 @@ pub fn source_fragment(t: map, sources: map[], prev_valid: bool = false, prev_fi
     let span = t.kind == "source-span";
     let direct = span or (t.direct == true and t.file != null and t.file >= 0);
     let adjacent = direct and prev_valid and prev_file == t.file and t.seq == prev_seq + 1;
-    let gap = if (adjacent and t.start > prev_end) source_text(sources, t.file, prev_end, t.start)^ else "";
+    // The token spelling and any gap belong to the same source.
+    let source = if (t.file == null) null else find_source(sources, t.file)^;
+    let gap = if (adjacent and t.start > prev_end) source_text(source, prev_end, t.start)^ else "";
     // synthetic parser events have no source range to read.
     let raw = if (t.file == null or t.start == null or t.end == null) null
-        else source_text(sources, t.file, t.start, t.end)^;
+        else source_text(source, t.start, t.end)^;
     let parline = t.kind == "control" and t.value == "par" and raw != null and raw != "\\par";
     let use_source = span or (faithful(t, raw)^ and (direct or t.kind == "control" or t.cat != 10));
     {span:span,direct:direct,adjacent:adjacent,gap:gap,
@@ -169,7 +177,7 @@ fn append_tail(built: Builder, result: map, sources: map[]) Builder^ {
         let adjacent = previous.prev_valid and previous.prev_file == tail.file and
             result.input.reader.seq + 1 == previous.prev_seq + 1;
         let gap = if (adjacent and tail.start > previous.prev_end)
-            source_text(sources, tail.file, previous.prev_end, tail.start)^ else "";
+            source_text(find_source(sources, tail.file)^, previous.prev_end, tail.start)^ else "";
         let with_gap = if (gap == null) {*:built, issue: "tex-reconstruct-source-range"}
             else append(built, gap, previous.prev_end, false)^;
         let before = if (adjacent) with_gap else separate(with_gap, tail.text, tail.start)^;

@@ -32,21 +32,21 @@ fn gz(j) => 0.0 - EZ + j * STEP
 let HEIGHTS = [for (j in 0 to NZ, i in 0 to NX) w.floor_y(gx(i), gz(j))^]
 fn h(i, j) => HEIGHTS[min(NZ, max(0, j)) * (NX + 1) + min(NX, max(0, i))]
 fn cell(a, row) => [a, a + row, a + 1, a + 1, a + row, a + row + 1]
-fn grid_indices() => [for (j in 0 to NZ - 1, i in 0 to NX - 1, k in cell(j * (NX + 1) + i, NX + 1)) k]
+// The floor, water and caustic film share the same grid topology.
+let GRID_INDICES = [for (j in 0 to NZ - 1, i in 0 to NX - 1, k in cell(j * (NX + 1) + i, NX + 1)) k]
 fn grid_normal(i, j) any^ => v.unit([h(i - 1, j) - h(i + 1, j), 2.0 * STEP, h(i, j - 1) - h(i, j + 1)])^
 pub fn floor_buffer() any^ {
-    let indices = grid_indices();
     {positions: [for (j in 0 to NZ, i in 0 to NX, c in [gx(i), h(i, j), gz(j)]) c],
      normals: [for (j in 0 to NZ, i in 0 to NX, c in grid_normal(i, j)^) c],
-     colors: [for (j in 0 to NZ, i in 0 to NX, c in w.floor_color(gx(i), gz(j), h(i, j))^) c], indices: indices}
+     colors: [for (j in 0 to NZ, i in 0 to NX, c in w.floor_color(gx(i), gz(j), h(i, j))^) c], indices: GRID_INDICES}
 }
 // the films carry depth (r) and the beach foam lip (g) in their vertex colours
 fn film_info(y) => (let d = max(0.0, 0.0 - y), [min(1.0, d / 2.2), if (y > 0.05) 0.0 else 1.0 - u.clamp(d / 0.3, 0.0, 1.0), 0.0])
+let FILM_NORMALS = [for (y in HEIGHTS, c in [0.0, 1.0, 0.0]) c]
+let FILM_COLORS = [for (y in HEIGHTS, c in film_info(y)^) c]
 pub fn film_buffer(lift) any^ {
-    let indices = grid_indices();
     {positions: [for (j in 0 to NZ, i in 0 to NX, c in [gx(i), if (lift == 0.0) 0.0 else h(i, j) + lift, gz(j)]) c],
-     normals: [for (j in 0 to NZ, i in 0 to NX, c in [0.0, 1.0, 0.0]) c],
-     colors: [for (j in 0 to NZ, i in 0 to NX, c in film_info(h(i, j))^) c], indices: indices}
+     normals: FILM_NORMALS, colors: FILM_COLORS, indices: GRID_INDICES}
 }
 
 let ROCK_BASE = shape.sphere(6, 10)

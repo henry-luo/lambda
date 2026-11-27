@@ -14,6 +14,8 @@ let changed = {*:first.reader, catcodes: {'!': 11}};
 "dynamic category codes:"; [first.token.cat, tex.next(changed).token.cat]
 let supers = {*:tex.reader("^^41^^42"), catcodes: {'^': 7}};
 "superscript notation:"; compact(collect(supers))
+let encoded_word = tex.next({*:tex.reader("\\a!!62ç"), catcodes: {'!': 7, 'ç': 11}});
+"superscript in a control word:"; [encoded_word.token.value, encoded_word.token.start, encoded_word.token.end]
 "control symbols and spaces:"; compact(collect(tex.reader("\\!  A\\  B")))
 "CRLF and trimmed spaces:"; compact(collect(tex.reader("a  \r\nb\r\n\r\nc")))
 "disabled endline:"; compact(collect({*:tex.reader("a\nb"), endline: -1}))
