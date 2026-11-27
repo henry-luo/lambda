@@ -76,7 +76,7 @@ implementation below. Evidence is in `temp/interp-mir-retirement/`.
 
 | Surface | Evidence and next reduction |
 | --- | --- |
-| Satellite compiler and publication | `mvp_compile_function_image` uses one definition in the worker snapshot. All eight compile events in `worker-cluster.log` recorded `members=1`. The synchronous collector's sole caller outside the driver is the resident-export GTest. D8.3.3 calls for clusters and D8.3.4 requires a frozen input to the worker. Compute cluster membership on the evaluator, pass the frozen definitions to the existing queue and migrate the GTest to that path. Publication must retain an image before exposing any of its entries. Check a candidate receiving a second promotion while a cluster job is queued. [Worker and link](../../lambda/runtime/mvp/mvp_driver.cpp) · [Publication](../../lambda/runtime/interp.cpp) |
+| Satellite compiler and publication | `mvp_compile_function_image` uses one definition in the worker snapshot. All eight compile events in `worker-cluster.log` recorded `members=1`. The synchronous collector's sole caller outside the driver is the resident-export GTest. D8.3.3 calls for clusters and D8.3.4 requires a frozen input to the worker. Compute cluster membership on the evaluator, pass the frozen definitions to the existing queue and migrate the GTest to that path. Publication must retain an image before exposing any of its entries. Check a candidate receiving a second promotion while a cluster job is queued. [Worker and link](../../lambda/runtime/mir/mir_driver.cpp) · [Publication](../../lambda/runtime/interp.cpp) |
 | REPL-only unindexed admission | File execution scans the published Lambda AST when available. A REPL entry still creates a temporary `Script` and walks the fragment before admission. A range-scoped scan over the retained index could remove the dual walk once rollback tests prove that rejected fragments restore the old AST range and import cone (D8.2.4, D8.3.6). [Scan](../../lambda/runtime/interp_plan.cpp) · [Transaction](../../lambda/runtime/runner.cpp) |
 | Stack selection and bulk T0 setup | `script_run.cpp` walks the AST to match call names against bounded definition and call arrays. The match includes ordinary calls and can miss indirect recursion. Its handler gate changes stack selection deliberately. Replace it with a prepared call-graph fact only after testing imported and indirect recursion, handler fault recovery and the deep `ack2` case (D6.3.3, S7.4.3, S7.11.4). [Stack selection](../../lambda/runtime/script_run.cpp) |
 | Borrow transport | The entry-backed write-back fallback in `interp_call_internal` is still used by view state and object fields. D5.4.6 and S9.2.3 require publication to the caller's actual place. Give those cases an explicit rooted place/home with the same detach and effect order before removing the legacy entry fields. [Borrow transport](../../lambda/runtime/interp.cpp) |
@@ -182,10 +182,10 @@ reduction in the combined source budget.
 | Area | Current sharing and remaining duplication |
 | --- | --- |
 | Operators | The fallback switches in `eval_binary` and `em_boxed_binary_helper` choose the same symbol for all 23 common operators. This is a lexical comparison of the generic switch cases, including default boxed equality, for the generic paths. T0 also lists `is` and `is nan` in its switch. Raw `Bool` comparisons, vector comparisons, short-circuiting and constrained `is` need explicit treatment. [T0 switch](../../lambda/runtime/interp.cpp#L1716) · [MIR switch](../../lambda/runtime/mir_emitter_shared.hpp#L1137) |
-| System calls | Both use `SysFuncInfo`. The control's `eval_sys_call` maps C prototypes and results, handles error operands, and recognizes raw bitwise entries separately. MVP independently selects raw, native or checked calls and converts their results. The control registry already routes generic `len` to `fn_len_checked` and shifts to boxed helpers. `count` and `band`/`bor`/`bxor`/`bnot` illustrate the control's raw-ABI adapters. [T0](../../lambda/runtime/interp.cpp#L1862) · [MVP](../../lambda/runtime/mvp/mvp_mir.cpp#L5865) · [registry](../../lambda/runtime/sys_func_registry.c#L385) |
+| System calls | Both use `SysFuncInfo`. The control's `eval_sys_call` maps C prototypes and results, handles error operands, and recognizes raw bitwise entries separately. MVP independently selects raw, native or checked calls and converts their results. The control registry already routes generic `len` to `fn_len_checked` and shifts to boxed helpers. `count` and `band`/`bor`/`bxor`/`bnot` illustrate the control's raw-ABI adapters. [T0](../../lambda/runtime/interp.cpp#L1862) · [MVP](../../lambda/runtime/mir/mir_lower.cpp#L5865) · [registry](../../lambda/runtime/sys_func_registry.c#L385) |
 | Calls and contracts | `ast_plan_call_shape`, `ast_resolve_call_arguments`, `ast_call_contract_return`, `fn_call_into` and the type-contract runtime are already common. `eval_call` stages arguments in rooted scratch, then ordinary control calls enter `lambda_dynamic_call`, which reserves another source span and re-homes wide values before optional/rest adaptation. T0's binding and parameter admission and MVP's boxed slow arms still choose checks and representation witnesses separately. [Call facts](../../lambda/runtime/ast-core.hpp#L775) · [T0 staging](../../lambda/runtime/interp.cpp#L2709) · [Dynamic adapter](../../lambda/runtime/lambda-eval.cpp#L2108) · [Contracts](../../lambda/runtime/type_contract.hpp) |
-| Access and updates | Both use generic `fn_member`, `fn_index`, `fn_index_nd` and COW path helpers. T0 and MVP independently plan when to snapshot, detach and write back. The two paths for native `var` procedures both check the published kind and republish a place. MIR also has proven typed and shape-based paths. [T0 native `var`](../../lambda/runtime/interp.cpp#L2076) · [MVP native `var`](../../lambda/runtime/mvp/mvp_mir.cpp#L5185) · [MIR N-D fallback](../../lambda/runtime/mir_container_access.hpp#L22) |
-| Frames, modules and tasks | Both use the same context, root/number side stacks, module state and activation service. T0's `InterpFrameGuard` writes through a static root window. MIR materializes roots at safepoints, uses generated epilogues and exposes `_b` entry points for promoted code. The remaining duplication concerns the entry/exit protocol, including borrow transport, return ownership and cleanup ordering. [T0 frame](../../lambda/runtime/interp.cpp#L519) · [MVP entry](../../lambda/runtime/mvp/mvp_mir.cpp#L9528) · [Runtime state](../../lambda/runtime/runtime-state.cpp#L309) · [Activation](../../lambda/runtime/activation.h) |
+| Access and updates | Both use generic `fn_member`, `fn_index`, `fn_index_nd` and COW path helpers. T0 and MVP independently plan when to snapshot, detach and write back. The two paths for native `var` procedures both check the published kind and republish a place. MIR also has proven typed and shape-based paths. [T0 native `var`](../../lambda/runtime/interp.cpp#L2076) · [MVP native `var`](../../lambda/runtime/mir/mir_lower.cpp#L5185) · [MIR N-D fallback](../../lambda/runtime/mir_container_access.hpp#L22) |
+| Frames, modules and tasks | Both use the same context, root/number side stacks, module state and activation service. T0's `InterpFrameGuard` writes through a static root window. MIR materializes roots at safepoints, uses generated epilogues and exposes `_b` entry points for promoted code. The remaining duplication concerns the entry/exit protocol, including borrow transport, return ownership and cleanup ordering. [T0 frame](../../lambda/runtime/interp.cpp#L519) · [MVP entry](../../lambda/runtime/mir/mir_lower.cpp#L9528) · [Runtime state](../../lambda/runtime/runtime-state.cpp#L309) · [Activation](../../lambda/runtime/activation.h) |
 | Preparation | `interp_scan_supported` uses `AstIndex` when published. The control's `interp_visit_children` supplies extra Lambda edges to the front end, MIR planning and satellite indexing. `FnFramePlan` owns T0 slot and scratch requirements. MVP has separate liveness, shape and native-lane plans. T0's fast integer loop also rechecks AST shape and builds its literal lookup when it enters the loop. [Lambda traversal](../../lambda/runtime/ast-core.cpp#L1245) · [Admission](../../lambda/runtime/interp_plan.cpp#L578) · [Integer loop](../../lambda/runtime/interp.cpp#L5660) |
 
 ## Shared runtime and execution contracts
@@ -237,7 +237,7 @@ follows its statement boundary, the returned error value and postfix `^`. A reje
 becomes the *call's* value before the body runs under S7.7.3. Predicate execution remains an
 explicit callback or emitted edge in the predicate's declaring module under S11.4.11. [Call
 facts](../../lambda/runtime/ast.hpp#L357) · [T0 boundaries](../../lambda/runtime/interp.cpp#L1206)
-· [MVP admission](../../lambda/runtime/mvp/mvp_mir.cpp#L717) · [Rulings S7.4, S7.6–S7.7, S11.4 and
+· [MVP admission](../../lambda/runtime/mir/mir_lower.cpp#L717) · [Rulings S7.4, S7.6–S7.7, S11.4 and
 D7.3.5](../../doc/Lambda_Formal_Semantics.md#s77-validation-outcomes-and-boundary-behavior)
 
 Refactor the existing dynamic adapter to consume a prepared, already rooted argument window when
@@ -266,7 +266,7 @@ method/state-backed places and collection mutation forms. Share helpers for chec
 prepare/write-back while keeping tier-specific binding publication and MIR's proved direct
 field/array operations. [T0 place keys](../../lambda/runtime/interp.cpp#L2008) · [T0 indexed
 stores](../../lambda/runtime/interp.cpp#L5932) · [MVP place
-writes](../../lambda/runtime/mvp/mvp_mir.cpp#L4334) · [Rulings S7.1–S7.2, S9.1.2–S9.1.3v4,
+writes](../../lambda/runtime/mir/mir_lower.cpp#L4334) · [Rulings S7.1–S7.2, S9.1.2–S9.1.3v4,
 S10.1.2v5, D5.4 and D7.6.3–D7.6.4](../../doc/Lambda_Formal_Design.md#d54-copy-on-write)
 
 Explore use of the existing rooted key-span COW entry points for small T0 places that currently
@@ -277,7 +277,7 @@ materialization is measured. Grouping already has a common kernel in `fn_group_b
 positional append, spreading, void/absence and output demand explicit at the caller under S2.5 and
 D3.3. [T0 grouping](../../lambda/runtime/interp.cpp#L4143) · [T0 checked nested
 write](../../lambda/runtime/interp.cpp#L5882) · [MVP checked nested
-write](../../lambda/runtime/mvp/mvp_mir.cpp#L4596)
+write](../../lambda/runtime/mir/mir_lower.cpp#L4596)
 
 ### 4. Specify one entry/exit protocol with two frame implementations
 
@@ -292,9 +292,9 @@ System faults restore the checkpoint on the same activation, including when a la
 catches a materialized fault. Both paths use the activation and scheduler service for suspension.
 These invariants follow D6.1–D6.4, D7.4.3, D7.5.3, S7.11.2v2 and S12.4.4v4. [T0 borrowed
 entry](../../lambda/runtime/interp.cpp#L7354) · [MIR borrowed
-prologue](../../lambda/runtime/mvp/mvp_mir.cpp#L9528) · [Recovery
+prologue](../../lambda/runtime/mir/mir_lower.cpp#L9528) · [Recovery
 frame](../../lambda/runtime/recovery_frame.h) · [Open block
-lowering](../../lambda/runtime/mvp/mvp_mir.cpp#L7320)
+lowering](../../lambda/runtime/mir/mir_lower.cpp#L7320)
 
 Keep storage policy with each owner. T0 continues to write through `RootFrame`/slots. Generated
 code maintains safepoint-current homes through `MirEmitter`. Reuse `RuntimeModuleStateScope` and
@@ -342,7 +342,7 @@ specialization and its private walk. If a narrow fast path still pays, retain on
 implementation for that case. A guard miss resumes from the current source point with already
 committed changes and exact trip accounting. Use only static predictions and runtime guards for
 these specializations under D7.4.1. [T0 integer runner](../../lambda/runtime/interp.cpp#L5660) ·
-[MIR integer lowering](../../lambda/runtime/mvp/mvp_mir.cpp#L3118) · [Rulings D7.4.1 and
+[MIR integer lowering](../../lambda/runtime/mir/mir_lower.cpp#L3118) · [Rulings D7.4.1 and
 D8.3.2](../../doc/Lambda_Formal_Design.md#d74-dispatch-and-the-call-abi)
 
 ## Delivery order and evidence

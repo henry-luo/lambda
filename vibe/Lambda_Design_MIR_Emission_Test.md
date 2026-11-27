@@ -33,7 +33,7 @@ release builds (§9.2) and a C2MIR-vs-MIR-Direct optimization gap (§9.3) -- and
 **Date:** 2026-07-22
 
 **Scope:** unit and regression testing of MIR **emission** (AST → MIR lowering)
-for Lambda (`lambda/runtime/mvp/mvp_plan.cpp`, `mvp_mir.cpp`) and LambdaJS
+for Lambda (`lambda/runtime/mir/mir_plan.cpp`, `mir_lower.cpp`) and LambdaJS
 (`lambda/js/js_mir_*.cpp`) over the shared emitter
 (`lambda/runtime/mir_emitter_shared.hpp`), with the Stack API
 frame/rooting/scalar-home protocol as the first-class subject. Python, Bash,

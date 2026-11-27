@@ -153,7 +153,7 @@ backing live bytes match actual survivors. Proposed microbenchmark peak budget:
 
 ## P3 — Seal eager MIR images and retire compilation scratch
 
-**Files:** `lambda/runtime/mir.c`, `lambda/runtime/mvp/mvp_driver.cpp`,
+**Files:** `lambda/runtime/mir.c`, `lambda/runtime/mir/mir_driver.cpp`,
 image lifecycle fields and `runner.cpp` teardown/anchor transfers.
 
 Add one Lambda-side sealing operation. After an eager image has linked every

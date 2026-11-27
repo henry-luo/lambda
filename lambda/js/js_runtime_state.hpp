@@ -94,6 +94,9 @@ struct JsAstLiteralCache {
     RootVector values = {};
 };
 
+struct JsTimerHandle;
+struct JsCssFontRequest;
+
 struct JsEventLoopState {
     // Each queue owns a GC Array of one RuntimeJob shape. Queue order stays
     // policy-specific while storage and captured context are shared (JSCU30).
@@ -122,6 +125,10 @@ struct JsEventLoopState {
     bool negative_warning_emitted = false;
     bool virtual_clock_enabled = false;
     double virtual_clock_ms = 0.0;
+    // Ready wall timers still belong to their resource table while a foreign realm runs.
+    JsTimerHandle* deferred_timer_first = nullptr;
+    JsTimerHandle* deferred_timer_last = nullptr;
+    JsCssFontRequest* font_loads = nullptr;
 };
 struct JsRegexpLastMatch {
     // Slots 0/1 are input and full match; remaining slots are capture groups.
@@ -226,6 +233,8 @@ enum JsRealmSlotId {
     JS_REALM_SLOT_ASYNC_FUNCTION_CONSTRUCTOR,
     JS_REALM_SLOT_DOM_EXCEPTION_CONSTRUCTOR,
     JS_REALM_SLOT_DOM_EXCEPTION_PROTOTYPE,
+    JS_REALM_SLOT_QUOTA_EXCEEDED_ERROR_CONSTRUCTOR,
+    JS_REALM_SLOT_QUOTA_EXCEEDED_ERROR_STATE_KEY,
     JS_REALM_SLOT_PERFORMANCE_RESOURCE_TIMING_CONSTRUCTOR,
 #define CSS_DECLARATION_INTERFACE(kind, name, host, metadata) JS_REALM_SLOT_##host,
 #include "lambda/input/css/css_declaration_interfaces.def"

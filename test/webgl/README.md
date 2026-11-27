@@ -14,7 +14,7 @@ make test-scene3d
 |---|---|
 | `api.html` | 49 context, brand, typed-view, upload/readback, shader/reflection, indexed-draw, error and resize assertions; two real canvas images |
 | `khronos-selected.html` | 100 assertions ported from named, pinned upstream Khronos slices; eight numeric buffer-view types, subranges, actual readback, object lifetimes and RGBA8 flip/premultiply |
-| `unavailable.html` | Ordinary windowless/full-host and headless-C captures must be green: WebGL returns null and leaves Canvas 2D available |
+| `unavailable.html` | Captures on hosts without a graphics provider must be green: WebGL returns null and leaves Canvas 2D available |
 | `loss.html` | Trusted cancelable WebGLContextEvents, consumed loss error, invalid old/lost-created wrappers and fresh native resources after restoration |
 | `three-lifecycle.html` | Unmodified Three.js startup, indexed geometry, bitmap resize, density, two renderers, resource disposal and native error checks |
 | `../demo/scene3d/three-gallery.html` | Unmodified pinned WebGLRenderer/addon, Lambert/basic materials, indexed geometry, texture/transparency, instancing and image output |
@@ -26,9 +26,10 @@ generation under **D5.5.1 / D5.1.4** in the [formal design](../../doc/Lambda_For
 
 `CanvasWebGlExportTest.PixelsAlphaAndEffectsReachEveryOutput` generates independent
 red/blue PNG references and checks 96 Canvas pairs across PNG/SVG/PDF, alpha
-modes, preserved/discarded buffers, CSS effects and 1x/2x density. The control
-explicitly enables the full native host's existing `LAMBDA_HEADLESS_GLFW_WINDOW=1`
-option. Default null-host context absence remains covered by `unavailable.html`.
+modes, preserved/discarded buffers, CSS effects and 1x/2x density. Export starts
+windowless and acquires its graphics host on the first context request
+(**D9.5.6v2 / D10.1.7**). The `unavailable.html` control covers hosts without
+a graphics provider.
 
 `conformance-manifest.json` pins upstream paths/revision/hashes and identifies
 the exact assertion ports. `LICENSE.Khronos.txt` preserves their license.

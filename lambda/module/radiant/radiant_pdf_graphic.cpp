@@ -168,7 +168,7 @@ bool pdf_vector_resource(const PaintList* paint, UiContext* ui, Rooted<Item>& pa
         if (command.op == PAINT_BEGIN_EFFECT_GROUP && !text_only) {
             const PaintEffectGroup& group = command.effect_group;
             if (group.filter || group.backdrop || group.backdrop_filter || group.shadow ||
-                    group.mask.gradient || group.blend_mode || group.has_transform || group.has_clip) return false;
+                    group.mask.active() || group.blend_mode || group.has_transform || group.has_clip) return false;
             int stop = index + 1, depth = 1;
             for (; stop < end; stop++) {
                 if (paint->data()[stop].op == PAINT_BEGIN_EFFECT_GROUP) depth++;

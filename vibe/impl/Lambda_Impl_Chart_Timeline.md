@@ -20,6 +20,12 @@ they are not runtime dependencies or vendored implementation code.
 
 ## Work record
 
+- **2026-11-27.** The edit preview has a stable slot beneath the chart host.
+  Before this change, the preview changed the host's child count, triggering
+  a replacement that detached the target held by the app. The pending draft
+  now changes descendants of the slot. The retained chart accepts the
+  app's next source update (**D5.5.3 / S12.1.5v2**).
+  `timeline_editing` passes all 16 assertions.
 - Pinned React Chrono 3.3.3, TimelineJS 3.9.13, vis-timeline commit
   `67b24bb2b80bf5fef510476b2897e0a3e32f3f63`, and amCharts 5.21.0.
 - Core modules now cover canonical element/map normalization, exact astronomical

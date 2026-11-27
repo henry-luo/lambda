@@ -9,8 +9,8 @@
 #include <assert.h>
 
 #include "js_interp_env.h"
-#include "mvp-lmd/mvp_lmd.h"
-#include "mvp-lmd/mvp_lmd_dynamic.h"
+#include "mir/js_mir.h"
+#include "mir/js_mir_dynamic.h"
 #include "js_state_guards.h"
 #include "js_runtime_state.hpp"
 #include "js_builtin_catalog.hpp"

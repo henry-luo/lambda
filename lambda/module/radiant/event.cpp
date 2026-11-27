@@ -1221,15 +1221,13 @@ static DomBoundary pointer_boundary_within_target(DomBoundary boundary, View* ta
     return boundary;
 }
 
-// F17/ES24: legacy Lambda payload fields now project through the same event
-// wrapper JS receives. Nested Mark values still use the document Input arena;
-// only the outer event carrier moved from a one-shot Mark map to the record.
+// F17/ES24: Lambda payload fields use the same event wrapper JS receives.
 class DomEventPayloadBuilder {
 public:
     explicit DomEventPayloadBuilder(Item event) : event_(event) {}
 
     void put(const char* name, const char* value) {
-        set(name, value ? js_name_item(value) : ItemNull);
+        set(name, value ? Item{.item = s2it(heap_strcpy(value, strlen(value)))} : ItemNull);
     }
     void put(const char* name, int64_t value) {
         set(name, (Item){.item = i2it(value)});
@@ -1455,7 +1453,6 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
         return event_root.get();
     }
 
-    MarkBuilder builder(doc->input);
     DomEventPayloadBuilder mb(event_root.get());
     mb.put("type", event_name);
     if (event_name && strcmp(event_name, "scrollkey") == 0) {
@@ -1559,11 +1556,22 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
 
     if (intent && intent->type != INPUT_INTENT_NONE) {
         const char* input_type = input_intent_type_name(intent->type);
-        // Both package payloads share a length-delimited snapshot of the text.
-        Item data = intent->data
-            ? Item{.item = s2it(builder.createString(intent->data, intent->text_length()))} : ItemNull;
+        // Publish one GC-owned snapshot so a handler can retain the event
+        // while old edits and clipboard payloads remain collectable (D6.3.3).
+        RootFrame snapshot_roots(2);
+        Rooted<Item> data(snapshot_roots, intent->data
+            ? Item{.item = s2it(heap_strcpy(intent->data, intent->text_length()))} : ItemNull);
+        Rooted<Item> html(snapshot_roots, ItemNull);
+        if (intent->html_data) {
+            Arena* temporary = arena_create_default();
+            if (temporary) {
+                char* sanitized = clipboard_store_sanitize(temporary, "text/html", intent->html_data);
+                if (sanitized) html.set({.item = s2it(heap_strcpy(sanitized, strlen(sanitized)))});
+                arena_destroy(temporary);
+            }
+        }
         mb.put("input_type", input_type);
-        mb.put("data", data);
+        mb.put("data", data.get());
         if (intent->data_mime) mb.put("mime", intent->data_mime);
         else mb.putNull("mime");
         // ES17: an undo/redo hands the template the entry to install — the
@@ -1573,34 +1581,21 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
             mb.put("history_sel_start", (int64_t)intent->history_sel_start);
             mb.put("history_sel_end", (int64_t)intent->history_sel_end);
         }
-        if (intent->html_data) {
-            char* sanitized = clipboard_store_sanitize(builder.arena(), "text/html", intent->html_data);
-            if (sanitized) mb.put("html", sanitized);
-            else mb.putNull("html");
-        } else {
-            mb.putNull("html");
-        }
+        mb.put("html", html.get());
 
-        MapBuilder im = builder.map();
-        im.put("input_type", input_type);
-        im.put("data", data);
-        if (intent->data_mime) im.put("mime", intent->data_mime);
-        else im.putNull("mime");
-        if (intent->html_data) {
-            char* sanitized = clipboard_store_sanitize(builder.arena(), "text/html", intent->html_data);
-            if (sanitized) im.put("html", sanitized);
-            else im.putNull("html");
-        } else {
-            im.putNull("html");
-        }
-        im.put("key", key_code_to_name(intent->key));
-        im.put("shift", (intent->mods & RDT_MOD_SHIFT) != 0);
-        im.put("ctrl",  (intent->mods & RDT_MOD_CTRL)  != 0);
-        im.put("alt",   (intent->mods & RDT_MOD_ALT)   != 0);
-        im.put("meta",  (intent->mods & RDT_MOD_SUPER) != 0);
-        im.put("is_composing", intent->is_composing);
-        im.put("composition_caret", (int64_t)intent->composition_caret);
-        mb.put("input_intent", im.final());
+        RootedValueBuilder im(RootedValueBuilder::DATA_MAP);
+        im.put("input_type", js_name_item(input_type));
+        im.put("data", data.get());
+        im.put("mime", intent->data_mime ? js_name_item(intent->data_mime) : ItemNull);
+        im.put("html", html.get());
+        im.put("key", js_name_item(key_code_to_name(intent->key)));
+        im.put("shift", {.item = b2it((intent->mods & RDT_MOD_SHIFT) != 0)});
+        im.put("ctrl",  {.item = b2it((intent->mods & RDT_MOD_CTRL)  != 0)});
+        im.put("alt",   {.item = b2it((intent->mods & RDT_MOD_ALT)   != 0)});
+        im.put("meta",  {.item = b2it((intent->mods & RDT_MOD_SUPER) != 0)});
+        im.put("is_composing", {.item = b2it(intent->is_composing)});
+        im.put("composition_caret", {.item = i2it(intent->composition_caret)});
+        mb.put("input_intent", im.value.get());
         mb.put("is_composing", intent->is_composing);
         mb.put("composition_caret", (int64_t)intent->composition_caret);
     }
@@ -2446,25 +2441,22 @@ static AuthorTemplateCascade* author_template_cascade_current(EventContext* evco
     return cascade->evcon == evcon ? cascade : nullptr;
 }
 
-struct TemplateUiAllocationScope {
+struct TemplateAllocationScope {
     EvalContext* owner;
     bool previous_ui_mode;
     Arena* previous_arena;
     Context* previous_input;
 
-    TemplateUiAllocationScope(EvalContext* target, bool ui_mode)
+    explicit TemplateAllocationScope(EvalContext* target)
         : owner(target), previous_ui_mode(target && target->ui_mode),
           previous_arena(target ? target->arena : nullptr), previous_input(input_context) {
         if (owner) {
-            if (ui_mode) runtime_context_follow_ui_result(owner->runtime, owner);
-            else {
-                owner->ui_mode = false;
-                owner->arena = nullptr;
-            }
+            owner->ui_mode = false;
+            owner->arena = nullptr;
         }
-        input_context = owner && owner->ui_mode ? (Context*)owner : nullptr;
+        input_context = nullptr;
     }
-    ~TemplateUiAllocationScope() {
+    ~TemplateAllocationScope() {
         if (owner) {
             owner->ui_mode = previous_ui_mode;
             owner->arena = previous_arena;
@@ -2491,12 +2483,13 @@ static bool settle_template_retransform(EventContext* evcon,
         return false;
     }
     RetransformResult results[16];
+    RootSpan result_roots(16 * 3);
     int count = 0;
     uint64_t transform_start = time_now_ns();
     {
-        // only published render results follow the runtime's canonical result Input.
-        TemplateUiAllocationScope render_scope(context, true);
-        count = render_map_retransform_with_results(results, 16);
+        // Stage evaluator results independently of the DOM occurrence arena.
+        TemplateAllocationScope render_scope(context);
+        count = render_map_retransform_with_results(results, 16, result_roots.items());
     }
     if (shell_getenv("RADIANT_TEMPLATE_PROFILE")) log_notice("[TEMPLATE_PROFILE] transform_ms=%.3f",
         time_elapsed_ms_f(transform_start, time_now_ns()));
@@ -2521,7 +2514,10 @@ static bool settle_template_retransform(EventContext* evcon,
     }
     // The render map already published new source identities, even for equal values.
     // Commit their DOM ownership together or the next redraw cannot find its old result.
-    if (!reported) return false;
+    if (!reported) {
+        render_map_prune_unpublished();
+        return false;
+    }
     if (evcon) {
         DocState* state = event_context_target_state(evcon);
         bool had_hover = state && state->hover_target;
@@ -2544,6 +2540,7 @@ static bool settle_template_retransform(EventContext* evcon,
         }
         evcon->need_repaint = true;
     }
+    render_map_prune_unpublished();
     if (out_model_reconciled) *out_model_reconciled = true;
     return true;
 }
@@ -2706,8 +2703,8 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
             return true;
         }
     }
-    // handler temporaries are runtime values; rendering opts into arena ownership separately.
-    TemplateUiAllocationScope handler_scope(handler_ctx, false);
+    // Evaluation uses runtime values before presentation copies its DOM occurrences.
+    TemplateAllocationScope handler_scope(handler_ctx);
 
     // F17: author/UA handlers receive the in-flight host record. When no JS
     // stage created it (a Lambda-only document), create the same record shape
@@ -3529,7 +3526,7 @@ public:
         model.set(radiant_dom_wrap_node(evcon->target));
         EmitHandlerScope emit_scope(event_context_target_document(evcon), evcon->target,
             model.get(), nullptr, evcon, &nested_selection);
-        TemplateUiAllocationScope handler_scope(context, false);
+        TemplateAllocationScope handler_scope(context);
         Item argument = {.item = b2it(canceled)};
         // cold T0 callbacks need interpreter admission; compiled entries have no AST module.
         result.set(function_has_abi(completion.get().function, FN_ENTRY_ABI_LAMBDA_INTERPRETED)
@@ -6346,13 +6343,20 @@ static bool dom_js_transform_keeps_containing_block(DomElement* element, const C
         transform_has_functions(element->transform_prop());
 }
 
+static bool dom_js_property_can_commit_without_layout(CssPropertyCode property) {
+    return property == CSS_PROPERTY_STROKE_DASHOFFSET || property == CSS_PROPERTY_OPACITY ||
+        property == CSS_PROPERTY_VISIBILITY || property == CSS_PROPERTY_FILTER ||
+        property == CSS_PROPERTY_BACKGROUND_POSITION_X || property == CSS_PROPERTY_BACKGROUND_POSITION_Y ||
+        property == CSS_PROPERTY_TRANSFORM || css_individual_transform_index(property) >= 0;
+}
+
 struct AttributeValueDependency {
     const char* name;
     const char* before = nullptr;
     const char* after = nullptr;
     bool compare_values = false;
     bool case_sensitive = true;
-    bool preserves_container_size = false;
+    bool handles_size_queries = false;
 };
 
 static bool dom_js_selector_mentions_attribute(CssSelector* selector, void* data) {
@@ -6380,11 +6384,10 @@ static bool dom_js_rule_has_attribute_value_dependency(CssRule* rule, void* data
         pool_destroy(scratch);
         return dependency;
     }
-    // retained opacity/transform paint does not change a size-query input.
     auto* dependency = (AttributeValueDependency*)data;
     if (rule->type == CSS_RULE_SCOPE) return true;
     if (rule->type == CSS_RULE_CONTAINER)
-        return !dependency->preserves_container_size ||
+        return !dependency->handles_size_queries ||
             !css_container_query_is_size_only(rule->data.conditional_rule.condition);
     if (radiant_css_rule_selector_has_match(rule, dom_js_selector_mentions_attribute, data)) return true;
     if (rule->type != CSS_RULE_STYLE && rule->type != CSS_RULE_NESTING && rule->type != CSS_RULE_NESTED_DECLARATIONS)
@@ -6426,20 +6429,24 @@ extern "C" bool dom_engine_inline_style_has_css_dependency(DomDocument* doc, Dom
     if (!doc || !element) return true;
     AttributeValueDependency dependency = {"style", old_value, element->get_attribute("style"),
         true, !dom_element_uses_quirks_css(element)};
+    // ordinary inline layout already settles size-only queries; their presence
+    // does not make a declaration write a selector-affecting attribute edit.
+    dependency.handles_size_queries = !dom_js_property_can_commit_without_layout((CssPropertyCode)property);
     if (property == CSS_PROPERTY_OPACITY) {
         // opacity can flatten a preserve-3d subtree; retain its existing layout path.
-        dependency.preserves_container_size = element->transformp()->transform_style != CSS_VALUE_PRESERVE_3D;
+        dependency.handles_size_queries = element->transformp()->transform_style != CSS_VALUE_PRESERVE_3D;
     } else if (property == CSS_PROPERTY_TRANSFORM) {
         CssRule* block = dom_element_inline_declaration_block(element);
         for (size_t i = block ? block->data.style_rule.declaration_count : 0; i > 0; i--) {
             CssDeclaration* declaration = block->data.style_rule.declarations[i - 1];
             if (declaration && declaration->property_code == CSS_PROPERTY_TRANSFORM) {
-                dependency.preserves_container_size = dom_js_transform_keeps_containing_block(element, declaration->value);
+                dependency.handles_size_queries = dom_js_transform_keeps_containing_block(element, declaration->value);
                 break;
             }
         }
     }
-    return attribute_value_has_css_dependency(doc, element, &dependency);
+    return attribute_value_has_css_dependency(doc, element, &dependency) ||
+        radiant_css_shadow_rule_tree_has_match(doc, dom_js_rule_has_attribute_value_dependency, &dependency);
 }
 
 struct CursorAttributeDependency { const char* name; bool found = false; };
@@ -6909,6 +6916,11 @@ static bool dom_js_mutation_can_incremental(DomDocument* doc,
             // the notifier proved no relational attribute match can change.
             // a later stylesheet mutation still forces the broad path.
             continue;
+        }
+        if (record->kind == DOM_JS_MUTATION_ATTRIBUTE &&
+                record->attribute == DOM_JS_MUTATION_ATTRIBUTE_SHADOW_SELECTOR) {
+            if (reason) *reason = "shadow-style-selector";
+            return false;
         }
         if (record->kind == DOM_JS_MUTATION_ATTRIBUTE &&
             record->attribute == DOM_JS_MUTATION_ATTRIBUTE_CLASS) {
@@ -7417,13 +7429,11 @@ static DomElement* dom_js_svg_paint_only_target(DomDocument* doc, const DomJsMut
 
 static DomElement* dom_js_paint_only_target(DomDocument* doc, const DomJsMutationRecord* record) {
     CssPropertyCode property = record->presentation_property;
+    if (!dom_js_property_can_commit_without_layout(property)) return nullptr;
     if (property == CSS_PROPERTY_STROKE_DASHOFFSET) return dom_js_svg_paint_only_target(doc, record);
     bool background_position = property == CSS_PROPERTY_BACKGROUND_POSITION_X ||
         property == CSS_PROPERTY_BACKGROUND_POSITION_Y;
-    bool transform_property = property == CSS_PROPERTY_TRANSFORM || css_individual_transform_index(property) >= 0;
     bool color_filter = property == CSS_PROPERTY_FILTER;
-    if (property != CSS_PROPERTY_OPACITY && !transform_property &&
-        property != CSS_PROPERTY_VISIBILITY && !background_position && !color_filter) return nullptr;
     if (!record->target || !record->target->is_element() || !record->was_connected) return nullptr;
     DomElement* element = record->target->as_element();
     if (element->doc != doc || element->is_synthetic() || element->view_type == RDT_VIEW_NONE ||
@@ -7719,21 +7729,9 @@ static void post_html_handler_rebuild_impl(EventContext* evcon,
 
     DocState* state = (DocState*)doc->state;
 
-    // the fallback drops layout resources; transient owners survive until the
-    // post-layout prune checks their DOM identity (D5.5.1).
-
-    // Broad DOM fallback is a layout-resource epoch change, not a DOM/view-node
-    // identity change; keep the ViewTree shell and retained nodes for StateStore.
-    if (!doc->view_tree) {
-        doc->view_tree = view_tree_shell_create(doc);
-        view_pool_reset_retained(doc->view_tree);
-    } else {
-        view_pool_reset_retained(doc->view_tree);
-    }
-
     DomDocument* saved_doc = evcon->ui_context ? evcon->ui_context->document : nullptr;
     if (evcon->ui_context) evcon->ui_context->document = lam::up(doc);
-    layout_html_doc(evcon->ui_context, doc, true);
+    layout_rebuild_document(evcon->ui_context, doc);
     if (evcon->ui_context) evcon->ui_context->document = lam::up(saved_doc);
 
     int state_pruned = 0;
@@ -12613,7 +12611,7 @@ static bool navigation_async_commit(AsyncScriptNavigation* job) {
         if (same_target) {
             DocumentJsHostConfig host_config = document_js_host_config_inherit(uicon, source);
             document_apply_js_host_config(loaded, &host_config);
-            complete_deferred_html_scripts(loaded);
+            same_target = complete_deferred_html_scripts(loaded);
         }
         if (same_target && navigation_async_follow_redirect(job, iframe)) {
             navigated = true;
@@ -12640,10 +12638,10 @@ static bool navigation_async_commit(AsyncScriptNavigation* job) {
     } else if (live) {
         DocumentJsHostConfig host_config = document_js_host_config_inherit(uicon, source);
         document_apply_js_host_config(loaded, &host_config);
-        complete_deferred_html_scripts(loaded);
-        if (navigation_async_follow_redirect(job, nullptr)) {
+        bool scripts_ready = complete_deferred_html_scripts(loaded);
+        if (scripts_ready && navigation_async_follow_redirect(job, nullptr)) {
             navigated = true;
-        } else {
+        } else if (scripts_ready) {
             BrowsingSession* session = uicon->browsing_session;
             navigation_save_session_scroll(session, source);
             if (session) {

@@ -370,7 +370,7 @@ the generated Lambda CST is built only for `lambda-cst` verification.
    implemented in `lambda/runtime/parser/lambda_parser.c` and semantic AST
    changes in `lambda/runtime/build_ast.cpp`.
 
-4. **Update the transpiler** — add MIR generation in `lambda/runtime/mvp/mvp_mir.cpp` for the new AST node. The former C2MIR source generator was removed and is not an implementation target.
+4. **Update the transpiler** — add MIR generation in `lambda/runtime/mir/mir_lower.cpp` for the new AST node. The former C2MIR source generator was removed and is not an implementation target.
 
 5. **Build and test**:
    ```bash
@@ -438,7 +438,7 @@ Lambda AST  ──→  MVP planner/lowering  ──→  MIR instructions (MIR_MO
                                            MIR generator  ──→  machine code
 ```
 
-- `lambda/runtime/mvp/mvp_mir.cpp` emits MIR IR instructions directly via the MIR C API.
+- `lambda/runtime/mir/mir_lower.cpp` emits MIR IR instructions directly via the MIR C API.
 - No intermediate C code is involved — instructions like `MIR_MOV`, `MIR_ADD`, `MIR_CALL` are built directly.
 
 The vendored MIR dependency still contains its upstream C2MIR frontend, but
@@ -450,9 +450,9 @@ sources use the shared value layouts and runtime ABI during their own build.
 
 | File | Role |
 |------|------|
-| `lambda/runtime/mvp/mvp_driver.cpp` | Eager/satellite compilation, linking, module layout and image lifetime |
-| `lambda/runtime/mvp/mvp_plan.cpp` | Admission, binding, effect and representation planning |
-| `lambda/runtime/mvp/mvp_mir.cpp` | Lowers planned Lambda operations into MIR |
+| `lambda/runtime/mir/mir_driver.cpp` | Eager/satellite compilation, linking, module layout and image lifetime |
+| `lambda/runtime/mir/mir_plan.cpp` | Admission, binding, effect and representation planning |
+| `lambda/runtime/mir/mir_lower.cpp` | Lowers planned Lambda operations into MIR |
 | `lambda/runtime/mir_emitter_shared.hpp` | Shared MIR emission, roots, calls and ABI helpers |
 | `lambda/runtime/mir.c` | MIR contexts, import resolution and native generation |
 | `lambda/runtime/sys_func_registry.c` | Runtime helper addresses and audited import effects |
@@ -470,7 +470,7 @@ values in precise roots (**D6.3**).
 
 ### MVP Compiler Architecture
 
-`mvp_driver.cpp` runs indexed compiler passes: constant materialization/folding,
+`mir_driver.cpp` runs indexed compiler passes: constant materialization/folding,
 planning, lowering, finalization and linking (**D8.2.5**). The planner owns
 per-function binding, representation and return plans; lowering consumes those
 plans through `MirEmitter`. `const_materialize.cpp` holds compiler-neutral

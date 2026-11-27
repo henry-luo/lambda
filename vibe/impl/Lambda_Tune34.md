@@ -353,7 +353,7 @@ Build on Phase 1 and the existing `mir_bitwise_binary_decision`,
 `mir_inline_callee_ok`, and `mir_inline_expr_ok`. Consult shared physical
 lowering in [mir_emitter_shared.hpp](../../lambda/runtime/mir_emitter_shared.hpp).
 The JS examples are `int32`, `typed_array_lanes`, and `string_concat` in
-[mvp_lmd_mir.cpp](../../lambda/js/mvp-lmd/mvp_lmd_mir.cpp); reuse physical
+[mvp_lmd_mir.cpp](../../lambda/js/mir/js_mir_mir.cpp); reuse physical
 operations, while retaining Lambda's own admission and numeric semantics.
 
 - Carry raw machine-word success values through nested bitwise operations,

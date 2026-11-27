@@ -19,6 +19,9 @@ struct BoundaryProp;
 struct ScrollProp;
 struct PositionProp;
 struct EmbedStyle;
+struct CssKeyframes;
+struct CssWebAnimationState;
+struct CssWebAnimationTiming;
 enum DomScrollAlign : uint8_t;
 enum DomScrollBehavior : uint8_t;
 
@@ -81,7 +84,13 @@ enum DomScrollBehavior : uint8_t;
     OP(bool, svg_append_shape, (DomElement* element, RdtPath* path, const void* lengths), (element, path, lengths), false) \
     OP(RdtPath*, svg_text_path, (DomElement* element, const void* lengths, void* fonts), (element, lengths, fonts), nullptr) \
     OP(bool, svg_clip_contains, (DomElement* element, const void* lengths, void* fonts, const RdtMatrix* frame, SvgPathContainsFn contains, const RdtLogicalPoint* point, const void* scope), (element, lengths, fonts, frame, contains, point, scope), false) \
-    OP(void*, web_animation_create, (DomElement* element, void* keyframes, double duration, const void* timing, Pool* pool), (element, keyframes, duration, timing, pool), nullptr) \
+    OP(CssWebAnimationState*, web_animation_create, (DomElement* element, CssKeyframes* keyframes, const CssWebAnimationTiming* timing, Pool* pool), (element, keyframes, timing, pool), nullptr) \
+    OP(double, web_animation_current_time, (const CssWebAnimationState* state), (state), 0.0) \
+    OP(bool, web_animation_is_relevant, (const CssWebAnimationState* state), (state), false) \
+    OP(void, web_animation_play, (CssWebAnimationState* state), (state), (void)0) \
+    OP(void, web_animation_pause, (CssWebAnimationState* state), (state), (void)0) \
+    OP(void, web_animation_seek, (CssWebAnimationState* state, double time), (state, time), (void)0) \
+    OP(void, web_animation_cancel, (CssWebAnimationState* state), (state), (void)0) \
     OP(void, range_adopt_subtree, (DocState* source, DocState* destination, DomNode* subtree), (source, destination, subtree), (void)0) \
     OP(void, range_refresh_lifecycle_pins, (DomDocument* document), (document), (void)0) \
     OP(bool, selection_collapse, (DomSelection* selection, DomNode* node, uint32_t offset, const char** exception), (selection, node, offset, exception), false) \

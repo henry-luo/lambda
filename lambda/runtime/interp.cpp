@@ -9,7 +9,7 @@
 
 #include "shell_pipeline.hpp"
 #include "interp.hpp"
-#include "mvp/mvp.hpp"
+#include "mir/mir.hpp"
 #include "lambda/io/mark_output_builder.hpp"
 #include "output_demand.hpp"
 #include <signal.h>

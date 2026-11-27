@@ -24,15 +24,29 @@ pub let EXTENT = [30.0, 22.5]          // terrain half-size
 pub fn shore(x: float, z: float) float => (let a = math.atan2(z, x),
     sqrt(u.sq(x / RX) + u.sq(z / RZ)) * (1.0 + 0.07 * sin(3.0 * a + 0.6) + 0.045 * sin(5.0 * a + 2.1) + 0.03 * sin(9.0 * a)))
 fn smooth(e: float) float => (let c = u.clamp(e, 0.0, 1.0), c * c * (3.0 - 2.0 * c))
-// floor height: a bowl ~2.2 m deep that shoals to a beach at the waterline, then grassy banks
-pub fn floor_y(x: float, z: float) float^ {
-    let r = shore(x, z)
-    let bumps = 0.3 * noise.perlin2(P, x * 0.11, z * 0.11)^ + 0.1 * noise.perlin2(Q, x * 0.37, z * 0.37)^
-    let base = if (r <= 1.0) -0.15 - 2.0 * smooth((1.0 - r) / 0.55) else min(0.9, -0.15 + (r - 1.0) * 4.5)
+// floor height: a deep bowl shoaling to the waterline, then grassy banks.
+fn floor_base(r: float) float^ =>
+    if (r <= 1.0) -0.15 - 2.0 * smooth((1.0 - r) / 0.55) else min(0.9, -0.15 + (r - 1.0) * 4.5)
+let COARSE_BUMP = 0.3
+let FINE_BUMP = 0.1
+fn floor_height(x: float, z: float, r: float, base: float) float^ {
+    let bumps = COARSE_BUMP * noise.perlin2(P, x * 0.11, z * 0.11)^ + FINE_BUMP * noise.perlin2(Q, x * 0.37, z * 0.37)^
     let roughness = if (r <= 1.0) 0.35 + 0.65 * smooth((1.0 - r) / 0.3) else 0.6
     return base + bumps * roughness
 }
+pub fn floor_y_at_shore(x: float, z: float, r: float) float^ => floor_height(x, z, r, floor_base(r)^)^
+pub fn floor_y(x: float, z: float) float^ => floor_y_at_shore(x, z, shore(x, z))^
 pub fn depth(x: float, z: float) float^ => max(0.0, 0.0 - floor_y(x, z)^)
+
+// callers that only compare against a limit can skip noise when the floor is
+// already below it. The scaled gradient dot products in perlin2 have magnitude
+// at most 2 over a cell, interpolation stays within that bound, and roughness
+// is at most 1.
+pub fn floor_y_below(x: float, z: float, r: float, limit: float) float^ {
+    let base = floor_base(r)^
+    let ceiling = base + 2.000001 * (COARSE_BUMP + FINE_BUMP);
+    if (ceiling < limit) ceiling else floor_height(x, z, r, base)^
+}
 
 // floor colour in linear light: grass banks, a beach, sand shoals with moss, greener deeps
 let GRASS = u.lin([0.42, 0.58, 0.27])

@@ -497,27 +497,25 @@ Detailed implementation progress and measurements belong in a later
 ## Appendix A. Proposed implementation seams
 
 The compiler interface, plans, scalar/array lowering and selector are implemented
-in the existing four MVP files. Separate array/runtime-helper files remain optional
+in the production MIR compiler files, originally developed as the MVP. Separate array/runtime-helper files remain optional
 seams; justified helper changes currently reuse the shared runtime. Current
 behavior and limits are recorded in the
 [implementation note](impl/Lambda_Impl_MIR_MVP.md).
 
 ```text
-lambda/runtime/mvp/
-    mvp.hpp           admission/compile interface and artifact ownership
-    mvp_internal.hpp  small compiler records using existing Type/MirValue/ABI types
-    mvp_driver.cpp    eager/satellite compilation, linking and image ownership
-    mvp_plan.cpp      admission, function/effect/representation planning
-    mvp_mir.cpp       scalar/control/call lowering through MirEmitter
-    mvp_array.cpp     array lowering as M2 needs it
-    mvp_runtime.cpp   only justified adapters/kernels; omit until needed
+lambda/runtime/mir/
+    mir.hpp           admission/compile interface and artifact ownership
+    mir_internal.hpp  small compiler records using existing Type/MirValue/ABI types
+    mir_driver.cpp    eager/satellite compilation, linking and image ownership
+    mir_plan.cpp      admission, function/effect/representation planning
+    mir_lower.cpp       scalar/control/call lowering through MirEmitter
 ```
 
 Keep files cohesive; this is not a requirement to create empty modules. Common
 code stays common, and a third similar lowering case requires extracting the
 shared operation rather than adding another copy.
 
-MVP is the sole MIR compiler. Unset/empty `LAMBDA_MIR_COMPILER` and the
+The compiler began as the MIR MVP and is now the sole production MIR compiler. Unset/empty `LAMBDA_MIR_COMPILER` and the
 compatibility spelling `mvp` use the same compiler and cache identity;
 `production` is rejected because Full MIR is retired. `LAMBDA_EXEC_BACKEND`
 retains its three tiers: `jit` compiles eagerly, `auto` starts in T0 and promotes
@@ -526,7 +524,7 @@ interpreter-only and reject an explicit MVP request. Historical Full comparisons
 must use an archived executable; they are not a current compiler mode.
 
 The shared driver, module linking, view registration and satellite ownership
-live in `mvp/mvp_driver.cpp`. The interpreter calls `lambda_mvp_compile_script`
+live in `mir/mir_driver.cpp`. The interpreter calls `lambda_mvp_compile_script`
 and `lambda_mvp_compile_function_snapshot` and publishes the MVP boxed ABI.
 `FnAnalysis` remains frontend/T0 metadata; MVP owns representation and return
 plans privately, including in immutable worker snapshots (**D8.2.4, D8.3.4**).
@@ -553,7 +551,7 @@ Existing reuse points to inspect before adding code:
 | `lambda/runtime/sys_func_registry.h`, `sys_func_registry.c` | Audited builtin/import contracts and effects. |
 | `lambda/runtime/mir.c`, `mir_policy.hpp`, `mir_dump.cpp` | MIR lifecycle, optimization/link policy and artifacts. |
 | `lambda/runtime/runtime-state.h`, `lambda-root-frame.hpp` | Context ownership and precise native-helper roots. |
-| `lambda/js/mvp-lmd/mvp_lmd_mir.cpp` | Precedent for admission and retained plans; JS coercion/mutation semantics are not Lambda implementations. |
+| `lambda/js/mir/js_mir_mir.cpp` | Precedent for admission and retained plans; JS coercion/mutation semantics are not Lambda implementations. |
 
 Add sources/test targets through `build_lambda_config.json`; never edit generated
 Lua build files. Keep the new MIR files excluded from no-MIR builds. A focused

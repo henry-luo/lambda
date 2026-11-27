@@ -1,5 +1,30 @@
 # Editing viewer document formats
 
+## Transformed preview reuse — 2026-11-26
+
+The project viewer keeps up to 16 successfully rendered previews with a
+combined 16 MiB source-fragment budget. A visit reattaches the preview's DOM
+subtree and leaves the file tree mounted. The cache owns the detached nodes
+through script wrappers, and pane models refer to entries by revision
+(D5.5.1, D5.5.2, D5.5.3, D9.3.4). LaTeX, TikZ, PDF, graph and rendered markup
+previews use this path. TikZ entries include the measured text width. Selecting
+the active file again reloads its dependencies. Leaving an edit session
+invalidates the edited file's entry. The navigation replay checks rendered
+math and graph content, node identity on return, and explicit reload.
+[Preview reuse replay](../../test/ui/doc_viewer_cached_transforms.json).
+
+The named graph and TikZ layout callbacks allocate their results in the
+evaluator heap. Native layout copies the placement values and roots the
+current generated paint layers. Resetting the view releases the old paint
+resource and its roots (D5.5.2, D6.3.3, D9.5.6v2).
+
+In a 12-round release replay over seven documents, physical footprint rose
+from 1,248 to 3,309 MiB before the changes. The rebuilt host used 1,107 MiB
+in the first round and 1,265 MiB in the twelfth. From round four through
+twelve it gained 6 MiB. A 16-round native macOS replay passed all content
+checks, with a two-second median warm round. Raw measurements are under
+`temp/view-navigation-memory/`. Embedded HTML retirement remains RI-260.
+
 ## Viewer header and edit feedback — 2026-11-26
 
 The document header holds View, Edit, and Source in that order where the

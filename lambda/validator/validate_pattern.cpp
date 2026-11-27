@@ -87,22 +87,11 @@ static ValidationResult* validate_single_item_occurrence(
     ConstItem item,
     TypeUnary* type_unary
 ) {
-    ValidationResult* result = create_validation_result(validator->get_pool());
     CountConstraint constraint = get_count_constraint(type_unary);
-
-    // S11.1.6v2: a run of zero is `null`, whatever spells the zero -- `T?`,
-    // `T*` and `T{0}` all admit it, and `T+` and `T{1,}` do not.
-    if (item.type_id() == LMD_TYPE_NULL) {
-        result->valid = constraint.min == 0;
-        if (!result->valid) {
-            add_type_mismatch_error(result, validator, "a value", item.type_id());
-        }
-        return result;
-    }
-
-    // A run of one is the bare value.
-    if (constraint.min <= 1 && (constraint.max == -1 || constraint.max >= 1)) {
-        // Validate the single item against the operand type
+    TypeId actual = item.type_id();
+    bool empty = actual == LMD_TYPE_NULL;
+    // S11.1.6v2: null is a run of zero and a bare value is a run of one.
+    if (!empty && constraint.min <= 1 && (constraint.max == -1 || constraint.max >= 1)) {
         Type* operand_type = unwrap_type(type_unary->operand);
         if (operand_type) {
             TypeType temp_wrapper = {};
@@ -112,8 +101,13 @@ static ValidationResult* validate_single_item_occurrence(
         }
     }
 
-    result->valid = false;
-    add_type_mismatch_error(result, validator, "array/list", item.type_id());
+    bool valid = empty && constraint.min == 0;
+    // Runtime predicates return a verdict. Reporting uses the caller's pool.
+    if (validator->is_fast_mode()) return validation_verdict(valid);
+    ValidationResult* result = create_validation_result(validator->get_pool());
+    if (!result) return nullptr;
+    result->valid = valid;
+    if (!valid) add_type_mismatch_error(result, validator, empty ? "a value" : "array/list", actual);
     return result;
 }
 

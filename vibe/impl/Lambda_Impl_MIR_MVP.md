@@ -63,7 +63,7 @@ containment **S3.5, S7.7.2–S7.7.3**. No formal ruling changes.
 
 ## Implementation
 
-The new compiler lives in [`lambda/runtime/mvp/`](../../lambda/runtime/mvp/):
+The compiler began as the MVP in `lambda/runtime/mvp/`; it now lives in [`lambda/runtime/mir/`](../../lambda/runtime/mir/) (**D8.3.1–D8.3.4**). At the time of this implementation the files were:
 
 | File | Responsibility |
 |---|---|

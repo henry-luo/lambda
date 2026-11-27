@@ -14,14 +14,15 @@
 #include "js_host_hooks.h"
 #include "js_regex_generated_properties.h"
 #include "js_intl_likely_subtags.h"
+#include "js_intl_locale.h"
 #include "js_regex_router_scanner.h"
 #include "js_regexp_compile.h"
 #include "js_state_guards.h"
 #include "lambda/core/js_well_known_names.h"
 #include "js_exec_profile.h"
-#include "mvp-lmd/mvp_lmd.h"
-#include "mvp-lmd/mvp_lmd_runtime.h"
-#include "mvp-lmd/mvp_lmd_dynamic.h"
+#include "mir/js_mir.h"
+#include "mir/js_mir_runtime.h"
+#include "mir/js_mir_dynamic.h"
 #include "lambda/core/well_known_lambda_names.h"
 #include "../jube/jube_node_permission.h"
 #include "../jube/jube_registry.h"
@@ -2358,6 +2359,10 @@ static bool js_can_host_private_slots(Item object) {
 
 static Item js_private_storage_object(Item object) {
     if (js_is_proxy(object)) return js_proxy_private_slots(object, false);
+    // Native subclass fields live in the wrapper's traced expando map.
+    if (const VirtualContainer* container = virtual_container_from_item(object)) {
+        return container->expando;
+    }
     if (get_type_id(object) == LMD_TYPE_FUNC) {
         JsFunction* fn = (JsFunction*)object.function;
         return fn && get_type_id(fn->properties_map) == LMD_TYPE_MAP
@@ -7280,10 +7285,8 @@ static Item js_private_property_set_checked(Item object, Item key, Item value,
     Rooted<Item> value_root(roots, value);
     Rooted<Item> storage_root(roots, object);
     if (!roots.valid()) return ItemError;
-    // Static private elements are stored in a class function's properties map,
-    // just as Proxy private elements are stored outside the public receiver.
-    // PrivateSet must use the common storage resolver or `C.#x = value` misses
-    // the declared static slot and reports a false brand failure (S#7.3.32).
+    // Resolve the physical slot map after the caller's native own-slot check.
+    // Functions, Proxies and host wrappers store slots outside the receiver.
     storage_root.set(js_private_storage_object(object_root.get()));
     if (get_type_id(storage_root.get()) == LMD_TYPE_MAP &&
             property_key_id(it2s(key_root.get())) != NAME_ID_NONE) {
@@ -19067,11 +19070,13 @@ extern "C" Item js_set_collection_new(void) {
 }
 
 
-static Item js_iterator_close_preserve_exception(Item iterator, Item original) {
+Item js_iterator_close_preserve_exception(Item iterator, Item original) {
+    RootFrame roots(2);
+    Rooted<Item> owner(roots, iterator), error(roots, original);
     // IteratorClose is cleanup for an existing abrupt completion; even a failing
     // return method must not replace the original exception in that completion.
-    js_iterator_close(iterator);
-    return js_throw_value(original);
+    js_iterator_close(owner.get());
+    return js_throw_value(error.get());
 }
 
 const JsCollectionOps js_collection_default_ops = {
@@ -24314,7 +24319,7 @@ static void js_namespace_set_object_prototype(Item object) {
     if (get_type_id(prototype) == LMD_TYPE_MAP) js_set_prototype(object, prototype);
 }
 
-static void js_namespace_set_to_string_tag(Item object, const char* name, int len) {
+void js_namespace_set_to_string_tag(Item object, const char* name, int len) {
     Item tag_key = js_well_known_symbol_key(4);
     js_set_key_default(object, tag_key, js_name_item(name, len));
     js_mark_non_writable(object, tag_key);
@@ -24472,8 +24477,6 @@ static unsigned char js_intl_ascii_case(unsigned char value, bool upper = false)
 }
 
 // locale records contain syntax-derived data; all published strings stay precisely rooted.
-enum JsIntlLocaleField { JS_INTL_LOCALE_TAG, JS_INTL_LOCALE_BASE,
-    JS_INTL_LOCALE_LANGUAGE, JS_INTL_LOCALE_SCRIPT, JS_INTL_LOCALE_REGION, JS_INTL_LOCALE_FIELDS };
 struct JsLocaleSubtag { char* text; size_t length; };
 
 static bool js_locale_subtag_matches(const char* text, size_t length, bool alpha, bool digit) {
@@ -24536,8 +24539,12 @@ static Item js_intl_locale_record(Item tag, Item options) {
     uint64_t seen_extensions = 0;
     while (cursor < count) {
         JsLocaleSubtag extension = tags[cursor++];
-        if (extension.length != 1 || extension.text[0] == 'x')
+        if (extension.length != 1)
             return js_throw_range_error("Unsupported locale extension");
+        if (extension.text[0] == 'x') {
+            if (cursor == count) return js_throw_range_error("Empty locale private use");
+            break;
+        }
         unsigned char name = extension.text[0];
         unsigned bit = name >= 'a' ? name - 'a' + 10 : name - '0';
         uint64_t mask = UINT64_C(1) << bit;
@@ -24604,6 +24611,102 @@ static Item js_intl_locale_record(Item tag, Item options) {
     value.set(js_strbuf_take_item(canonical));
     js_set_key_default(record.get(), (Item){.item = i2it(JS_INTL_LOCALE_TAG)}, value.get());
     return record.get();
+}
+
+Item js_intl_requested_locales(Item source) {
+    RootFrame roots(6);
+    Rooted<Item> input(roots, source), result(roots, js_array_new(0));
+    Rooted<Item> key(roots, ItemNull), value(roots, ItemNull), record(roots, ItemNull), tag(roots, ItemNull);
+    JS_RETURN_IF_ERROR(result.get());
+    if (get_type_id(input.get()) == LMD_TYPE_UNDEFINED) return result.get();
+    bool single = get_type_id(input.get()) == LMD_TYPE_STRING || js_object_has_class(input.get(), JS_CLASS_INTL_LOCALE);
+    int64_t count = 1;
+    if (!single) {
+        JS_RETURN_IF_ERROR(js_require_object_coercible(input.get()));
+        input.set(js_to_object(input.get()));
+        JS_RETURN_IF_ERROR(input.get());
+        Item length_key = ItemNull;
+        JS_RETURN_IF_ERROR(js_array_get_length_status(input.get(), &length_key, &count));
+    }
+    for (int64_t index = 0; index < count; ++index) {
+        if (single) value.set(input.get());
+        else {
+            key.set(js_property_index_key(index));
+            Item present = js_has_property(input.get(), js_property_lane_for_canonical_key(key.get()), key.get());
+            JS_RETURN_IF_ERROR(present);
+            if (!it2b(present)) continue;
+            value.set(js_get_key_default(input.get(), key.get()));
+            JS_RETURN_IF_ERROR(value.get());
+        }
+        if (js_object_has_class(value.get(), JS_CLASS_INTL_LOCALE)) {
+            record.set(js_native_private_array_state(value.get(), JS_CLASS_INTL_LOCALE,
+                JS_INTL_LOCALE_FIELDS, "Illegal Intl.Locale receiver"));
+        } else record.set(js_intl_locale_record(value.get(), make_js_undefined()));
+        JS_RETURN_IF_ERROR(record.get());
+        tag.set(js_elements_get_int(record.get(), JS_INTL_LOCALE_TAG));
+        bool duplicate = false;
+        for (int64_t i = 0; i < js_array_length(result.get()); ++i) {
+            Item earlier = js_elements_get_int(result.get(), i);
+            duplicate = js_same_value_zero(tag.get(), js_elements_get_int(earlier, JS_INTL_LOCALE_TAG));
+            if (duplicate) break;
+        }
+        if (!duplicate) JS_RETURN_IF_ERROR(js_array_push(result.get(), record.get()));
+    }
+    return result.get();
+}
+
+Item js_intl_string_option(Item options, const char* name, const char* const* choices,
+                            size_t count, int* index, const char* message) {
+    if (get_type_id(options) == LMD_TYPE_UNDEFINED) return ItemNull;
+    RootFrame roots(2);
+    Rooted<Item> owner(roots, options), value(roots, js_get_key_cstr(owner.get(), name));
+    JS_RETURN_IF_ERROR(value.get());
+    if (get_type_id(value.get()) == LMD_TYPE_UNDEFINED) return ItemNull;
+    value.set(js_to_string(value.get()));
+    JS_RETURN_IF_ERROR(value.get());
+    String* text = it2s(value.get());
+    for (size_t i = 0; i < count; ++i) {
+        size_t length = strlen(choices[i]);
+        if (text->len == length && memcmp(text->chars, choices[i], length) == 0) {
+            *index = (int)i;
+            return ItemNull;
+        }
+    }
+    return js_throw_range_error(message);
+}
+
+Item js_intl_coerce_options(Item source) {
+    if (get_type_id(source) == LMD_TYPE_UNDEFINED) return js_object_create(ItemNull);
+    JS_RETURN_IF_ERROR(js_require_object_coercible(source));
+    return js_to_object(source);
+}
+
+Item js_intl_install_service(Item owner, const char* name, const char* tag,
+                              JsNativeConstructBody construct, const JsIntlServiceMethod* methods,
+                              size_t method_count) {
+    RootFrame roots(4);
+    Rooted<Item> intl(roots, owner), constructor(roots,
+        js_new_native_body_constructor(js_intrinsic_ctor_requires_new_call_body, construct, 0));
+    JS_RETURN_IF_ERROR(constructor.get());
+    Rooted<Item> prototype(roots, js_new_object()), method(roots, ItemNull);
+    JS_RETURN_IF_ERROR(prototype.get());
+    js_set_function_name(constructor.get(), js_name_item(name));
+    JS_RETURN_IF_ERROR(js_initialize_native_constructor_prototype(constructor.get(), prototype.get()));
+    JS_RETURN_IF_ERROR(js_set_key_cstr(prototype.get(), "constructor", constructor.get()));
+    js_mark_non_enumerable(prototype.get(), js_name_item("constructor"));
+    for (size_t i = 0; i < method_count; ++i) {
+        const JsIntlServiceMethod& entry = methods[i];
+        method.set(js_new_native_payload_function(entry.body, 0, entry.arity));
+        JS_RETURN_IF_ERROR(method.get());
+        js_set_function_name(method.get(), js_name_item(entry.name));
+        Item target = entry.is_static ? constructor.get() : prototype.get();
+        JS_RETURN_IF_ERROR(js_set_key_cstr(target, entry.name, method.get()));
+        js_mark_non_enumerable(target, js_name_item(entry.name));
+    }
+    js_namespace_set_to_string_tag(prototype.get(), tag, strlen(tag));
+    JS_RETURN_IF_ERROR(js_set_key_cstr(intl.get(), name, constructor.get()));
+    js_mark_non_enumerable(intl.get(), js_name_item(name));
+    return constructor.get();
 }
 
 static Item js_intl_locale_get(Item callee, Item receiver, Item*, int, uint64_t*) {
@@ -24767,10 +24870,70 @@ enum JsIntlNumberField { JS_INTL_NUMBER_LOCALE, JS_INTL_NUMBER_GROUP,
     JS_INTL_NUMBER_MIN_INTEGER, JS_INTL_NUMBER_MIN_FRACTION, JS_INTL_NUMBER_MAX_FRACTION,
     JS_INTL_NUMBER_STRIP_ZEROS, JS_INTL_NUMBER_BOUND_FORMAT, JS_INTL_NUMBER_PERCENT,
     JS_INTL_NUMBER_COMPACT, JS_INTL_NUMBER_COMPACT_LONG, JS_INTL_NUMBER_COMPACT_DEFAULT,
+    JS_INTL_NUMBER_CURRENCY, JS_INTL_NUMBER_CURRENCY_DISPLAY, JS_INTL_NUMBER_CURRENCY_SIGN,
     JS_INTL_NUMBER_FIELDS };
 
 enum JsIntlNumberGrouping { JS_INTL_GROUP_OFF, JS_INTL_GROUP_ALWAYS, JS_INTL_GROUP_AUTO, JS_INTL_GROUP_MIN2 };
 static const char* js_intl_number_group_names[] = {"", "always", "auto", "min2"};
+
+enum JsIntlNumberStyle { JS_INTL_DECIMAL, JS_INTL_PERCENT, JS_INTL_CURRENCY };
+enum JsIntlCurrencyDisplay { JS_INTL_CURRENCY_SYMBOL, JS_INTL_CURRENCY_NARROW, JS_INTL_CURRENCY_CODE, JS_INTL_CURRENCY_NAME };
+static const char* const js_intl_number_styles[] = {"decimal", "percent", "currency"};
+static const char* const js_intl_currency_displays[] = {"symbol", "narrowSymbol", "code", "name"};
+static const char* const js_intl_currency_signs[] = {"standard", "accounting"};
+
+struct JsIntlCurrencyDigits { const char* code; int digits; };
+struct JsIntlCurrencyNames { const char* symbol; const char* narrow; const char* one; const char* other; };
+struct JsIntlCurrencyCode { const char* code; uint16_t names; };
+struct JsIntlCurrencyLocale { const char* name; uint16_t forms; uint16_t first; uint16_t count; };
+struct JsIntlCurrencyForms {
+    const char* standard;
+    const char* standard_alpha;
+    const char* accounting;
+    const char* accounting_alpha;
+    const char* number;
+    const char* group;
+    const char* decimal;
+    const char* minus;
+    const char* name_separator;
+};
+
+#include "js_intl_currency_data.h"
+
+template <typename Entry>
+static const Entry* js_intl_currency_find(const char* code, const Entry* entries, size_t count) {
+    return (const Entry*)bsearch(code, entries, count, sizeof(Entry), [](const void* key, const void* entry) {
+        return strcmp((const char*)key, ((const Entry*)entry)->code);
+    });
+}
+
+static const JsIntlCurrencyNames* js_intl_currency_labels(const JsIntlCurrencyLocale& locale, const char* code) {
+    const JsIntlCurrencyCode* names = js_intl_currency_find(code, js_intl_currency_codes + locale.first, locale.count);
+    if (!names && locale.first) {
+        const auto& english = js_intl_currency_locales[0];
+        names = js_intl_currency_find(code, js_intl_currency_codes + english.first, english.count);
+    }
+    return names ? &js_intl_currency_names[names->names] : nullptr;
+}
+
+static Item js_intl_number_currency_option(Item options) {
+    if (get_type_id(options) == LMD_TYPE_UNDEFINED) return options;
+    RootFrame roots(1);
+    Rooted<Item> value(roots, js_get_key_cstr(options, "currency"));
+    JS_RETURN_IF_ERROR(value.get());
+    if (get_type_id(value.get()) == LMD_TYPE_UNDEFINED) return value.get();
+    value.set(js_to_string(value.get()));
+    JS_RETURN_IF_ERROR(value.get());
+    String* text = it2s(value.get());
+    char code[4] = {};
+    if (text->len != 3) return js_throw_range_error("Invalid currency code");
+    for (size_t i = 0; i < 3; ++i) {
+        code[i] = js_intl_ascii_case(text->chars[i], true);
+        if (code[i] < 'A' || code[i] > 'Z') return js_throw_range_error("Invalid currency code");
+    }
+    return js_name_item(code, 3);
+}
+
 // compact decimal patterns from CLDR English; locale selection retains the existing English profile.
 static const struct { int exponent; const char* short_name; const char* long_name; } js_intl_number_compact[] = {
     {0, "", ""}, {3, "K", "thousand"}, {6, "M", "million"},
@@ -24782,13 +24945,93 @@ static Item js_intl_number_state(Item receiver) {
         JS_INTL_NUMBER_FIELDS, "Illegal Intl.NumberFormat receiver");
 }
 
-static Item js_intl_number_part(Item parts, const char* type, const char* text, size_t length) {
+Item js_intl_append_part(Item parts, const char* type, Item part_value) {
     RootFrame roots(4);
-    Rooted<Item> output(roots, parts), part(roots, js_new_object());
-    Rooted<Item> value(roots, js_make_string_len(text, length)), kind(roots, js_name_item(type));
+    Rooted<Item> output(roots, parts), value(roots, part_value);
+    JS_RETURN_IF_ERROR(value.get());
+    Rooted<Item> part(roots, js_new_object()), kind(roots, js_name_item(type));
     JS_RETURN_IF_ERROR(js_create_data_property(part.get(), js_name_item("type"), kind.get()));
     JS_RETURN_IF_ERROR(js_create_data_property(part.get(), js_name_item("value"), value.get()));
     return js_array_push(output.get(), part.get());
+}
+
+static Item js_intl_number_part(Item parts, const char* type, const char* text, size_t length) {
+    RootFrame roots(1);
+    Rooted<Item> output(roots, parts);
+    return js_intl_append_part(output.get(), type, js_make_string_len(text, length));
+}
+
+struct JsIntlNumberPattern {
+    StrView before;
+    StrView after;
+    int primary_group = 3;
+    int secondary_group = 3;
+    bool leading_minus;
+};
+
+static JsIntlNumberPattern js_intl_number_pattern(const char* pattern, bool negative) {
+    const char* separator = strchr(pattern, ';');
+    const char* start = negative && separator ? separator + 1 : pattern;
+    const char* end = separator && start == pattern ? separator : start + strlen(start);
+    const char* first = start + strcspn(start, "#0");
+    const char* last = first + strspn(first, "#0,.");
+    JsIntlNumberPattern found = {{start, (size_t)(first - start)}, {last, (size_t)(end - last)}, 3, 3,
+        negative && !separator};
+    // Read the two rightmost CLDR grouping widths (e.g. #,##,##0 in en-IN).
+    int digits = 0, previous_group = 0, separators = 0;
+    for (const char* digit = first; digit != last && *digit != '.'; ++digit) {
+        if (*digit == ',') { previous_group = digits; digits = 0; ++separators; }
+        else ++digits;
+    }
+    if (separators) {
+        found.primary_group = digits;
+        found.secondary_group = separators == 1 ? digits : previous_group;
+    }
+    return found;
+}
+
+static bool js_intl_currency_alpha_boundary(const char* symbol, bool prefix) {
+    size_t length = strlen(symbol);
+    if (!length) return false;
+    size_t start = prefix ? length - 1 : 0;
+    while (start && ((uint8_t)symbol[start] & 0xc0) == 0x80) --start;
+    uint32_t codepoint = 0;
+    js_utf8_decode_codepoint(symbol, (int)length, (int)start, &codepoint);
+    utf8proc_category_t category = utf8proc_category(codepoint);
+    return category >= UTF8PROC_CATEGORY_LU && category <= UTF8PROC_CATEGORY_LO;
+}
+
+static JsIntlNumberPattern js_intl_currency_pattern(const JsIntlCurrencyForms& forms,
+        const char* symbol, bool accounting, bool negative, bool finite) {
+    const char* base = accounting ? forms.accounting : forms.standard;
+    const char* alpha = accounting ? forms.accounting_alpha : forms.standard_alpha;
+    const char* mark = strstr(base, "¤");
+    bool currency_is_prefix = mark && mark < base + strcspn(base, "#0");
+    if (finite && js_intl_currency_alpha_boundary(symbol, currency_is_prefix)) base = alpha;
+    return js_intl_number_pattern(base, negative);
+}
+
+static Item js_intl_currency_affix(Item parts, StrView affix, const char* currency, const char* minus) {
+    RootFrame roots(1);
+    Rooted<Item> output(roots, parts);
+    size_t literal_start = 0;
+    for (size_t index = 0; index < affix.length;) {
+        bool currency_slot = index + 2 <= affix.length && !memcmp(affix.str + index, "¤", 2);
+        bool minus_slot = affix.str[index] == '-';
+        if (!currency_slot && !minus_slot) { ++index; continue; }
+        if (index > literal_start) {
+            JS_RETURN_IF_ERROR(js_intl_number_part(output.get(), "literal",
+                affix.str + literal_start, index - literal_start));
+        }
+        const char* value = currency_slot ? currency : minus;
+        JS_RETURN_IF_ERROR(js_intl_number_part(output.get(), currency_slot ? "currency" : "minusSign", value, strlen(value)));
+        index += currency_slot ? 2 : 1;
+        literal_start = index;
+    }
+    if (literal_start < affix.length) {
+        return js_intl_number_part(output.get(), "literal", affix.str + literal_start, affix.length - literal_start);
+    }
+    return ItemNull;
 }
 
 static Item js_intl_number_render(Item state, Item input, bool parts) {
@@ -24802,7 +25045,32 @@ static Item js_intl_number_render(Item state, Item input, bool parts) {
     bool percent = it2b(js_elements_get_int(record.get(), JS_INTL_NUMBER_PERCENT));
     bool compact = it2b(js_elements_get_int(record.get(), JS_INTL_NUMBER_COMPACT));
     bool negative = signbit(value) && !isnan(value);
-    if (negative) JS_RETURN_IF_ERROR(js_intl_number_part(result.get(), "minusSign", "-", 1));
+    JsIntlNumberPattern pattern = {{}, {}, 3, 3, negative};
+    const JsIntlCurrencyForms* forms = nullptr;
+    const JsIntlCurrencyNames* names = nullptr;
+    const char* label = nullptr;
+    int display = JS_INTL_CURRENCY_SYMBOL;
+    char code[4] = {};
+    Item currency = js_elements_get_int(record.get(), JS_INTL_NUMBER_CURRENCY);
+    if (get_type_id(currency) == LMD_TYPE_STRING) {
+        memcpy(code, it2s(currency)->chars, 3);
+        String* locale_name = it2s(js_elements_get_int(record.get(), JS_INTL_NUMBER_LOCALE));
+        const JsIntlCurrencyLocale* locale = js_intl_lookup_locale({locale_name->chars, locale_name->len}, js_intl_currency_locales);
+        if (!locale) locale = &js_intl_currency_locales[0];
+        forms = &js_intl_currency_forms[locale->forms];
+        names = js_intl_currency_labels(*locale, code);
+        display = (int)it2i(js_elements_get_int(record.get(), JS_INTL_NUMBER_CURRENCY_DISPLAY));
+        bool accounting = it2i(js_elements_get_int(record.get(), JS_INTL_NUMBER_CURRENCY_SIGN)) != 0;
+        label = code;
+        if (names && display == JS_INTL_CURRENCY_SYMBOL) label = names->symbol;
+        if (names && display == JS_INTL_CURRENCY_NARROW) label = names->narrow;
+        pattern = display == JS_INTL_CURRENCY_NAME ? js_intl_number_pattern(forms->number, negative) :
+            js_intl_currency_pattern(*forms, label, accounting, negative, isfinite(value));
+    }
+    const char* minus = forms ? forms->minus : "-";
+    if (pattern.leading_minus) JS_RETURN_IF_ERROR(js_intl_number_part(result.get(), "minusSign", minus, strlen(minus)));
+    if (forms) JS_RETURN_IF_ERROR(js_intl_currency_affix(result.get(), pattern.before, label, minus));
+    bool singular_currency_name = false;
     if (!isfinite(value)) {
         JS_RETURN_IF_ERROR(js_intl_number_part(result.get(), isnan(value) ? "nan" : "infinity",
             isnan(value) ? "NaN" : "\xe2\x88\x9e", 3));
@@ -24858,6 +25126,8 @@ static Item js_intl_number_render(Item state, Item input, bool parts) {
         for (int i = 0; i < fraction; i++) if (digits[integer + i] != '0') whole = false;
         if (whole && it2b(js_elements_get_int(record.get(), JS_INTL_NUMBER_STRIP_ZEROS))) minimum_fraction = 0;
         while (fraction > minimum_fraction && digits[integer + fraction - 1] == '0') fraction--;
+        // English names follow the rounded quantity and its visible fraction digits.
+        singular_currency_name = fraction == 0 && integer == 1 && digits[0] == '1';
         if (integer < minimum_integer) {
             int padding = minimum_integer - integer;
             memmove(digits + padding, digits, integer + fraction);
@@ -24865,15 +25135,22 @@ static Item js_intl_number_render(Item state, Item input, bool parts) {
         }
         int group_mode = (int)it2i(js_elements_get_int(record.get(), JS_INTL_NUMBER_GROUP));
         bool minimum_two = group_mode == JS_INTL_GROUP_MIN2 || (compact && group_mode == JS_INTL_GROUP_AUTO);
-        bool grouping = group_mode != JS_INTL_GROUP_OFF && (!minimum_two || integer >= 5);
+        bool grouping = group_mode != JS_INTL_GROUP_OFF && (!minimum_two || integer >= pattern.primary_group + 2);
+        const char* group = forms ? forms->group : ",";
+        const char* decimal = forms ? forms->decimal : ".";
         for (int start = 0; start < integer;) {
-            int length = grouping ? (start ? 3 : (integer - 1) % 3 + 1) : integer;
+            int remaining = integer - start;
+            int length = remaining;
+            if (grouping && remaining > pattern.primary_group) {
+                length = start ? pattern.secondary_group :
+                    (remaining - pattern.primary_group - 1) % pattern.secondary_group + 1;
+            }
             JS_RETURN_IF_ERROR(js_intl_number_part(result.get(), "integer", digits + start, length));
             start += length;
-            if (start < integer) JS_RETURN_IF_ERROR(js_intl_number_part(result.get(), "group", ",", 1));
+            if (start < integer) JS_RETURN_IF_ERROR(js_intl_number_part(result.get(), "group", group, strlen(group)));
         }
         if (fraction) {
-            JS_RETURN_IF_ERROR(js_intl_number_part(result.get(), "decimal", ".", 1));
+            JS_RETURN_IF_ERROR(js_intl_number_part(result.get(), "decimal", decimal, strlen(decimal)));
             JS_RETURN_IF_ERROR(js_intl_number_part(result.get(), "fraction", digits + integer, fraction));
         }
         if (unit) {
@@ -24884,6 +25161,14 @@ static Item js_intl_number_render(Item state, Item input, bool parts) {
         }
     }
     if (percent) JS_RETURN_IF_ERROR(js_intl_number_part(result.get(), "percentSign", "%", 1));
+    if (forms) {
+        JS_RETURN_IF_ERROR(js_intl_currency_affix(result.get(), pattern.after, label, minus));
+        if (display == JS_INTL_CURRENCY_NAME) {
+            const char* name = names ? (singular_currency_name ? names->one : names->other) : code;
+            JS_RETURN_IF_ERROR(js_intl_number_part(result.get(), "literal", forms->name_separator, strlen(forms->name_separator)));
+            JS_RETURN_IF_ERROR(js_intl_number_part(result.get(), "currency", name, strlen(name)));
+        }
+    }
     if (parts) return result.get();
     StrBuf* buffer = strbuf_new();
     if (!buffer) return ItemError;
@@ -24926,6 +25211,7 @@ static Item js_intl_number_format_options(Item receiver, Item*, int) {
     Rooted<Item> result(roots, js_new_object()), value(roots, ItemNull);
     bool compact = it2b(js_elements_get_int(record.get(), JS_INTL_NUMBER_COMPACT));
     bool compact_default = it2b(js_elements_get_int(record.get(), JS_INTL_NUMBER_COMPACT_DEFAULT));
+    bool currency = get_type_id(js_elements_get_int(record.get(), JS_INTL_NUMBER_CURRENCY)) == LMD_TYPE_STRING;
     const char* numeric[] = {"locale", "useGrouping", "minimumIntegerDigits", "minimumFractionDigits", "maximumFractionDigits"};
     for (size_t i = 0; i < sizeof(numeric) / sizeof(*numeric); i++) {
         value.set(js_elements_get_int(record.get(), i));
@@ -24935,15 +25221,28 @@ static Item js_intl_number_format_options(Item receiver, Item*, int) {
         }
         JS_RETURN_IF_ERROR(js_create_data_property(result.get(), js_name_item(numeric[i]), value.get()));
     }
+    const char* style = currency ? "currency" :
+        it2b(js_elements_get_int(record.get(), JS_INTL_NUMBER_PERCENT)) ? "percent" : "decimal";
     const struct { const char* name; const char* value; } settings[] = {
-        {"numberingSystem", "latn"},
-        {"style", it2b(js_elements_get_int(record.get(), JS_INTL_NUMBER_PERCENT)) ? "percent" : "decimal"},
+        {"numberingSystem", "latn"}, {"style", style},
         {"notation", compact ? "compact" : "standard"},
         {"signDisplay", "auto"}, {"roundingMode", "halfExpand"},
         {"roundingPriority", compact_default ? "morePrecision" : "auto"}
     };
     for (const auto& setting : settings)
         JS_RETURN_IF_ERROR(js_create_data_property(result.get(), js_name_item(setting.name), js_name_item(setting.value)));
+    if (currency) {
+        const struct { const char* name; JsIntlNumberField field; const char* const* choices; } fields[] = {
+            {"currency", JS_INTL_NUMBER_CURRENCY, nullptr},
+            {"currencyDisplay", JS_INTL_NUMBER_CURRENCY_DISPLAY, js_intl_currency_displays},
+            {"currencySign", JS_INTL_NUMBER_CURRENCY_SIGN, js_intl_currency_signs},
+        };
+        for (const auto& field : fields) {
+            value.set(js_elements_get_int(record.get(), field.field));
+            if (field.choices) value.set(js_name_item(field.choices[it2i(value.get())]));
+            JS_RETURN_IF_ERROR(js_create_data_property(result.get(), js_name_item(field.name), value.get()));
+        }
+    }
     if (compact) {
         value.set(js_name_item(it2b(js_elements_get_int(record.get(), JS_INTL_NUMBER_COMPACT_LONG)) ? "long" : "short"));
         JS_RETURN_IF_ERROR(js_create_data_property(result.get(), js_name_item("compactDisplay"), value.get()));
@@ -24960,7 +25259,7 @@ static Item js_intl_number_format_options(Item receiver, Item*, int) {
 
 static Item js_intl_number_format_construct_body(Item callee, Item* args,
         int argc, Item new_target, uint64_t* result_home) {
-    RootFrame roots(7);
+    RootFrame roots(8);
     Rooted<Item> constructor(roots, callee), target(roots, new_target);
     Rooted<Item> locales(roots, argc ? args[0] : make_js_undefined());
     Rooted<Item> options(roots, argc > 1 ? args[1] : make_js_undefined());
@@ -24976,9 +25275,19 @@ static Item js_intl_number_format_construct_body(Item callee, Item* args,
     }
     js_array_push(record.get(), value.get());
     if (get_type_id(options.get()) == LMD_TYPE_NULL) return js_throw_type_error("NumberFormat options cannot be null");
-    bool percent = false, compact = false, long_compact = false;
+    int style = JS_INTL_DECIMAL, currency_display = JS_INTL_CURRENCY_SYMBOL, currency_sign = 0;
+    JS_RETURN_IF_ERROR(js_intl_string_option(options.get(), "style", js_intl_number_styles, &style, "Unsupported NumberFormat option"));
+    Rooted<Item> currency(roots, js_intl_number_currency_option(options.get()));
+    JS_RETURN_IF_ERROR(currency.get());
+    if (style == JS_INTL_CURRENCY && get_type_id(currency.get()) == LMD_TYPE_UNDEFINED)
+        return js_throw_type_error("Currency style requires a currency code");
+    JS_RETURN_IF_ERROR(js_intl_string_option(options.get(), "currencyDisplay", js_intl_currency_displays,
+        &currency_display, "Invalid NumberFormat currencyDisplay"));
+    JS_RETURN_IF_ERROR(js_intl_string_option(options.get(), "currencySign", js_intl_currency_signs,
+        &currency_sign, "Invalid NumberFormat currencySign"));
+    bool percent = style == JS_INTL_PERCENT, compact = false, long_compact = false;
     const struct { const char* name; const char* supported; const char* alternate; bool* selected; } strings[] = {
-        {"style", "decimal", "percent", &percent}, {"notation", "standard", "compact", &compact},
+        {"notation", "standard", "compact", &compact},
         {"compactDisplay", "short", "long", &long_compact}, {"signDisplay", "auto", nullptr, nullptr},
         {"numberingSystem", "latn", nullptr, nullptr}, {"roundingMode", "halfExpand", nullptr, nullptr},
         {"roundingPriority", "auto", nullptr, nullptr}
@@ -24992,6 +25301,8 @@ static Item js_intl_number_format_construct_body(Item callee, Item* args,
             return js_throw_range_error("Unsupported NumberFormat option");
         *option.selected = true;
     }
+    if (compact && style == JS_INTL_CURRENCY)
+        return js_throw_range_error("Compact currency notation is unavailable");
     value.set(get_type_id(options.get()) == LMD_TYPE_UNDEFINED ? make_js_undefined() : js_get_key_cstr(options.get(), "useGrouping"));
     JS_RETURN_IF_ERROR(value.get());
     int group_default = compact ? JS_INTL_GROUP_MIN2 : JS_INTL_GROUP_AUTO, group = group_default;
@@ -25004,27 +25315,32 @@ static Item js_intl_number_format_construct_body(Item callee, Item* args,
     } else if (get_type_id(value.get()) != LMD_TYPE_UNDEFINED)
         group = js_is_truthy(value.get()) ? JS_INTL_GROUP_ALWAYS : JS_INTL_GROUP_OFF;
     js_array_push(record.get(), (Item){.item = i2it(group)});
-    const char* digits[] = {"minimumIntegerDigits", "minimumFractionDigits", "maximumFractionDigits"};
-    int minimum_fraction = 0;
-    bool fraction_options = false;
-    for (size_t i = 0; i < 3; i++) {
-        int maximum_default = percent ? 0 : 3;
-        int fallback = i == 0 ? 1 : i == 1 ? 0 : minimum_fraction > maximum_default ? minimum_fraction : maximum_default;
-        int low = i == 0 ? 1 : 0, high = i == 0 ? 21 : 100;
-        value.set(get_type_id(options.get()) == LMD_TYPE_UNDEFINED ? make_js_undefined() : js_get_key_cstr(options.get(), digits[i]));
-        JS_RETURN_IF_ERROR(value.get());
-        double number = fallback;
-        if (get_type_id(value.get()) != LMD_TYPE_UNDEFINED) {
-            if (i) fraction_options = true;
-            value.set(js_to_number(value.get())); JS_RETURN_IF_ERROR(value.get());
-            item_try_to_double(value.get(), &number);
-            if (!isfinite(number) || number < low || number > high) return js_throw_range_error("Invalid NumberFormat digit option");
-        }
-        int integer = (int)floor(number);
-        if (i == 1) minimum_fraction = integer;
-        if (i == 2 && integer < minimum_fraction) return js_throw_range_error("Invalid fraction digit range");
-        js_array_push(record.get(), (Item){.item = i2it(integer)});
+    int minimum_default = 0, maximum_default = percent ? 0 : 3;
+    if (style == JS_INTL_CURRENCY) {
+        const auto* digits = js_intl_currency_find(it2s(currency.get())->chars, js_intl_currency_digits,
+            sizeof(js_intl_currency_digits) / sizeof(*js_intl_currency_digits));
+        minimum_default = maximum_default = digits ? digits->digits : js_intl_currency_default_digits;
     }
+    const struct { const char* name; int low; int high; } digit_options[] = {
+        {"minimumIntegerDigits", 1, 21}, {"minimumFractionDigits", 0, 100}, {"maximumFractionDigits", 0, 100},
+    };
+    int digits[] = {1, -1, -1};
+    if (get_type_id(options.get()) != LMD_TYPE_UNDEFINED) for (size_t i = 0; i < sizeof(digits) / sizeof(*digits); ++i) {
+        const auto& option = digit_options[i];
+        value.set(js_get_key_cstr(options.get(), option.name)); JS_RETURN_IF_ERROR(value.get());
+        if (get_type_id(value.get()) == LMD_TYPE_UNDEFINED) continue;
+        value.set(js_to_number(value.get())); JS_RETURN_IF_ERROR(value.get());
+        double number = it2d(value.get());
+        if (!isfinite(number) || number < option.low || number > option.high)
+            return js_throw_range_error("Invalid NumberFormat digit option");
+        digits[i] = (int)floor(number);
+    }
+    // ECMA-402 derives each omitted bound from the supplied bound and the style's defaults.
+    bool fraction_options = digits[1] >= 0 || digits[2] >= 0;
+    if (digits[1] < 0) digits[1] = digits[2] >= 0 && digits[2] < minimum_default ? digits[2] : minimum_default;
+    if (digits[2] < 0) digits[2] = digits[1] > maximum_default ? digits[1] : maximum_default;
+    if (digits[2] < digits[1]) return js_throw_range_error("Invalid fraction digit range");
+    for (int digit : digits) JS_RETURN_IF_ERROR(js_array_push(record.get(), (Item){.item = i2it(digit)}));
     if (compact && get_type_id(options.get()) != LMD_TYPE_UNDEFINED) {
         const char* significant[] = {"minimumSignificantDigits", "maximumSignificantDigits"};
         for (const char* name : significant) {
@@ -25047,6 +25363,9 @@ static Item js_intl_number_format_construct_body(Item callee, Item* args,
     if (compact_default) js_elements_set_int(record.get(), JS_INTL_NUMBER_MAX_FRACTION, (Item){.item = i2it(0)});
     const bool flags[] = {percent, compact, long_compact, compact_default};
     for (bool flag : flags) JS_RETURN_IF_ERROR(js_array_push(record.get(), (Item){.item = b2it(flag)}));
+    JS_RETURN_IF_ERROR(js_array_push(record.get(), style == JS_INTL_CURRENCY ? currency.get() : make_js_undefined()));
+    JS_RETURN_IF_ERROR(js_array_push(record.get(), (Item){.item = i2it(currency_display)}));
+    JS_RETURN_IF_ERROR(js_array_push(record.get(), (Item){.item = i2it(currency_sign)}));
     value.set(js_private_key_for_class(constructor.get(), js_name_item("#IntlNumberFormat")));
     JS_RETURN_IF_ERROR(value.get());
     result.set(js_native_private_array_object(JS_CLASS_INTL_NUMBER_FORMAT, value.get(), record.get(), ItemNull));
@@ -25432,6 +25751,8 @@ extern "C" Item js_get_intl_object_value() {
         supported_locales_root.get());
     js_intl_object = intl_root.get();
     JS_RETURN_IF_ERROR(js_intl_locale_install(intl_root.get()));
+    JS_RETURN_IF_ERROR(js_intl_plural_rules_install(intl_root.get()));
+    JS_RETURN_IF_ERROR(js_intl_list_format_install(intl_root.get()));
     js_set_key_cstr(intl_root.get(), "Segmenter", segmenter_ctor_root.get());
     js_set_key_cstr(intl_root.get(), "NumberFormat", number_format_ctor_root.get());
     js_set_key_cstr(intl_root.get(), "Collator", collator_ctor_root.get());
@@ -25454,6 +25775,7 @@ static Item js_get_console_object() {
         M("log", js_console_log_span) M("warn", js_console_warn_span) \
         M("error", js_console_error_span) M("info", js_console_log_span) \
         M("debug", js_console_debug_span) \
+        M("assert", js_console_assert_span) \
         M("group", js_console_group_span) M("groupCollapsed", js_console_group_span)
 #define JS_CONSOLE_INSTALL_SPAN(name, target) \
         js_runtime_set_native_span_method(js_console_object, name, target);
@@ -25466,7 +25788,7 @@ static Item js_get_console_object() {
         M("timeLog", js_console_timeLog_fn) M("clear", js_console_clear_fn) \
         M("groupEnd", js_console_groupEnd_fn) \
         M("trace", js_console_trace_fn) M("dir", js_console_dir_fn) \
-        M("table", js_console_table_fn) M("assert", js_console_assert_fn)
+        M("table", js_console_table_fn)
 #define JS_CONSOLE_INSTALL_METHOD(name, target) \
         js_runtime_set_native_method(js_console_object, name, target);
         JS_CONSOLE_METHODS(JS_CONSOLE_INSTALL_METHOD)

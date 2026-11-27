@@ -479,7 +479,7 @@ and source audit; executed counts alone still do not establish CPU shares.
 | [Lambda MIR compiler](../../lambda/runtime/transpile-mir.cpp) | `MirIndexLoadPolicy`, `mir_exact_array_contract_for_object`, `mir_index_expr_is_native_int`, `mir_int_lane_interval`, `mir_condition_may_error`, `mir_equality_needs_item`, `mir_inline_call_target`, string fusion and record plans |
 | [Shared MIR emitter](../../lambda/runtime/mir_emitter_shared.hpp) | `em_finalize_recorded_roots`, `em_root_reload_live_values_after_call`; change only after a residual root/effect defect is demonstrated |
 | [Runtime helpers](../../lambda/runtime/lambda-eval.cpp) | `string_buffer_join`, existing COW/string profiles and executed-call instrumentation |
-| [JS MIR compiler](../../lambda/js/mvp-lmd/mvp_lmd_mir.cpp) | `typed_array_lanes`, native `charCodeAt` lowering, bounded inline planning and recursive expansion as comparative evidence |
+| [JS MIR compiler](../../lambda/js/mir/js_mir_mir.cpp) | `typed_array_lanes`, native `charCodeAt` lowering, bounded inline planning and recursive expansion as comparative evidence |
 | [Benchmark registry](../../test/benchmark/run_benchmarks.py) | Actual source paths, include expansion, workload wrappers and tier selection |
 | [Standard benchmark runner](../../test/benchmark/run_standard_benchmarks.py) | Release provenance, typed expansion, statuses and result serialization |
 

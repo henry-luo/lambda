@@ -23,7 +23,7 @@ remain separate from that archived whole-population score.
 **Performance history:** [MVP_Result3–9](../../test/benchmark/js_mvp_lmd/README.md)
 retains one representative comparison per major tuning phase.
 
-**Destination:** `lambda/js/mvp-lmd/`
+**Destination:** `lambda/js/mir/` (originally `lambda/js/mvp-lmd/` for the MVP-Lmd prototype; the production MIR engine follows **D8.4.2**).
 
 **Scope:** JS execution on Lambda's values, containers, memory ownership, and
 MIR infrastructure. This document records design and the latest measurement
@@ -2003,7 +2003,7 @@ before the legacy compiler retirement in §36.2.
 | Source lines | **13,874** | **32,314** |
 
 MVP's compiler has **57% fewer source lines**. The counted files are
-`mvp_lmd_mir.cpp` versus `transpile_js_mir.cpp` and `js_mir_*.cpp`; the legacy
+`js_mir_mir.cpp` versus `transpile_js_mir.cpp` and `js_mir_*.cpp`; the legacy
 file family includes retained shared entrypoint/cache integration.
 
 **Cleaned native helper count (2026-10-17):** working tree based on `b37f6877a`,

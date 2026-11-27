@@ -39,7 +39,7 @@
 #include "js_class.h"
 #include "js_props.h"
 #include "js_property_attrs.h"
-#include "mvp-lmd/mvp_lmd_runtime.h"
+#include "mir/js_mir_runtime.h"
 #include "../dom/dom_ops.h"
 #include "lambda/input/css/css_style.hpp"
 #include "js_runtime_state.hpp"
@@ -1686,7 +1686,7 @@ extern "C" void dom_install_collection_globals(void) {
     js_dom_install_interface(global, "CanvasRenderingContext2D");
     dom_publish_value_constructor(global, "ImageData",
         js_new_native_body_constructor(dom_image_data_call, dom_image_data_construct, 2), true);
-    dom_canvas_install_readback_interface(js_get_key_cstr(global, "ImageData"),
+    dom_canvas_install_pixel_interface(js_get_key_cstr(global, "ImageData"),
         _iface_proto(global, "ImageData"), _iface_proto(global, "CanvasRenderingContext2D"));
     dom_canvas_install_html_interface(_iface_proto(global, "HTMLCanvasElement"));
     _install_document_fragment_iface(global);

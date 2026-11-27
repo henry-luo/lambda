@@ -24,6 +24,7 @@
 #include <stddef.h>
 #include "lib/layout_boxes.h"
 #include "lib/dom_image.h"
+#include "lib/font/css_font_load.h"
 
 struct DomDocument;
 struct DomElement;
@@ -46,6 +47,12 @@ void dom_engine_dispatch_author_template_participant(void* dom_node, Item event,
 DocState* dom_engine_document_ensure_state(DomDocument* document, const char* owner);
 void dom_engine_reset_wrapper_cache(void);
 bool dom_engine_exec_command(void* document, const char* command, const char* value);
+
+CssFontLoad* dom_engine_css_font_load_begin(DomDocument* document, const char* font, size_t font_len,
+    const char* text, size_t text_len, CssFontLoadStatus* status);
+CssFontLoadStatus dom_engine_css_font_load_poll(DomDocument* document, CssFontLoad* request);
+bool dom_engine_css_font_load_face(const CssFontLoad* request, size_t index, CssFontLoadFaceInfo* result);
+void dom_engine_css_font_load_destroy(CssFontLoad* request);
 
 // session history (browsing-context state, owned by the shell)
 bool dom_engine_history_initialize(DomDocument* document);
@@ -107,7 +114,7 @@ void dom_engine_sync_pseudo_state(void* view, uint32_t pseudo_flag, bool set);
 int dom_engine_pointer_capture(DomElement* element,int32_t pointer_id,unsigned operation);
 
 void dom_engine_install_animation_globals(void);
-void dom_engine_animation_frame_prepare(void* document, double timestamp_ms);
+void dom_engine_animation_frame_prepare(void* document, double timestamp_ms, bool preserve_css_time);
 
 // one-shot named frame events; the document owns requests, never script closures
 uint64_t dom_engine_frame_request(void* owner, const char* event_name);

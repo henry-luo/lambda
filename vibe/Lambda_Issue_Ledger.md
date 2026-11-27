@@ -74,6 +74,19 @@ focused interpreter and eager-JIT probes reproduced the following cases.
 
 Focused sources and tier outputs are under `temp/formal_semantics_audit_20261124/`.
 
+<a id="lr12-73"></a>
+
+## LR12-73 — Overlapping template updates can leave obsolete event owners
+
+**Fixed in the working tree, 2026-11-27.** A click in `dtna_disclosure`
+marks both the collapse template and its enclosing app dirty. When hash
+iteration rendered the child first, the later parent render could publish
+a different child source while the overlapping native patches kept the
+earlier one. The next keyboard event could miss its author handler.
+Reconciliation now renders dirty ancestors before their descendants so
+their nested applications can refresh the child entries (**D5.5.3**).
+The fixture passes all 13 assertions with the baseline font directory.
+
 <a id="lr12-72"></a>
 
 ## LR12-72 — DOM mutation seam signature blocks the split build
@@ -1877,7 +1890,7 @@ still use clean returns after fallible admissions/assignments and unchecked
 loop conversions. Six incompatible fixtures were found against `88d30f849`;
 the latest MVP work at `1b0927e30` brings the current count to eleven.
 `admitted_call` explicitly rejects propagation, and unary admission excludes
-`OPERATOR_PROPAGATE` (`lambda/runtime/mvp/mvp_plan.cpp`). Adapt fixtures and
+`OPERATOR_PROPAGATE` (`lambda/runtime/mir/mir_plan.cpp`). Adapt fixtures and
 prototype together; do not restore declaration exits or erase error outcomes.
 Normal admission and post-binding recovery also need prototype qualification.
 **USER, 2026-11-03: leave MVP adaptation to the ongoing main-checkout work.**
@@ -2433,7 +2446,7 @@ preserves the exact HTTP golden. Initial serial MIR runs take
 Existing `js-mvp-phases` logging attributes one 6.014-second run to 0.008
 seconds parsing, 0.124 seconds planning, 0.998 seconds emission and 4.294
 seconds finalization/link/code generation. `lower_pass` in
-`lambda/js/mvp-lmd/mvp_lmd_mir.cpp` eagerly generates all 1,528 functions,
+`lambda/js/mir/js_mir_mir.cpp` eagerly generates all 1,528 functions,
 then retrieves every native address with `MIR_gen`. Its largest function is
 46,138 instructions and the existing shared policy already selects O1.
 The ordinary `JS_TRANSPILE_TIMING` MIR record is zero because the formal
@@ -3596,6 +3609,39 @@ bookkeeping and names as well as arenas, after transferring every escaping
 result owner. [Evidence and proposed P5](impl/Lambda_Impl_Sync_Memory_Tuning.md#p5--bound-parser-ownership-and-reduce-redundant-codec-validation).
 
 **Implementation follow-up (2026-11-17):** Implemented P5: explicit JSON/Mark parses use a scoped Input, transfer escaping values/names/shapes/scalar owners into runtime ownership, and destroy the parser owner. Native owner-count and Unicode/NUL key regressions pass. Five versus twenty-five unchanged rounds retain identical Input arena counts/bytes. Other formats and automatic dispatch retain their previous ownership. See [implementation qualification](impl/Lambda_Impl_Sync_Memory_Tuning.md#implementation-and-qualification--2026-11-17).
+
+**Viewer replay (2026-11-27).** The mixed-document release replay retains
+about 1.6 MiB per round in `parse://inline/` arenas after garbage collection.
+The same documents visited in View mode retain about 0.1 MiB per round in
+that group. The mixed replay adds source scrolling, rich and source editing,
+and CSV saves. The Markdown editor reparses individual blocks for its round-trip
+checks, retaining hundreds of `Input` arenas per reopen. Explicit `parse` of
+Markdown now uses a scoped Input and transfers the returned tree to runtime
+ownership (D5.2.5, D6.3.3). Other formats have separate ownership. The layout
+storage measured in the same test is tracked in
+[RI-261](Radiant_Issue_Ledger.md#ri-261).
+
+## Abandoned template models retain editor subtrees — 2026-11-27
+
+**Fixed.** The session template-state table rooted its model keys and state
+values unconditionally. Opening and discarding a rich Markdown editor left two
+obsolete editor trees pinned by state that still referred to their DOM wrappers.
+The table now traces each value through its model key. A reachable model keeps
+all of its template states across redraws and template switches, and an
+unreachable model can release its state and wrappers (S12.1.3v6, D6.3.3,
+Reactive UI §5.2 Q2). A narrow edit replay reduced live view-property growth
+from about 4 MiB per reopen to about 5 KiB. A GC regression checks that both
+presentations keep their state while their shared model is live.
+
+## Occurrence checks retain unused validation reports — 2026-11-27
+
+**Fixed.** The viewer replay traced repeated
+40-byte allocations in the script pool to single-item occurrence
+validation (S11.1.6v2, D5.2.5). A run of one delegates to the operand
+validator, so allocating a result first leaked a report that was never
+returned. Predicate callers now use the existing verdicts for the zero
+and rejected branches, and reporting callers build a report only when
+that branch returns it.
 
 ## Large workspace capture fails during a SQLite statement — 2026-11-17
 

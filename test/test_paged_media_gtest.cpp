@@ -16433,19 +16433,19 @@ TEST_F(SecondaryViewTest, RadialInheritedMathOwnsItsSyntaxAcrossRecascadeAndReti
 
 TEST_F(SecondaryViewTest, RadialMaskReplacementReclaimsComputedRadiusPayloads) {
     DomElement* element = block(nullptr); ASSERT_NE(element, nullptr);
-    LayoutContext context = {}; context.doc = lam::up(&doc); context.pool = lam::up(doc.view_tree->prop_pool.get());
-    context.selected_view_tree = lam::up(doc.view_tree.get()); context.view = lam::up((View*)element); context.elmt = lam::up(element);
+    LayoutContext context = {};
     const char* text = "mask-image:radial-gradient(ellipse min(50%,24px) max(25%,16px),black,transparent)";
-    CssDeclaration* gradient = css_parse_declaration_text(text, strlen(text), doc.document_pool); ASSERT_NE(gradient, nullptr);
-    CssDeclaration* none = css_parse_declaration_text("mask-image:none", strlen("mask-image:none"), doc.document_pool); ASSERT_NE(none, nullptr);
-    resolve_css_property(CSS_PROPERTY_MASK_IMAGE, gradient, &context);
-    ASSERT_NE(element->boundary()->mask, nullptr); ASSERT_NE(element->boundary()->mask->radial_gradient, nullptr);
-    ASSERT_NE(element->boundary()->mask->radial_gradient->computed_geometry, nullptr);
-    resolve_css_property(CSS_PROPERTY_MASK_IMAGE, none, &context);
+    // Mask layers are computed together after the cascade, not by a single-property call.
+    ASSERT_TRUE(element->set_attribute("style", text)); resolve_style(element, &context);
+    MaskProp* mask = element->boundary()->mask; ASSERT_NE(mask, nullptr);
+    // Mask images are stored in layers, including the single-image case.
+    ASSERT_EQ(mask->image_count, 1); ASSERT_NE(mask->image(0).radial_gradient, nullptr);
+    ASSERT_NE(mask->image(0).radial_gradient->computed_geometry, nullptr);
+    ASSERT_TRUE(element->set_attribute("style", "mask-image:none")); resolve_style(element, &context);
     PoolStats warm = {}; pool_get_detailed_stats(doc.view_tree->prop_pool, &warm);
     for (size_t cycle = 0; cycle < 256; cycle++) {
-        resolve_css_property(CSS_PROPERTY_MASK_IMAGE, gradient, &context);
-        resolve_css_property(CSS_PROPERTY_MASK_IMAGE, none, &context);
+        ASSERT_TRUE(element->set_attribute("style", text)); resolve_style(element, &context);
+        ASSERT_TRUE(element->set_attribute("style", "mask-image:none")); resolve_style(element, &context);
     }
     PoolStats repeated = {}; pool_get_detailed_stats(doc.view_tree->prop_pool, &repeated);
     EXPECT_EQ(warm.live_bytes, repeated.live_bytes); EXPECT_EQ(warm.allocation_count - warm.free_count, repeated.allocation_count - repeated.free_count);
@@ -16639,19 +16639,18 @@ TEST_F(SecondaryViewTest, InvalidGradientStopDomainsAndBodiesPreserveEarlierImag
 
 TEST_F(SecondaryViewTest, RadialMaskReplacementReclaimsComputedStopExpressions) {
     DomElement* element = block(nullptr); ASSERT_NE(element, nullptr);
-    LayoutContext context = {}; context.doc = lam::up(&doc); context.pool = lam::up(doc.view_tree->prop_pool.get());
-    context.selected_view_tree = lam::up(doc.view_tree.get()); context.view = lam::up((View*)element); context.elmt = lam::up(element);
+    LayoutContext context = {};
     const char* text = "mask-image:radial-gradient(circle 16px,black min(50%,8px),transparent calc(100%))";
-    CssDeclaration* gradient = css_parse_declaration_text(text, strlen(text), doc.document_pool); ASSERT_NE(gradient, nullptr);
-    CssDeclaration* none = css_parse_declaration_text("mask-image:none", strlen("mask-image:none"), doc.document_pool); ASSERT_NE(none, nullptr);
-    resolve_css_property(CSS_PROPERTY_MASK_IMAGE, gradient, &context);
-    ASSERT_NE(element->boundary()->mask, nullptr); ASSERT_NE(element->boundary()->mask->radial_gradient, nullptr);
-    ASSERT_NE(element->boundary()->mask->radial_gradient->stops[0].position_expression, nullptr);
-    resolve_css_property(CSS_PROPERTY_MASK_IMAGE, none, &context);
+    ASSERT_TRUE(element->set_attribute("style", text)); resolve_style(element, &context);
+    MaskProp* mask = element->boundary()->mask; ASSERT_NE(mask, nullptr);
+    ASSERT_EQ(mask->image_count, 1); ASSERT_NE(mask->image(0).radial_gradient, nullptr);
+    ASSERT_GT(mask->image(0).radial_gradient->stop_count, 0);
+    ASSERT_NE(mask->image(0).radial_gradient->stops[0].position_expression, nullptr);
+    ASSERT_TRUE(element->set_attribute("style", "mask-image:none")); resolve_style(element, &context);
     PoolStats warm = {}; pool_get_detailed_stats(doc.view_tree->prop_pool, &warm);
     for (size_t cycle = 0; cycle < 256; cycle++) {
-        resolve_css_property(CSS_PROPERTY_MASK_IMAGE, gradient, &context);
-        resolve_css_property(CSS_PROPERTY_MASK_IMAGE, none, &context);
+        ASSERT_TRUE(element->set_attribute("style", text)); resolve_style(element, &context);
+        ASSERT_TRUE(element->set_attribute("style", "mask-image:none")); resolve_style(element, &context);
     }
     PoolStats repeated = {}; pool_get_detailed_stats(doc.view_tree->prop_pool, &repeated);
     EXPECT_EQ(warm.live_bytes, repeated.live_bytes);

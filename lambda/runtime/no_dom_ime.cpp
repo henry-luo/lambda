@@ -18,7 +18,7 @@ bool dom_is_comment_tag(const char* tag_name) {
 
 bool dom_child_links_valid(DomElement*) { return false; }
 void dom_node_cancel_detached(DomDocument*, DomNode*) {}
-DomElement* build_dom_tree_from_element_detached(Element*, DomDocument*, DomElement*) { return nullptr; }
+DomElement* build_dom_tree_from_element_detached(Element*, DomDocument*, DomElement*, bool) { return nullptr; }
 DomText* DomText::create_detached_copy(DomDocument*, const char*, size_t) { return nullptr; }
 void dom_unlink_from_sibling_chain(DomNode*) {}
 bool dom_node_registry_owns(DomDocument*, DomNode*) { return false; }

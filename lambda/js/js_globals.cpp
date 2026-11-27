@@ -18,6 +18,7 @@
 #include "../dom/dom_xhr.h"
 #include "js_error_codes.h"
 #include "../jube/jube_node_permission.h"
+#include "../jube/jube_node_zlib_codec.hpp"
 #include "../module/node_core/node_url.hpp"
 #include "js_property_attrs.h"
 #include "js_host_hooks.h"
@@ -30,7 +31,7 @@
 #include "js_runtime_internal.hpp"
 #include "js_exec_profile.h"
 #include "js_interp.hpp"
-#include "mvp-lmd/mvp_lmd_dynamic.h"
+#include "mir/js_mir_dynamic.h"
 
 #include "js_function.hpp"
 #include "js_builtin_catalog.hpp"
@@ -50,6 +51,7 @@
 #include "../module/radiant/radiant_dom_bridge.hpp"
 #include "lib/base64.h"
 #include "lib/arraylist.hpp"
+#include "lib/digest.h"
 #include "lib/escape.h"
 #include "lib/hashmap_helpers.h"
 #include "lib/log.h"
@@ -65,6 +67,7 @@ extern "C" Item js_proxy_trap_set_with_receiver(Item proxy, Item key, Item value
 extern "C" void js_async_hooks_after_gc(void);
 extern "C" Item js_global_url_search_params_new(Item init);
 static bool js_activate_url_primitives(void);
+static Item js_decompression_stream_new(Item format);
 static Item js_install_url_constructor(Item global);
 extern "C" Item js_func_get_custom_proto(Item func);
 extern "C" Item js_get_typed_array_base();
@@ -120,7 +123,7 @@ enum JsHostGlobalGroup {
     JS_HOST_GROUP_NODE_FILTER, JS_HOST_GROUP_ABORT_CONTROLLER, JS_HOST_GROUP_ABORT_SIGNAL,
     JS_HOST_GROUP_CODECS, JS_HOST_GROUP_STREAMS, JS_HOST_GROUP_HEADERS,
     JS_HOST_GROUP_PERFORMANCE, JS_HOST_GROUP_MESSAGING, JS_HOST_GROUP_URL,
-    JS_HOST_GROUP_EXCEPTION, JS_HOST_GROUP_OPTION, JS_HOST_GROUP_CANVAS,
+    JS_HOST_GROUP_EXCEPTION, JS_HOST_GROUP_CRYPTO, JS_HOST_GROUP_OPTION, JS_HOST_GROUP_CANVAS,
     JS_HOST_GROUP_CLIPBOARD, JS_HOST_GROUP_COUNT
 };
 struct JsHostGlobalSpec { const char* name; JsHostGlobalGroup group; };
@@ -139,7 +142,8 @@ static const JsHostGlobalSpec js_host_globals[] = {
     {"TextEncoder", JS_HOST_GROUP_CODECS}, {"TextDecoder", JS_HOST_GROUP_CODECS},
     {"ReadableStream", JS_HOST_GROUP_STREAMS}, {"WritableStream", JS_HOST_GROUP_STREAMS},
     {"TransformStream", JS_HOST_GROUP_STREAMS}, {"TextEncoderStream", JS_HOST_GROUP_STREAMS},
-    {"TextDecoderStream", JS_HOST_GROUP_STREAMS}, {"ByteLengthQueuingStrategy", JS_HOST_GROUP_STREAMS},
+    {"TextDecoderStream", JS_HOST_GROUP_STREAMS}, {"DecompressionStream", JS_HOST_GROUP_STREAMS},
+    {"ByteLengthQueuingStrategy", JS_HOST_GROUP_STREAMS},
     {"CountQueuingStrategy", JS_HOST_GROUP_STREAMS}, {"Headers", JS_HOST_GROUP_HEADERS},
     {"Response", JS_HOST_GROUP_HEADERS}, {"Request", JS_HOST_GROUP_HEADERS},
     {"performance", JS_HOST_GROUP_PERFORMANCE},
@@ -151,6 +155,8 @@ static const JsHostGlobalSpec js_host_globals[] = {
     {"MessageChannel", JS_HOST_GROUP_MESSAGING},
     {"MessagePort", JS_HOST_GROUP_MESSAGING}, {"URLSearchParams", JS_HOST_GROUP_URL},
     {"URL", JS_HOST_GROUP_URL}, {"DOMException", JS_HOST_GROUP_EXCEPTION},
+    {"QuotaExceededError", JS_HOST_GROUP_EXCEPTION},
+    {"Crypto", JS_HOST_GROUP_CRYPTO}, {"crypto", JS_HOST_GROUP_CRYPTO},
     {"Option", JS_HOST_GROUP_OPTION}, {"OffscreenCanvas", JS_HOST_GROUP_CANVAS},
     {"Blob", JS_HOST_GROUP_CLIPBOARD}, {"File", JS_HOST_GROUP_CLIPBOARD},
     {"FileReader", JS_HOST_GROUP_CLIPBOARD}, {"ClipboardItem", JS_HOST_GROUP_CLIPBOARD},
@@ -2026,14 +2032,14 @@ static Item js_performance_entries(void) {
     return js_performance_timeline_entries(make_js_undefined(), make_js_undefined());
 }
 
-static Item js_performance_illegal_constructor(void) {
+static Item js_host_illegal_constructor(void) {
     return js_throw_type_error("Illegal constructor");
 }
 
 static Item js_install_user_timing(Item global) {
     RootFrame roots(6);
     Rooted<Item> owner(roots, global), base(roots, js_install_native_constructor(owner.get(),
-        "PerformanceEntry", js_performance_illegal_constructor));
+        "PerformanceEntry", js_host_illegal_constructor));
     Rooted<Item> prototype(roots, js_get_key_cstr(base.get(), "prototype"));
     Rooted<Item> constructor(roots, ItemNull), method(roots, ItemNull), key(roots, ItemNull);
     JsPerformanceState* state = js_performance_resources();
@@ -2056,7 +2062,7 @@ static Item js_install_user_timing(Item global) {
     for (const auto& definition : interfaces) {
         bool mark = definition.cls == JS_CLASS_PERFORMANCE_MARK;
         constructor.set(mark ? js_new_native_body_constructor(js_intrinsic_ctor_requires_new_call_body,
-            js_performance_mark_construct, 1) : js_new_native_constructor(js_performance_illegal_constructor));
+            js_performance_mark_construct, 1) : js_new_native_constructor(js_host_illegal_constructor));
         js_set_function_name(constructor.get(), js_name_item(definition.name));
         js_set_prototype(constructor.get(), base.get());
         prototype.set(js_new_object());
@@ -2074,7 +2080,7 @@ static Item js_install_user_timing(Item global) {
         js_set_key_cstr(owner.get(), definition.name, constructor.get());
     }
     constructor.set(js_install_native_constructor(owner.get(), "PerformanceResourceTiming",
-        js_performance_illegal_constructor));
+        js_host_illegal_constructor));
     *js_realm_slot(&js_runtime_state.realm_slots,
         JS_REALM_SLOT_PERFORMANCE_RESOURCE_TIMING_CONSTRUCTOR) = constructor.get();
     js_set_prototype(constructor.get(), base.get());
@@ -5356,11 +5362,13 @@ static int js_console_format_args(Item* args, int argc, char* buf, int capacity)
     int pos = 0;
     if (argc >= 2 && get_type_id(args[0]) == LMD_TYPE_STRING &&
         has_format_specifiers(it2s(args[0]))) {
-        Item arr = js_array_new(0);
+        RootFrame roots(1);
+        if (!roots.valid()) return 0;
+        Rooted<Item> arr(roots, js_array_new(0));
         for (int i = 0; i < argc; i++) {
-            js_array_push(arr, args[i]);
+            js_array_push(arr.get(), args[i]);
         }
-        Item formatted = js_host_hooks_format_console(arr);
+        Item formatted = js_host_hooks_format_console(arr.get());
         if (get_type_id(formatted) == LMD_TYPE_STRING) {
             String* s = it2s(formatted);
             if (s && s->len > 0) {
@@ -5387,9 +5395,13 @@ static int js_console_format_args(Item* args, int argc, char* buf, int capacity)
     return pos;
 }
 
-static void js_console_emit(Item* args, int argc, JsConsoleLevel level) {
+static void js_console_emit(Item* args, int argc, JsConsoleLevel level,
+                            const char* prefix = nullptr) {
     char buf[4096];
-    int message_len = js_console_format_args(args, argc, buf, (int)sizeof(buf));
+    int prefix_len = prefix ? (int)strlen(prefix) : 0;
+    if (prefix_len) memcpy(buf, prefix, prefix_len);
+    int message_len = prefix_len + js_console_format_args(args, argc,
+        buf + prefix_len, (int)sizeof(buf) - prefix_len);
 
     // Browser documents and command-line scripts share one formatter so their
     // captured output cannot drift from the diagnostic log representation.
@@ -5604,19 +5616,18 @@ extern "C" Item js_console_table_fn(Item data) {
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
-// console.assert(value, ...args) — if !value, print assertion failed
-extern "C" Item js_console_assert_fn(Item cond, Item msg) {
-    if (!js_is_truthy(cond)) {
-        char buf[4096];
-        int n = snprintf(buf, sizeof(buf), "Assertion failed");
-        if (get_type_id(msg) == LMD_TYPE_STRING) {
-            String* s = it2s(msg);
-            if (s && s->len > 0) n += snprintf(buf + n, sizeof(buf) - n, ": %.*s", (int)s->len, s->chars);
-        }
-        n += snprintf(buf + n, sizeof(buf) - n, "\n");
-        js_console_write_to_stderr(buf, n);
+extern "C" Item js_console_assert_span(Item* args, int argc) {
+    if (argc && js_is_truthy(args[0])) return make_js_undefined();
+    // Keep the message arguments in the shared formatter and only add the
+    // Console Standard's separator when the first diagnostic value is a string.
+    if (argc < 2) {
+        js_console_emit(nullptr, 0, JS_CONSOLE_ERROR, "Assertion failed");
+    } else {
+        const char* prefix = get_type_id(args[1]) == LMD_TYPE_STRING
+            ? "Assertion failed: " : "Assertion failed ";
+        js_console_emit(args + 1, argc - 1, JS_CONSOLE_ERROR, prefix);
     }
-    return (Item){.item = ITEM_JS_UNDEFINED};
+    return make_js_undefined();
 }
 
 // =============================================================================
@@ -13569,20 +13580,14 @@ static Item js_domexception_constructor(void) {
     return constructor.get();
 }
 
-// DOMException(message, nameOrOptions) constructor and internal factory.
-extern "C" Item js_domexception_new(Item message, Item name_arg) {
-    RootFrame roots(7);
-    Rooted<Item> message_root(roots, message), options(roots, name_arg);
-    Rooted<Item> constructor(roots, js_domexception_constructor());
-    JS_RETURN_IF_ERROR(constructor.get());
-    Rooted<Item> object(roots, js_new_object_with_class(JS_CLASS_DOM_EXCEPTION));
+static Item js_initialize_domexception(Item receiver, Item message, Item name_arg) {
+    RootFrame roots(6);
+    Rooted<Item> object(roots, receiver), message_root(roots, message), options(roots, name_arg);
     // D6.3.3: field conversion/getters may collect the unpublished exception.
-    js_set_prototype(object.get(),
-        *js_realm_intrinsic_slot_existing(JS_REALM_SLOT_DOM_EXCEPTION_PROTOTYPE, 0));
     Rooted<Item> actual_name(roots, js_name_item("Error"));
     Rooted<Item> cause(roots, make_js_undefined()), value(roots, ItemNull);
-    js_set_key_cstr(object.get(), "message", get_type_id(message_root.get()) == LMD_TYPE_STRING
-        ? message_root.get() : js_name_item(""));
+    JS_RETURN_IF_ERROR(js_define_own_key_storage(object.get(), js_name_item("message"),
+        get_type_id(message_root.get()) == LMD_TYPE_STRING ? message_root.get() : js_name_item("")));
     bool has_cause = false;
     if (get_type_id(options.get()) == LMD_TYPE_STRING) {
         actual_name.set(options.get());
@@ -13598,8 +13603,9 @@ extern "C" Item js_domexception_new(Item message, Item name_arg) {
             JS_RETURN_IF_ERROR(cause.get());
         }
     }
-    js_set_key_cstr(object.get(), "name", actual_name.get());
-    if (has_cause) js_set_key_cstr(object.get(), "cause", cause.get());
+    JS_RETURN_IF_ERROR(js_define_own_key_storage(object.get(), js_name_item("name"), actual_name.get()));
+    if (has_cause)
+        JS_RETURN_IF_ERROR(js_define_own_key_storage(object.get(), js_name_item("cause"), cause.get()));
 
     // DOMException legacy code mappings
     int code = 0;
@@ -13627,9 +13633,182 @@ extern "C" Item js_domexception_new(Item message, Item name_arg) {
             }
         }
     }
-    js_set_key_cstr(object.get(), "code", (Item){.item = i2it(code)});
-    js_set_key_cstr(object.get(), "stack", js_name_item(""));
+    JS_RETURN_IF_ERROR(js_define_own_key_storage(object.get(), js_name_item("code"), (Item){.item = i2it(code)}));
+    JS_RETURN_IF_ERROR(js_define_own_key_storage(object.get(), js_name_item("stack"), js_name_item("")));
     return object.get();
+}
+
+// DOMException(message, nameOrOptions) constructor and internal factory.
+extern "C" Item js_domexception_new(Item message, Item name_arg) {
+    RootFrame roots(3);
+    Rooted<Item> text(roots, message), name(roots, name_arg);
+    JS_RETURN_IF_ERROR(js_domexception_constructor());
+    Rooted<Item> object(roots, js_new_object_with_class(JS_CLASS_DOM_EXCEPTION));
+    JS_RETURN_IF_ERROR(object.get());
+    js_set_prototype(object.get(),
+        *js_realm_intrinsic_slot_existing(JS_REALM_SLOT_DOM_EXCEPTION_PROTOTYPE, 0));
+    return js_initialize_domexception(object.get(), text.get(), name.get());
+}
+
+static Item js_quota_exceeded_error_constructor(void);
+enum JsQuotaErrorField { JS_QUOTA, JS_QUOTA_REQUESTED, JS_QUOTA_FIELD_COUNT };
+
+static Item js_quota_error_get(Item callee, Item receiver, Item*, int, uint64_t*) {
+    uintptr_t field = js_fn_native((JsFunction*)callee.function)->target.bits;
+    JS_ASSIGN_OR_RETURN(record, js_native_private_array_state(receiver, JS_CLASS_QUOTA_EXCEEDED_ERROR,
+        JS_QUOTA_FIELD_COUNT, "Illegal QuotaExceededError receiver"));
+    return js_elements_get_int(record, field);
+}
+
+static Item js_quota_error_create(Item text, Item quota, Item requested, Item new_target) {
+    RootFrame roots(8);
+    Rooted<Item> message(roots, text), limit(roots, quota), amount(roots, requested), target(roots, new_target);
+    Rooted<Item> constructor(roots, js_quota_exceeded_error_constructor());
+    JS_RETURN_IF_ERROR(constructor.get());
+    Rooted<Item> prototype(roots, js_get_constructor_intrinsic_prototype(constructor.get()));
+    if (js_is_object_value(target.get()) && target.get().item != constructor.get().item) {
+        JS_ASSIGN_OR_RETURN(candidate, js_get_key_cstr(target.get(), "prototype"));
+        if (js_is_object_value(candidate)) prototype.set(candidate);
+    }
+    Rooted<Item> fields(roots, js_array_new(0));
+    JS_RETURN_IF_ERROR(js_array_push(fields.get(), limit.get()));
+    JS_RETURN_IF_ERROR(js_array_push(fields.get(), amount.get()));
+    Item key = *js_realm_intrinsic_slot_existing(JS_REALM_SLOT_QUOTA_EXCEEDED_ERROR_STATE_KEY, 0);
+    Rooted<Item> object(roots, js_native_private_array_object(JS_CLASS_QUOTA_EXCEEDED_ERROR,
+        key, fields.get(), prototype.get()));
+    JS_RETURN_IF_ERROR(object.get());
+    return js_initialize_domexception(object.get(), message.get(), js_name_item("QuotaExceededError"));
+}
+
+static const char* const js_quota_error_keys[] = {"quota", "requested"};
+
+static Item js_quota_error_construct(Item, Item* args, int count, Item new_target, uint64_t*) {
+    RootFrame roots(6);
+    Rooted<Item> options(roots, count > 1 ? args[1] : make_js_undefined()), target(roots, new_target);
+    Rooted<Item> message(roots, count && args[0].item != ITEM_JS_UNDEFINED ? js_to_string(args[0]) : js_name_item(""));
+    JS_RETURN_IF_ERROR(message.get());
+    TypeId options_type = get_type_id(options.get());
+    if (options_type != LMD_TYPE_NULL && options_type != LMD_TYPE_UNDEFINED && !js_is_object_value(options.get()))
+        return js_throw_type_error("QuotaExceededError options must be an object");
+
+    Rooted<Item> quota(roots, ItemNull), requested(roots, ItemNull), value(roots, ItemNull);
+    if (js_is_object_value(options.get())) {
+        // Web IDL converts dictionary members in key order before running the constructor.
+        Rooted<Item>* fields[] = {&quota, &requested};
+        double numbers[JS_QUOTA_FIELD_COUNT] = {};
+        for (int index = 0; index < JS_QUOTA_FIELD_COUNT; ++index) {
+            value.set(js_get_key_cstr(options.get(), js_quota_error_keys[index]));
+            JS_RETURN_IF_ERROR(value.get());
+            if (value.get().item == ITEM_JS_UNDEFINED) continue;
+            value.set(js_to_number(value.get()));
+            JS_RETURN_IF_ERROR(value.get());
+            numbers[index] = it2d(value.get());
+            if (!isfinite(numbers[index])) return js_throw_type_error("QuotaExceededError values must be finite");
+            fields[index]->set(value.get());
+        }
+        if (numbers[JS_QUOTA] < 0 || numbers[JS_QUOTA_REQUESTED] < 0 ||
+                (quota.get().item != ItemNull.item && requested.get().item != ItemNull.item &&
+                 numbers[JS_QUOTA_REQUESTED] < numbers[JS_QUOTA]))
+            return js_throw_range_error("Invalid QuotaExceededError quota or requested amount");
+    }
+    return js_quota_error_create(message.get(), quota.get(), requested.get(), target.get());
+}
+
+static Item js_quota_exceeded_error_constructor(void) {
+    if (!js_realm_intrinsic_slots_ensure_roots()) return ItemError;
+    Item* retained = js_realm_intrinsic_slot_existing(JS_REALM_SLOT_QUOTA_EXCEEDED_ERROR_CONSTRUCTOR, 0);
+    if (retained->item) return *retained;
+    RootFrame roots(5);
+    Rooted<Item> base(roots, js_domexception_constructor());
+    JS_RETURN_IF_ERROR(base.get());
+    Rooted<Item> constructor(roots, js_new_native_body_constructor(js_intrinsic_ctor_requires_new_call_body,
+        js_quota_error_construct, 0));
+    JS_RETURN_IF_ERROR(constructor.get());
+    Rooted<Item> prototype(roots, js_new_object()), getter(roots, ItemNull), tag(roots, js_well_known_symbol_key(4));
+    js_set_function_name(constructor.get(), js_name_item("QuotaExceededError"));
+    js_set_prototype(constructor.get(), base.get());
+    js_set_prototype(prototype.get(), js_get_constructor_intrinsic_prototype(base.get()));
+    JS_RETURN_IF_ERROR(js_initialize_native_constructor_prototype(constructor.get(), prototype.get()));
+    js_set_key_cstr(prototype.get(), "constructor", constructor.get());
+    js_mark_non_enumerable(prototype.get(), js_name_item("constructor"));
+    for (int index = 0; index < JS_QUOTA_FIELD_COUNT; ++index) {
+        getter.set(js_new_native_payload_function(js_quota_error_get, index, 0));
+        js_set_function_name(getter.get(), js_name_item(index == JS_QUOTA ? "get quota" : "get requested"));
+        js_install_native_accessor(prototype.get(), js_name_item(js_quota_error_keys[index]), getter.get(), ItemNull, 0);
+    }
+    js_set_key_default(prototype.get(), tag.get(), js_name_item("QuotaExceededError"));
+    js_mark_non_enumerable(prototype.get(), tag.get());
+    js_mark_non_writable(prototype.get(), tag.get());
+    NameRef key = name_pool_create_unique_private(context->name_pool, {"QuotaExceededError", sizeof("QuotaExceededError") - 1});
+    if (!key) return ItemError;
+    *js_realm_intrinsic_slot_existing(JS_REALM_SLOT_QUOTA_EXCEEDED_ERROR_STATE_KEY, 0) = (Item){.item = s2it(key)};
+    *retained = constructor.get();
+    return constructor.get();
+}
+
+static Item js_crypto_get_random_values(Item view) {
+    if (!js_object_has_class(js_get_this(), JS_CLASS_CRYPTO))
+        return js_throw_type_error("Illegal Crypto receiver");
+    RootFrame roots(1);
+    Rooted<Item> array(roots, view);
+    JsTypedArray* typed = js_is_typed_array(array.get()) ? js_get_typed_array_ptr(array.get().map) : nullptr;
+    JsDataView* data = typed ? nullptr : js_get_dataview_ptr(array.get());
+    if (!typed && !data) return js_throw_type_error("getRandomValues requires an ArrayBuffer view");
+    JsArrayBuffer* buffer = typed ? typed->base.buffer : data->buffer;
+    // Web IDL rejects shared and resizable buffers before the Web Crypto algorithm.
+    if (js_arraybuffer_shared(buffer) || js_arraybuffer_resizable(buffer))
+        return js_throw_type_error("getRandomValues requires a fixed, unshared ArrayBuffer");
+    if (!typed || !js_typed_array_is_integer_type(typed->element_type)) {
+        JS_ASSIGN_OR_RETURN(error, js_domexception_new(js_name_item("getRandomValues requires an integer typed array"),
+            js_name_item("TypeMismatchError")));
+        return js_throw_value(error);
+    }
+    const int length = js_typed_array_byte_length(array.get());
+    constexpr int max_random_bytes = 65536; // Web Crypto §10.1.1
+    if (length > max_random_bytes) {
+        JS_ASSIGN_OR_RETURN(error, js_quota_error_create(js_name_item("getRandomValues exceeded its byte limit"),
+            ItemNull, ItemNull, ItemNull));
+        return js_throw_value(error);
+    }
+    if (length == 0) return array.get();
+
+    // Publish bytes only after the entropy provider succeeds for the entire view.
+    void* bytes = mem_alloc((size_t)length, MEM_CAT_TEMP);
+    if (!bytes) return ItemError;
+    void* destination = crypto_random_bytes(bytes, (size_t)length)
+        ? js_typed_array_prepare_write_ptr(array.get()) : nullptr;
+    if (destination) memcpy(destination, bytes, (size_t)length);
+    mem_free(bytes);
+    if (!destination) {
+        JS_ASSIGN_OR_RETURN(error, js_domexception_new(js_name_item("getRandomValues could not produce random bytes"),
+            js_name_item("OperationError")));
+        return js_throw_value(error);
+    }
+    return array.get();
+}
+
+static Item js_install_crypto(Item global) {
+    RootFrame roots(6);
+    Rooted<Item> target(roots, global), constructor(roots, js_install_native_constructor(target.get(),
+        "Crypto", js_host_illegal_constructor));
+    JS_RETURN_IF_ERROR(constructor.get());
+    js_set_function_name(constructor.get(), js_name_item("Crypto"));
+    Rooted<Item> prototype(roots, js_get_constructor_intrinsic_prototype(constructor.get()));
+    js_set_key_cstr(prototype.get(), "constructor", constructor.get());
+    js_mark_non_enumerable(prototype.get(), js_name_item("constructor"));
+    Rooted<Item> method(roots, js_install_native_method(prototype.get(), "getRandomValues", js_crypto_get_random_values));
+    JS_RETURN_IF_ERROR(method.get());
+    js_set_function_name(method.get(), js_name_item("getRandomValues"));
+    Rooted<Item> tag(roots, js_well_known_symbol_key(4));
+    js_set_key_default(prototype.get(), tag.get(), js_name_item("Crypto"));
+    js_mark_non_enumerable(prototype.get(), tag.get());
+    js_mark_non_writable(prototype.get(), tag.get());
+    Rooted<Item> crypto(roots, js_new_object_with_class(JS_CLASS_CRYPTO));
+    JS_RETURN_IF_ERROR(crypto.get());
+    js_set_prototype(crypto.get(), prototype.get());
+    js_set_key_cstr(target.get(), "crypto", crypto.get());
+    js_mark_non_writable(target.get(), js_name_item("crypto"));
+    return crypto.get();
 }
 
 // forward declaration
@@ -14586,6 +14765,8 @@ static Item js_install_host_global_group(Item target, JsHostGlobalGroup group) {
             js_text_encoder_stream_new);
         js_install_native_constructor(global.get(), "TextDecoderStream",
             js_text_decoder_stream_new);
+        js_install_native_constructor(global.get(), "DecompressionStream",
+            js_decompression_stream_new);
         // Streams §7.2/§7.3: size functions are shared per realm; instance state is private.
         js_install_queuing_strategy(global.get(), "ByteLengthQueuingStrategy",
             JS_CLASS_BYTE_LENGTH_QUEUING_STRATEGY);
@@ -14651,7 +14832,7 @@ static Item js_install_host_global_group(Item target, JsHostGlobalGroup group) {
             timing_root.set(js_new_object());
             js_set_key_cstr(perf_root.get(), "timing", timing_root.get());
             Rooted<Item> constructor_root(performance_roots, js_install_native_constructor(
-                global.get(), "Performance", js_performance_illegal_constructor));
+                global.get(), "Performance", js_host_illegal_constructor));
             Rooted<Item> prototype_root(performance_roots, js_new_object());
             Rooted<Item> method_root(performance_roots, ItemNull);
             js_set_function_name(constructor_root.get(), js_name_item("Performance"));
@@ -14691,7 +14872,7 @@ static Item js_install_host_global_group(Item target, JsHostGlobalGroup group) {
             js_set_key_cstr(observer_root.get(), "supportedEntryTypes", supported_types_root.get());
             js_attr_set_writable(observer_root.get(), "supportedEntryTypes", 19, false);
             constructor_root.set(js_install_native_constructor(global.get(), "PerformanceObserverEntryList",
-                js_performance_illegal_constructor));
+                js_host_illegal_constructor));
             performance->observer_list_prototype = js_get_key_cstr(constructor_root.get(), "prototype");
             js_install_native_method(performance->observer_list_prototype, "getEntries",
                 js_performance_observer_list_get_entries);
@@ -14738,13 +14919,17 @@ static Item js_install_host_global_group(Item target, JsHostGlobalGroup group) {
         break;
     }
     case JS_HOST_GROUP_EXCEPTION: {
-        // globalThis.DOMException constructor
-        {
-            RootFrame dom_exception_roots(1);
-            Rooted<Item> constructor(dom_exception_roots, js_domexception_constructor());
-            JS_RETURN_IF_ERROR(constructor.get());
-            js_set_key_cstr(global.get(), "DOMException", constructor.get());
-        }
+        RootFrame exception_roots(2);
+        Rooted<Item> constructor(exception_roots, js_domexception_constructor());
+        JS_RETURN_IF_ERROR(constructor.get());
+        js_set_key_cstr(global.get(), "DOMException", constructor.get());
+        Rooted<Item> quota(exception_roots, js_quota_exceeded_error_constructor());
+        JS_RETURN_IF_ERROR(quota.get());
+        js_set_key_cstr(global.get(), "QuotaExceededError", quota.get());
+        break;
+    }
+    case JS_HOST_GROUP_CRYPTO: {
+        JS_RETURN_IF_ERROR(js_install_crypto(global.get()));
         break;
     }
     case JS_HOST_GROUP_OPTION: {
@@ -17007,9 +17192,13 @@ extern "C" Item js_get_intrinsic_prototype_for_class(int class_id) {
         JsPerformanceState* state = js_performance_resources();
         return js_get_constructor_intrinsic_prototype(cls == JS_CLASS_PERFORMANCE_MARK ? state->mark_constructor : state->measure_constructor);
     }
-    if (cls == JS_CLASS_INTL_LOCALE || cls == JS_CLASS_INTL_NUMBER_FORMAT)
-        return js_get_constructor_intrinsic_prototype(js_get_key_cstr(js_get_intl_object_value(),
-            cls == JS_CLASS_INTL_LOCALE ? "Locale" : "NumberFormat"));
+    static const struct { JsClass brand; const char* name; } intl_types[] = {
+        {JS_CLASS_INTL_LOCALE, "Locale"}, {JS_CLASS_INTL_NUMBER_FORMAT, "NumberFormat"},
+        {JS_CLASS_INTL_PLURAL_RULES, "PluralRules"},
+        {JS_CLASS_INTL_LIST_FORMAT, "ListFormat"},
+    };
+    for (const auto& type : intl_types) if (cls == type.brand)
+        return js_get_constructor_intrinsic_prototype(js_get_key_cstr(js_get_intl_object_value(), type.name));
     const char* name = NULL;
     int len = 0;
     if (!js_intrinsic_proto_ctor_name_for_class(cls, &name, &len)) return ItemNull;
@@ -18542,46 +18731,60 @@ static Item js_readable_stream_tee(Item) {
     return result.get();
 }
 
-static Item js_writable_stream_writer_write(Item env_item, Item chunk) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return js_promise_resolve(make_js_undefined());
-    Item sink = js_get_key_cstr(env[0], "__sink__");
-    Item write_fn = js_get_key_cstr(sink, "write");
-    if (js_is_callable(write_fn)) {
-        js_call_function(write_fn, sink, &chunk, 1);
+static Item js_writable_stream_writer_call(Item stream, const char* method, Item chunk, int argc) {
+    RootFrame roots(6);
+    Rooted<Item> owner(roots, stream), value(roots, chunk);
+    Rooted<Item> error_key(roots, js_name_item("__error__"));
+    if (it2b(js_has_own_property(owner.get(), error_key.get())))
+        return js_promise_reject(js_get_key_default(owner.get(), error_key.get()));
+    if (js_is_truthy(js_get_key_cstr(owner.get(), "__closed__")))
+        return js_promise_from_completion(js_throw_type_error("WritableStream is closed"));
+    Rooted<Item> sink(roots, js_get_key_cstr(owner.get(), "__sink__"));
+    Rooted<Item> function(roots, js_get_key_cstr(sink.get(), method));
+    Rooted<Item> result(roots, function.get());
+    if (js_is_callable(function.get())) {
+        Item args[] = {value.get()};
+        result.set(js_call_function(function.get(), sink.get(), args, argc));
     }
+    // A failing sink retains its error for later writes and close.
+    if (item_is_error(result.get())) {
+        JS_RETURN_IF_ERROR(js_set_key_default(owner.get(), error_key.get(), js_error_lane_payload(result.get())));
+        return js_promise_from_completion(result.get());
+    }
+    if (argc == 0) JS_RETURN_IF_ERROR(js_set_key_cstr(owner.get(), "__closed__", (Item){.item = ITEM_TRUE}));
     return js_promise_resolve(make_js_undefined());
+}
+
+static Item js_writable_stream_writer_write(Item env_item, Item chunk) {
+    JS_ENV_OR_UNDEFINED(env, env_item);
+    return js_writable_stream_writer_call(env[0], "write", chunk, 1);
 }
 
 static Item js_writable_stream_writer_close(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return js_promise_resolve(make_js_undefined());
-    Item sink = js_get_key_cstr(env[0], "__sink__");
-    Item close_fn = js_get_key_cstr(sink, "close");
-    if (js_is_callable(close_fn)) {
-        js_call_function(close_fn, sink, NULL, 0);
-    }
-    js_set_key_cstr(env[0], "__closed__", (Item){.item = b2it(true)});
-    return js_promise_resolve(make_js_undefined());
+    JS_ENV_OR_UNDEFINED(env, env_item);
+    return js_writable_stream_writer_call(env[0], "close", make_js_undefined(), 0);
 }
 
 static Item js_writable_stream_get_writer_stub(void) {
-    Item stream = js_get_this();
-    Item* env = js_alloc_env1(stream);
-    Item writer = js_new_object();
-    js_set_key_cstr(writer, "write", js_new_native_closure(js_writable_stream_writer_write, 1, env, 1));
-    js_set_key_cstr(writer, "close", js_new_native_closure(js_writable_stream_writer_close, 0, env, 1));
-    return writer;
+    RootFrame roots(4);
+    Rooted<Item> stream(roots, js_get_this()), writer(roots, js_new_object());
+    Item* env = js_alloc_env1(stream.get());
+    if (!env) return ItemError;
+    Rooted<Item> write(roots, js_new_native_closure(js_writable_stream_writer_write, 1, env, 1));
+    Rooted<Item> close(roots, js_new_native_closure(js_writable_stream_writer_close, 0, env, 1));
+    JS_RETURN_IF_ERROR(js_set_key_cstr(writer.get(), "write", write.get()));
+    JS_RETURN_IF_ERROR(js_set_key_cstr(writer.get(), "close", close.get()));
+    return writer.get();
 }
 
 extern "C" Item js_writable_stream_new(Item underlying_sink) {
-    Item obj = js_new_object_with_class(JS_CLASS_WRITABLE_STREAM);
-    js_set_key_cstr(obj, "__sink__", underlying_sink);
-    js_set_key_cstr(obj, "__closed__", (Item){.item = b2it(false)});
-    Item get_writer_key = js_name_item("getWriter");
-    Item get_writer_fn = js_new_native_function(js_writable_stream_get_writer_stub);
-    js_set_key_default(obj, get_writer_key, get_writer_fn);
-    return obj;
+    RootFrame roots(3);
+    Rooted<Item> sink(roots, underlying_sink), obj(roots, js_new_object_with_class(JS_CLASS_WRITABLE_STREAM));
+    Rooted<Item> get_writer(roots, js_new_native_function(js_writable_stream_get_writer_stub));
+    JS_RETURN_IF_ERROR(js_set_key_cstr(obj.get(), "__sink__", sink.get()));
+    JS_RETURN_IF_ERROR(js_set_key_cstr(obj.get(), "__closed__", (Item){.item = ITEM_FALSE}));
+    JS_RETURN_IF_ERROR(js_set_key_cstr(obj.get(), "getWriter", get_writer.get()));
+    return obj.get();
 }
 
 static Item js_transform_stream_controller_terminate(Item env_item) {
@@ -18616,6 +18819,17 @@ static Item js_transform_stream_close_readable(Item readable) {
         (Item){.item = (uint64_t)(uintptr_t)env});
 }
 
+static Item js_transform_stream_apply(Item method, Item transformer, Item readable,
+        Item* args, int argc) {
+    RootFrame roots(2);
+    Rooted<Item> output(roots, js_call_function(method, transformer, args, argc));
+    if (item_is_error(output.get())) {
+        Rooted<Item> reason(roots, js_error_lane_payload(output.get()));
+        JS_RETURN_IF_ERROR(js_readable_stream_error(readable, reason.get()));
+    }
+    return output.get();
+}
+
 static Item js_transform_stream_sink_write(Item env_item, Item chunk) {
     JS_ENV_OR_UNDEFINED(env, env_item);
     RootFrame roots(5);
@@ -18628,7 +18842,7 @@ static Item js_transform_stream_sink_write(Item env_item, Item chunk) {
         js_get_key_cstr(transformer_root.get(), "transform"));
     if (js_is_callable(transform_root.get())) {
         Item args[] = {chunk_root.get(), controller_root.get()};
-        return js_call_function(transform_root.get(), transformer_root.get(), args, 2);
+        return js_transform_stream_apply(transform_root.get(), transformer_root.get(), readable_root.get(), args, 2);
     }
     return js_transform_stream_enqueue(readable_root.get(), chunk_root.get());
 }
@@ -18644,8 +18858,7 @@ static Item js_transform_stream_sink_close(Item env_item) {
         js_get_key_cstr(transformer_root.get(), "flush"));
     if (js_is_callable(flush_root.get())) {
         Item args[] = {controller_root.get()};
-        Item flush_result = js_call_function(flush_root.get(), transformer_root.get(), args, 1);
-        if (item_is_error(flush_result)) return flush_result;
+        JS_RETURN_IF_ERROR(js_transform_stream_apply(flush_root.get(), transformer_root.get(), readable_root.get(), args, 1));
     }
     return js_transform_stream_close_readable(readable_root.get());
 }
@@ -18723,4 +18936,116 @@ extern "C" Item js_text_decoder_stream_new(Item encoding, Item options) {
         js_text_decoder_stream_transform, 2, env, 1));
     js_set_key_cstr(transformer_root.get(), "transform", transform_root.get());
     return js_transform_stream_new(transformer_root.get());
+}
+
+static VMapVtable js_decompression_state_vtable = {
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, node_zlib_stream_free, nullptr,
+};
+
+static bool js_decompression_bytes(Item chunk, const char** data, int* length) {
+    JsArrayBuffer* buffer = nullptr;
+    if (js_is_typed_array(chunk)) {
+        buffer = js_get_typed_array_ptr(chunk.map)->base.buffer;
+    } else if (js_is_dataview(chunk)) {
+        JsDataView* view = js_get_dataview_ptr(chunk);
+        if (js_arraybuffer_view_is_out_of_bounds(view)) return false;
+        buffer = view->buffer;
+    } else if (js_is_arraybuffer(chunk)) {
+        buffer = js_get_arraybuffer_ptr_item(chunk);
+    }
+    return buffer && !js_arraybuffer_shared(buffer) && !js_arraybuffer_detached(buffer) &&
+        js_item_bytes(chunk, data, length);
+}
+
+static Item js_decompression_enqueue(Item controller, const NodeZlibBytes* decoded) {
+    if (decoded->length == 0) return make_js_undefined();
+    RootFrame roots(4);
+    Rooted<Item> owner(roots, controller);
+    Rooted<Item> buffer(roots, js_arraybuffer_from_bytes(decoded->data, decoded->length));
+    JS_RETURN_IF_ERROR(buffer.get());
+    Rooted<Item> bytes(roots, js_typed_array_new_from_buffer(JS_TYPED_UINT8, buffer.get(), 0, decoded->length));
+    JS_RETURN_IF_ERROR(bytes.get());
+    Rooted<Item> enqueue(roots, js_get_key_cstr(owner.get(), "enqueue"));
+    Item args[] = {bytes.get()};
+    return js_call_function(enqueue.get(), owner.get(), args, 1);
+}
+
+static Item js_decompression_run(Item owner, Item chunk, Item controller, bool final) {
+    RootFrame roots(3);
+    Rooted<Item> state(roots, owner), source(roots, chunk), destination(roots, controller);
+    VMap* carrier = state.get().vmap;
+    const char* input = nullptr;
+    int length = 0;
+    if (!carrier->data) return js_throw_type_error("DecompressionStream is closed or errored");
+    if (!final && !js_decompression_bytes(source.get(), &input, &length)) {
+        node_zlib_stream_free(carrier->data);
+        carrier->data = nullptr;
+        return js_throw_type_error("DecompressionStream requires a BufferSource");
+    }
+    NodeZlibBytes decoded;
+    // The codec borrows the rooted source only until it returns native output bytes.
+    bool success = node_zlib_stream_run(carrier->data, (const uint8_t*)input, length,
+        final ? Z_FINISH : Z_NO_FLUSH, &decoded);
+    if (final || !success) {
+        node_zlib_stream_free(carrier->data);
+        carrier->data = nullptr;
+    }
+    if (!success) return decoded.status == Z_MEM_ERROR ? ItemError
+        : js_throw_type_error("Invalid or incomplete compressed data");
+    Item output = js_decompression_enqueue(destination.get(), &decoded);
+    node_zlib_bytes_free(&decoded);
+    return output;
+}
+
+static Item js_decompression_transform(Item env_item, Item chunk, Item controller) {
+    JS_ENV_OR_UNDEFINED(env, env_item);
+    return js_decompression_run(env[0], chunk, controller, false);
+}
+
+static Item js_decompression_flush(Item env_item, Item controller) {
+    JS_ENV_OR_UNDEFINED(env, env_item);
+    return js_decompression_run(env[0], make_js_undefined(), controller, true);
+}
+
+static Item js_decompression_stream_new(Item format) {
+    if (get_type_id(js_get_new_target()) != LMD_TYPE_FUNC)
+        return js_throw_type_error("DecompressionStream requires new");
+    RootFrame roots(7);
+    Rooted<Item> name(roots, format);
+    name.set(js_to_string(name.get()));
+    JS_RETURN_IF_ERROR(name.get());
+    String* value = name.get().get_string();
+    static const struct { const char* name; NodeZlibCodecMode mode; int window_bits; } formats[] = {
+        {"deflate", NODE_ZLIB_CODEC_INFLATE, MAX_WBITS},
+        {"deflate-raw", NODE_ZLIB_CODEC_INFLATE_RAW, -MAX_WBITS},
+        {"gzip", NODE_ZLIB_CODEC_GUNZIP, MAX_WBITS + 16},
+    };
+    const auto* selected = &formats[0];
+    for (; selected != formats + sizeof(formats) / sizeof(formats[0]); ++selected) {
+        size_t length = strlen(selected->name);
+        if (value->len == length && memcmp(value->chars, selected->name, length) == 0) break;
+    }
+    if (selected == formats + sizeof(formats) / sizeof(formats[0]))
+        return js_throw_type_error("Unsupported DecompressionStream format");
+    Rooted<Item> prototype(roots, js_get_prototype_from_constructor_default(js_get_new_target(), JS_CLASS_OBJECT, -1));
+    JS_RETURN_IF_ERROR(prototype.get());
+    // The two transform callbacks share a precise GC owner for abandoned streams.
+    Rooted<Item> state(roots, vmap_new());
+    JS_RETURN_IF_ERROR(state.get());
+    VMap* carrier = state.get().vmap;
+    carrier->vtable = &js_decompression_state_vtable;
+    if (!node_zlib_stream_init(selected->mode, selected->window_bits, Z_DEFAULT_COMPRESSION,
+            8, Z_DEFAULT_STRATEGY, &carrier->data, nullptr, ZlibMemberPolicy::Single)) return ItemError;
+    Rooted<Item> transformer(roots, js_new_object());
+    JS_RETURN_IF_ERROR(transformer.get());
+    Item* env = js_alloc_env1(state.get());
+    if (!env) return ItemError;
+    Rooted<Item> transform(roots, js_new_native_closure(js_decompression_transform, 2, env, 1));
+    Rooted<Item> flush(roots, js_new_native_closure(js_decompression_flush, 1, env, 1));
+    JS_RETURN_IF_ERROR(js_set_key_cstr(transformer.get(), "transform", transform.get()));
+    JS_RETURN_IF_ERROR(js_set_key_cstr(transformer.get(), "flush", flush.get()));
+    Rooted<Item> stream(roots, js_transform_stream_new(transformer.get()));
+    JS_RETURN_IF_ERROR(stream.get());
+    js_set_prototype(stream.get(), prototype.get());
+    return stream.get();
 }

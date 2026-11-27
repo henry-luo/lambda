@@ -23,6 +23,7 @@
 #include "activation.h"
 #include "sysinfo.h"
 #include "template_state.h"
+#include "render_map.h"
 #include "lambda/core/binary.h"
 #include "context_capsule.h"
 #include <uv.h>
@@ -457,7 +458,8 @@ static void mark_template_state_item(void* visitor_context, uint64_t item) {
 }
 
 extern "C" void heap_gc_visit_template_roots(gc_heap_t* gc) {
-    tmpl_state_visit_roots(gc, mark_template_state_item);
+    tmpl_state_trace(gc);
+    render_map_visit_roots(gc, mark_template_state_item);
 }
 
 static void heap_finish_init(void) {

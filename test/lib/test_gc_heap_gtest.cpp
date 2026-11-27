@@ -30,6 +30,7 @@
 #include "../../lambda/runtime/interp.hpp"
 #include "../../lambda/runtime/root_vector.h"
 #include "../../lambda/runtime/runtime-state.h"
+#include "../../lambda/runtime/template_state.h"
 
 extern "C" {
 #include "lambda/lambda.h"
@@ -2191,19 +2192,28 @@ TEST_F(GCHeapTest, MarkWorklistGrowthFailureAbandonsCollectionWithoutMutation) {
 TEST_F(GCHeapTest, EphemeronWorklistFailureDoesNotClearUnprocessedEntries) {
     uint64_t key = string_item(make_string("live-key"));
     void* live_value = make_list(2, 2);
-    list_items(live_value)[0] = string_item(make_string("first-live-child"));
-    list_items(live_value)[1] = string_item(make_string("second-live-child"));
+    // Strings mark in place. Two traceable children are needed to grow the worklist.
+    for (int i = 0; i < 2; i++) {
+        void* child = make_list(1, 1);
+        list_items(child)[0] = string_item(make_string("live-child"));
+        list_items(live_value)[i] = list_item(child);
+    }
     uint64_t value = list_item(live_value);
     uint64_t dead_key = string_item(make_string("dead-key"));
     uint64_t dead_value = string_item(make_string("dead-value"));
     ASSERT_TRUE(gc_register_ephemeron(gc, &dead_key, &dead_value, nullptr, nullptr));
     ASSERT_TRUE(gc_register_ephemeron(gc, &key, &value, nullptr, nullptr));
+    gc_set_root_visitor(gc, [](gc_heap_t* heap) {
+        const gc_ephemeron_t pending = heap->ephemerons[0];
+        EXPECT_TRUE(gc_register_ephemeron(heap, pending.key_slot, pending.value_slot, nullptr, nullptr));
+    });
     gc->mark_capacity = 1;
     memtrack_fault_inject(0);
     gc_collect(gc, &key, 1);
     memtrack_fault_clear();
+    gc_set_root_visitor(gc, nullptr);
     EXPECT_EQ(gc->collections, 0u);
-    EXPECT_EQ(gc->object_count, 6u);
+    EXPECT_EQ(gc->object_count, 8u);
     EXPECT_NE(dead_key, 0u);
     EXPECT_NE(dead_value, 0u);
     EXPECT_NE(value, 0u);
@@ -2211,7 +2221,7 @@ TEST_F(GCHeapTest, EphemeronWorklistFailureDoesNotClearUnprocessedEntries) {
 
     gc_collect(gc, &key, 1);
     EXPECT_EQ(gc->collections, 1u);
-    EXPECT_EQ(gc->object_count, 4u);
+    EXPECT_EQ(gc->object_count, 6u);
     EXPECT_EQ(dead_key, 0u);
     EXPECT_EQ(dead_value, 0u);
     void* list = (void*)(uintptr_t)(value & UINT64_C(0x00FFFFFFFFFFFFFF));
@@ -3164,6 +3174,37 @@ protected:
     }
 };
 
+TEST_F(RuntimeMemoryLifetimeTest, TemplateStateFollowsReachableModelIdentity) {
+    struct StateCleanup {
+        ~StateCleanup() { tmpl_state_destroy(); }
+    } cleanup;
+    RootFrame roots(2);
+    Rooted<Item> model(roots, {.item = s2it(heap_strcpy("mounted model", 13))});
+    Rooted<Item> value(roots, {.item = s2it(heap_strcpy("editor state", 12))});
+    // Two presentations share a model, but each keeps its own state.
+    tmpl_state_set(model.get(), "editor", "document", value.get());
+    tmpl_state_set(model.get(), "preview", "document", {.item = i2it(42)});
+    uint64_t weak_model = model.get().item;
+    uint64_t weak_value = value.get().item;
+    gc_register_weak(runtime.heap->gc, &weak_model, nullptr, nullptr);
+    gc_register_weak(runtime.heap->gc, &weak_value, nullptr, nullptr);
+
+    value.set(ItemNull);
+    heap_gc_collect();
+    EXPECT_NE(weak_value, 0u);
+    EXPECT_EQ(tmpl_state_get(model.get(), "editor", "document").item, weak_value);
+    EXPECT_EQ(it2i(tmpl_state_get(model.get(), "preview", "document")), 42);
+
+    model.set(ItemNull);
+    heap_gc_collect();
+    EXPECT_EQ(weak_model, 0u);
+    EXPECT_EQ(weak_value, 0u);
+    heap_gc_collect();
+    EXPECT_EQ(hashmap_count(tmpl_state_get_map()), 0u);
+    gc_unregister_weak(runtime.heap->gc, &weak_model);
+    gc_unregister_weak(runtime.heap->gc, &weak_value);
+}
+
 TEST_F(RuntimeMemoryLifetimeTest, FormatterDestinationDoesNotAccumulateInRuntimePool) {
     const size_t length = 1024 * 1024;
     char* bytes = (char*)mem_alloc(length, MEM_CAT_CONTAINER);
@@ -3323,6 +3364,31 @@ TEST_F(RuntimeMemoryLifetimeTest, DiscardedParsesDoNotRetainInputArenas) {
     memory_test_input_owners(&after_count, &after_used);
     EXPECT_EQ(after_count, before_count);
     EXPECT_EQ(after_used, before_used);
+}
+
+TEST_F(RuntimeMemoryLifetimeTest, MarkdownParseReleasesInputAndKeepsParsedContent) {
+    const char* markdown = "## Heading\n\nA **bold** word.\n";
+    RootFrame roots(3);
+    Rooted<Item> source(roots, {.item = s2it(heap_strcpy(markdown, strlen(markdown)))});
+    Rooted<Item> type(roots, {.item = y2it(heap_create_symbol("markdown", 8))});
+    // The first parse initializes shared runtime shapes; repeats only allocate values.
+    Rooted<Item> value(roots, fn_parse2(source.get(), type.get()));
+    ASSERT_EQ(get_type_id(value.get()), LMD_TYPE_ELEMENT);
+    size_t before_count = 0, before_used = 0, after_count = 0, after_used = 0;
+    memory_test_input_owners(&before_count, &before_used);
+    gc_set_force_collect_interval(runtime.heap->gc, 1);
+    for (int i = 0; i < 16; i++) {
+        value.set(fn_parse2(source.get(), type.get()));
+        ASSERT_EQ(get_type_id(value.get()), LMD_TYPE_ELEMENT);
+    }
+    gc_set_force_collect_interval(runtime.heap->gc, 0);
+    heap_gc_collect();
+    memory_test_input_owners(&after_count, &after_used);
+    EXPECT_EQ(after_count, before_count);
+    EXPECT_EQ(after_used, before_used);
+    Item rendered = fn_format2(value.get(), type.get());
+    ASSERT_EQ(get_type_id(rendered), LMD_TYPE_STRING);
+    EXPECT_NE(strstr(rendered.get_safe_string()->chars, "A **bold** word."), nullptr);
 }
 
 struct MemoryTestSharedStorage {

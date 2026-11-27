@@ -19,6 +19,8 @@ enum NodeZlibCodecMode {
     NODE_ZLIB_CODEC_UNZIP,
 };
 
+enum class ZlibMemberPolicy { Node, Single };
+
 // keep the host provider's seed and unsigned-result semantics identical to
 // zlib while the Node-facing namespace remains in the dynamic module.
 static inline uint32_t node_zlib_crc32_bytes(const uint8_t* data, int length, uint32_t seed) {
@@ -38,7 +40,7 @@ void node_zlib_bytes_free(NodeZlibBytes* bytes);
 
 bool node_zlib_stream_init(enum NodeZlibCodecMode mode, int window_bits, int level,
                            int mem_level, int strategy, void** out_state,
-                           int* out_status);
+                           int* out_status, ZlibMemberPolicy member_policy = ZlibMemberPolicy::Node);
 bool node_zlib_stream_run(void* state, const uint8_t* data, int length, int flush,
                           NodeZlibBytes* out_bytes);
 void node_zlib_stream_free(void* state);

@@ -3294,11 +3294,14 @@ TEST_F(DomRetirementTest, ManualAssignmentsMoveWithEitherEndpoint) {
     EXPECT_EQ(hashmap_count(doc.services.manual_slot_endpoints), 0u);
 }
 
-TEST_F(DomRetirementTest, FailedSubtreeAdoptionPreservesEarlierMembersAndCanRetry) {
-    DomDocument destination;
-    ASSERT_TRUE(destination.init(input));
-    DomElement* branch = element("section");
-    DomElement* first = element("i");
+TEST_F(DomGcBackingTest, FailedSubtreeAdoptionPreservesEarlierMembersAndCanRetry) {
+    init_adoption_target(true);
+    ASSERT_TRUE(target_initialized);
+    DomElement* branch = runtime_element(1);
+    DomElement* first = runtime_element(1);
+    ASSERT_NE(branch, nullptr);
+    ASSERT_NE(first, nullptr);
+    ASSERT_EQ(heap.gc->root_slot_count, 2);
     ASSERT_TRUE(attach(branch, first));
     DomElement* shadow = dom_attach_shadow_root(branch, {});
     ASSERT_NE(shadow, nullptr);
@@ -3306,18 +3309,23 @@ TEST_F(DomRetirementTest, FailedSubtreeAdoptionPreservesEarlierMembersAndCanRetr
     ASSERT_NE(layout_only, nullptr);
     ASSERT_TRUE(attach(branch, layout_only));
     DomNodeRef ref = dom_node_ref(first);
-    ASSERT_FALSE(dom_adopt_detached_subtree(&doc, &destination, branch));
+    ASSERT_FALSE(dom_adopt_detached_subtree(&doc, &target_doc, branch));
     EXPECT_EQ(branch->doc.get(), &doc);
     EXPECT_EQ(shadow->doc.get(), &doc);
     EXPECT_EQ(dom_node_ref_validate(&doc, ref), first);
-    EXPECT_EQ(dom_node_ref_validate(&destination, ref), nullptr);
+    EXPECT_EQ(dom_node_ref_validate(&target_doc, ref), nullptr);
+    // rollback must withdraw the staged index entries without releasing their source roots.
+    dom_lifecycle_release_backing_roots(&target_doc);
+    ASSERT_EQ(heap.gc->root_slot_count, 2);
     ASSERT_TRUE(branch->remove_child(layout_only));
-    ASSERT_TRUE(dom_adopt_detached_subtree(&doc, &destination, branch));
-    EXPECT_EQ(branch->doc.get(), &destination);
-    EXPECT_EQ(first->doc.get(), &destination);
-    EXPECT_EQ(shadow->doc.get(), &destination);
-    EXPECT_TRUE(destination.js.has_shadow_roots);
-    destination.destroy();
+    ASSERT_TRUE(dom_adopt_detached_subtree(&doc, &target_doc, branch));
+    EXPECT_EQ(branch->doc.get(), &target_doc);
+    EXPECT_EQ(first->doc.get(), &target_doc);
+    EXPECT_EQ(shadow->doc.get(), &target_doc);
+    EXPECT_TRUE(target_doc.js.has_shadow_roots);
+    dom_lifecycle_release_backing_roots(&doc);
+    EXPECT_EQ(heap.gc->root_slot_count, 2);
+    EXPECT_EQ(target_heap.gc->root_slot_count, 0);
 }
 
 TEST_F(DomRetirementTest, SourceWrapperKeepsAdoptedNodeAliveUntilReleased) {
@@ -3388,7 +3396,7 @@ TEST_F(DomRetirementTest, AttributeArenaGrowthPlateausAcrossTenThousandRemovals)
         DomAttr* attribute = dom_attribute_node_create(&doc, "urn:test", "a:value", "initial");
         ASSERT_NE(attribute, nullptr);
         dom_attribute_node_attach(owner, attribute);
-        ASSERT_TRUE(dom_attribute_node_set_value(attribute, "changed"));
+        ASSERT_TRUE(dom_attribute_node_set_value(attribute, strview_from_cstr("changed")));
         dom_attribute_node_detach(attribute);
         ASSERT_EQ(dom_retire_sweep(&doc), 1u);
         if (i == 127) arena_get_stats(doc.node_arena, &warm);
@@ -4660,6 +4668,66 @@ TEST_F(StyleEpochTest, OldAndNewEpochsCoexistThenReleaseAtLastBinding) {
     EXPECT_EQ(released.retired_referenced_reserved_bytes, 0u);
     EXPECT_GE(released.released_epoch_count, 1u);
     EXPECT_TRUE(second->specified_style_shared());
+}
+
+TEST_F(StyleEpochTest, RetiringListItemReleasesGeneratedMarkerStorage) {
+    DomElement* item = append("li");
+    DomElement* marker = DomElement::create(&doc, "::marker", nullptr);
+    ASSERT_NE(marker, nullptr);
+    ASSERT_TRUE(item->append_child(marker));
+    CssRule* width = rule(CSS_PROPERTY_WIDTH,
+        css_value_create_length(doc.document_pool, 40.0, CSS_UNIT_PX));
+    apply(marker, width, marker);
+    ASSERT_TRUE(marker->specified_style_shared());
+    apply(document_root, width, document_root, nullptr, true);
+
+    struct ViewOwner {
+        ViewTree tree = {};
+        ~ViewOwner() { tree.destroy(); }
+    } view;
+    view.tree.init(nullptr);
+    Pool* pool = view.tree.prop_pool;
+    ASSERT_NE(pool, nullptr);
+    MarkerProp* properties = (MarkerProp*)pool_calloc(pool, sizeof(MarkerProp));
+    ASSERT_NE(properties, nullptr);
+    char* label = pool_strdup(pool, "1. ");
+    ASSERT_NE(label, nullptr);
+    properties->text_content = lam::own(label);
+    marker->set_marker_prop(properties);
+
+    view_pool_reset_retained_subtree(&view.tree, item);
+    EXPECT_TRUE(marker->specified_style_shared());
+    EXPECT_EQ(marker->marker_prop(), properties);
+    view_tree_release_retired_subtree(&view.tree, item);
+    EXPECT_EQ(marker->specified_style, nullptr);
+    EXPECT_EQ(marker->marker_prop(), nullptr);
+    EXPECT_EQ(pool_allocation_size(pool, label), 0u);
+    StyleEpochStats retired = {};
+    style_epoch_get_stats(&doc, &retired);
+    EXPECT_EQ(retired.retired_referenced_reserved_bytes, 0u);
+}
+
+TEST_F(StyleEpochTest, CascadeScratchSizeFollowsTheCurrentSubtree) {
+    ASSERT_NE(append("retained"), nullptr);
+    PoolStats before = {}, during = {};
+    pool_get_detailed_stats(doc.document_pool, &before);
+    ASSERT_TRUE(style_epoch_cascade_begin(&doc, document_root, &engine, false));
+    pool_get_detailed_stats(doc.document_pool, &during);
+    style_epoch_cascade_end(&doc);
+    size_t initial_scratch = during.live_bytes - before.live_bytes;
+
+    for (int i = 0; i < 512; i++) {
+        DomElement* replaced = append("replaced");
+        ASSERT_NE(replaced, nullptr);
+        ASSERT_TRUE(document_root->remove_child(replaced));
+        ASSERT_EQ(dom_retire_sweep(&doc), 1u);
+    }
+
+    pool_get_detailed_stats(doc.document_pool, &before);
+    ASSERT_TRUE(style_epoch_cascade_begin(&doc, document_root, &engine, false));
+    pool_get_detailed_stats(doc.document_pool, &during);
+    style_epoch_cascade_end(&doc);
+    EXPECT_EQ(during.live_bytes - before.live_bytes, initial_scratch);
 }
 
 TEST_F(StyleEpochTest, MediaEnvironmentChangeAdvancesButLocalRematchDoesNot) {

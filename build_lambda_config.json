@@ -62,7 +62,7 @@
     "lambda/io",
     "lambda/devtools",
     "lambda/runtime",
-    "lambda/runtime/mvp",
+    "lambda/runtime/mir",
     "lambda/runtime/gc",
     "lambda/runtime/grammar",
     "lambda/jube",
@@ -76,11 +76,11 @@
     "lambda/format",
     "lambda/validator",
     "lambda/js",
-    "lambda/js/mvp-lmd",
+    "lambda/js/mir",
     "lambda/dom",
     "lambda/dom/realm",
     "lambda/module/radiant",
-    "lambda/module/hostobj_demo",
+    "test/hostobj_demo",
     "lambda/ts",
     "lambda/network",
     "radiant",
@@ -534,13 +534,13 @@
       "lang": "c++17",
       "source_patterns": [
         "lambda/js/*.cpp",
-        "lambda/js/mvp-lmd/*.cpp",
+        "lambda/js/mir/*.cpp",
         "lambda/dom/*.cpp",
         "lambda/dom/realm/*.cpp",
         "lambda/jube/*.cpp",
         "lambda/ts/*.cpp",
         "lambda/runtime/*.cpp",
-        "lambda/runtime/mvp/*.cpp",
+        "lambda/runtime/mir/*.cpp",
         "lambda/runtime/gc/*.c",
         "lambda/runtime/grammar/*.cpp",
         "lambda/validator/*.cpp"
@@ -568,7 +568,7 @@
         "lambda/runtime/concurrency_js.cpp",
         "lambda/runtime/edit_bridge.cpp",
         "lambda/runtime/http_module.cpp",
-        "lambda/module/hostobj_demo/hostobj_demo_module.cpp",
+        "test/hostobj_demo/hostobj_demo_module.cpp",
         "lambda/runtime/module_registry.cpp",
         "lambda/runtime/pack.cpp",
         "lambda/runtime/render_map.cpp",
@@ -586,7 +586,7 @@
         "lambda/runtime/lambda-eval-science.cpp",
         "lambda/runtime/lambda-eval-num.cpp",
         "lambda/runtime/runner.cpp",
-        "lambda/runtime/mvp/mvp_driver.cpp",
+        "lambda/runtime/mir/mir_driver.cpp",
         "lambda/runtime/transpile_shared.cpp",
         "lambda/runtime/safety_analyzer.cpp",
         "lambda/runtime/vmap.cpp",
@@ -1192,7 +1192,7 @@
         "lambda/network",
         "lib/font",
         "lib/font/woff2",
-        "lambda/runtime/mvp",
+        "lambda/runtime/mir",
         "lambda/devtools"
       ],
       "source_files": [
@@ -1421,12 +1421,12 @@
       "description": "Desktop twin of the iOS phase-1 profile (vibe/Lambda_Design_Mobile.md MB2): the full lambda.exe with GLFW Radiant and the JS/TS runtime, minus MIR -- T0 AST interpreters only (Lambda and LambdaJS), no JIT, no MIR code generation",
       "output": "lambda-nomir.exe",
       "extra_exclude_source_files": [
-        "lambda/runtime/mvp/mvp_driver.cpp",
-        "lambda/runtime/mvp/mvp_plan.cpp",
-        "lambda/runtime/mvp/mvp_mir.cpp",
+        "lambda/runtime/mir/mir_driver.cpp",
+        "lambda/runtime/mir/mir_plan.cpp",
+        "lambda/runtime/mir/mir_lower.cpp",
         "lambda/runtime/mir.c",
         "lambda/runtime/mir_dump.cpp",
-        "lambda/js/mvp-lmd/mvp_lmd_mir.cpp"
+        "lambda/js/mir/js_mir_mir.cpp"
       ],
       "exclude_libraries": [
         "mir"
@@ -2551,12 +2551,12 @@
         "lambda/host/safety/worker_main.cpp"
       ],
       "extra_exclude_source_files": [
-        "lambda/runtime/mvp/mvp_driver.cpp",
-        "lambda/runtime/mvp/mvp_plan.cpp",
-        "lambda/runtime/mvp/mvp_mir.cpp",
+        "lambda/runtime/mir/mir_driver.cpp",
+        "lambda/runtime/mir/mir_plan.cpp",
+        "lambda/runtime/mir/mir_lower.cpp",
         "lambda/runtime/mir.c",
         "lambda/runtime/mir_dump.cpp",
-        "lambda/js/mvp-lmd/mvp_lmd_mir.cpp",
+        "lambda/js/mir/js_mir_mir.cpp",
         "lambda/io/security_policy.cpp",
         "lambda/runtime/devtools_scratch.cpp"
       ],
@@ -4926,6 +4926,7 @@
               "test/test_radiant_view_scene3d.cpp"
             ],
             "case_workers": 7,
+            "case_worker_slots": 3,
             "case_workers_env": "LAMBDA_RADIANT_VIEW_TEST_JOBS",
             "case_worker_args": [
               "--radiant-case-worker"
@@ -6558,6 +6559,19 @@
               "gtest_main"
             ],
             "icon": "\ud83d\udfe8"
+          },
+          {
+            "source": "test/test_viewer_navigation_memory_gtest.cpp",
+            "name": "Viewer Navigation Memory Tests",
+            "category": "extended",
+            "dependencies": [
+              "lambda-lib"
+            ],
+            "binary": "test_viewer_navigation_memory_gtest.exe",
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ]
           },
           {
             "source": "test/test_js_c_parser_gtest.cpp",

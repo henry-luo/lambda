@@ -1056,7 +1056,7 @@ is sufficient for size-based link policy. MVP maintains its maximum in the
 existing function compilation loop. Updating totals and maxima costs constant
 time per finalized function. Source: `lambda/runtime/transpile-mir.cpp`,
 `lambda/runtime/mir_emitter_shared.hpp`, and
-`lambda/js/mvp-lmd/mvp_lmd_mir.cpp`. This changes accounting mechanics under
+`lambda/js/mir/js_mir_mir.cpp`. This changes accounting mechanics under
 **D8.2.5**, without changing the ruling.
 
 #### P3g implementation record — pass-owned contexts and authoritative MIR driver, 2026-08-29

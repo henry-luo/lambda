@@ -1,0 +1,28 @@
+{
+  "name": "Document viewer reuses transformed previews and the file tree during navigation",
+  "html": "temp/view-cache",
+  "prepare": ["python3", "-c", "import os,shutil;p='temp/view-cache';os.makedirs(p,exist_ok=True);[shutil.copy('test/input/'+f,p) for f in 'comprehensive_test.tex advanced_math_test.md go-package.dot seq_diagram.d2'.split()]"],
+  "viewport": {"width": 1200, "height": 900},
+  "events": [
+    {"type": "click", "target": {"selector": ".tree-entry[data-tree-path$='/comprehensive_test.tex'] .tree-label"}},
+    {"type": "assert_text", "target": {"selector": "#rendered-preview"}, "contains": "Lambda LaTeX Phase 2 Enhanced Test"},
+    {"type": "assert_script", "js": "globalThis.cachedTree = document.querySelector('#project-tree'); globalThis.cachedTex = document.querySelector('#rendered-preview article'); !!cachedTree && !!cachedTex"},
+    {"type": "click", "target": {"selector": ".tree-entry[data-tree-path$='/advanced_math_test.md'] .tree-label"}},
+    {"type": "assert_count", "target": {"selector": "#rendered-preview svg.lambda-math"}, "min": 1},
+    {"type": "assert_script", "js": "globalThis.cachedMath = document.querySelector('#rendered-preview svg.lambda-math'); !!cachedMath"},
+    {"type": "click", "target": {"selector": ".tree-entry[data-tree-path$='/go-package.dot'] .tree-label"}},
+    {"type": "assert_count", "target": {"selector": "#rendered-preview .lambda-graph"}, "count": 1},
+    {"type": "assert_script", "js": "globalThis.cachedDot = document.querySelector('#rendered-preview .lambda-graph'); !!cachedDot"},
+    {"type": "click", "target": {"selector": ".tree-entry[data-tree-path$='/seq_diagram.d2'] .tree-label"}},
+    {"type": "assert_count", "target": {"selector": "#rendered-preview .lambda-sequence svg"}, "count": 1},
+    {"type": "click", "target": {"selector": ".tree-entry[data-tree-path$='/comprehensive_test.tex'] .tree-label"}},
+    {"type": "assert_script", "js": "cachedTex === document.querySelector('#rendered-preview article') && cachedTree === document.querySelector('#project-tree')"},
+    {"type": "click", "target": {"selector": ".tree-entry[data-tree-path$='/advanced_math_test.md'] .tree-label"}},
+    {"type": "assert_script", "js": "cachedMath === document.querySelector('#rendered-preview svg.lambda-math')"},
+    {"type": "click", "target": {"selector": ".tree-entry[data-tree-path$='/go-package.dot'] .tree-label"}},
+    {"type": "assert_script", "js": "cachedDot === document.querySelector('#rendered-preview .lambda-graph')"},
+    {"type": "assert_count", "target": {"selector": ".tree-entry[data-tree-path$='/go-package.dot'] .tree-row.selected"}, "count": 1},
+    {"type": "click", "target": {"selector": ".tree-entry[data-tree-path$='/go-package.dot'] .tree-label"}},
+    {"type": "assert_script", "js": "const diagram = document.querySelector('#rendered-preview .lambda-graph'); !!diagram && diagram !== cachedDot"}
+  ]
+}

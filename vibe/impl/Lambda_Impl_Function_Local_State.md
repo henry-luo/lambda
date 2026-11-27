@@ -54,7 +54,7 @@ the checkout are not part of this feature.
 | Interpreter | `interp.cpp`: binding reads/writes, `interp_make_closure`, `EvalSignal`, loop and content evaluation | Preserve no-result versus null, propagate control correctly, use classified capture storage. |
 | Production JIT | `transpile-mir.cpp`: closure environment emission, loop/assignment lowering, result collection and return epilogues | Reuse existing MIR control and COW paths with fn ownership; audit paths gated on procedure kind. |
 | Auto tier | `interp.cpp`, `mir.c`, tier eligibility and handoff metadata | Carry capture/ownership facts across promotion without changing binding homes or results. |
-| Experimental MIR path | `lambda/runtime/mvp/mvp_plan.cpp`, `mvp_mir.cpp` | Respect the shared semantic facts. Unsupported cases must use its documented rejection/fallback contract, never an unsafe admission. |
+| Experimental MIR path | `lambda/runtime/mir/mir_plan.cpp`, `mir_lower.cpp` | Respect the shared semantic facts. Unsupported cases must use its documented rejection/fallback contract, never an unsafe admission. |
 | GC and values | `lambda-eval.cpp`, `lambda-mem.cpp`, owned Item slots, precise root frames and closure tracing | Reuse existing ownership/rooting helpers. A live captured home is not an untraced native pointer or an independently writable snapshot. |
 | Fixtures and harnesses | `test/lambda/`, `test/lambda/proc/`, `test/lambda/negative/`, parser/semantic GTests, GC stress and tier sweep | Migrate only obsolete fn-local rejection cases; preserve real effect and ownership negatives. |
 

@@ -204,7 +204,7 @@ Source audit against the current checkout:
 
 The reuse seam already exists: `JsInterpHostOps` in
 [`js_interp.hpp`](../../lambda/js/js_interp.hpp), populated in
-[`mvp_lmd_dynamic.cpp`](../../lambda/js/mvp-lmd/mvp_lmd_dynamic.cpp).
+[`mvp_lmd_dynamic.cpp`](../../lambda/js/mir/js_mir_dynamic.cpp).
 Its property, invocation, arrays, iterators, class, error and conversion
 operations already execute MVP dynamic source through the retained walker.
 The target is **the same JS runtime helpers and realm identities for AST and

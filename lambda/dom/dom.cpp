@@ -339,19 +339,20 @@ static Item dom_svg_get_animated_class_name(DomElement* elem);
 static Item dom_svg_create_transform(void);
 static Item dom_svg_create_transform_from_matrix(Item matrix);
 static Html5Parser* dom_create_fragment_parser(DomDocument* doc,
-                                               DomElement* context = nullptr) {
+                                               DomElement* context = nullptr,
+                                               Input* scratch = nullptr) {
     if (!doc || !doc->document_pool || !doc->input || !doc->input->arena) {
         return nullptr;
     }
-    // Fragment backing is inserted into the Mark tree, so keep it in the
-    // document Input arena rather than the separate DOM-wrapper arena.
-    return html5_fragment_parser_create(doc->document_pool, doc->input->arena,
-        doc->input, context ? context->tag_name() : nullptr,
+    Input* input = scratch ? scratch : doc->input;
+    return html5_fragment_parser_create(scratch ? scratch->pool : doc->document_pool,
+        input->arena, input, context ? context->tag_name() : nullptr,
         context && dom_element_is_svg(context));
 }
 
 static bool dom_replace_inner_html(DomElement* elem, StrView markup,
                                    bool notify_mutation, bool declarative = false);
+static DomElement* dom_template_contents(DomElement* element);
 
 static String* dom_fragment_text(Item item) {
     String* s = it2s(item);
@@ -383,7 +384,8 @@ static void dom_set_fragment_script_state(DomElement* root, DomFragmentScriptMod
 
 // Fragment roots can be comments as well as layout elements; the element builder skips them.
 static DomNode* dom_build_fragment_node(Item item, DomDocument* doc, DomElement* context,
-                                       DomFragmentScriptMode script_mode = DomFragmentScriptMode::inert) {
+                                       DomFragmentScriptMode script_mode = DomFragmentScriptMode::inert,
+                                       bool retain_source = true) {
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_STRING) {
         String* text = dom_fragment_text(item);
@@ -392,8 +394,11 @@ static DomNode* dom_build_fragment_node(Item item, DomDocument* doc, DomElement*
     }
     if (type != LMD_TYPE_ELEMENT || !item.element || !item.element->type) return nullptr;
     const char* tag = ((TypeElmt*)item.element->type)->name.str;
-    if (dom_is_comment_tag(tag)) return dom_comment_create_detached(item.element, doc);
-    DomElement* root = build_dom_tree_from_element_detached(item.element, doc, context);
+    if (dom_is_comment_tag(tag)) {
+        if (!retain_source) item = MarkBuilder(doc->input).deep_copy_for_dom(item);
+        return get_type_id(item) == LMD_TYPE_ELEMENT ? dom_comment_create_detached(item.element, doc) : nullptr;
+    }
+    DomElement* root = build_dom_tree_from_element_detached(item.element, doc, context, retain_source);
     if (root) dom_set_fragment_script_state(root, script_mode);
     return root;
 }
@@ -431,8 +436,7 @@ struct JsWebAnimationHost {
 
 struct JsWebKeyframeEffectHost {
     CssKeyframes* keyframes;
-    double duration_ms;
-    TimingFunction timing;
+    CssWebAnimationTiming timing;
 };
 
 // Cached JS wrappers are owned by the active EvalContext, not this translation
@@ -484,14 +488,165 @@ JS_FORWARD_EXPRESSION(bool, dom_is_host_driven_loop, (void), (_js_host_driven_lo
 // as _js_current_document.
 #define _js_main_document (js_runtime_state.dom.main_document)
 
-static Item js_create_document_fonts_object(void) {
+struct JsCssFontRequest {
+    CssFontLoad* native;
+    DomDocument* document;
+    JsCssFontRequest* next;
+    JsCssFontRequest** link;
+    uint32_t id;
+};
+
+static void js_close_css_font_request(void* data) {
+    auto* request = (JsCssFontRequest*)data;
+    if (request->link) {
+        *request->link = request->next;
+        if (request->next) request->next->link = request->link;
+    }
+    dom_engine_css_font_load_destroy(request->native);
+    mem_free(request);
+}
+
+static Item js_css_font_exception(const char* name, const char* message) {
     RootFrame roots(2);
+    Rooted<Item> kind(roots, js_name_item(name));
+    Rooted<Item> text(roots, js_name_item(message));
+    return js_domexception_new(text.get(), kind.get());
+}
+
+static Item js_css_font_define_field(Item face, const char* name, Item value) {
+    RootFrame roots(1);
+    Rooted<Item> field(roots, value);
+    return js_define_own_key_storage(face, js_name_item(name), field.get());
+}
+
+static Item js_css_font_loaded_faces(const CssFontLoad* request) {
+    RootFrame roots(4);
+    Rooted<Item> result(roots, js_array_new(0));
+    JS_RETURN_IF_ERROR(result.get());
+    Rooted<Item> constructor(roots, js_get_global_property(js_name_item("FontFace")));
+    Rooted<Item> prototype(roots, js_is_callable(constructor.get())
+        ? js_get_key_cstr(constructor.get(), "prototype") : ItemNull);
+    Rooted<Item> face(roots, ItemNull);
+    CssFontLoadFaceInfo info;
+    for (size_t i = 0; dom_engine_css_font_load_face(request, i, &info); i++) {
+        face.set(js_new_object());
+        JS_RETURN_IF_ERROR(face.get());
+        JS_RETURN_IF_ERROR(js_css_font_define_field(face.get(), "family", make_string_item(info.family)));
+        JS_RETURN_IF_ERROR(js_css_font_define_field(face.get(), "style", make_string_item(info.style)));
+        JS_RETURN_IF_ERROR(js_css_font_define_field(face.get(), "weight", make_string_item(info.weight)));
+        JS_RETURN_IF_ERROR(js_css_font_define_field(face.get(), "status", js_name_item("loaded")));
+        JS_RETURN_IF_ERROR(js_css_font_define_field(face.get(), "loaded", js_promise_resolve(face.get())));
+        if (js_is_object_value(prototype.get())) js_set_prototype(face.get(), prototype.get());
+        JS_RETURN_IF_ERROR(js_array_push(result.get(), face.get()));
+    }
+    return result.get();
+}
+
+static void js_finish_css_font_load(Item owner, const CssFontLoad* request, CssFontLoadStatus status) {
+    RootFrame roots(2);
+    Rooted<Item> promise(roots, owner);
+    Rooted<Item> result(roots, ItemNull);
+    if (status == CSS_FONT_LOAD_LOADED) {
+        result.set(js_css_font_loaded_faces(request));
+        if (!item_is_error(result.get())) {
+            js_promise_fulfill_existing(promise.get(), result.get());
+            return;
+        }
+    }
+    result.set(status == CSS_FONT_LOAD_SYNTAX
+        ? js_css_font_exception("SyntaxError", "Invalid font shorthand")
+        : js_css_font_exception("NetworkError", "The selected font could not be loaded"));
+    js_promise_reject_existing(promise.get(), result.get());
+}
+
+extern "C" void js_dom_css_font_load_poll_pending(void) {
+    JsCssFontRequest** owner = &js_runtime_state.event_loop->font_loads;
+    if (!*owner) return;
+    RuntimeResourceTable* table = runtime_resource_table_context(context);
+    for (JsCssFontRequest* request = *owner; request;) {
+        CssFontLoadStatus status = request->document == _js_main_document
+            ? dom_engine_css_font_load_poll(request->document, request->native) : CSS_FONT_LOAD_FAILED;
+        if (status == CSS_FONT_LOAD_PENDING) {
+            request = request->next;
+            continue;
+        }
+        // Detach before settling: a thenable getter can run script and reenter this checkpoint.
+        RootFrame roots(1);
+        uint32_t id = request->id;
+        uint32_t next = request->next ? request->next->id : 0;
+        Rooted<Item> promise(roots, runtime_resource_table_value(table,
+            runtime_resource_table_entry_owned(table, owner, id)));
+        CssFontLoad* native = request->native;
+        request->native = nullptr;
+        runtime_resource_table_remove_owned(table, owner, id);
+        js_finish_css_font_load(promise.get(), native, status);
+        dom_engine_css_font_load_destroy(native);
+        request = (JsCssFontRequest*)runtime_resource_table_user_data_owned(table, owner, next);
+    }
+}
+
+static Item js_document_font_set_load(Item, Item receiver, Item* args, int argc, uint64_t*) {
+    if (receiver.item != js_document_fonts_value.item || argc == 0) {
+        return js_promise_from_completion(js_throw_type_error("FontFaceSet.load requires a font"));
+    }
+    RootFrame roots(4);
+    Rooted<Item> sample(roots, argc > 1 ? args[1] : make_js_undefined());
+    Rooted<Item> font(roots, js_to_string(args[0]));
+    if (item_is_error(font.get())) return js_promise_from_completion(font.get());
+    Rooted<Item> text(roots, js_to_string(get_type_id(sample.get()) == LMD_TYPE_UNDEFINED
+        ? js_name_item(" ") : sample.get()));
+    if (item_is_error(text.get())) return js_promise_from_completion(text.get());
+    Rooted<Item> promise(roots, js_promise_create_pending());
+    if (!js_promise_is(promise.get())) return ItemError;
+
+    DomDocument* document = _js_main_document;
+    const String* font_spec = it2s(font.get());
+    const String* sample_text = it2s(text.get());
+    CssFontLoadStatus status;
+    CssFontLoad* native = dom_engine_css_font_load_begin(document, font_spec->chars, font_spec->len,
+        sample_text->chars, sample_text->len, &status);
+    if (status == CSS_FONT_LOAD_PENDING) status = dom_engine_css_font_load_poll(document, native);
+    if (status != CSS_FONT_LOAD_PENDING) {
+        js_finish_css_font_load(promise.get(), native, status);
+        dom_engine_css_font_load_destroy(native);
+        return promise.get();
+    }
+
+    auto* request = (JsCssFontRequest*)mem_calloc(1, sizeof(JsCssFontRequest), MEM_CAT_LAYOUT);
+    if (request) {
+        static const RuntimeResourceDescriptor descriptor = {
+            RUNTIME_RESOURCE_DOM_FONT_LOAD, RUNTIME_RESOURCE_GROUP_NONE, "FontFaceSet.load"
+        };
+        JsCssFontRequest** owner = &js_runtime_state.event_loop->font_loads;
+        request->native = native;
+        request->document = document;
+        request->id = runtime_resource_table_add_owned(runtime_resource_table_context_ensure(context),
+            owner, promise.get(), &descriptor, js_close_css_font_request, request, false);
+        if (request->id) {
+            request->link = owner;
+            request->next = *owner;
+            if (*owner) (*owner)->link = &request->next;
+            *owner = request;
+            return promise.get();
+        }
+        mem_free(request);
+    }
+    dom_engine_css_font_load_destroy(native);
+    js_finish_css_font_load(promise.get(), nullptr, CSS_FONT_LOAD_FAILED);
+    return promise.get();
+}
+
+static Item js_create_document_fonts_object(void) {
+    RootFrame roots(3);
     // font-set listeners use the shared EventTarget registry, not own method shims.
     Rooted<Item> fonts(roots, js_create_event_target());
     // retain the existing ready-promise policy; font-resource completion is separate.
     // promise creation and property-name interning can collect either unpublished value (D6.3.3).
     Rooted<Item> ready(roots, dom_realm_promise_resolve(make_js_undefined()));
     dom_realm_set_cstr(fonts.get(), "ready", ready.get());
+    Rooted<Item> load(roots, js_new_native_payload_function(js_document_font_set_load, 0, 1));
+    js_set_function_name(load.get(), js_name_item("load"));
+    dom_realm_set_cstr(fonts.get(), "load", load.get());
     return fonts.get();
 }
 
@@ -2105,6 +2260,10 @@ static void register_named_elements_recursive(DomElement* elem) {
 
 void dom_register_named_elements(DomElement* root) {
     if (!root) return;
+    for (const DomNode* node = root; node; node = dom_shadow_including_parent(node)) {
+        const DomElement* element = node->as_element();
+        if (element && element->template_content_host()) return;
+    }
     register_named_elements_recursive(root);
 }
 
@@ -3484,10 +3643,6 @@ struct IframeContentEntry {
 };
 static const int IFRAME_CACHE_SIZE = 32;
 
-// Side table: documents that have a non-null defaultView (browsing context).
-// Main doc and iframe content docs go here. Foreign docs from
-// document.implementation.create*Document do not.
-static const int DOC_WIN_TABLE_SIZE = 32;
 // Wrapper identity and foreign-document ownership are document-realm state.
 // Calls below use this direct capsule after their normal JS/host entry bind.
 struct DomPendingImageEvent {
@@ -3501,8 +3656,6 @@ struct DomPendingLoadDocument;
 struct JsDomForeignDocumentRuntimeState {
     ForeignDocCacheEntry* foreign_doc_cache = nullptr;
     int foreign_doc_cache_count = 0;
-    DomDocument* doc_with_window[DOC_WIN_TABLE_SIZE] = {};
-    int doc_with_window_count = 0;
     IframeContentEntry iframe_cache[IFRAME_CACHE_SIZE] = {};
     int iframe_cache_count = 0;
     int64_t published_frame_count = 0;
@@ -3539,8 +3692,6 @@ JS_FORWARD_STATIC_EXPRESSION(bool, dom_foreign_document_state_ensure, (),
 #define dom_foreign_document_rt_state ((JsDomForeignDocumentRuntimeState*)context_capsule(context, CONTEXT_CAPSULE_DOM_FOREIGN_DOCUMENT))
 #define s_foreign_doc_cache (dom_foreign_document_rt_state->foreign_doc_cache)
 #define s_foreign_doc_cache_count (dom_foreign_document_rt_state->foreign_doc_cache_count)
-#define s_doc_with_window (dom_foreign_document_rt_state->doc_with_window)
-#define s_doc_with_window_count (dom_foreign_document_rt_state->doc_with_window_count)
 #define s_iframe_cache (dom_foreign_document_rt_state->iframe_cache)
 #define s_iframe_cache_count (dom_foreign_document_rt_state->iframe_cache_count)
 #define s_pending_iframe_loads (dom_foreign_document_rt_state->pending_iframe_loads)
@@ -3554,18 +3705,10 @@ JS_FORWARD_STATIC_EXPRESSION(bool, dom_foreign_document_state_ensure, (),
 
 
 extern "C" bool dom_doc_has_browsing_context(void* doc) {
-    if (!doc || !dom_foreign_document_state_get()) return false;
-    for (int i = 0; i < s_doc_with_window_count; i++) {
-        if (s_doc_with_window[i] == (DomDocument*)doc) return true;
-    }
-    return false;
+    return doc && ((DomDocument*)doc)->has_browsing_context;
 }
 extern "C" void dom_doc_mark_has_browsing_context(void* doc) {
-    if (!doc || !dom_foreign_document_state_ensure()) return;
-    if (dom_doc_has_browsing_context(doc)) return;
-    if (s_doc_with_window_count < DOC_WIN_TABLE_SIZE) {
-        s_doc_with_window[s_doc_with_window_count++] = (DomDocument*)doc;
-    }
+    if (doc) ((DomDocument*)doc)->has_browsing_context = true;
 }
 
 static IframeContentEntry* lookup_iframe_entry(DomElement* iframe) {
@@ -3602,10 +3745,6 @@ static void reset_foreign_document_cache() {
     }
     s_iframe_cache_count = 0;
 
-    for (int i = 0; i < s_doc_with_window_count; i++) {
-        s_doc_with_window[i] = nullptr;
-    }
-    s_doc_with_window_count = 0;
 }
 static bool dom_retains_adopted_document(DomDocument* owner,
                                            DomDocument* target) {
@@ -3690,15 +3829,16 @@ static Item wrap_foreign_doc_owned(DomDocument* doc, bool owns_doc) {
     DomNode* node = (DomNode*)dom_get_or_create_doc_node(doc);
     Item it = node ? radiant_dom_wrap_node(node) : ItemNull;
     if (get_type_id(it) != LMD_TYPE_VELMT) return ItemNull;
+    // Borrowed browsing contexts use the node cache's weak identity. A second
+    // strong root would keep a detached frame alive until the outer realm closed.
+    virtual_host_set(it, radiant_dom_foreign_document_host_type(), node);
+    if (!owns_doc) return it;
     ForeignDocCacheEntry* entry = (ForeignDocCacheEntry*)mem_calloc(
         1, sizeof(ForeignDocCacheEntry), MEM_CAT_JS_RUNTIME);
     if (!entry) {
         log_error("dom-foreign-document: failed to retain document wrapper");
         return ItemNull;
     }
-    // The foreign brand selects active-document behavior; structural reads
-    // retain the same document-node backend as every other DOM Velmt.
-    virtual_host_set(it, radiant_dom_foreign_document_host_type(), node);
     entry->doc = doc;
     entry->item = it.item;
     entry->owns_doc = owns_doc;
@@ -3712,12 +3852,14 @@ JS_FORWARD_STATIC_ITEM(wrap_foreign_doc, (DomDocument* doc), wrap_foreign_doc_ow
 
 // Returns the foreign-doc wrapper for `doc` if one exists, else ItemNull.
 static Item lookup_foreign_doc_wrapper(DomDocument* doc) {
-    if (!dom_foreign_document_state_get()) return ItemNull;
-    for (ForeignDocCacheEntry* entry = s_foreign_doc_cache; entry;
-         entry = entry->next) {
-        if (entry->doc == doc) {
-            return (Item){.item = entry->item};
-        }
+    if (!doc) return ItemNull;
+    Item wrapper = dom_cached_node_wrapper(doc->js.doc_node);
+    if (virtual_host_type(wrapper) == radiant_dom_foreign_document_host_type()) return wrapper;
+    if (doc != _js_main_document && doc != _js_current_document &&
+            (doc->embedding_document || doc->retired_frame_owner) && doc->has_browsing_context) {
+        // A live child node can observe its document again after the old
+        // wrapper is collected. Recreate the same foreign-document surface.
+        return wrap_foreign_doc_owned(doc, false);
     }
     return ItemNull;
 }
@@ -4012,26 +4154,18 @@ extern "C" Item dom_iframe_get_content_document(DomElement* iframe) {
     if (!iframe || !dom_foreign_document_state_ensure()) return ItemNull;
     IframeContentEntry* e = lookup_iframe_entry(iframe);
     DomDocument* loaded = iframe->embed ? dom_engine_embed_property(iframe)->doc : nullptr;
-    if (e && loaded && e->doc != loaded) {
-        // the frames collection may have exposed about:blank before navigation committed.
-        if (!dom_transfer_document_storage(e->doc, loaded)) return ItemNull;
-        e->doc = loaded;
-        e->owns_doc = false;
+    if (loaded) {
+        if (e) {
+            // Transfer a provisional about:blank owner once. The renderer
+            // holds the committed child directly on the iframe.
+            if (e->doc != loaded && !dom_transfer_document_storage(e->doc, loaded)) return ItemNull;
+            *e = s_iframe_cache[--s_iframe_cache_count];
+            s_iframe_cache[s_iframe_cache_count] = {};
+        }
         dom_doc_mark_has_browsing_context(loaded);
+        return wrap_foreign_doc_owned(loaded, false);
     }
     if (!e) {
-        DomDocument* embedded_doc = iframe->embed ? dom_engine_embed_property(iframe)->doc : nullptr;
-        if (embedded_doc) {
-            dom_doc_mark_has_browsing_context(embedded_doc);
-            // A renderer-loaded srcdoc is already a full document; observing it must not reparse its body.
-            if (s_iframe_cache_count < IFRAME_CACHE_SIZE) {
-                s_iframe_cache[s_iframe_cache_count].iframe = iframe;
-                s_iframe_cache[s_iframe_cache_count].doc = embedded_doc;
-                s_iframe_cache[s_iframe_cache_count].owns_doc = false;
-                s_iframe_cache_count++;
-            }
-            return wrap_foreign_doc_owned(embedded_doc, false);
-        }
         DomDocument* doc = create_foreign_html_doc("");
         if (!doc) return ItemNull;
         dom_doc_mark_has_browsing_context(doc);
@@ -6174,6 +6308,7 @@ static void collect_inner_html(DomNode* node, StrBuf* sb,
 
 static void collect_html_children(DomElement* element, StrBuf* buffer,
                                   const DomShadowSerialization* shadows) {
+    if (DomElement* content = element->template_contents()) element = content;
     DomElement* root = shadows ? element->shadow_root_element() : nullptr;
     const ShadowStyle* state = root ? root->shadow_style() : nullptr;
     if (state) {
@@ -6315,6 +6450,16 @@ static void dom_collapse_selection_before_child_replace(DomElement* elem,
 
 
 
+struct DomFragmentInputScope {
+    Pool* pool;
+    Input* input;
+
+    explicit DomFragmentInputScope(bool temporary)
+        : pool(temporary ? mem_pool_create(nullptr, MEM_ROLE_INPUT, "input.dom.fragment") : nullptr),
+          input(pool ? Input::create(pool) : nullptr) {}
+    ~DomFragmentInputScope() { if (pool) mem_pool_destroy(pool); }
+};
+
 // Parse in the context's document without replacing its existing children.
 static bool dom_parse_markup_into(DomElement* target, StrView markup,
                                   bool notify_mutation, DomElement* context = nullptr,
@@ -6324,7 +6469,12 @@ static bool dom_parse_markup_into(DomElement* target, StrView markup,
     if (!doc || !doc->input) return false;
     if (!context) context = target->shadow_host_element();
     if (!context) context = target;
-    Html5Parser* parser = dom_create_fragment_parser(doc, context);
+    // Reactive documents already copy parser nodes into their published DOM.
+    // Keep the intermediate HTML tree and its parser storage scoped to this insert.
+    bool temporary_source = doc->element_dom_map && doc->page_kind != DOM_PAGE_KIND_HTML;
+    DomFragmentInputScope scratch(temporary_source);
+    if (temporary_source && !scratch.input) return false;
+    Html5Parser* parser = dom_create_fragment_parser(doc, context, scratch.input);
     Html5ParserScope parser_scope(parser);
     if (!parser) return false;
     parser->allow_declarative_shadow_roots = declarative;
@@ -6332,7 +6482,8 @@ static bool dom_parse_markup_into(DomElement* target, StrView markup,
     Element* body_elem = html5_fragment_get_body(parser);
     if (!body_elem) return false;
     for (int64_t i = 0; i < body_elem->length; i++) {
-        DomNode* child = dom_build_fragment_node(body_elem->items[i], doc, context, script_mode);
+        DomNode* child = dom_build_fragment_node(body_elem->items[i], doc, context, script_mode,
+            !temporary_source);
         if (!child || !dom_parser_move_child(target, child)) continue;
         dom_post_insert(target, child, notify_mutation);
         dom_observers_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT,
@@ -6345,6 +6496,15 @@ static bool dom_parse_markup_into(DomElement* target, StrView markup,
 static bool dom_replace_inner_html(DomElement* elem, StrView markup,
                                    bool notify_mutation, bool declarative) {
     if (!elem || !markup.str) return false;
+    DomElement* template_context = nullptr;
+    RootFrame roots(1);
+    Rooted<Item> owner(roots, ItemNull);
+    if (dom_element_is_html_tag(elem, MARKUP_NAME_TEMPLATE)) {
+        // Parse in the template's context and replace the stable, inert contents.
+        template_context = elem;
+        owner.set(dom_wrap_element(elem));
+        elem = dom_template_contents(elem);
+    }
     elem = dom_prepare_children_for_mutation(elem);
     if (!elem) return false;
     DomScriptReactionScope script_reactions(elem->doc);
@@ -6368,7 +6528,7 @@ static bool dom_replace_inner_html(DomElement* elem, StrView markup,
     }
 
     if (markup.length || elem->tag() == MARKUP_NAME_HTML) {
-        if (!dom_parse_markup_into(elem, markup, notify_mutation, nullptr, declarative)) return false;
+        if (!dom_parse_markup_into(elem, markup, notify_mutation, template_context, declarative)) return false;
     }
 
     dom_register_named_elements(elem);
@@ -10173,39 +10333,18 @@ extern "C" int radiant_dom_anchor_hash_get(Item receiver, Item* out);
 
 
 
-static Item dom_template_content(DomElement* template_elem) {
-    if (!template_elem || !template_elem->doc) return ItemNull;
+static DomElement* dom_template_contents(DomElement* template_elem) {
+    if (DomElement* existing = template_elem->template_contents()) return existing;
+    DomElement* fragment = dom_attach_template_contents(template_elem);
+    if (!fragment) return nullptr;
 
-    RootFrame roots(3);
-    Rooted<Item> owner(roots, dom_wrap_element(template_elem));
-    Rooted<Item> content_key(roots, js_string_key("__lambda_template_content"));
-    Rooted<Item> fragment_item(roots, ItemNull);
-    Item cached = ItemNull;
-    if (expando_get_property((DomNode*)template_elem, content_key.get(), &cached)) {
-        return cached;
+    // The normal move handles element and text backing. Comment insertion can
+    // use a DOM-only link, so drop its old backing entry explicitly.
+    while (DomNode* child = template_elem->first_child) {
+        if (child->is_comment() && !dom_remove_backed_child(template_elem, child)) return nullptr;
+        if (!dom_parser_move_child(fragment, child)) return nullptr;
     }
-
-    DomElement* fragment = dom_element_create(
-        template_elem->doc, "#document-fragment", nullptr);
-    if (!fragment) return ItemNull;
-
-    // template children belong to the detached template contents, not to the
-    // rendered template element; move both DOM and backing entries together.
-    DomNode* child = template_elem->first_child;
-    while (child) {
-        DomNode* next = child->next_sibling;
-        if (!dom_remove_backed_child(template_elem, child) &&
-            child->parent == (DomNode*)template_elem) {
-            ((DomNode*)template_elem)->remove_child(child);
-        }
-        ((DomNode*)fragment)->append_child(child);
-        child = next;
-    }
-
-    // publishing the cache can allocate before either the key or wrapper has an owner.
-    fragment_item.set(dom_wrap_element(fragment));
-    expando_set_property((DomNode*)template_elem, content_key.get(), fragment_item.get());
-    return fragment_item.get();
+    return fragment;
 }
 
 static bool dom_get_textlike_property(DomNode* node, Item elem_item,
@@ -10856,9 +10995,8 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
 
     // html requires template contents to be exposed through a detached
     // DocumentFragment, so cloning does not clone the hidden template wrapper.
-    if (prop_id == JS_DOM_PROP_CONTENT &&
-        elem->tag_name() && str_icmp_cstr(elem->tag_name(), "template") == 0) {
-        return dom_template_content(elem);
+    if (prop_id == JS_DOM_PROP_CONTENT && dom_element_is_html_tag(elem, MARKUP_NAME_TEMPLATE)) {
+        return dom_wrap_element(dom_template_contents(elem));
     }
 
     // namespaceURI. Prefer the URI recorded by createElementNS (kept as a
@@ -14243,7 +14381,7 @@ extern "C" Item dom_append_child_bridge(void* parent_ptr, Item child_arg) {
         log_error("dom_append_child_bridge: argument is not a DOM node");
         return ItemNull;
     }
-    if (dom_shadow_including_contains(child_node, elem)) {
+    if (dom_host_including_contains(child_node, elem)) {
         // reject an ancestor before either tree can acquire a parent cycle.
         return dom_insertion_ancestor_error();
     }
@@ -14315,7 +14453,7 @@ extern "C" Item dom_insert_before_bridge(void* parent_ptr, Item new_child_arg,
         // keyed reconciler children and changes live-range behavior.
         return new_child_arg;
     }
-    if (dom_shadow_including_contains(new_child, parent_node)) {
+    if (dom_host_including_contains(new_child, parent_node)) {
         return dom_insertion_ancestor_error();
     }
     if (ref_child && ref_child->parent != parent_node) {
@@ -14405,6 +14543,10 @@ extern "C" Item dom_remove_bridge(void* node_ptr) {
 extern "C" Item dom_adopt_node_bridge(Item node_arg) {
     DomNode* node = (DomNode*)dom_unwrap_element(node_arg);
     if (!node) return ItemNull;
+    if (DomElement* element = node->as_element(); element && element->template_content_host() &&
+            element->doc != _js_current_document) {
+        return dom_raise_named("NotSupportedError", "Template contents use their host's native document.");
+    }
     if (DomAttr* attribute = node->as_attribute()) {
         if (attribute->owner_element) dom_core_remove_attribute_node(
             dom_wrap_element(attribute->owner_element), node_arg);
@@ -14560,7 +14702,13 @@ static DomNode* dom_clone_node_into_document(DomNode* node,
         }
         return true;
     };
-    if (deep && !clone_children(elem, clone)) return nullptr;
+    if (deep) {
+        if (DomElement* source = elem->template_contents()) {
+            DomElement* target = dom_attach_template_contents(clone);
+            if (!target || !clone_children(source, target)) return nullptr;
+        }
+        if (!clone_children(elem, clone)) return nullptr;
+    }
     DomElement* shadow = elem->shadow_root_element();
     const ShadowStyle* state = shadow ? shadow->shadow_style() : nullptr;
     if (state && state->clonable) {
@@ -14646,7 +14794,7 @@ extern "C" Item dom_replace_child_bridge(void* parent_ptr, Item new_child_arg,
         dom_pre_remove(old_child);
         return old_child_arg;
     }
-    if (dom_shadow_including_contains(new_child, elem)) {
+    if (dom_host_including_contains(new_child, elem)) {
         return dom_insertion_ancestor_error();
     }
     DomScriptReactionScope script_reactions(elem->doc);
@@ -15039,7 +15187,7 @@ extern "C" Item dom_append_variadic_bridge(void* elem_ptr, Item* args, int argc)
     for (int i = 0; i < argc; i++) {
         DomNode* child_node = (DomNode*)dom_unwrap_element(args[i]);
         if (child_node) {
-            if (dom_shadow_including_contains(child_node, elem)) {
+            if (dom_host_including_contains(child_node, elem)) {
                 return dom_insertion_ancestor_error();
             }
             if (child_node->is_element()) {
@@ -15104,7 +15252,7 @@ static Item dom_replace_children(Item parent_item, Item* args, int argc) {
         insertion = (DomNode*)dom_unwrap_element(fragment_root.get());
         is_fragment = true;
     }
-    if (dom_shadow_including_contains(insertion, parent)) return dom_insertion_ancestor_error();
+    if (dom_host_including_contains(insertion, parent)) return dom_insertion_ancestor_error();
     bool document = parent == parent->doc->js.doc_node;
     int elements = 0, doctypes = 0;
     for (DomNode* child = is_fragment ? insertion->as_element()->first_child.get() : insertion;
@@ -15271,7 +15419,7 @@ extern "C" Item dom_prepend_variadic_bridge(void* elem_ptr, Item* args, int argc
     for (int i = 0; i < argc; i++) {
         DomNode* child_node = (DomNode*)dom_unwrap_element(args[i]);
         if (child_node) {
-            if (dom_shadow_including_contains(child_node, elem)) {
+            if (dom_host_including_contains(child_node, elem)) {
                 return dom_insertion_ancestor_error();
             }
             if (child_node->is_element() &&
@@ -18342,9 +18490,24 @@ static Item js_web_animation_parse_keyframes(DomDocument* document,
     return ItemNull;
 }
 
-// the headless runner samples currentTime explicitly; pausing only needs to
-// prevent an implicit clock from changing that deterministic sample.
-JS_FORWARD_STATIC_EXPRESSION(Item, js_web_animation_pause, (void), ItemNull)
+static Item js_web_animation_pause(void) {
+    JsWebAnimationHost* host = js_web_animation_host(dom_realm_receiver());
+    if (!host || !host->state)
+        return dom_realm_throw_type_error("Animation.pause requires an Animation receiver");
+    dom_engine_web_animation_pause(host->state);
+    return make_js_undefined();
+}
+
+static Item js_web_animation_play(void) {
+    RootFrame roots(1);
+    Rooted<Item> receiver(roots, dom_realm_receiver());
+    JsWebAnimationHost* host = js_web_animation_host(receiver.get());
+    if (!host || !host->state)
+        return dom_realm_throw_type_error("Animation.play requires an Animation receiver");
+    JS_RETURN_IF_ERROR(dom_web_animation_remember(receiver.get()));
+    dom_engine_web_animation_play(host->state);
+    return make_js_undefined();
+}
 
 static Item js_web_animation_reverse(void) {
     // The headless layout runner samples currentTime explicitly; reversing an
@@ -18356,7 +18519,7 @@ static Item js_web_animation_reverse(void) {
 static Item js_web_animation_current_time_get(void) {
     JsWebAnimationHost* host = js_web_animation_host(dom_realm_receiver());
     return host && host->state && host->state->current_time_resolved
-        ? js_make_number(host->state->current_time_ms) : ItemNull;
+        ? js_make_number(dom_engine_web_animation_current_time(host->state)) : ItemNull;
 }
 
 static Item js_web_animation_current_time_set(Item value) {
@@ -18380,7 +18543,7 @@ static Item js_web_animation_current_time_set(Item value) {
         else if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64) {
             current_time = (double)it2i(numeric);
         }
-        css_web_animation_set_current_time(host->state, current_time);
+        dom_engine_web_animation_seek(host->state, current_time);
         JS_RETURN_IF_ERROR(dom_web_animation_remember(receiver_root.get()));
         log_debug("web-anim: currentTime set to %.1fms", current_time);
     }
@@ -18393,36 +18556,45 @@ extern "C" Item dom_web_animation_cancel(void) {
     JsWebAnimationHost* host = js_web_animation_host(receiver_root.get());
     if (!host || !host->state)
         return dom_realm_throw_type_error("Animation.cancel requires an Animation receiver");
-    css_web_animation_cancel(host->state);
+    dom_engine_web_animation_cancel(host->state);
     for (int64_t i = 0; i < js_array_length(dom_web_animation_wrappers); i++)
         if (js_elements_get_int(dom_web_animation_wrappers, i).item == receiver_root.get().item)
             JS_RETURN_IF_ERROR(js_elements_set_int(dom_web_animation_wrappers, i, ItemNull));
     return make_js_undefined();
 }
 
+static Item js_web_animation_timing_number(Item input, double* result) {
+    JS_RETURN_IF_ERROR(input);
+    if (is_js_undefined(input)) return ItemNull;
+    RootFrame roots(1);
+    Rooted<Item> value(roots, input);
+    value.set(js_to_number(value.get()));
+    JS_RETURN_IF_ERROR(value.get());
+    *result = get_type_id(value.get()) == LMD_TYPE_FLOAT ? it2d(value.get()) : (double)it2i(value.get());
+    return ItemNull;
+}
+
 static Item js_web_animation_parse_timing_options(Item options,
-                                                  double* duration_ms,
-                                                  TimingFunction* timing, Pool* pool) {
-    *duration_ms = 0.0;
+                                                  CssWebAnimationTiming* timing, Pool* pool) {
     *timing = {};
-    timing->type = TIMING_LINEAR;
+    timing->iterations = 1.0;
+    timing->easing.type = TIMING_LINEAR;
     RootFrame roots(2);
     Rooted<Item> options_root(roots, options);
     Rooted<Item> value_root(roots, ItemNull);
     bool dictionary = js_is_object_value(options_root.get());
+    if (dictionary) {
+        JS_RETURN_IF_ERROR(js_web_animation_timing_number(
+            dom_realm_get_cstr(options_root.get(), "delay"), &timing->delay_ms));
+        if (!isfinite(timing->delay_ms)) return dom_realm_throw_type_error("invalid animation delay");
+    }
     value_root.set(dictionary ? dom_realm_get_cstr(options_root.get(), "duration")
         : options_root.get());
-    if (item_is_error(value_root.get())) return value_root.get();
-    if (!is_js_undefined(value_root.get()) && value_root.get().item != ITEM_NULL) {
-        const char* text = fn_to_cstr(value_root.get());
-        if (!text || strcmp(text, "auto")) {
-            value_root.set(js_to_number(value_root.get()));
-            if (item_is_error(value_root.get())) return value_root.get();
-            *duration_ms = get_type_id(value_root.get()) == LMD_TYPE_FLOAT
-                ? it2d(value_root.get()) : (double)it2i(value_root.get());
-            if (isnan(*duration_ms) || *duration_ms < 0.0)
-                return dom_realm_throw_type_error("invalid animation duration");
-        }
+    JS_RETURN_IF_ERROR(value_root.get());
+    if (get_type_id(value_root.get()) != LMD_TYPE_STRING || strcmp(fn_to_cstr(value_root.get()), "auto")) {
+        JS_RETURN_IF_ERROR(js_web_animation_timing_number(value_root.get(), &timing->duration_ms));
+        if (isnan(timing->duration_ms) || timing->duration_ms < 0.0)
+            return dom_realm_throw_type_error("invalid animation duration");
     }
     if (dictionary) {
         value_root.set(dom_realm_get_cstr(options_root.get(), "easing"));
@@ -18430,9 +18602,25 @@ static Item js_web_animation_parse_timing_options(Item options,
         if (!is_js_undefined(value_root.get())) {
             value_root.set(js_to_string(value_root.get()));
             if (item_is_error(value_root.get())) return value_root.get();
-            if (!css_animation_parse_timing_function_text(fn_to_cstr(value_root.get()), timing, pool))
+            if (!css_animation_parse_timing_function_text(fn_to_cstr(value_root.get()), &timing->easing, pool))
                 return dom_realm_throw_type_error("invalid animation easing");
         }
+        value_root.set(dom_realm_get_cstr(options_root.get(), "fill"));
+        JS_RETURN_IF_ERROR(value_root.get());
+        if (!is_js_undefined(value_root.get())) {
+            value_root.set(js_to_string(value_root.get()));
+            JS_RETURN_IF_ERROR(value_root.get());
+            const char* fill = fn_to_cstr(value_root.get());
+            if (!strcmp(fill, "forwards")) timing->fill = ANIM_FILL_FORWARDS;
+            else if (!strcmp(fill, "backwards")) timing->fill = ANIM_FILL_BACKWARDS;
+            else if (!strcmp(fill, "both")) timing->fill = ANIM_FILL_BOTH;
+            else if (strcmp(fill, "none") && strcmp(fill, "auto"))
+                return dom_realm_throw_type_error("invalid animation fill");
+        }
+        JS_RETURN_IF_ERROR(js_web_animation_timing_number(
+            dom_realm_get_cstr(options_root.get(), "iterations"), &timing->iterations));
+        if (isnan(timing->iterations) || timing->iterations < 0.0)
+            return dom_realm_throw_type_error("invalid animation iterations");
     }
     return ItemNull;
 }
@@ -18447,19 +18635,18 @@ static Item js_web_animation_create(DomElement* element, Item keyframes_item,
     Rooted<Item> keyframes_root(roots, keyframes_item);
     Rooted<Item> options_root(roots, options_item);
     CssKeyframes* keyframes = snapshot ? snapshot->keyframes : nullptr;
-    double duration_ms = snapshot ? snapshot->duration_ms : 0.0;
-    TimingFunction timing = snapshot ? snapshot->timing : TimingFunction{};
+    CssWebAnimationTiming timing = snapshot ? snapshot->timing : CssWebAnimationTiming{};
     if (!snapshot) {
         Item parsed = js_web_animation_parse_timing_options(options_root.get(),
-            &duration_ms, &timing, element->doc->document_pool);
+            &timing, element->doc->document_pool);
         if (item_is_error(parsed)) return parsed;
         parsed = js_web_animation_parse_keyframes(element->doc, keyframes_root.get(), &keyframes);
         if (item_is_error(parsed)) return parsed;
     }
     if (!keyframes) return ItemNull;
 
-    CssWebAnimationState* state = (CssWebAnimationState*)dom_engine_web_animation_create(
-        element, keyframes, duration_ms, &timing, element->doc->document_pool);
+    CssWebAnimationState* state = dom_engine_web_animation_create(
+        element, keyframes, &timing, element->doc->document_pool);
     if (!state) return ItemNull;
 
     JsWebAnimationHost* host = (JsWebAnimationHost*)pool_calloc(
@@ -18492,7 +18679,7 @@ static Item js_web_animation_create(DomElement* element, Item keyframes_item,
     dom_realm_set_native(animation_root.get(), js_string_key("pause"),
                       js_web_animation_pause);
     dom_realm_set_native(animation_root.get(), js_string_key("play"),
-                      js_web_animation_pause);
+                      js_web_animation_play);
     dom_realm_set_native(animation_root.get(), js_string_key("reverse"),
                       js_web_animation_reverse);
     dom_realm_install_accessor(animation_root.get(), js_string_key("currentTime"),
@@ -18506,6 +18693,8 @@ static Item js_web_animation_create(DomElement* element, Item keyframes_item,
                     dom_realm_promise_resolve(make_js_undefined()));
     dom_realm_apply_prototype(animation_root.get(), "Animation");
     JS_RETURN_IF_ERROR(dom_web_animation_remember(animation_root.get()));
+    // Construction alone leaves an Animation idle. Element.animate starts it.
+    if (!snapshot) dom_engine_web_animation_play(state);
     return animation_root.get();
 }
 
@@ -18536,7 +18725,7 @@ extern "C" Item dom_element_get_animations(Item options) {
     for (int64_t i = 0; i < count; i++) {
         value.set(js_elements_get_int(dom_web_animation_wrappers, i));
         JsWebAnimationHost* host = js_web_animation_host(value.get());
-        if (!host || !host->state || !host->state->current_time_resolved) continue;
+        if (!host || !dom_engine_web_animation_is_relevant(host->state)) continue;
         DomElement* target = host->state->element;
         if (target == element || (subtree && dom_subtree_contains_node(element, target)))
             matches.get()[matched++] = {i, host->sequence};
@@ -18567,7 +18756,7 @@ extern "C" Item dom_keyframe_effect_ctor(Item target, Item keyframes,
         document->document_pool, sizeof(JsWebKeyframeEffectHost));
     if (!host) return ItemError;
     Item parsed = js_web_animation_parse_timing_options(options_root.get(),
-        &host->duration_ms, &host->timing, document->document_pool);
+        &host->timing, document->document_pool);
     if (item_is_error(parsed)) return parsed;
     parsed = js_web_animation_parse_keyframes(document, keyframes_root.get(), &host->keyframes);
     if (item_is_error(parsed)) return parsed;
@@ -18662,8 +18851,6 @@ extern "C" void dom_foreign_documents_release_context(void) {
 #undef dom_foreign_document_rt_state
 #undef s_foreign_doc_cache
 #undef s_foreign_doc_cache_count
-#undef s_doc_with_window
-#undef s_doc_with_window_count
 #undef s_iframe_cache
 #undef s_iframe_cache_count
 #undef s_pending_iframe_loads
@@ -18678,7 +18865,7 @@ static void dom_foreign_document_capsule_destroy(void* capsule) {
     JsDomForeignDocumentRuntimeState* state =
         (JsDomForeignDocumentRuntimeState*)capsule;
     dom_destroy_context_state(capsule,
-        state->foreign_doc_cache_count || state->doc_with_window_count ||
+        state->foreign_doc_cache_count ||
         state->iframe_cache_count || state->pending_iframe_load_count ||
         state->pending_image_load_count || state->pending_load_documents,
         "js-dom-foreign-document");

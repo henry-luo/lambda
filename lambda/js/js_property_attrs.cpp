@@ -12,7 +12,7 @@ extern "C" bool js_proto_snapshot_requires_typemap_detach(Item obj);
 #include "js_runtime_state.hpp"
 #include "js_function.hpp"
 #include "js_state_guards.h"
-#include "mvp-lmd/mvp_lmd_runtime.h"
+#include "mir/js_mir_runtime.h"
 #include "../lambda.hpp"
 #include "../lambda-data.hpp"
 #include "lambda/input/input.hpp"

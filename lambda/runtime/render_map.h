@@ -74,7 +74,11 @@ int render_map_retransform(void);
 // Re-transform dirty entries and return details of what changed.
 // Fills out_results (up to max_results), returns actual count.
 // If more dirty entries than max_results, excess is still retransformed but not reported.
-int render_map_retransform_with_results(RetransformResult* out_results, int max_results);
+// result_roots holds three precise slots per reported result through native commit.
+int render_map_retransform_with_results(RetransformResult* out_results, int max_results, Item* result_roots);
+void render_map_visit_roots(void* visitor_context,
+                            void (*visit)(void* visitor_context, uint64_t item));
+void render_map_prune_unpublished(void);
 
 // Clear all entries
 void render_map_reset(void);
