@@ -475,10 +475,11 @@ pub fn validate(graph) {
   else { [*schema.validate(graph), *graph_diagnostics(graph)] }
 }
 
-pub fn normalize(graph) {
+fn lower_graph(graph, report) {
   // Source graph readers retain node redeclarations; merge them before
   // canonical uniqueness checks while authored canonical Mark keeps strict IDs.
-  let dot_result = if (is_dot_source_graph(graph)) graphviz_normalize.normalize(graph)
+  let dot_source = is_dot_source_graph(graph);
+  let dot_result = if (dot_source) graphviz_normalize.normalize(graph, report)
     else {graph: graph, diagnostics: []};
   let resolved = if (is_redeclaration_source_graph(dot_result.graph)) {
     let merged = merge_source_redeclarations(dot_result.graph);
@@ -492,12 +493,21 @@ pub fn normalize(graph) {
     (if (is_canonical_graph(resolved)) resolved else canonical_graph(resolved)) else resolved;
   let final_graph = if (canonical is element and canonical.flavor == "dot")
     resolve_dot_compass_ports(canonical) else canonical;
+  {graph: final_graph, original: if (dot_source) final_graph else resolved,
+    diagnostics: dot_result.diagnostics}
+}
+
+// A renderer consumes the lowered graph. Validation remains available to callers
+// that consume diagnostics, and does not participate in building this tree.
+pub fn canonicalize(graph) => lower_graph(graph, false).graph
+
+pub fn normalize(graph) {
+  let lowered = lower_graph(graph, true);
   // Validate authored structure before rebuilding so duplicate canonical children
   // cannot disappear without a diagnostic when the canonical pair is selected.
-  let values = [*dot_result.diagnostics,
-    *validate(if (is_dot_source_graph(graph)) final_graph else resolved)];
+  let values = [*lowered.diagnostics, *validate(lowered.original)];
   {
-    graph: final_graph,
+    graph: lowered.graph,
     diagnostics: values,
     valid: not diagnostic.has_errors(values)
   }

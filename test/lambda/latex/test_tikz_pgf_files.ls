@@ -40,6 +40,12 @@ let log_html = format(tikz.render_document(logaxis, null)^, 'xml')
 let series_html = format(tikz.render_document(series, {text_width_px: 1200})^, 'xml');
 let venn1_html = format(tikz.render_document(venn1, null)^, 'xml')
 let venn2_html = format(tikz.render_document(venn2, null)^, 'xml');
+let venn1_direct = tikz.render_with_program(input("test/input/tikz/diagrama_venn1.pgf", "text")^,
+    null, null, 0, false, {text_width_px:326})^;
+let venn2_direct = tikz.render_with_program(input("test/input/tikz/diagrama_venn2.pgf", "text")^,
+    null, null, 0, false, {text_width_px:326})^;
+let polar_direct = tikz.render_with_program(input("test/input/tikz/polar.pgf", "text")^,
+    null, null, 0, false, {text_width_px:326})^;
 let parametric_html = format(tikz.render_document(parametric, null)^, 'xml');
 let regression_html = format(tikz.render_document(regression, null)^, 'xml');
 
@@ -52,6 +58,8 @@ let regression_html = format(tikz.render_document(regression, null)^, 'xml');
     len(children_named(polar, "pgfplots_library")) == 1,
     expr.evaluate(children_named(polar_plot, "function_call")[0], 90.0)^ == 1.0,
     contains(polar_html, "tikz-polar-axis") and contains(polar_html, "Polar coordinates"),
+    polar_direct is element and string(name(polar_direct)) == "div" and
+        not contains(format(polar_direct, 'html')^, "null null"),
     len(log_pictures) == 2,
     len(log_legends) == 2 and log_legends[0].source == "Case 1",
     contains(log_html, "tikz-fragment-gallery") and contains(log_html, "Case 1"),
@@ -63,9 +71,13 @@ let regression_html = format(tikz.render_document(regression, null)^, 'xml');
     len(children_named(venn1_paths[2], "point")) == 33,
     contains(venn1_html, "<ellipse") and contains(venn1_html, "<rect") and
         contains(venn1_html, "tikz-label"),
+    venn1_direct is element and string(name(venn1_direct)) == "span" and
+        not contains(format(venn1_direct, 'html')^, "null null"),
     len(venn2_paths) == 9 and len([for (path in venn2_paths
         where path.shape == "ellipse") path]) == 1,
     contains(venn2_html, "<ellipse") and contains(venn2_html, "darkgreen"),
+    venn2_direct is element and string(name(venn2_direct)) == "span" and
+        not contains(format(venn2_direct, 'html')^, "null null"),
     len(children_named(parametric, "pgfplots_setting")) == 1,
     parametric_plot.input_kind == "parametric" and
         len(children_named(parametric_plot, "x_expression")) == 1 and

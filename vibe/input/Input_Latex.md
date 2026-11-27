@@ -162,8 +162,12 @@ attempted, rather than repeatedly emitting a missing-package declaration. The
 project expl3 fixture loads and
 its greeting, macro, integer, sorting and token-list commands match pdfLaTeX;
 its ASCII text case-conversion and floating-point commands also match pdfLaTeX.
-The expandable `\fp_eval:n` subset handles decimal arithmetic, parentheses,
-`sqrt`, `abs`, and `round` with 16 significant digits and ties to even. It
+The expandable `\fp_eval:n` subset handles decimal arithmetic, right-associative
+power, parentheses, `sqrt`, `abs`, and `round` with 16 significant digits;
+`round` resolves ties to even by default.
+Power follows expl3's fixed-point calculation and supports finite results in
+the existing magnitude range; invalid-domain and non-finite power results
+remain unsupported (S1.8, S4.6.2, D10.2.2v2). It
 explicitly rejects unsupported functions, fractional rounding places, literals
 with more than 30 digits, exponents outside -200 to 200, and results outside
 that magnitude range; these bounds are narrower than expl3. The option does

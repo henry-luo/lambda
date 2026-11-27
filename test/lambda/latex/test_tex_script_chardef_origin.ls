@@ -1,15 +1,18 @@
 import profile: lambda.doc.latex.tex_engine.profile
 import reconstruct: lambda.doc.latex.tex_engine.reconstruct
 import digest: lambda.doc.latex.tex_engine.digest
+import compare: ._tex_script_recovery
 let kernel=input(sys.lambda.home ++ "/package/doc/latex/tex_engine/kernel.tex","text")^;
 let baseline=parse("",{type:"tex"})^.messages;
-fn check(source) any^ {
- let r=profile.expand_with_kernel(source,kernel,{script_expl3:true,echo_definitions:true,adapters:[],resources:{local:{},bundled:{}}},100000)^;
- let n=parse(source,{type:"tex"})^;
- let b=reconstruct.reconstruct(r)^;
- {issue:r.issue,reconstruct_issue:b.issue,text_match:b.text==n.text,messages_match:r.messages == n.messages,diagnostics_match:r.diagnostic_records==n.diagnostics}
+// Keep native text captures independent of the migrated public parser.
+let native=input("test/lambda/latex/fixtures/tex_chardef_origin_native.json","json")^;
+let cached=compare.preload_expl3()^;
+fn check(source,index) any^ {
+ let entry=native.cases[index];
+ let reference={*:entry,tex:{*:entry.tex,messages:if(entry.kernel_messages) native.kernel_messages else entry.tex.messages}};
+ compare.check_expansion(source,{script_expl3:true},reference,if(index==0)null else cached)
 }
-[for (source in [
+[for (index,source in [
   "\\chardef\\z=65 \\z",
   "\\chardef\\z=36 A\\z B",
   "\\chardef\\z=35 \\begin{document}A\\z B\\end{document}",
@@ -35,7 +38,7 @@ fn check(source) any^ {
   "\\chardef\\z=65 \\begin{document}$x\\z y$\\end{document}",
   "\\ExplSyntaxOn\\c_zero_int\\ExplSyntaxOff",
   "\\ExplSyntaxOn\\def\\x{\\c_zero_int}\\x\\ExplSyntaxOff"
-]) check(source)^]
+]) check(source,index)^]
 
 fn safe_digestion(source) any^ {
  let r=profile.expand_with_kernel(source,kernel,{script_expl3:true,echo_definitions:true,adapters:[],resources:{local:{},bundled:{}}},100000)^;

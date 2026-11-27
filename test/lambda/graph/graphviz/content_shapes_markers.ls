@@ -118,7 +118,7 @@ let scene_edge = model.edges(graph_scene)[0]
     not contains(string(unsafe_node.style), "background:black"),
     not contains(string(unsafe_node.style), "border-width:99px"),
     not contains(string(unsafe_node.style), "font-family:Arial"),
-    unsafe_node["data-fill"] == "#ffffff",
+    unsafe_node["data-fill"] == "transparent",
     unsafe_node["data-stroke"] == "#64748b"
   ],
   polygon_layout: [polygon_layout.width, polygon_layout.height],

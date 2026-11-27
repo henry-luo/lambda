@@ -1,15 +1,13 @@
 import profile: lambda.doc.latex.tex_engine.profile
 import reconstruct: lambda.doc.latex.tex_engine.reconstruct
 import digest: lambda.doc.latex.tex_engine.digest
+import compare: ._tex_script_recovery
 let kernel=input(sys.lambda.home ++ "/package/doc/latex/tex_engine/kernel.tex","text")^;
 let baseline=parse("",{type:"tex"})^.messages;
-fn check(source) any^ {
- let r=profile.expand_with_kernel(source,kernel,{script_expl3:true,echo_definitions:true,adapters:[],resources:{local:{},bundled:{}}},100000)^;
- let n=parse(source,{type:"tex"})^;
- let b=reconstruct.reconstruct(r)^;
- {issue:r.issue,reconstruct_issue:b.issue,text_match:b.text==n.text,messages_match:r.messages==slice(n.messages,len(baseline),len(n.messages))^,diagnostics_match:r.diagnostic_records==n.diagnostics}
-}
-[for (source in [
+// Independent native captures avoid comparing the migrated parser with itself.
+let native=input("test/lambda/latex/fixtures/tex_expl3_int_compare_native.json","json")^;
+let cached=compare.preload_expl3()^;
+[for (index,source in [
   "\\ExplSyntaxOn\\int_compare:nTF{1<2}{Y}{N}\\ExplSyntaxOff",
   "\\ExplSyntaxOn\\int_compare:nTF{1<=1}{Y}{N}\\ExplSyntaxOff",
   "\\ExplSyntaxOn\\int_compare:nTF{1>=2}{Y}{N}\\ExplSyntaxOff",
@@ -54,7 +52,7 @@ fn check(source) any^ {
   "\\ExplSyntaxOn\\int_compare:nTF{`A>64}{Y}{N}\\ExplSyntaxOff",
   "\\ExplSyntaxOn\\int_compare:nTF{\"10=16}{Y}{N}\\ExplSyntaxOff",
   "\\begin{document}A\\ExplSyntaxOn\\int_compare:nTF{1<2}{Y}{N}\\ExplSyntaxOff B\\end{document}"
-]) check(source)^]
+]) compare.check_expansion(source,{script_expl3:true},native.cases[index],if(index==0)null else cached)^]
 
 fn safe_digestion(source) any^ {
  let r=profile.expand_with_kernel(source,kernel,{script_expl3:true,echo_definitions:true,adapters:[],resources:{local:{},bundled:{}}},100000)^;

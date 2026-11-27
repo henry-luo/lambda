@@ -1,6 +1,8 @@
 // decimal operations for the script TeX floating-point expression evaluator.
 // a finite value is rounded to the expl3 precision after each operation.
 import reader: .reader
+import fixed: .fp_fixed
+import pow_constants: .fp_constants
 
 type DecimalParts = {negative: bool, digits: string, point: int, exponent: int}
 type ParseStep = {issue: string?, index: int, value?: decimal, unsupported?: string}
@@ -95,30 +97,70 @@ fn trig_series(x: decimal, cosine: bool, term: decimal, sum: decimal, n: int) de
     let total = sum + next;
     if (n >= 40 or total == sum) total else trig_series(x,cosine,next,total,n + 1)
 }
+// reduce scaled arguments with exact integers; the constant is floor(pi/2 * 10^240).
+// verify with utils/generate_latex_trig_constant.py --check.
+let QUARTER_SCALED = 1570796326794896619231321691639751442098584699687552910487472296153908203143104499314017412671058533991074043256641153323546922304775291115862679704064240558725142051350969260552779822311474477465190982214405487832966723064237824116893391582n;
+fn reduction_digit(value, count: int = 0) any^ => if(value < QUARTER_SCALED)
+    {remainder:value,digit:count} else reduction_digit(value - QUARTER_SCALED,count + 1);
+fn reduction_scan(digits: string, zeros: int, index: int = 0, remainder = 0n, quadrant: int = 0, has_quotient: bool = false) any^ {
+    if(index >= len(digits) + zeros) {remainder:remainder,quadrant:quadrant,has_quotient:has_quotient}
+    else {
+        let next = if(index < len(digits)) int(ch(digits,index))^ else 0;
+        let step = reduction_digit(remainder * 10n + next)^;
+        reduction_scan(digits,zeros,index + 1,step.remainder,(quadrant * 10 + step.digit) % 4,has_quotient or step.digit != 0)
+    }
+}
+fn reduce_argument(value: decimal) any^ {
+    let p = parts(abs(value)^)^;
+    let zeros = 240 + p.point + p.exponent - len(p.digits);
+    if(zeros < 0) {issue:"expl3-fp-unsupported"}
+    else {
+        let divided = reduction_scan(p.digits,zeros)^;
+        let upward = divided.remainder * 2n > QUARTER_SCALED or
+            (divided.remainder * 2n == QUARTER_SCALED and divided.quadrant % 2 == 1);
+        let remainder = if(upward) divided.remainder - QUARTER_SCALED else divided.remainder;
+        let quadrant = (divided.quadrant + if(upward) 1 else 0) % 4;
+        let signed = if(value < 0m) -remainder else remainder;
+        let angle = decimal(string(signed))^ / 1e240m;
+        // no pi error is introduced when the selected quotient is zero.
+        let pi_error = if(not divided.has_quotient and not upward) 0m else (abs(value)^ + 1m) * 1e-240m;
+        {issue:null,angle:angle,
+            quadrant:if(value < 0m) (4 - quadrant) % 4 else quadrant,
+            uncertainty:pi_error + abs(angle)^ * 1e-198m}
+    }
+}
+// reject quadrant and 16-digit rounding decisions that cross their error intervals.
+fn trig_reduced(angle: decimal, quadrant: int, reduction_error: decimal, cosine: bool) any^ {
+    // the extra margin keeps the rounded boundary below the true pi/4.
+    let quarter_bound = decimal(string(QUARTER_SCALED))^ / 2e240m - 1e-198m;
+    if(abs(angle)^ + reduction_error >= quarter_bound) {issue:"expl3-fp-unsupported"}
+    else {
+        let use_cos = if (cosine) quadrant == 0 or quadrant == 2 else quadrant == 1 or quadrant == 3;
+        let negative = if (cosine) quadrant == 1 or quadrant == 2 else quadrant == 2 or quadrant == 3;
+        let first = if(use_cos) 1m else angle;
+        let raw = trig_series(angle,use_cos,first,first,1)^;
+        let result = if(negative) -raw else raw;
+        let uncertainty = reduction_error + abs(result)^ * 1e-32m;
+        let low = normalize(result - uncertainty) ^ { null };
+        let high = normalize(result + uncertainty) ^ { null };
+        if(low == null or high == null or low != high) {issue:"expl3-fp-unsupported"}
+        else {issue:null,value:normalize(result)^,raw:result,uncertainty:uncertainty}
+    }
+}
 fn trig(value: decimal, cosine: bool) any^ {
-    if (value == 0m and not cosine) {issue:null,value:value,raw:value,uncertainty:0m}
+    if(value == 0m and not cosine) {issue:null,value:value,raw:value,uncertainty:0m}
     else {
         let quarter_hi = 1.570796326794897m;
         let quarter_lo = -0.0000000000000003807686783083602485579014153003124m;
         let turns = nearest_even(value / (quarter_hi + quarter_lo))^;
         let angle = (value - turns * quarter_hi) - turns * quarter_lo;
         let reduction_error = abs(turns)^ * 1e-49m;
-        // Reject a quadrant choice if the pi uncertainty could cross its boundary.
-        if (abs(angle)^ + reduction_error >= (quarter_hi + quarter_lo) / 2m) {issue:"expl3-fp-unsupported"}
+        let quadrant = int((turns % 4m + 4m) % 4m)^;
+        let fast = trig_reduced(angle,quadrant,reduction_error,cosine)^;
+        if(fast.issue == null) fast
         else {
-            // Reduce in decimal first: a large quadrant index can exceed the int domain.
-            let quadrant = int((turns % 4m + 4m) % 4m)^;
-            let use_cos = if (cosine) quadrant == 0 or quadrant == 2 else quadrant == 1 or quadrant == 3;
-            let negative = if (cosine) quadrant == 1 or quadrant == 2 else quadrant == 2 or quadrant == 3;
-            let first = if(use_cos) 1m else angle;
-            let raw = trig_series(angle,use_cos,first,first,1)^;
-            let result = if(negative) -raw else raw;
-            // Bound the truncated pi tail and series arithmetic before accepting a rounding.
-            let uncertainty = reduction_error + abs(result)^ * 1e-32m;
-            let low = normalize(result - uncertainty) ^ { null };
-            let high = normalize(result + uncertainty) ^ { null };
-            if(low == null or high == null or low != high) {issue:"expl3-fp-unsupported"}
-            else {issue:null,value:normalize(result)^,raw:result,uncertainty:uncertainty}
+            let exact = reduce_argument(value)^;
+            if(exact.issue != null) exact else trig_reduced(exact.angle,exact.quadrant,exact.uncertainty,cosine)
         }
     }
 }
@@ -284,7 +326,75 @@ fn unary(source: string, index: int) ParseStep^ {
         let result = unary(source, at + 1)^;
         if (result.issue != null) result else {*:result, value: -1m * result.value}
     }
-    else primary(source, at)
+    else power(source, at)
+}
+
+// Native expl3 uses its own fixed-point logarithm and exponential for power.
+fn power_components(value: decimal) any^ {
+    let p=parts(abs(value)^)^;
+    let first=first_nonzero(p.digits);
+    let digits=reader.text_span(p.digits,first,len(p.digits)) ++ zeroes(16);
+    let a=int(reader.text_span(digits,0,4))^;
+    let b=int(reader.text_span(digits,4,8))^;
+    let c=int(reader.text_span(digits,8,12))^;
+    let d=int(reader.text_span(digits,12,16))^;
+    {significand:((a*10000n+b)*10000n+c)*10000n+d,
+        limbs:[a,b,c,d,0,0],exponent:p.exponent+p.point-first}
+}
+fn power_value(base: decimal, exponent: decimal) any^ {
+    if (exponent == 0m) {issue:null,value:1m}
+    else if (base == 0m) {
+        let negative_zero=parts(base)^.negative and exponent == trunc(exponent)^ and abs(exponent % 2m)^ == 1m;
+        {issue:null,value:if (negative_zero) base else 0m}
+    }
+    else {
+        let positive=abs(base)^;
+        let negative=base < 0m and abs(exponent % 2m)^ == 1m;
+        if (positive == 1m) {issue:null,value:if (negative) -1m else 1m}
+        else {
+            let x=power_components(positive)^;
+            let y=power_components(exponent)^;
+            if (y.exponent >= 22) {issue:"expl3-fp-unsupported",unsupported:"power range"}
+            else {
+                let logarithm=fixed.ln_significand(x.significand,pow_constants.logarithms)^;
+                let ten=[for (entry in pow_constants.logarithms where entry.multiplier == 10) entry.limbs][0];
+                let scaled=fixed.power_scaled_log(logarithm,x.exponent,ten)^;
+                let product=fixed.multiply(scaled,y.limbs)^;
+                let parts=fixed.power_exp_parts(product,y.exponent,pow_constants.exponentials) ^ { null };
+                if (parts == null) {issue:"expl3-fp-unsupported",unsupported:"power range"}
+                else {
+                    let inverse=(positive < 1m) != (exponent < 0m);
+                    let fp=if (inverse) fixed.reciprocal_float(parts.limbs)^ else fixed.float_from_fixed(parts.limbs,0)^;
+                    let result_exp=fp.exponent+(if (inverse) -parts.exponent else parts.exponent);
+                    if (result_exp < -199 or result_exp > 201) {issue:"expl3-fp-unsupported",unsupported:"power range"}
+                    else {
+                        let value=decimal(fp.digits)^ * (10m ** (result_exp-16));
+                        {issue:null,value:if (negative) -value else value}
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Power binds more tightly than unary signs and associates to the right.
+fn power(source: string, index: int) ParseStep^ {
+    let base = primary(source,index)^;
+    let at = skip(source,base.index);
+    if(base.issue != null or ch(source,at) != "^") base
+    else {
+        let exponent = unary(source,at + 1)^;
+        if(exponent.issue != null) exponent
+        // Domain diagnostics and non-finite results still require TeX handling.
+        else if((base.value < 0m and exponent.value != trunc(exponent.value)^) or
+            (base.value == 0m and exponent.value < 0m))
+            {issue:"expl3-fp-unsupported",unsupported:"power domain",index:at}
+        else {
+            let result=power_value(base.value,exponent.value)^;
+            if (result.issue != null) {*:result,index:at}
+            else {issue:null,value:result.value,index:exponent.index}
+        }
+    }
 }
 
 fn term_tail(source: string, left: ParseStep) ParseStep^ {

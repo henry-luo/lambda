@@ -4305,10 +4305,11 @@ static int lambda_main_impl(int argc, char *argv[]) {
     }
 
 #ifndef LAMBDA_NO_MIR
-    // Window startup calls many handlers only a few times. Wait for sustained
-    // use before competing with document load for background compilation.
-    if (argc >= 2 && (strcmp(argv[1], "view") == 0 || strcmp(argv[1], "edit") == 0)) {
-        interp_set_func_jit_threshold_default(32);  // D8.3.2, caller overrides still apply
+    // Repeated layout helpers can queue compiler work while the viewer is
+    // preparing its first frame. Delay promotion until use is sustained (D8.3.2).
+    bool view_command = argc >= 2 && strcmp(argv[1], "view") == 0;
+    if (view_command || (argc >= 2 && strcmp(argv[1], "edit") == 0)) {
+        interp_set_func_jit_threshold_default(view_command ? 80 : 32);
     }
 #endif
 

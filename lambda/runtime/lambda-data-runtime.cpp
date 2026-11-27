@@ -2780,6 +2780,7 @@ static inline bool map_table_answers_reads(TypeMap* map_type) {
         typemap_hash_is_usable(map_type);
 }
 
+template<bool NameIdRead = false>
 static Item map_get_for_owner_keyed(Container* owner, TypeMap* map_type, void* map_data,
                                     const char* key, int key_len, uint32_t key_id,
                                     bool* is_found, Target* ns = NULL) {
@@ -2787,20 +2788,32 @@ static Item map_get_for_owner_keyed(Container* owner, TypeMap* map_type, void* m
     *is_found = false;
     // proxy carriers have no physical data payload; their keys require procedural observation.
     if (!map_data && owner && owner->type_id == LMD_TYPE_MAP && owner->map_kind == MAP_KIND_PROXY) return ItemError;
-    if (map_table_answers_reads(map_type)) {
+    if (NameIdRead && !map_data) return result;
+    bool indexed = NameIdRead
+        ? map_type && map_type->is_trusted_contract && !map_type->has_spread &&
+            typemap_hash_slots(map_type) &&
+            map_type->field_count < (uint32_t)typemap_hash_capacity(map_type)
+        : map_table_answers_reads(map_type);
+    if (indexed) {
         ShapeEntry* field = typemap_hash_lookup_by_hash(map_type, key, key_len, key_id);
-        if (field && field->key_kind == NAME_KEY_STRING && target_equal(field->ns, ns)) {
+        if (field && (NameIdRead ? !field->ns :
+                field->key_kind == NAME_KEY_STRING && target_equal(field->ns, ns))) {
             *is_found = true;
             return map_read_field_for_owner(owner, field, map_data);
         }
         if (!field) return result;
     }
+    // In { *:base, ... } any later matching field shadows the inherited key.
+    // Defer the first spread so local overrides never walk the base chain.
+    ShapeEntry* prefix = map_type && map_type->has_spread ? map_type->shape : NULL;
+    if (prefix && prefix->name) prefix = NULL;
     FOR_EACH_MAP_FIELD(map_type, field) {
+        if (field == prefix) continue;
         if (!field->name) {
             Map* nested_map = map_shape_field_to_map(map_data, field);
             if (nested_map && nested_map->type_id == LMD_TYPE_MAP) {
                 bool nested_found;
-                Item nested_result = map_get_for_owner_keyed((Container*)nested_map,
+                Item nested_result = map_get_for_owner_keyed<NameIdRead>((Container*)nested_map,
                     (TypeMap*)nested_map->type, nested_map->data, key, key_len,
                     key_id, &nested_found, ns);
                 if (nested_found) {
@@ -2808,9 +2821,18 @@ static Item map_get_for_owner_keyed(Container* owner, TypeMap* map_type, void* m
                     result = nested_result;
                 }
             }
-        } else if (typemap_shape_name_equals_hash(field, key, key_len, key_id) && target_equal(field->ns, ns)) {
+        } else if (NameIdRead ? !field->ns && shape_field_name_equals(field, key, key_len)
+                : typemap_shape_name_equals_hash(field, key, key_len, key_id) && target_equal(field->ns, ns)) {
             *is_found = true;
             result = map_read_field_for_owner(owner, field, map_data);
+        }
+    }
+    if (prefix && !*is_found) {
+        Map* base = map_shape_field_to_map(map_data, prefix);
+        if (base && base->type_id == LMD_TYPE_MAP) {
+            Item inherited = map_get_for_owner_keyed<NameIdRead>(base, (TypeMap*)base->type,
+                base->data, key, key_len, key_id, is_found, ns);
+            if (*is_found) return inherited;
         }
     }
     return result;
@@ -2863,6 +2885,12 @@ Item _map_get(TypeMap* map_type, void* map_data, const char *key, bool *is_found
                           typemap_name_hash(key, key_len), is_found);
 }
 
+Item map_get_canonical_name(Map* map, const String* name, uint32_t name_hash) {
+    bool found;
+    return map_get_for_owner_keyed(map, (TypeMap*)map->type, map->data,
+        name->chars, (int)name->len, name_hash, &found);
+}
+
 Item map_get(Map* map, Item key) {
     if (!map || !key.item) return ItemNull;
     bool found;
@@ -2873,8 +2901,7 @@ Item map_get(Map* map, Item key) {
             if (!name) return ItemError;
         }
         // string keys carry their length: embedded NUL is ordinary name data.
-        return map_get_for_owner_keyed(map, (TypeMap*)map->type, map->data,
-            name->chars, (int)name->len, typemap_name_hash(name->chars, (int)name->len), &found);
+        return map_get_canonical_name(map, name, typemap_name_hash(name->chars, (int)name->len));
     }
     if (get_type_id(key) == LMD_TYPE_SYMBOL) {
         Symbol* symbol = key.get_safe_symbol();
@@ -2887,66 +2914,21 @@ Item map_get(Map* map, Item key) {
     return ItemNull;
 }
 
-static Item map_get_by_name_id_keyed(Container* owner, TypeMap* map_type,
-                                     void* map_data, NameId name_id,
-                                     bool* is_found) {
-    Item result = ItemNull;
-    *is_found = false;
-    if (!map_data) {
-        // js_proxy_carrier_new stores all proxy edges outside Map::data.
-        if (owner && owner->type_id == LMD_TYPE_MAP && owner->map_kind == MAP_KIND_PROXY) return ItemError;
-        return result;
-    }
-    if (!map_type || name_id == NAME_ID_NONE) return result;
-    NameRef key = name_pool_resolve_id(context ? context->name_pool : NULL,
-        name_id);
-    if (key && map_type->is_trusted_contract && !map_type->has_spread &&
-            typemap_hash_slots(map_type) &&
-            map_type->field_count < (uint32_t)typemap_hash_capacity(map_type)) {
-        // The builder indexes closed string-only declared shapes. Spreads and
-        // unindexed or saturated shapes keep their declaration-order walk.
-        int key_len = (int)key->len;  // INT_CAST_OK: pooled field-name length
-        ShapeEntry* field = typemap_hash_lookup_by_hash(map_type, key->chars,
-            key_len, typemap_name_hash(key->chars, key_len));
-        if (field && !field->ns) {
-            *is_found = true;
-            return map_read_field_for_owner(owner, field, map_data);
-        }
-        if (!field) return result;
-    }
-
-    FOR_EACH_MAP_FIELD(map_type, field) {
-        if (!field->name) {
-            Map* nested_map = map_shape_field_to_map(map_data, field);
-            if (nested_map && nested_map->type_id == LMD_TYPE_MAP) {
-                bool nested_found = false;
-                Item nested_result = map_get_by_name_id_keyed(
-                    (Container*)nested_map, (TypeMap*)nested_map->type,
-                    nested_map->data, name_id, &nested_found);
-                if (nested_found) {
-                    *is_found = true;
-                    result = nested_result;
-                }
-            }
-        } else if (!field->ns && key && shape_field_name_equals(field, key->chars, key->len)) {
-            // Some element/input shape transitions preserve an older identity
-            // while replacing the spelling. The NameId fast path therefore
-            // confirms bytes before selecting a slot; this is the correctness
-            // seam for those shapes (D5.6.1-D5.6.2).
-            // Keep the same declaration-order last-writer semantics as the
-            // string-key path, including fields stored in immortal input maps.
-            *is_found = true;
-            result = map_read_field_for_owner(owner, field, map_data);
-        }
-    }
-    return result;
-}
-
 Item map_get_by_name_id(Container* owner, TypeMap* map_type, void* map_data,
                         NameId name_id, bool* is_found) {
     if (!is_found) return ItemNull;
-    return map_get_by_name_id_keyed(owner, map_type, map_data, name_id,
-                                    is_found);
+    // Confirm spelling even for a resolved ID. Input shapes can retain an
+    // older identity while replacing the spelling (D5.6.1–D5.6.2).
+    *is_found = false;
+    if (!map_data) {
+        return map_get_for_owner_keyed<true>(owner, map_type, map_data,
+            NULL, 0, 0, is_found);
+    }
+    NameRef key = name_pool_resolve_id(context ? context->name_pool : NULL, name_id);
+    if (!key) return ItemNull;
+    return map_get_for_owner_keyed<true>(owner, map_type, map_data,
+        key->chars, (int)key->len,
+        property_key_kind(key) == NAME_KEY_STRING ? property_key_hash(key) : 0, is_found);
 }
 
 // allocate an element under an already-resolved type; the type_index entry

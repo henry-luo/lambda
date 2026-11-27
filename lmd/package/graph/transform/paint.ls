@@ -129,15 +129,25 @@ fn marker_ref_x(tokens) any^ {
   len(tokens) * 8 - (if (nearest == "normal") 1 else 4)
 }
 
+fn marker_dimensions(marker_type, size, stroke_width, flavor) {
+  let width = max([1, len(marker_tokens(marker_type))]) * 8;
+  let d2_arrow = flavor == "d2" and marker_type == "normal";
+  {width: if (d2_arrow) (4.0 + 3.0 * stroke_width) * size else width * size,
+    height: if (d2_arrow) (4.0 + 4.0 * stroke_width) * size
+      else route_geometry.marker_height * size,
+    scale: if (d2_arrow) 1.0 else stroke_width,
+    tip_offset: if (d2_arrow) 0 else size * stroke_width}
+}
+
 fn edge_marker(id, marker_type, color, opacity, size, stroke_width, flavor) {
   let tokens = marker_tokens(marker_type);
   let width = max([1, len(tokens)]) * 8;
   // D2's default triangle grows from a fixed base. SVG strokeWidth units
   // scale the entire marker and can make thick arrows cover the label.
   let d2_arrow = flavor == "d2" and marker_type == "normal";
+  let dims = marker_dimensions(marker_type, size, stroke_width, flavor);
   <marker id: id,
-      markerWidth: if (d2_arrow) (4.0 + 3.0 * stroke_width) * size else width * size,
-      markerHeight: if (d2_arrow) (4.0 + 4.0 * stroke_width) * size else 8 * size,
+      markerWidth: dims.width, markerHeight: dims.height,
       viewBox: "0 0 " ++ string(width) ++ " 8",
       refX: if (d2_arrow) 8 else marker_ref_x(tokens), refY: 4,
       orient: "auto-start-reverse",
@@ -148,6 +158,52 @@ fn edge_marker(id, marker_type, color, opacity, size, stroke_width, flavor) {
   >
 }
 
+fn clip_id(edge, end_name) any^ => marker_id(edge, end_name) ++ "-stroke-clip"
+
+fn terminal_direction(points, endpoint, index, step) any^ {
+  if (index < 0 or index >= len(points)) null
+  else {
+    let dx = points[index].x - endpoint.x;
+    let dy = points[index].y - endpoint.y;
+    let length = math.sqrt(dx * dx + dy * dy);
+    if (length > 0.001) {x: dx / length, y: dy / length}
+    else terminal_direction(points, endpoint, index + step, step)
+  }
+}
+
+fn triangle_clip(edge, marker_type, end_name, size, stroke_width, flavor, width, height) any^ {
+  let points = edge.points;
+  let dims = marker_dimensions(marker_type, size, stroke_width, flavor);
+  let marker_width = dims.width * dims.scale;
+  let marker_height = dims.height * dims.scale;
+  // The stroke must end where the triangle is at least as wide as the stroke.
+  let cut = if (marker_type == "normal" and marker_height > 0)
+    max([0.0, min([marker_width, stroke_width * marker_width / marker_height - dims.tip_offset])]) else 0;
+  let start = end_name == "start";
+  let endpoint = if (len(points) > 0) points[if (start) 0 else len(points) - 1] else null;
+  let direction = if (endpoint != null) terminal_direction(points, endpoint,
+    if (start) 1 else len(points) - 2, if (start) 1 else -1) else null;
+  if (cut <= 0 or direction == null) null else {
+    let outer = max([width + height, marker_width + marker_height, 1.0]);
+    let reach = max([marker_width, stroke_width * 2.0]);
+    let half = max([stroke_width * 2.0, marker_height]);
+    let near = {x: endpoint.x + direction.x * cut, y: endpoint.y + direction.y * cut};
+    let far = {x: endpoint.x - direction.x * reach, y: endpoint.y - direction.y * reach};
+    let nx = -direction.y * half;
+    let ny = direction.x * half;
+    <clipPath id: clip_id(edge, end_name), 'clipPathUnits': "userSpaceOnUse",
+      <path 'clip-rule': "evenodd", d:
+        "M " ++ string(-outer) ++ " " ++ string(-outer) ++
+        " H " ++ string(width + outer) ++ " V " ++ string(height + outer) ++
+        " H " ++ string(-outer) ++ " Z M " ++
+        string(near.x + nx) ++ " " ++ string(near.y + ny) ++ " L " ++
+        string(far.x + nx) ++ " " ++ string(far.y + ny) ++ " L " ++
+        string(far.x - nx) ++ " " ++ string(far.y - ny) ++ " L " ++
+        string(near.x - nx) ++ " " ++ string(near.y - ny) ++ " Z">
+    >
+  }
+}
+
 fn edge_defs(edge, color, opacity, stroke_width, flavor) {
   let size = max([0.1, float(if (edge.arrow_size != null) edge.arrow_size else 1.0)]);
   [<defs
@@ -156,7 +212,7 @@ fn edge_defs(edge, color, opacity, stroke_width, flavor) {
   >]
 }
 
-fn edge_path(edge, color, stroke_width, opacity) {
+fn edge_path(edge, color, stroke_width, opacity, markers = true) {
   let marker_start = if (edge.marker_start != "none")
     "url(#" ++ marker_id(edge, "start") ++ ")" else null;
   let marker_end = if (edge.marker_end != "none")
@@ -165,7 +221,8 @@ fn edge_path(edge, color, stroke_width, opacity) {
       'stroke-width': stroke_width,
       'stroke-dasharray': if (edge.dash_array != null) edge.dash_array else dash_array(edge.style),
       opacity: opacity,
-      'marker-start': marker_start, 'marker-end': marker_end,
+      'marker-start': if (markers) marker_start else null,
+      'marker-end': if (markers) marker_end else null,
       'data-graph-role': "edge", 'data-edge-id': edge.id,
       'data-from': edge.from, 'data-to': edge.to,
       'data-from-port': edge.from_port, 'data-to-port': edge.to_port,
@@ -182,15 +239,32 @@ fn edge_path(edge, color, stroke_width, opacity) {
 fn edge_svg(edge, width, height, opts) {
   let color = if (edge.stroke != null) string(edge.stroke)
     else if (opts != null and opts.edge_color != null) string(opts.edge_color) else "#59636e";
-  let stroke_width = if (edge.stroke_width != null) edge.stroke_width
-    else if (opts != null and opts.edge_width != null) opts.edge_width else 1.5;
+  let base_width = if (edge.stroke_width != null) edge.stroke_width
+    else if (opts != null and opts.edge_width != null) opts.edge_width else route_geometry.default_edge_width;
+  let stroke_width = if (opts != null and opts.edge_width_scale != null)
+    float(base_width) * float(opts.edge_width_scale) else base_width;
   let opacity = if (edge.opacity != null) edge.opacity else null;
-  let defs = edge_defs(edge, color, opacity, stroke_width, if (opts == null) null else opts.flavor);
+  let flavor = if (opts == null) null else opts.flavor;
+  let defs = edge_defs(edge, color, opacity, stroke_width, flavor);
+  let size = max([0.1, float(if (edge.arrow_size != null) edge.arrow_size else 1.0)]);
+  let start_clip = triangle_clip(edge, edge.marker_start, "start", size, stroke_width, flavor, width, height);
+  let end_clip = triangle_clip(edge, edge.marker_end, "end", size, stroke_width, flavor, width, height);
   <svg xmlns: "http://www.w3.org/2000/svg", width: width, height: height,
       viewBox: "0 0 " ++ string(width) ++ " " ++ string(height),
       style: "overflow:visible;pointer-events:none;",
     for (item in defs) item
-    edge_path(edge, color, stroke_width, opacity)
+    if (start_clip == null and end_clip == null) edge_path(edge, color, stroke_width, opacity)
+    else <g
+      <defs start_clip; end_clip>
+      <g 'clip-path': if (start_clip != null) "url(#" ++ clip_id(edge, "start") ++ ")" else null,
+        <g 'clip-path': if (end_clip != null) "url(#" ++ clip_id(edge, "end") ++ ")" else null,
+          edge_path(edge, color, stroke_width, opacity, false) >>
+      // Keep the marker attached to the original endpoint and tangent.
+      <path d: route_geometry.path_data(edge), fill: "none", stroke: "none",
+        'stroke-width': stroke_width, opacity: opacity,
+        'marker-start': if (edge.marker_start != "none") "url(#" ++ marker_id(edge, "start") ++ ")" else null,
+        'marker-end': if (edge.marker_end != "none") "url(#" ++ marker_id(edge, "end") ++ ")" else null>
+    >
   >
 }
 

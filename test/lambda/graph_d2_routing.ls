@@ -1,6 +1,7 @@
 import layout: lambda.graph.layout
 import model: lambda.graph.model
 import normalize: lambda.graph.normalize
+import paint: lambda.graph.transform.paint
 import transform: lambda.graph.transform
 
 fn by_id(items, id) => [for (item in items where item.id == id) item][0]
@@ -41,6 +42,10 @@ let nodes = [for (node in ((model.nodes(canonical.graph)) ^ { [] }))
   {id: node.id, width: 100, height: 40, shape: node.shape}]
 let edges = model.edges(canonical.graph)
 let html = transform.to_html(source)
+let system_graph = input("test/input/system_design.d2", {type:"graph",flavor:"d2"})^
+let system_html = transform.to_html(system_graph)
+let system_labels = [for (child in ((model.element_children(system_html)) ^ { [] })
+  where ((model.tag(child) == "edge-label") ^ { false })) child]
 let database_html = [for (node in ((model.nodes(html)) ^ { [] })
   where node["data-node-id"] == "database") node][0]
 let rim = model.element_children(database_html)[0]
@@ -76,12 +81,38 @@ let a = by_id(ported.nodes, "a")
 let b = by_id(ported.nodes, "b")
 let finish = back.points[len(back.points) - 1]
 
+// Both markers retain the original curved path while the stroke is clipped.
+fn clipping_checks(edge, opts) {
+  let svg = paint.layers({width: 150, height: 100, edges: [edge]}, opts)[0].content;
+  let group = model.element_children(svg)[1];
+  let children = model.element_children(group);
+  let clips = model.element_children(children[0]);
+  let stroke_group = model.element_children(children[1])[0];
+  let stroke = model.element_children(stroke_group)[0];
+  let markers = children[2];
+  [len(clips) == 2,
+    children[1]["clip-path"] != null and stroke_group["clip-path"] != null,
+    stroke.stroke != "none" and stroke["marker-start"] == null and stroke["marker-end"] == null,
+    markers.stroke == "none" and markers["marker-start"] != null and
+      markers["marker-end"] != null and stroke.d == markers.d]
+}
+let thick_edge = {id: "thick", index: 0, from: "a", to: "b",
+  points: [{x: 20, y: 30}, {x: 90, y: 30}, {x: 130, y: 70}],
+  route_mode: "curved", marker_start: "normal", marker_end: "normal", stroke_width: 8}
+let small_edge = {id: "small", index: 1, from: "a", to: "b",
+  points: [{x: 20, y: 30}, {x: 130, y: 30}], route_mode: "line",
+  marker_start: "normal", marker_end: "normal", stroke_width: 8, arrow_size: 0.5}
+
 {
   counts: [len(nodes), len(edges)],
   shapes: [for (node in nodes) node.shape],
   valid: canonical.valid,
   labels: [for (edge in edges) model.label_source(edge)],
   html_counts: [len(model.nodes(html)), len(model.edges(html))],
+  system_labels_beside_edges: len(system_labels) == 4 and
+    all([for (label in system_labels) label["data-label-placement"] == "right"]),
+  thick_arrow_clipping: clipping_checks(thick_edge, {flavor: "d2"}),
+  small_arrow_clipping: clipping_checks(small_edge, null),
   cylinder_rim: [
     model.tag(rim) == "node-rim" and rim["aria-hidden"] == "true",
     contains(string(rim.style), "border:inherit;border-radius:50%"),

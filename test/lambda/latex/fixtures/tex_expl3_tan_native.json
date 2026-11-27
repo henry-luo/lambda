@@ -1,0 +1,166 @@
+{
+  "cases": [
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{tan(0)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "0",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{tan(-0)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "-0",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{tan(1)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "1.557407724654902",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{tan(-1)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "-1.557407724654902",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{tan(3.141592653589793)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "-0.0000000000000002384626433832795",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{tan(1.570796326794896)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "1614905391523416",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{tan(1.570796326794897)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "-2626266436731868",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{tan(1.570796326794898)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "-724234273060961.6",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{tan(1000)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "1.470324155702718",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{tan(-1000)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "-1.470324155702718",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{tan(1e10)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "-0.5583496378112418",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{tan(1e16)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "-1.245173435718406",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{tan(1e17)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "0.52456243090255",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{tan(1e18)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "-8.388549680593688",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{tan(1e20)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "-0.8446024630198843",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{tan(1e25)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "1.116125969817747",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{tan(1e30)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "0.09048506806330217",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{tan(1e35)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "3.320650949926201",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    }
+  ]
+}

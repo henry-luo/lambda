@@ -24,6 +24,6 @@ let html_nodes = [for (i in ((0 to (len(html) - 1)) ^ { [] }), let child = html[
   ]],
   idempotent: repeated.graph == canonical,
   html_nodes: [for (node in html_nodes) [
-    node["data-node-id"], node["data-shape"], node[0]
+    node["data-node-id"], node["data-shape"], if (node["data-shape"] == "diamond") node[1][0] else node[0]
   ]]
 }

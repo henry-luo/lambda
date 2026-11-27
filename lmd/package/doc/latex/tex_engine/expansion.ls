@@ -2,6 +2,7 @@
 import stream: .stream
 import reader: .reader
 import primitives: .primitives
+import alias_catalog: .primitive_alias_catalog
 import expl3: .expl3
 import regex: .regex
 import fp: .fp
@@ -15,6 +16,7 @@ import format_count_catalog: .format_count_catalog
 import unicode_array_catalog: .unicode_array_catalog
 import utf8: lambda.io.utf8
 import path: lambda.io.path
+let EXPL_LET_MAPPING_GUARD = "tl_eq"
 
 // Core state fields are common to every expansion outcome; package-specific fields remain open.
 pub type State = {input: map, definitions: map, groups: array, output: map[],
@@ -74,6 +76,7 @@ fn meaning(st, t) any^ => if (not is_control(t)) {kind: "char", value: t.value, 
     else {
         let resolved = st.definitions[key(t)];
         if (resolved != null) resolved
+        else if (t.kind == "control" and st.expl3_aliases[t.value] != null) st.expl3_aliases[t.value]
         else if (t.kind == "control" and builtin(st, t.value)) {kind: "primitive", name: t.value}
         else {kind: "undefined"}
     }
@@ -122,10 +125,14 @@ fn append_delimiter(delimiters, token) any^ {
 
 fn set_definition(definitions, name, value) => {*:definitions, *:map([name, value])}
 
+// Global definitions must also replace each saved group value.
+fn assign_global_meanings(st: State, values: map) State =>
+    if (len(values)==0) st else {*:st,definitions:{*:st.definitions,*:values},groups:[for (scope in st.groups)
+        {*:scope,definitions:{*:scope.definitions,*:values}}]}
+
 fn assign_meaning(st: State, name, value, global) State^ =>
-    {*:st, definitions: set_definition(st.definitions, name, value),
-        groups: if (global) [for (scope in st.groups)
-            {*:scope, definitions: set_definition(scope.definitions, name, value)}] else st.groups}
+    if (global) assign_global_meanings(st, map([name,value]))
+    else {*:st,definitions:set_definition(st.definitions,name,value)}
 
 // native keeps the scanned signature when input ends before the body.
 fn unfinished_signature(input, count, prefix, delimiters, diagnostics) =>
@@ -480,7 +487,7 @@ fn assign_futurelet(st: State, global) State^ {
 }
 
 // aliased expl3 lets require the assignment source-mapping guard.
-fn guarded_expl_let(st: State, token) State^ => if (meaning(st, token).source_mapping_guard == "tl_eq")
+fn guarded_expl_let(st: State, token) State^ => if (meaning(st, token).source_mapping_guard == EXPL_LET_MAPPING_GUARD)
     {*:st, expl3_tl_put_seen: true} else st
 
 fn prefixed(st: State, global, long_ok, protected_flag, budget) State^ {
@@ -824,8 +831,7 @@ fn csname(st: State, budget) State^ {
             let token = {kind: "control", value: scanned.name, cat: null, start: -1, end: -1};
             let k = key(token);
             {*:scanned.state, input: stream.push(scanned.state.input, [token]),
-                definitions: if ((scanned.state.definitions[k] == null and not builtin(scanned.state, scanned.name)) or
-                    scanned.state.definitions[k].kind == "undefined")
+                definitions: if (meaning(scanned.state, token).kind == "undefined")
                     set_definition(scanned.state.definitions, k, {kind: "primitive", name: "relax"})
                     else scanned.state.definitions}
         }
@@ -6912,7 +6918,7 @@ fn kernel_allocator_matches(st: State) bool^ {
 }
 
 // The opt-in script profile replaces the kernel's full-package bootstrap.
-pub fn enable_script_expl3(st: State) State^ {
+fn bootstrap_script_expl3(st: State) State^ {
     let enabled = {*:st, script_expl3: true};
     let names = ["ExplSyntaxOn", "ExplSyntaxOff", "ProvidesExplPackage", "ProvidesExplClass", "ProvidesExplFile"];
     let primitives = enable_expl_primitives(enabled, names)^;
@@ -6995,8 +7001,6 @@ pub fn enable_script_expl3(st: State) State^ {
         {name:"c_term_iow", kind:"mathchardef", value:16},
         // expl3 error help uses the existing TeX token-list parameter.
         {name:"tex_errhelp:D", kind:"primitive", value:"errhelp"},
-        // expl3 copies latex's frozen end primitive, not the end-environment command.
-        {name:"tex_end:D", kind:"primitive", value:"@@end"},
         // the message machinery addresses these TeX primitives through aliases.
         {name:"tex_escapechar:D", kind:"primitive", value:"escapechar"},
         {name:"tex_inputlineno:D", kind:"primitive", value:"inputlineno"},
@@ -7004,7 +7008,10 @@ pub fn enable_script_expl3(st: State) State^ {
         {name:"tex_newlinechar:D", kind:"primitive", value:"newlinechar"},
         {name:"tex_immediate:D", kind:"primitive", value:"immediate"},
         {name:"tex_write:D", kind:"primitive", value:"write"},
-        {name: "tex_let:D", kind: "primitive", value: "let", source_mapping_guard: "tl_eq"},
+        // expl3 retains primitive identities even if their public names are redefined.
+        {name:"tex_ifx:D", kind:"primitive", value:"ifx"},
+        {name:"tex_def:D", kind:"primitive", value:"def"},
+        {name: "tex_let:D", kind: "primitive", value: "let", source_mapping_guard: EXPL_LET_MAPPING_GUARD},
         {name: "tex_global:D", kind: "primitive", value: "global"},
         {name: "tex_chardef:D", kind: "primitive", value: "chardef"},
         {name: "tex_advance:D", kind: "primitive", value: "advance"},
@@ -7720,6 +7727,82 @@ pub fn enable_script_expl3(st: State) State^ {
     }
 }
 
+// Preserve the existing source-mapping guard when the primitive is captured.
+fn capture_expl_alias(st: State, entry) any^ {
+    let value = meaning(st, control_token(entry.source))^;
+    if (entry.alias == "tex_let:D" and value.kind == "primitive" and value.name == "let")
+        {*:value,source_mapping_guard:EXPL_LET_MAPPING_GUARD} else value
+}
+
+fn clock_alias_redefined(st: State, entry) bool^ {
+    let value = meaning(st, control_token(entry.source))^;
+    value.kind != "primitive" or primitives.meaning_name(value.name) != entry.source
+}
+
+// expl3's shipout probe keeps the final control printing as the original primitive.
+fn shipout_override(st: State) map^ {
+    if ((meaning(st, control_token("@@hyph"))^).kind == "undefined") {local:{},global:{}}
+    else {
+        let current = print_meaning(st, control_token("shipout"))^;
+        let original = (escape(st)^) ++ "shipout";
+        let matches = if (current == original) [] else
+            [for (name in alias_catalog.shipout_candidates()
+                where (print_meaning(st, control_token(name))^) == original) name];
+        let fallback = if ((meaning(st, control_token("@@shipout"))^).kind != "undefined") "@@shipout" else null;
+        let chosen = if (len(matches) > 0) matches[len(matches) - 1] else fallback;
+        let values = if (chosen == null) {} else map(["control:tex_shipout:D", meaning(st, control_token(chosen))^]);
+        if (len(matches) > 0) {local:{},global:values} else {local:values,global:{}}
+    }
+}
+
+// expl3 selects the live PDF tracing parameter or its undefined-control fallback.
+fn font_tracing_override(st: State) map^ {
+    if ((meaning(st, control_token("@@hyph"))^).kind == "undefined") {}
+    else {
+        let source = if ((meaning(st, control_token("pdftracingfonts"))^).kind != "undefined")
+            "pdftracingfonts" else "tex_undefined:D";
+        map(["control:tex_tracingfonts:D", meaning(st, control_token(source))^])
+    }
+}
+
+// Capture source meanings once, before documents can redefine them.
+pub fn enable_script_expl3(st: State) State^ {
+    let previous = st.expl3_aliases;
+    // Optional declarations copy only defined sources, in the format's order.
+    let entries = if (previous is map) [] else [for (entry in alias_catalog.prepared()
+        where entry.optional != true or (meaning(st, control_token(entry.source))^).kind != "undefined") entry];
+    let aliases = if (previous is map) previous else map([for (entry in entries)
+        *[entry.alias, capture_expl_alias(st, entry)^]]);
+    // The initial global lets replace prior destination definitions only once.
+    let conflicts = if (previous is map) {} else map([for (entry in entries
+        where st.definitions["control:" ++ entry.alias] != null)
+        *["control:" ++ entry.alias, aliases[entry.alias]]]);
+    let prepared = assign_global_meanings(st,conflicts);
+    let alias_state = {*:prepared, expl3_aliases:aliases};
+    // A non-pdfTeX, non-LuaTeX format copies its undefined control into PDF map aliases.
+    let no_pdf_engine = (meaning(alias_state, control_token("tex_pdftexversion:D"))^).kind == "undefined" and
+        (meaning(alias_state, control_token("tex_luatexversion:D"))^).kind == "undefined";
+    let pdfmap = if (previous is map or not no_pdf_engine) {} else
+        map([for (name in alias_catalog.pdfmap_fallbacks())
+            *["control:" ++ name, meaning(st, control_token("tex_undefined:D"))^]]);
+    // expl3 copies tex_undefined:D when a clock meaning differs from its spelling.
+    let clock_overrides = if (previous is map) {} else map([for (entry in alias_catalog.clock_checks()
+        where clock_alias_redefined(st, entry)^) *["control:" ++ entry.alias, meaning(st, control_token("tex_undefined:D"))^]]);
+    let overrides = if (previous is map) {} else map([for (group in alias_catalog.simple_rebindings(), entry in group.bindings
+        where (meaning(st, control_token(group.guard))^).kind != "undefined")
+        *["control:" ++ entry.alias, meaning(st, control_token(entry.source))^]]);
+    let shipout = if (previous is map) {local:{},global:{}} else shipout_override(st)^;
+    let lua_font = not (previous is map) and (meaning(st, control_token("@@hyph"))^).kind != "undefined" and
+        (meaning(st, control_token("pdftracingfonts"))^).kind == "undefined" and
+        (meaning(alias_state, control_token("tex_directlua:D"))^).kind != "undefined";
+    let font_tracing = if (previous is map or lua_font) {} else font_tracing_override(st)^;
+    let initialized = bootstrap_script_expl3({*:prepared,expl3_pending_aliases:aliases})^;
+    let global_values = assign_global_meanings(initialized,{*:clock_overrides,*:shipout.global});
+    if (initialized.issue != null) initialized else if (lua_font) unsupported(initialized, "expl3 LuaTeX font initialization")
+    else {*:global_values, expl3_aliases:aliases,expl3_pending_aliases:null,
+        definitions:{*:global_values.definitions, *:pdfmap, *:overrides, *:shipout.local, *:font_tracing}}
+}
+
 // tokenize trusted bundled TeX definitions under expl3 category codes.
 fn expl3_definition_tokens(reader_state, output = []) any^ {
     let next = reader.next(reader_state)^;
@@ -7866,12 +7949,16 @@ fn enable_expl_values(st: State, values, index = 0) State^ {
     else {
         let value = values[index];
         let name = "control:" ++ value.name;
-        let meaning = if (value.kind == "alias") st.definitions["control:" ++ value.value]
+        // Bootstrap aliases copy the captured source meaning, including redefinitions.
+        let resolved = if (value.kind == "primitive" and st.expl3_pending_aliases[value.name] != null)
+                st.expl3_pending_aliases[value.name]
+            else if (value.kind == "alias") st.definitions["control:" ++ value.value]
+            else if (value.kind == "control-meaning") meaning(st, control_token(value.value))^
             else if (value.kind == "primitive")
                 {kind: "primitive", name: value.value, source_mapping_guard: value.source_mapping_guard}
             else if (value.kind == "char") {kind: "char", value: value.value, cat: value.cat}
             else {kind: value.kind, value: value.value};
-        let next = if (st.definitions[name] != null) st else assign_meaning(st, name, meaning, true)^;
+        let next = if (st.definitions[name] != null) st else assign_meaning(st, name, resolved, true)^;
         enable_expl_values(next, values, index + 1)
     }
 }

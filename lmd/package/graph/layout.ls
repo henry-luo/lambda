@@ -11,19 +11,20 @@ pub fn compute(input, opts = null) any^ => dagre.layout(input, opts)
 // Compatibility name retained while callers migrate to compute().
 pub fn layout(input, opts = null) any^ => compute(input, opts)
 
-fn attr_or(child, key, fallback) {
-  let attrs = child.attrs;
-  let nested = if (attrs == null or attrs is error) null else attrs[key];
-  let direct = child[key];
+fn attr_or(entry, key, fallback) {
+  let nested = if (entry.attrs == null or entry.attrs is error) null else entry.attrs[key];
   // DOM VMaps serialize an absent attribute as "", while source Elements retain
   // null; both represent missing optional graph metadata at this boundary.
   if (nested != null and nested != "" and not (nested is error)) nested
-  else if (direct != null and direct != "" and not (direct is error)) direct
-  else fallback
+  else {
+    let direct = entry.child[key];
+    if (direct != null and direct != "" and not (direct is error)) direct else fallback
+  }
 }
 
-fn child_tag(child) any^ {
-  let graph_role = attr_or(child, "data-graph-role", null);
+fn child_tag(entry) any^ {
+  let graph_role = attr_or(entry, "data-graph-role", null);
+  let child = entry.child;
   // Radiant VMap projections replace element tags with visual-node tags, so
   // graph identity must come from the transform's semantic role metadata.
   if (graph_role != null and not (graph_role is error)) lower(string(graph_role))
@@ -32,8 +33,16 @@ fn child_tag(child) any^ {
   else ""
 }
 
-fn child_id(child, fallback_index) any^ {
-  let value = attr_or(child, "data-node-id", attr_or(child, "id", null));
+// Reading attrs from a Velmt materializes a snapshot. Share it across role and
+// metadata reads for the duration of this layout callback.
+fn layout_entry(child, order) {
+  let attrs = child.attrs;
+  {child: child, attrs: attrs, order: order, role: child_tag({child: child, attrs: attrs})}
+}
+
+fn child_id(entry, fallback_index) any^ {
+  let node_id = attr_or(entry, "data-node-id", null);
+  let value = if (node_id == null) attr_or(entry, "id", null) else node_id;
   if (value != null and value != "") string(value)
   else "n" ++ string(fallback_index)
 }
@@ -65,46 +74,47 @@ fn bool_attr(child, key, fallback = false) any^ {
   else value == true or lower(string(value)) == "true"
 }
 
-fn semantic_nodes(children) {
-  let tagged = [for (i, child in children where ((child_tag(child) == "node") ^ { false })) {child: child, order: i}];
-  if (len(tagged) > 0) tagged
-  else [for (i, child in children) {child: child, order: i}]
+fn semantic_nodes(entries) {
+  let tagged = [for (entry in entries where ((entry.role == "node") ^ { false })) entry];
+  if (len(tagged) > 0) tagged else entries
 }
 
 fn semantic_edges(children) {
-  [for (i, child in children,
-    let parsed_style = graph_style.parse(attr_or(child, "data-style-declarations", ""))
-    where ((child_tag(child) == "edge") ^ { false })) {
-    id: string(attr_or(child, "data-edge-id", "e" ++ string(i))),
-    from: string(attr_or(child, "data-from", "")),
-    to: string(attr_or(child, "data-to", "")),
-    from_port: attr_or(child, "data-from-port", null),
-    to_port: attr_or(child, "data-to-port", null),
-    from_compass: attr_or(child, "data-from-compass", null),
-    to_compass: attr_or(child, "data-to-compass", null),
-    tail_cluster: attr_or(child, "data-tail-cluster", null),
-    head_cluster: attr_or(child, "data-head-cluster", null),
-    directed: attr_or(child, "data-directed", "true") != "false",
-    arrow_start: attr_or(child, "data-arrow-start", "false") == "true",
-    arrow_end: attr_or(child, "data-arrow-end", attr_or(child, "data-directed", "true")) == "true",
-    marker_start: string(attr_or(child, "data-marker-start",
-      if (attr_or(child, "data-arrow-start", "false") == "true") "normal" else "none")),
-    marker_end: string(attr_or(child, "data-marker-end",
-      if (attr_or(child, "data-arrow-end", attr_or(child, "data-directed", "true")) == "true")
-        "normal" else "none")),
-    arrow_size: float(attr_or(child, "data-arrow-size", 1.0)),
-    style: string(attr_or(child, "data-style", "solid")),
-    // Direct canonical paint attributes must survive even without class declarations.
-    stroke: attr_or(child, "data-stroke", parsed_style.stroke),
-    stroke_width: attr_or(child, "data-stroke-width", parsed_style.stroke_width),
-    opacity: attr_or(child, "data-opacity", parsed_style.opacity),
-    dash_array: attr_or(child, "data-dash-array", parsed_style.dash_array),
-    route_mode: attr_or(child, "data-route-mode", null),
-    min_length: int(attr_or(child, "data-min-length", 1)),
-    weight: float(attr_or(child, "data-weight", 1.0)),
-    constraint: attr_or(child, "data-constraint", "true") != "false",
-    z: child_z(child, -1),
-    child_index: child_index(child, i)
+  [for (i, child in children where ((child.role == "edge") ^ { false })) {
+    let style_declarations = attr_or(child, "data-style-declarations", "");
+    let parsed_style = if (style_declarations == "") {} else graph_style.parse(style_declarations);
+    {
+      id: string(attr_or(child, "data-edge-id", "e" ++ string(i))),
+      from: string(attr_or(child, "data-from", "")),
+      to: string(attr_or(child, "data-to", "")),
+      from_port: attr_or(child, "data-from-port", null),
+      to_port: attr_or(child, "data-to-port", null),
+      from_compass: attr_or(child, "data-from-compass", null),
+      to_compass: attr_or(child, "data-to-compass", null),
+      tail_cluster: attr_or(child, "data-tail-cluster", null),
+      head_cluster: attr_or(child, "data-head-cluster", null),
+      directed: attr_or(child, "data-directed", "true") != "false",
+      arrow_start: attr_or(child, "data-arrow-start", "false") == "true",
+      arrow_end: attr_or(child, "data-arrow-end", attr_or(child, "data-directed", "true")) == "true",
+      marker_start: string(attr_or(child, "data-marker-start",
+        if (attr_or(child, "data-arrow-start", "false") == "true") "normal" else "none")),
+      marker_end: string(attr_or(child, "data-marker-end",
+        if (attr_or(child, "data-arrow-end", attr_or(child, "data-directed", "true")) == "true")
+          "normal" else "none")),
+      arrow_size: float(attr_or(child, "data-arrow-size", 1.0)),
+      style: string(attr_or(child, "data-style", "solid")),
+      // Direct canonical paint attributes must survive even without class declarations.
+      stroke: attr_or(child, "data-stroke", parsed_style.stroke),
+      stroke_width: attr_or(child, "data-stroke-width", parsed_style.stroke_width),
+      opacity: attr_or(child, "data-opacity", parsed_style.opacity),
+      dash_array: attr_or(child, "data-dash-array", parsed_style.dash_array),
+      route_mode: attr_or(child, "data-route-mode", null),
+      min_length: int(attr_or(child, "data-min-length", 1)),
+      weight: float(attr_or(child, "data-weight", 1.0)),
+      constraint: attr_or(child, "data-constraint", "true") != "false",
+      z: child_z(child, -1),
+      child_index: child_index(child.child, i)
+    }
   }]
 }
 
@@ -133,11 +143,14 @@ fn measured_ports_at(stack, node_width, node_height, result) {
     let child = entry.child;
     let x = entry.x + child_x(child);
     let y = entry.y + child_y(child);
-    let port_id = attr_or(child, "data-record-port", null);
+    let port_id = attr_or({child: child, attrs: child.attrs}, "data-record-port", null);
     let found = if (port_id != null and port_id != "") [{
       id: string(port_id),
       x_offset: (x + child_width(child) / 2.0) / max([1.0, node_width]),
-      y_offset: (y + child_height(child) / 2.0) / max([1.0, node_height])
+      y_offset: (y + child_height(child) / 2.0) / max([1.0, node_height]),
+      left_offset: x / max([1.0, node_width]), top_offset: y / max([1.0, node_height]),
+      right_offset: (x + child_width(child)) / max([1.0, node_width]),
+      bottom_offset: (y + child_height(child)) / max([1.0, node_height])
     }] else [];
     let nested = [for (value in ((child_children(child)) ^ { [] })) {child: value, x: x, y: y}];
     measured_ports_at([*remaining, *nested], node_width, node_height,
@@ -152,47 +165,53 @@ fn measured_ports(node) any^ =>
   ], child_width(node), child_height(node), []) or []
 
 fn measured_port(nodes, node_id, port_id) any^ {
-  let matches = [for (entry in nodes,
-    port in ((measured_ports(entry.child)) ^ { [] })
-    where ((child_id(entry.child, entry.order) == node_id and port.id == port_id) ^ { false })) port];
+  let owners = [for (entry in nodes
+    where ((child_id(entry, entry.order) == node_id) ^ { false })) entry];
+  let matches = [for (entry in owners, port in ((measured_ports(entry.child)) ^ { [] })
+    where ((port.id == port_id) ^ { false })) port];
   if (len(matches) > 0) matches[0] else null
 }
 
 fn semantic_ports(children, nodes) => [
-  for (i, child in children,
-    let node_id = string(attr_or(child, "data-node-id", "")),
-    let port_id = string(attr_or(child, "data-port-id", "p" ++ string(i))),
-    let measured = measured_port(nodes, node_id, port_id)
-    where ((child_tag(child) == "port") ^ { false })) {
-    node_id: node_id,
-    id: port_id,
-    side: string(attr_or(child, "data-port-side", "auto")),
-    offset: float(attr_or(child, "data-port-offset", 0.5)),
-    // Measured cell centers supersede source-order estimates after Radiant prelayout.
-    x_offset: if (measured != null) measured.x_offset else null,
-    y_offset: if (measured != null) measured.y_offset else null,
-    z: child_z(child, 0),
-    child_index: child_index(child, i)
+  for (i, child in children where ((child.role == "port") ^ { false })) {
+    let node_id = string(attr_or(child, "data-node-id", ""));
+    let port_id = string(attr_or(child, "data-port-id", "p" ++ string(i)));
+    let measured = measured_port(nodes, node_id, port_id);
+    {
+      node_id: node_id,
+      id: port_id,
+      side: string(attr_or(child, "data-port-side", "auto")),
+      offset: float(attr_or(child, "data-port-offset", 0.5)),
+      // Measured cell centers supersede source-order estimates after Radiant prelayout.
+      x_offset: if (measured != null) measured.x_offset else null,
+      y_offset: if (measured != null) measured.y_offset else null,
+      left_offset: if (measured != null) measured.left_offset else null,
+      top_offset: if (measured != null) measured.top_offset else null,
+      right_offset: if (measured != null) measured.right_offset else null,
+      bottom_offset: if (measured != null) measured.bottom_offset else null,
+      z: child_z(child, 0),
+      child_index: child_index(child.child, i)
+    }
   }
 ]
 
 fn semantic_constraints(children) => [
-  for (i, child in children where ((child_tag(child) == "constraint") ^ { false })) {
+  for (i, child in children where ((child.role == "constraint") ^ { false })) {
     kind: string(attr_or(child, "data-constraint-kind", "rank")),
     value: string(attr_or(child, "data-constraint-value", "same")),
     scope: string(attr_or(child, "data-constraint-scope", "")),
     member: string(attr_or(child, "data-constraint-member", "")),
-    child_index: child_index(child, i)
+    child_index: child_index(child.child, i)
   }
 ]
 
 fn semantic_cluster_labels(children) => [
-  for (i, child in children where ((child_tag(child) == "cluster-label") ^ { false })) {
+  for (i, child in children where ((child.role == "cluster-label") ^ { false })) {
     cluster_id: string(attr_or(child, "data-cluster-id", "")),
-    width: child_width(child),
-    height: child_height(child),
+    width: child_width(child.child),
+    height: child_height(child.child),
     z: child_z(child, 0),
-    child_index: child_index(child, i)
+    child_index: child_index(child.child, i)
   }
 ]
 
@@ -204,7 +223,7 @@ fn cluster_label(labels, cluster_id) {
 fn semantic_clusters(children, labels) => [
   for (i, child in children, let id = string(attr_or(child, "data-cluster-id", "")),
     let label = cluster_label(labels, id)
-    where ((child_tag(child) == "cluster" and id != "") ^ { false })) {
+    where ((child.role == "cluster" and id != "") ^ { false })) {
     id: id,
     parent: attr_or(child, "data-parent-cluster-id", null),
     padding: float(attr_or(child, "data-cluster-padding", 16.0)),
@@ -217,7 +236,7 @@ fn semantic_clusters(children, labels) => [
     dash_array: attr_or(child, "data-dash-array", null),
     radius: float(attr_or(child, "data-cluster-radius", 6.0)),
     z: child_z(child, -2),
-    child_index: child_index(child, i)
+    child_index: child_index(child.child, i)
   }
 ]
 
@@ -229,33 +248,33 @@ fn shape_clip_port(child, node_id) any^ =>
       attr_or(child, "data-shape-height", null) == null) []
   else [{node_id: node_id, id: "", side: "shape", offset: 0.5,
     x_offset: float(attr_or(child, "data-shape-width", 0)) /
-      max([1.0, child_width(child)]),
+      max([1.0, child_width(child.child)]),
     y_offset: float(attr_or(child, "data-shape-height", 0)) /
-      max([1.0, child_height(child)]),
+      max([1.0, child_height(child.child)]),
     z: 0, child_index: -1}]
 
 fn semantic_edge_labels(children) {
-  [for (i, child in children where ((child_tag(child) == "edge-label") ^ { false })) {
+  [for (i, child in children where ((child.role == "edge-label") ^ { false })) {
     owner_kind: "edge",
     owner_id: string(attr_or(child, "data-edge-id", "")),
     kind: "center",
     placement: string(attr_or(child, "data-label-placement", "center")),
-    width: child_width(child),
-    height: child_height(child),
+    width: child_width(child.child),
+    height: child_height(child.child),
     z: child_z(child, 0),
-    child_index: child_index(child, i)
+    child_index: child_index(child.child, i)
   }]
 }
 
 fn semantic_annotations(children) => [
-  for (i, child in children where ((child_tag(child) == "annotation") ^ { false })) {
+  for (i, child in children where ((child.role == "annotation") ^ { false })) {
     owner_kind: string(attr_or(child, "data-owner-kind", "edge")),
     owner_id: string(attr_or(child, "data-owner-id", "")),
     kind: string(attr_or(child, "data-annotation-kind", "external")),
-    width: child_width(child),
-    height: child_height(child),
+    width: child_width(child.child),
+    height: child_height(child.child),
     z: child_z(child, 0),
-    child_index: child_index(child, i)
+    child_index: child_index(child.child, i)
   }
 ]
 
@@ -324,20 +343,6 @@ fn label_anchor(label, edges, nodes) any^ {
   }
 }
 
-fn label_placement(label, edges, nodes) any^ {
-  let anchor = label_anchor(label, edges, nodes);
-  if (anchor == null) {
-    {index: label.child_index, x: 0.0, y: 0.0, z: label.z}
-  } else {
-    {
-      index: label.child_index,
-      x: anchor.x - label.width / 2.0,
-      y: anchor.y - label.height / 2.0,
-      z: label.z
-    }
-  }
-}
-
 fn placement_box(x, y, width, height) =>
   {left: x, top: y, right: x + width, bottom: y + height}
 
@@ -353,18 +358,32 @@ fn candidate_placement(label, anchor, dx, dy) => {
   z: label.z
 }
 
-fn placement_clear(label, candidate, occupied) {
-  let box = placement_box(candidate.x, candidate.y, candidate.width, candidate.height);
-  len([for (obstacle in occupied
-    where ((not (label.owner_kind == "edge" and
-      obstacle.obstacle_kind == "route" and obstacle.owner_id == label.owner_id) and
-      boxes_overlap(box, obstacle)) ^ { false })) obstacle]) == 0
+fn placement_clear(label, candidate, occupied) any^ {
+  let box = placement_box(candidate.x, candidate.y, candidate.width, candidate.height)
+  let edge_label = label.owner_kind == "edge"
+  let owner = label.owner_id
+  let count = len(occupied)^
+  var i = 0
+  while (i < count) {
+    let obstacle = occupied[i]
+    if ((boxes_overlap(box, obstacle) and not (edge_label and
+        obstacle.obstacle_kind == "route" and obstacle.owner_id == owner)) ^ { false }) {
+      return false
+    }
+    i = i + 1
+  }
+  return true
 }
 
-fn first_clear_candidate(label, candidates, occupied, i) any^ {
-  if (i >= len(candidates)) candidates[0]
-  else if (placement_clear(label, candidates[i], occupied)) candidates[i]
-  else first_clear_candidate(label, candidates, occupied, i + 1)
+fn first_clear_candidate(label, candidates, occupied) any^ {
+  let count = len(candidates)^
+  var i = 0
+  while (i < count) {
+    let candidate = candidates[i]
+    if (placement_clear(label, candidate, occupied)^) { return candidate }
+    i = i + 1
+  }
+  return null
 }
 
 fn ring_candidates(label, anchor, gap, ring) {
@@ -389,31 +408,57 @@ fn outside_candidate(label, anchor, occupied, gap) any^ {
     right + gap + label.width / 2.0 - anchor.x, 0.0)
 }
 
-fn label_candidates(label, anchor, occupied, gap) {
-  let centered = candidate_placement(label, anchor, 0.0, 0.0);
-  let rings = [for (ring in 1 to 6,
-    candidate in ring_candidates(label, anchor, gap, ring)) candidate];
+fn choose_label_placement(label, anchor, occupied, gap) any^ {
+  let centered = candidate_placement(label, anchor, 0.0, 0.0)
+  let near_anchor = label.owner_kind == "node" or label.kind == "center"
   // A label above a route needs its entire box beyond the stroke, not just its baseline.
   let offset = if (label.placement == "above")
     candidate_placement(label, anchor, 0.0, 0.0 - label.height / 2.0 - gap)
     else if (label.placement == "right")
-      candidate_placement(label, anchor, label.width / 3.0, 0.0)
-    else centered;
-  let nearby = if (label.placement == "above") [
+      candidate_placement(label, anchor, label.width / 2.0 + gap, 0.0)
+    else centered
+  // Most labels fit at the preferred anchor. Build farther candidates on demand.
+  if (near_anchor and placement_clear(label, offset, occupied)) { return offset }
+  let nearby = if (near_anchor and label.placement == "above") [
     candidate_placement(label, anchor, 0.0 - label.width / 2.0 - gap,
       0.0 - label.height / 2.0 - gap),
     candidate_placement(label, anchor, label.width / 2.0 + gap,
       0.0 - label.height / 2.0 - gap)
-  ] else [];
-  let fallback = outside_candidate(label, anchor, occupied, gap);
-  if (label.owner_kind == "node" or label.kind == "center")
-    { [offset, *nearby, *(if (label.placement == "above") [] else [centered]),
-        *rings, fallback] }
-  else { [*rings, centered, fallback] }
+  ] else if (near_anchor and label.placement == "right") [
+    candidate_placement(label, anchor, 0.0 - label.width / 2.0 - gap, 0.0)
+  ] else []
+  let near_choice = first_clear_candidate(label, nearby, occupied)^
+  if (near_choice != null) { return near_choice }
+  if (near_anchor and label.placement == "right" and
+      placement_clear(label, centered, occupied)) { return centered }
+  var ring = 1
+  while (ring <= 6) {
+    let choice = first_clear_candidate(label, ring_candidates(label, anchor, gap, ring), occupied)^
+    if (choice != null) { return choice }
+    ring = ring + 1
+  }
+  if (not near_anchor and placement_clear(label, centered, occupied)) { return centered }
+  let fallback = outside_candidate(label, anchor, occupied, gap)
+  return if (placement_clear(label, fallback, occupied)^) fallback
+    else if (near_anchor) offset else ring_candidates(label, anchor, gap, 1)[0]
+}
+
+fn straight_axis_segments(points) any^ {
+  let count = len(points)^
+  var i = 1
+  while (i < count) {
+    let a = points[i - 1], b = points[i]
+    if ((a.x != b.x and a.y != b.y)^) { return false }
+    i = i + 1
+  }
+  return true
 }
 
 fn edge_route_obstacles(edge, clearance) any^ {
-  let points = route_geometry.sample_points(edge);
+  let route = edge.points;
+  // On an axis-aligned segment the expanded sample boxes cover one rectangle.
+  let points = if ((edge.route_mode != "curved" or len(route) <= 2) and
+    straight_axis_segments(route)) route else route_geometry.sample_points(edge);
   if (len(points) < 2) [] else [
     for (i in ((1 to (len(points) - 1)) ^ { [] }),
       let a = points[i - 1], let b = points[i])
@@ -428,17 +473,25 @@ fn route_obstacles(edges, clearance) => [
   for (edge in edges, box in ((edge_route_obstacles(edge, clearance)) ^ { [] })) box
 ]
 
+fn cluster_border_obstacles(cluster, clearance) => [
+  placement_box(cluster.x - clearance, cluster.y - clearance,
+    cluster.width + clearance * 2.0, clearance * 2.0),
+  placement_box(cluster.x - clearance, cluster.y + cluster.height - clearance,
+    cluster.width + clearance * 2.0, clearance * 2.0),
+  placement_box(cluster.x - clearance, cluster.y - clearance,
+    clearance * 2.0, cluster.height + clearance * 2.0),
+  placement_box(cluster.x + cluster.width - clearance, cluster.y - clearance,
+    clearance * 2.0, cluster.height + clearance * 2.0)
+]
+
 fn place_edge_labels_at(labels, edges, nodes, occupied, i, result) {
   if (i >= len(labels)) result
   else {
     let label = labels[i];
     let anchor = label_anchor(label, edges, nodes);
-    let fallback = label_placement(label, edges, nodes);
-    let gap = 6.0;
-    let candidates = if (anchor == null) [{*:fallback,
-      width: label.width, height: label.height}]
-    else label_candidates(label, anchor, occupied, gap);
-    let chosen = first_clear_candidate(label, candidates, occupied, 0);
+    let chosen = if (anchor == null) {index: label.child_index,
+      x: 0.0, y: 0.0, z: label.z, width: label.width, height: label.height}
+    else choose_label_placement(label, anchor, occupied, 6.0);
     let box = placement_box(chosen.x, chosen.y, chosen.width, chosen.height);
     place_edge_labels_at(labels, edges, nodes, [*occupied, box], i + 1,
       [*result, chosen])
@@ -446,16 +499,19 @@ fn place_edge_labels_at(labels, edges, nodes, occupied, i, result) {
 }
 
 fn edge_label_placements(labels, edges, nodes, cluster_labels, clusters) {
+  if (len(labels) == 0) { return [] }
   let occupied = [
     for (node in nodes) placement_box(node.x - node.width / 2.0,
       node.y - node.height / 2.0, node.width, node.height),
     for (label in cluster_labels,
       let placement = cluster_label_placement(label, clusters))
       placement_box(placement.x, placement.y, label.width, label.height),
-    // Labels need route-aware placement; otherwise dense parallel edges paint through text.
+    // A label spanning a cluster border makes both the boundary and text hard to read.
+    for (cluster in clusters, box in ((cluster_border_obstacles(cluster, 2.0)) ^ { [] })) box,
+    // Labels need route-aware placement otherwise dense parallel edges paint through text.
     *route_obstacles(edges, 2.0)
-  ];
-  place_edge_labels_at(labels, edges, nodes, occupied, 0, [])
+  ]
+  return place_edge_labels_at(labels, edges, nodes, occupied, 0, [])
 }
 
 fn cluster_label_placement(label, clusters) {
@@ -480,67 +536,68 @@ fn graph_option(parent, opts, key, attr_key, fallback) {
 
 fn placement_z(nodes, index) {
   let matches = [for (entry in nodes where ((child_index(entry.child, entry.order) == index) ^ { false }))
-    child_z(entry.child, 0)];
+    child_z(entry, 0)];
   if (len(matches) > 0) matches[0] else 0
 }
 
 // Convert already-laid-out semantic children into the canonical geometry model.
 pub fn from_velmts(parent, children, ctx, opts = null) any^ {
-  let nodes = semantic_nodes(children);
-  let metadata_edges = semantic_edges(children);
-  let edge_labels = [*semantic_edge_labels(children), *semantic_annotations(children)];
-  let ports = semantic_ports(children, nodes);
-  let constraints = semantic_constraints(children);
-  let cluster_labels = semantic_cluster_labels(children);
-  let clusters = semantic_clusters(children, cluster_labels);
+  let entries = [for (i, child in children) layout_entry(child, i)];
+  let parent_entry = {child: parent, attrs: parent.attrs};
+  let nodes = semantic_nodes(entries);
+  let metadata_edges = semantic_edges(entries);
+  let edge_labels = [*semantic_edge_labels(entries), *semantic_annotations(entries)];
+  let ports = semantic_ports(entries, nodes);
+  let constraints = semantic_constraints(entries);
+  let cluster_labels = semantic_cluster_labels(entries);
+  let clusters = semantic_clusters(entries, cluster_labels);
   let edges = if (opts != null and opts.edges != null) opts.edges else metadata_edges;
-  let requested_node_sep = float(graph_option(parent, opts, "node_sep", "data-node-sep", 60.0));
-  let requested_rank_sep = float(graph_option(parent, opts, "rank_sep", "data-rank-sep", 80.0));
+  let requested_node_sep = float(graph_option(parent_entry, opts, "node_sep", "data-node-sep", 60.0));
+  let requested_rank_sep = float(graph_option(parent_entry, opts, "rank_sep", "data-rank-sep", 80.0));
   let center_label_widths = [for (label in edge_labels where label.kind == "center")
     label.width];
   // measured DOT labels need rank space in addition to node boxes.
-  let rank_sep = if (attr_or(parent, "data-graph-flavor", null) == "dot" and
+  let rank_sep = if (attr_or(parent_entry, "data-graph-flavor", null) == "dot" and
     len(center_label_widths) > 0)
     max([requested_rank_sep, max(center_label_widths) + 48.0])
     else requested_rank_sep;
-  let requested_edge_sep = float(graph_option(parent, opts, "edge_sep", "data-edge-sep", 10.0));
+  let requested_edge_sep = float(graph_option(parent_entry, opts, "edge_sep", "data-edge-sep", 10.0));
   let center_label_heights = [for (label in edge_labels where label.kind == "center")
     label.height];
   // DOT lanes must leave room for the measured labels of nearby edges and loops.
-  let edge_sep = if (attr_or(parent, "data-graph-flavor", null) == "dot" and
+  let edge_sep = if (attr_or(parent_entry, "data-graph-flavor", null) == "dot" and
     len(center_label_heights) > 0)
     max([requested_edge_sep, max(center_label_heights) + 4.0])
     else requested_edge_sep;
-  let node_sep = if (attr_or(parent, "data-graph-flavor", null) == "dot" and
+  let node_sep = if (attr_or(parent_entry, "data-graph-flavor", null) == "dot" and
     len(center_label_heights) > 0)
     max([requested_node_sep, edge_sep + max(center_label_heights) + 12.0])
     else requested_node_sep;
-  let direction = string(graph_option(parent, opts, "direction", "data-direction", "TB"));
-  let route_mode = string(graph_option(parent, opts, "route_mode", "data-route-mode",
-    if (string(graph_option(parent, opts, "use_splines",
+  let direction = string(graph_option(parent_entry, opts, "direction", "data-direction", "TB"));
+  let route_mode = string(graph_option(parent_entry, opts, "route_mode", "data-route-mode",
+    if (string(graph_option(parent_entry, opts, "use_splines",
         "data-use-splines", "false")) == "true") "curved" else "orthogonal"));
   let graph_input = {
-    nodes: [for (entry in nodes) {
-      id: child_id(entry.child, entry.order),
+    nodes: [for (entry in nodes, let id = child_id(entry, entry.order)) {
+      id: id,
       index: child_index(entry.child, entry.order),
       width: child_width(entry.child),
       height: child_height(entry.child),
-      shape: string(attr_or(entry.child, "data-shape", "box")),
-      polygon_sides: attr_or(entry.child, "data-polygon-sides", null),
-      polygon_orientation: attr_or(entry.child, "data-polygon-orientation", null),
-      polygon_skew: attr_or(entry.child, "data-polygon-skew", null),
-      polygon_distortion: attr_or(entry.child, "data-polygon-distortion", null),
-      regular: bool_attr(entry.child, "data-regular"),
-      peripheries: attr_or(entry.child, "data-peripheries", null),
+      shape: string(attr_or(entry, "data-shape", "box")),
+      polygon_sides: attr_or(entry, "data-polygon-sides", null),
+      polygon_orientation: attr_or(entry, "data-polygon-orientation", null),
+      polygon_skew: attr_or(entry, "data-polygon-skew", null),
+      polygon_distortion: attr_or(entry, "data-polygon-distortion", null),
+      regular: bool_attr(entry, "data-regular"),
+      peripheries: attr_or(entry, "data-peripheries", null),
       // DOT group is an ordering hint; structural subgraph membership still owns cluster geometry.
-      order_group: attr_or(entry.child, "data-order-group", null),
-      ordering: attr_or(entry.child, "data-ordering", null),
-      group: attr_or(entry.child, "data-subgraph-id", null),
+      order_group: attr_or(entry, "data-order-group", null),
+      ordering: attr_or(entry, "data-ordering", null),
+      group: attr_or(entry, "data-subgraph-id", null),
       // Reuse the established port record shape for fixed-shape clipping;
       // extra node-map lanes are unstable in retained custom-layout JIT calls.
-      ports: [*ports_for(ports, child_id(entry.child, entry.order)),
-        *shape_clip_port(entry.child, child_id(entry.child, entry.order))],
-      z: child_z(entry.child, 0)
+      ports: [*ports_for(ports, id), *shape_clip_port(entry, id)],
+      z: child_z(entry, 0)
     }],
     edges: edges,
     constraints: constraints,
@@ -549,12 +606,13 @@ pub fn from_velmts(parent, children, ctx, opts = null) any^ {
     node_sep: node_sep,
     rank_sep: rank_sep,
     edge_sep: edge_sep,
+    marker_scale: float(attr_or(parent_entry, "data-graph-zoom", 1.0)),
     route_mode: route_mode,
-    loop_side: if (attr_or(parent, "data-graph-flavor", null) == "dot")
+    loop_side: if (attr_or(parent_entry, "data-graph-flavor", null) == "dot")
       "top" else "right",
-    ordering: graph_option(parent, opts, "ordering", "data-ordering", null),
-    new_rank: graph_option(parent, opts, "new_rank", "data-new-rank", false),
-    compound: graph_option(parent, opts, "compound", "data-compound", false),
+    ordering: graph_option(parent_entry, opts, "ordering", "data-ordering", null),
+    new_rank: graph_option(parent_entry, opts, "new_rank", "data-new-rank", false),
+    compound: graph_option(parent_entry, opts, "compound", "data-compound", false),
     use_splines: route_mode == "curved"
   };
   let result = compute(graph_input, opts);
@@ -574,11 +632,12 @@ pub fn from_velmts(parent, children, ctx, opts = null) any^ {
       placement.y + placement.height]) else result.height;
   let shift_x = 0.0 - min_x;
   let shift_y = 0.0 - min_y;
-  let shifted_nodes = [for (node in ((((((result.nodes) ^ { [] })))))) {*:node,
+  let shift = shift_x != 0.0 or shift_y != 0.0;
+  let shifted_nodes = if (not shift) result.nodes else [for (node in (result.nodes ^ { [] })) {*:node,
     x: node.x + shift_x, y: node.y + shift_y}];
-  let shifted_edges = [for (edge in ((((((result.edges) ^ { [] })))))) {*:edge,
+  let shifted_edges = if (not shift) result.edges else [for (edge in (result.edges ^ { [] })) {*:edge,
     points: [for (point in edge.points) {x: point.x + shift_x, y: point.y + shift_y}]}];
-  let shifted_clusters = [for (cluster in ((((((result.clusters) ^ { [] })))))) {*:cluster,
+  let shifted_clusters = if (not shift) result.clusters else [for (cluster in (result.clusters ^ { [] })) {*:cluster,
     x: cluster.x + shift_x, y: cluster.y + shift_y,
     label_x: cluster.label_x + shift_x, label_y: cluster.label_y + shift_y}];
   {

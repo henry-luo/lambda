@@ -7,6 +7,8 @@
   returns: [true, true, true],
   long_edge_avoids_loop: true,
   circle_style: true,
+  heawood_circles: true,
+  ellipse_centered: true,
   curved_terminal: true,
   curve_samples: true,
   loop_label_near_node: true,
