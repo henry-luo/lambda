@@ -7995,8 +7995,8 @@ class CanvasWebGlExportTest : public ::testing::TestWithParam<unsigned> {
             ASSERT_NE(previous_host, nullptr);
             memcpy(previous_host, previous, strlen(previous) + 1);
         }
-        // The full native host explicitly permits a hidden GPU context in export processes.
-        ASSERT_EQ(setenv("LAMBDA_HEADLESS_GLFW_WINDOW", "1", 1), 0);
+        // Exercise export's on-demand host acquisition from a windowless start.
+        ASSERT_EQ(unsetenv("LAMBDA_HEADLESS_GLFW_WINDOW"), 0);
     }
     void TearDown() override {
         if (previous_host) setenv("LAMBDA_HEADLESS_GLFW_WINDOW", previous_host, 1);

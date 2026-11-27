@@ -21,3 +21,27 @@ for (const [index, fixture] of cases.entries()) test(fixture.name, async () => {
         </script>`);
     assert.equal(loggedResult(log, 'GRID_SPAN_MINIMUM').width, fixture.width);
 });
+
+for (const rows of [true, false]) {
+    const tracks = rows ? 'rows' : 'columns';
+    const axis = rows ? 'row' : 'column';
+    const size = rows ? 'height' : 'width';
+    const start = rows ? 'y' : 'x';
+    const cssom = rows ? 'gridTemplateRows' : 'gridTemplateColumns';
+    test('indefinite flexible ' + tracks + ' share content space without absorbing gaps', async () => {
+        const {log} = await render('indefinite-' + tracks, `<!doctype html><style>
+            body{margin:0}#grid{display:grid;width:${rows ? '100px' : 'max-content'};
+                grid-template-${tracks}:auto 1fr auto 1fr;${axis}-gap:12px}
+            #first{grid-${axis}:1/3}#second{grid-${axis}:3/5}
+            #first div{${size}:30px}#second div{${size}:70px}
+            </style><div id="grid"><div id="first"><div></div></div><div id="second"><div></div></div></div><script>
+            const grid=document.getElementById('grid'),first=document.getElementById('first'),second=document.getElementById('second');
+            console.log('GRID_INDEFINITE_FRACTIONS '+JSON.stringify({tracks:getComputedStyle(grid).${cssom},
+                extent:grid.getBoundingClientRect().${size},first:first.getBoundingClientRect().${size},
+                secondStart:second.getBoundingClientRect().${start},second:second.getBoundingClientRect().${size}}));
+            </script>`);
+        assert.deepEqual(loggedResult(log, 'GRID_INDEFINITE_FRACTIONS'), {
+            tracks: '0px 58px 0px 58px', extent: 152, first: 70, secondStart: 82, second: 70,
+        });
+    });
+}

@@ -284,7 +284,21 @@
     {
       "label": "saas_landing_207",
       "url": "https://framerauth.com/",
-      "manual_major_remaining": "The header now appears, but the main membership heading, copy, actions and product media remain absent. Retained after visual review despite the lower coarse score."
+      "manual_major_remaining": "The badge, navigation, heading, copy and actions render. The native hero sits lower than Chromium and its cross-origin demo is blank.",
+      "rechecks": [
+        {
+          "rechecked_at": "2026-11-27T00:14:11.089Z",
+          "evidence": "comparison/repairs.html#round-220",
+          "previous_manual_major_remaining": "The header now appears, but the main membership heading, copy, actions and product media remain absent. Retained after visual review despite the lower coarse score.",
+          "manual_major_remaining": "Navigation, the membership heading, copy and both actions render. An oversized badge pushes the hero down, and the embedded demo visible in Chromium is absent from the native frame."
+        },
+        {
+          "rechecked_at": "2026-11-27T00:53:18.465Z",
+          "evidence": "comparison/repairs.html#round-221",
+          "previous_manual_major_remaining": "Navigation, the membership heading, copy and both actions render. An oversized badge pushes the hero down, and the embedded demo visible in Chromium is absent from the native frame.",
+          "manual_major_remaining": "The badge, navigation, heading, copy and actions render. The native hero sits lower than Chromium and its cross-origin demo is blank."
+        }
+      ]
     },
     {
       "label": "saas_landing_563",
@@ -558,9 +572,17 @@
     {
       "label": "saas_landing_293",
       "url": "https://www.figma.com/figjam/",
-      "manual_major_remaining": "Large product screenshot and decorative hero composition remain absent.",
+      "manual_major_remaining": "FigJam’s heading, supporting text, buttons and consent dialog render. The large product board and decorative hero canvas remain empty. The admitted Rive runtime reaches the missing WebAssembly namespace.",
       "reviewed_at": "2026-11-18T04:43:31.020Z",
-      "evidence": "comparison/repairs.html#round-83"
+      "evidence": "comparison/repairs.html#round-83",
+      "rechecks": [
+        {
+          "rechecked_at": "2026-11-27T01:59:10.905Z",
+          "evidence": "comparison/repairs.html#round-224",
+          "previous_manual_major_remaining": "Large product screenshot and decorative hero composition remain absent.",
+          "manual_major_remaining": "FigJam’s heading, supporting text, buttons and consent dialog render. The large product board and decorative hero canvas remain empty. The admitted Rive runtime reaches the missing WebAssembly namespace."
+        }
+      ]
     },
     {
       "label": "saas_landing_309",
@@ -986,6 +1008,18 @@
       "resolution": "Both ordinary captures navigate from Bento to Linktree. LI-125 and RI-255 restore the full consent panel in the native viewport with a 1.14% mean difference. Clear the major omission.",
       "resolution_evidence": "comparison/repairs.html#round-207",
       "resolved_previous_manual_major_remaining": "Bento now redirects to Linktree. Shared stream/startup repairs restore the heading, copy, actions and large portrait; the large consent panel remains absent, matching the known host-scoped cascade gap (JS13-L2). Retain manual high despite the cleared automatic broad-difference flag.",
+      "resolved_capture_settle_ms": 1000
+    },
+    {
+      "label": "saas_landing_582",
+      "url": "https://www.figma.com/pricing/",
+      "manual_major_remaining": "",
+      "reviewed_at": "2026-11-27T01:31:01.777Z",
+      "evidence": "comparison/repairs.html#round-222",
+      "resolved_at": "2026-11-27T01:42:40.867Z",
+      "resolution": "RI-263 sizes flexible tracks from intrinsic content in indefinite block space and keeps gutters out of available track space. Two independent ordinary pairs show legible pricing cards and consent. Full subgrid alignment remains open.",
+      "resolution_evidence": "comparison/repairs.html#round-223",
+      "resolved_previous_manual_major_remaining": "The pricing heading, plan cards and consent dialog render. In Radiant the third and fourth plan cards overlap the first two and obscure several prices and descriptions. Chromium uses nested row subgrids to place those cards below the first row.",
       "resolved_capture_settle_ms": 1000
     }
   ]

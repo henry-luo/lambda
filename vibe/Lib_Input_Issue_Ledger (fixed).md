@@ -6,7 +6,33 @@ remain in the [active issue ledger](Lib_Input_Issue_Ledger.md).
 
 ## Fixed issues
 
-<a id="li-125"></a>
+<a id="li-128"></a>
+
+### LI-128 — A queued resource completion can reach a retired DOM element
+
+**Fixed, 2026-11-27.** FramerAuth's native capture crashed when a queued
+image completion passed a retired element to the Radiant image processor.
+The fault was in `process_image_resource` when it accessed the reclaimed
+element's embed field. Both new requests and byte prefetches promoted to
+element delivery now store a `DomNodeRef`. Delivery resolves that reference
+in the requesting document before calling the processor. A live image or
+SVG owner stays retained during the call. A stylesheet from a retired link
+cannot become a document-wide rule source. Failed delivery and cancellation
+use the same owner lookup. Cached bytes and completion accounting remain
+available when an element has retired (**D5.5.1 / D9.1.2v2 / D9.1.3v2**).
+
+`NetworkResourceManager.QueuedElementDeliveryChecksDomLifetime` reproduced
+the stale callback on the previous source. It now verifies that the retired
+image is skipped, the live SVG receives one completion, and both entries
+are counted. The prefetch-promotion test also verifies delivery before and
+after the initial byte-only completion. The three downloaded-stylesheet
+checks and all 16 network scheduler tests pass. Two ordinary FramerAuth
+captures now complete in 109.42 s and 93.43 s. Both show the heading, copy,
+and primary actions. The vertically displaced hero and missing demo media
+keep the page high (**D10.1.7**). Crash, tests and paired capture evidence
+are in `temp/online-visual-round247/` and `temp/online-visual-round248/`.
+
+<a id="li-127"></a>
 
 ### LI-127 — Re-registering a math font grows the font resource registry
 

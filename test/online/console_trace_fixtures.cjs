@@ -13,6 +13,14 @@ const fixtures=[
   const value={toString(){coerced++;throw new Error('trace must not convert data to a counter label')}};
   const symbol=console.trace(Symbol('trace-symbol-probe'))===undefined,object=console.trace(value)===undefined;
   return {symbol,object,coerced};`,expected:{symbol:true,object:true,coerced:0}},
+ {name:'console assert emits only failed assertions and retains diagnostic arguments',body:`
+  const assert=console.assert.bind(null);
+  const success=assert({},'assertion-quiet-probe')===undefined;
+  const failure=assert(0,'assertion-messages-probe',17,'extras')===undefined;
+  const defaultCondition=assert()===undefined;
+  return {length:assert.length,success,failure,defaultCondition};`,
+  expected:{length:0,success:true,failure:true,defaultCondition:true},
+  output:'Assertion failed: assertion-messages-probe 17 extras',quiet:'assertion-quiet-probe'},
 ];
 function fixtureHtml(f){return scriptResultFixture(`const result=(function(){${f.body}})();
  console.log('CONSOLE_TRACE_DETAILS',JSON.stringify(result));check(JSON.stringify(result)===${JSON.stringify(JSON.stringify(f.expected))});`,

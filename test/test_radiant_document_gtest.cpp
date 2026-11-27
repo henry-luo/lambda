@@ -6338,7 +6338,7 @@ TEST_F(RadiantDocumentTest, FetchPreloadRetainsBytesWithoutImageDecodingOrScript
     NetworkResource* resource = resource_manager_prefetch(document->resource_manager, url, PRIORITY_NORMAL);
     ASSERT_NE(resource, nullptr);
     EXPECT_EQ(resource->type, RESOURCE_PREFETCH);
-    EXPECT_EQ(resource->owner_element, nullptr);
+    EXPECT_EQ(network_resource_owner(resource, document), nullptr);
     EXPECT_EQ(resource->image_surface, nullptr);
     EXPECT_TRUE(resource->processed);
     size_t length = 0;

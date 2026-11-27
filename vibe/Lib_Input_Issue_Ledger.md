@@ -15,6 +15,10 @@ Resolved records are in the [fixed issue ledger](<Lib_Input_Issue_Ledger (fixed)
 
 ## Open issues
 
+<a id="li-128"></a>
+
+- [LI-128 — A queued resource completion can reach a retired DOM element](<Lib_Input_Issue_Ledger (fixed).md#li-128>).
+
 <a id="li-127"></a>
 
 - [LI-127 — Re-registering a math font grows the font resource registry](<Lib_Input_Issue_Ledger (fixed).md#li-127>).

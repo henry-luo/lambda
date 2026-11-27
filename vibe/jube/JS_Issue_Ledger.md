@@ -641,7 +641,9 @@ Grounded in the current code; candidates for cleanup, not necessarily bugs.
 
 ## 10. Standard Built-in Library (JS10)
 
-### JS10-L1 — Locale-aware currency formatting is unavailable — **FEATURE GAP**
+<a id="js10-l1"></a>
+
+### JS10-L1 — Locale-aware currency formatting is incomplete — **Standard English currency supported**
 
 **2026-11-20.** Shared JavaScript semantics follow **D8.4.4**. Native NumberFormat
 implements an English decimal profile, extended to compact and percent in
@@ -672,6 +674,18 @@ React stack probes are separate. This confirms the API gap on this page,
 without claiming it explains every later startup step. Evidence:
 `temp/online-visual-round228/{live/saas_landing_582/after,
 browser/saas_landing_582,intl-observer/calls.json}`.
+
+**2026-11-27.** Standard currency formatting uses pinned CLDR 48 codes,
+precision, English regional separators, grouping and currency affixes.
+The existing formatter rounds the amount and publishes the real currency
+and numeric parts. Currency codes and display options are validated before
+construction (**D6.3.3 / D8.4.4**). All ten focused currency assertions
+match Chromium and pass with forced GC. The existing Locale, NumberFormat,
+PluralRules, ListFormat and DOM Intl checks pass. The JS layout gate is
+630/630. Figma's ordinary pairs advance past the currency option and
+still lack the pricing table. Compact currency and broader locale support
+remain open (**D10.1.7**). [ECMA-402 NumberFormat](https://tc39.es/ecma402/#numberformat-objects) ·
+[Regression](../../test/js/intl_currency.js).
 
 
 <a id="js10-l2"></a>
@@ -835,6 +849,88 @@ high review resolves; localized card and text differences remain.
 9. **The NULL-buffer `.buffer` synthesis path is vestigial.** `js_typed_array_new` now always allocates and wraps a backing `JsArrayBuffer` eagerly (`:2100`), so the exotic-gate fallback that lazily synthesizes a buffer for a `ta->buffer == NULL` array (`js_runtime.cpp:3283`) should be unreachable for engine-constructed arrays; it survives as a guard for exotic construction paths and could be demoted to an assert.
 
 ## 13. Web Platform: DOM, CSSOM, Events & Fetch (JS13)
+
+<a id="js13-l97"></a>
+
+### JS13-L97 — The MVP console omits assert — **FIXED**
+
+**2026-11-27.** FigJam's admitted Rive bootstrap aborts when it calls
+`console.assert(true)`. The same call fails in a local HTML document and
+the CLI. The MVP namespace publishes the shared assertion method in both
+tiers. Truthy assertions return quietly and failed assertions forward their
+message span through the existing console formatter. The formatter keeps
+its temporary argument array rooted (**D6.3.3 / D8.4.4**).
+[Console Standard §1.1.1](https://console.spec.whatwg.org/#assert).
+
+Both new AST/MIR checks fail on the preceding renderer. All ten console
+checks pass in a normal process and with collection on every allocation.
+Both ordinary FigJam captures now reach the missing WebAssembly namespace.
+The decorative hero and FigJam product board remain blank under JS13-L87,
+so the page stays high (**D10.1.7**).
+[Regression](../../test/online/render_console_trace.test.cjs) ·
+[Round 224](../../test/online/comparison/repairs.html#round-224).
+
+<a id="js13-l96"></a>
+
+### JS13-L96 — Private field assignment misses native subclass storage — **FIXED**
+
+**2026-11-27.** FigJam's video element throws when a public configuration
+setter and its disconnect callback assign to initialized private fields.
+A reduced custom element can read the field and test its private identity,
+then fails on assignment. The MVP path already verifies the receiver's own
+private slot. The shared private storage resolver now locates that slot in
+the virtual wrapper's precisely traced expando map
+(**D5.5.1 / D6.3.3 / D8.4.4 / D9.5.6v2**).
+
+The lifecycle regression covers the public setter via `Object.assign`,
+reactions, and writes after collection. It matches Chromium in AST, MIR,
+and AUTO with and without forced collection. All three DOM expando controls
+and all 630 baseline JavaScript layouts pass. Both ordinary FigJam captures
+restore the title, supporting text, actions, and consent dialog.
+[Regression](../../test/js/dom_custom_element_lifecycle.js) ·
+[Round 224](../../test/online/comparison/repairs.html#round-224).
+
+<a id="js13-l95"></a>
+
+### JS13-L95 — Canvas 2D cannot create and write ImageData — **Fixed for RGBA8/sRGB**
+
+**2026-11-27.** Figma Pricing generates its Canvas frame using
+`createImageData(width, height)` and `putImageData(image, 0, 0)`. The native
+source-range trace records the missing creation method at the first call.
+Both methods now share the existing ImageData owner and pixel budget.
+Radiant clips the synchronous write to its actual bitmap and uses the
+existing straight-alpha conversion and paint invalidation
+(**D5.5.2 / D6.3.3 / D8.4.4 / D9.5.6v2**).
+[HTML pixel manipulation](https://html.spec.whatwg.org/multipage/canvas.html#pixel-manipulation).
+
+Five reduced cases fail before the repair. All 16 Canvas pixel cases match
+Chromium and pass with forced GC. The 14 existing Canvas transform cases
+also pass. Both ordinary Figma captures recover its pricing heading, plan
+cards and consent dialog. Overlapping subgrid cards keep it high
+(**D10.1.7**). [Regression](../../test/online/render_canvas_readback.test.cjs) ·
+[Round 222](../../test/online/comparison/repairs.html#round-222).
+
+<a id="js13-l94"></a>
+
+### JS13-L94 — Browser UUID initialization cannot obtain random bytes — **FIXED**
+
+**2026-11-27.** Figma Pricing's live client stops at the UUID library
+because the browser realm lacks `crypto.getRandomValues`. The native
+method uses the shared entropy provider and writes only the supplied
+view. The provider respects the per-call DRBG limit while filling the
+complete 65,536-byte permitted request. The native method validates the
+receiver and Web IDL view before output and raises the specified quota
+exception (**D6.3.3 / D7.2.2 / D8.4.4 / D11.1.2**).
+[Web Cryptography §10.1.1](https://w3c.github.io/webcrypto/#Crypto-method-getRandomValues) ·
+[Web IDL §2.8.3](https://webidl.spec.whatwg.org/#idl-QuotaExceededError).
+
+Both focused render cases and the related browser global, error and base64
+controls pass, 25 in total. Both new cases pass with forced GC and poisoned
+freed memory. Two ordinary pairs complete and report the next exception in
+`Intl.NumberFormat` instead of the UUID error. The pricing table is still
+absent at this point (JS10-L1, **D10.1.7**). Evidence is in
+`temp/online-visual-round248/`.
+[Regression](../../test/online/render_web_crypto.test.cjs).
 
 <a id="js13-l93"></a>
 
@@ -1023,6 +1119,15 @@ canonical comparisons. Evidence: `temp/online-visual-round233/`:
 `affinity-contexts.json`, `affinity-no-webgl.json`, `affinity-no-wasm.json`,
 the unchanged `affinity-canvas.js`, `platform-capabilities.json`, and the
 ordinary matched pair. This does not block independent remaining-page work.
+
+**2026-11-27, FigJam.** After JS13-L96 restores the page and JS13-L97
+publishes `console.assert`, both ordinary native captures reach
+`ReferenceError: WebAssembly`. The exact admitted Rive chunk links directly
+to its WASM runtime. Chromium's corresponding viewport paints the 1100 px
+product board and decorative canvas. The Vimeo frames are separate below
+the first viewport. FigJam retains its high review
+(**D8.4.4 / D9.5.6v2 / D10.1.7**).
+[Round 224](../../test/online/comparison/repairs.html#round-224).
 
 <a id="js13-l86"></a>
 

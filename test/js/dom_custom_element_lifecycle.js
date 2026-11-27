@@ -12,20 +12,28 @@ async function custom_element_lifecycle() {
   let setting = false, synchronous = false;
   class Lifecycle extends HTMLElement {
     static observedAttributes = ['value'];
-    #token = 7;
+    #token = 0;
+    #config;
     constructor() { super(); this.created = ++constructed; }
-    connectedCallback() { events.push(['connected', this, this.#token]); }
+    get config() { return this.#config; }
+    set config(value) { this.#config = value; }
+    connectedCallback() {
+      this.#token = 7;
+      events.push(['connected', this, this.#token]);
+    }
     disconnectedCallback() { events.push(['disconnected', this, this.#token]); }
     attributeChangedCallback(name, oldValue, value) { events.push([name, this, oldValue, value]); if (value === 'next') synchronous = setting; }
   }
   customElements.define('test-lifecycle', Lifecycle);
   check('upgrade retains existing node', existing instanceof Lifecycle && existing.created === 1 && host.firstElementChild === existing);
+  Object.assign(existing, {config: false});
+  check('public setter updates an upgraded element private field', existing.config === false);
   const created = document.createElement('test-lifecycle');
   const direct = new Lifecycle();
   check('constructors initialize native nodes', created instanceof Lifecycle && created.created === 2 && direct.created === 3 && direct.localName === 'test-lifecycle');
   await new Promise(resolve => setTimeout(resolve, 0));
   check('upgrade observes initial attributes', events.some(e => e[0] === 'value' && e[1] === existing && e[2] === null && e[3] === 'initial'));
-  check('connection sees initialized private fields', events.some(e => e[0] === 'connected' && e[1] === existing && e[2] === 7));
+  check('connection can update initialized private fields', events.some(e => e[0] === 'connected' && e[1] === existing && e[2] === 7));
   setting = true;
   existing.setAttribute('value', 'next');
   setting = false;
@@ -45,6 +53,8 @@ async function custom_element_lifecycle() {
   const cloned = existing.cloneNode(true);
   check('clone constructs independent state', cloned instanceof Lifecycle && cloned.created === 5 && cloned !== existing);
   if (typeof gc === 'function') gc();
+  Object.assign(existing, {config: undefined});
+  check('private field writes survive collection', existing.config === undefined && created.config === undefined);
   host.append(created, imported, cloned);
   await new Promise(resolve => setTimeout(resolve, 0));
   check('native reactions retain receivers across gc', events.filter(e => e[0] === 'connected' && e[2] === 7).length === 5);
