@@ -1221,15 +1221,13 @@ static DomBoundary pointer_boundary_within_target(DomBoundary boundary, View* ta
     return boundary;
 }
 
-// F17/ES24: legacy Lambda payload fields now project through the same event
-// wrapper JS receives. Nested Mark values still use the document Input arena;
-// only the outer event carrier moved from a one-shot Mark map to the record.
+// F17/ES24: Lambda payload fields use the same event wrapper JS receives.
 class DomEventPayloadBuilder {
 public:
     explicit DomEventPayloadBuilder(Item event) : event_(event) {}
 
     void put(const char* name, const char* value) {
-        set(name, value ? js_name_item(value) : ItemNull);
+        set(name, value ? Item{.item = s2it(heap_strcpy(value, strlen(value)))} : ItemNull);
     }
     void put(const char* name, int64_t value) {
         set(name, (Item){.item = i2it(value)});
@@ -1455,7 +1453,6 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
         return event_root.get();
     }
 
-    MarkBuilder builder(doc->input);
     DomEventPayloadBuilder mb(event_root.get());
     mb.put("type", event_name);
     if (event_name && strcmp(event_name, "scrollkey") == 0) {
@@ -1559,11 +1556,22 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
 
     if (intent && intent->type != INPUT_INTENT_NONE) {
         const char* input_type = input_intent_type_name(intent->type);
-        // Both package payloads share a length-delimited snapshot of the text.
-        Item data = intent->data
-            ? Item{.item = s2it(builder.createString(intent->data, intent->text_length()))} : ItemNull;
+        // Publish one GC-owned snapshot so a handler can retain the event
+        // while old edits and clipboard payloads remain collectable (D6.3.3).
+        RootFrame snapshot_roots(2);
+        Rooted<Item> data(snapshot_roots, intent->data
+            ? Item{.item = s2it(heap_strcpy(intent->data, intent->text_length()))} : ItemNull);
+        Rooted<Item> html(snapshot_roots, ItemNull);
+        if (intent->html_data) {
+            Arena* temporary = arena_create_default();
+            if (temporary) {
+                char* sanitized = clipboard_store_sanitize(temporary, "text/html", intent->html_data);
+                if (sanitized) html.set({.item = s2it(heap_strcpy(sanitized, strlen(sanitized)))});
+                arena_destroy(temporary);
+            }
+        }
         mb.put("input_type", input_type);
-        mb.put("data", data);
+        mb.put("data", data.get());
         if (intent->data_mime) mb.put("mime", intent->data_mime);
         else mb.putNull("mime");
         // ES17: an undo/redo hands the template the entry to install — the
@@ -1573,34 +1581,21 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
             mb.put("history_sel_start", (int64_t)intent->history_sel_start);
             mb.put("history_sel_end", (int64_t)intent->history_sel_end);
         }
-        if (intent->html_data) {
-            char* sanitized = clipboard_store_sanitize(builder.arena(), "text/html", intent->html_data);
-            if (sanitized) mb.put("html", sanitized);
-            else mb.putNull("html");
-        } else {
-            mb.putNull("html");
-        }
+        mb.put("html", html.get());
 
-        MapBuilder im = builder.map();
-        im.put("input_type", input_type);
-        im.put("data", data);
-        if (intent->data_mime) im.put("mime", intent->data_mime);
-        else im.putNull("mime");
-        if (intent->html_data) {
-            char* sanitized = clipboard_store_sanitize(builder.arena(), "text/html", intent->html_data);
-            if (sanitized) im.put("html", sanitized);
-            else im.putNull("html");
-        } else {
-            im.putNull("html");
-        }
-        im.put("key", key_code_to_name(intent->key));
-        im.put("shift", (intent->mods & RDT_MOD_SHIFT) != 0);
-        im.put("ctrl",  (intent->mods & RDT_MOD_CTRL)  != 0);
-        im.put("alt",   (intent->mods & RDT_MOD_ALT)   != 0);
-        im.put("meta",  (intent->mods & RDT_MOD_SUPER) != 0);
-        im.put("is_composing", intent->is_composing);
-        im.put("composition_caret", (int64_t)intent->composition_caret);
-        mb.put("input_intent", im.final());
+        RootedValueBuilder im(RootedValueBuilder::DATA_MAP);
+        im.put("input_type", js_name_item(input_type));
+        im.put("data", data.get());
+        im.put("mime", intent->data_mime ? js_name_item(intent->data_mime) : ItemNull);
+        im.put("html", html.get());
+        im.put("key", js_name_item(key_code_to_name(intent->key)));
+        im.put("shift", {.item = b2it((intent->mods & RDT_MOD_SHIFT) != 0)});
+        im.put("ctrl",  {.item = b2it((intent->mods & RDT_MOD_CTRL)  != 0)});
+        im.put("alt",   {.item = b2it((intent->mods & RDT_MOD_ALT)   != 0)});
+        im.put("meta",  {.item = b2it((intent->mods & RDT_MOD_SUPER) != 0)});
+        im.put("is_composing", {.item = b2it(intent->is_composing)});
+        im.put("composition_caret", {.item = i2it(intent->composition_caret)});
+        mb.put("input_intent", im.value.get());
         mb.put("is_composing", intent->is_composing);
         mb.put("composition_caret", (int64_t)intent->composition_caret);
     }
@@ -2446,25 +2441,22 @@ static AuthorTemplateCascade* author_template_cascade_current(EventContext* evco
     return cascade->evcon == evcon ? cascade : nullptr;
 }
 
-struct TemplateUiAllocationScope {
+struct TemplateAllocationScope {
     EvalContext* owner;
     bool previous_ui_mode;
     Arena* previous_arena;
     Context* previous_input;
 
-    TemplateUiAllocationScope(EvalContext* target, bool ui_mode)
+    explicit TemplateAllocationScope(EvalContext* target)
         : owner(target), previous_ui_mode(target && target->ui_mode),
           previous_arena(target ? target->arena : nullptr), previous_input(input_context) {
         if (owner) {
-            if (ui_mode) runtime_context_follow_ui_result(owner->runtime, owner);
-            else {
-                owner->ui_mode = false;
-                owner->arena = nullptr;
-            }
+            owner->ui_mode = false;
+            owner->arena = nullptr;
         }
-        input_context = owner && owner->ui_mode ? (Context*)owner : nullptr;
+        input_context = nullptr;
     }
-    ~TemplateUiAllocationScope() {
+    ~TemplateAllocationScope() {
         if (owner) {
             owner->ui_mode = previous_ui_mode;
             owner->arena = previous_arena;
@@ -2491,12 +2483,13 @@ static bool settle_template_retransform(EventContext* evcon,
         return false;
     }
     RetransformResult results[16];
+    RootSpan result_roots(16 * 3);
     int count = 0;
     uint64_t transform_start = time_now_ns();
     {
-        // only published render results follow the runtime's canonical result Input.
-        TemplateUiAllocationScope render_scope(context, true);
-        count = render_map_retransform_with_results(results, 16);
+        // Stage evaluator results independently of the DOM occurrence arena.
+        TemplateAllocationScope render_scope(context);
+        count = render_map_retransform_with_results(results, 16, result_roots.items());
     }
     if (shell_getenv("RADIANT_TEMPLATE_PROFILE")) log_notice("[TEMPLATE_PROFILE] transform_ms=%.3f",
         time_elapsed_ms_f(transform_start, time_now_ns()));
@@ -2521,7 +2514,10 @@ static bool settle_template_retransform(EventContext* evcon,
     }
     // The render map already published new source identities, even for equal values.
     // Commit their DOM ownership together or the next redraw cannot find its old result.
-    if (!reported) return false;
+    if (!reported) {
+        render_map_prune_unpublished();
+        return false;
+    }
     if (evcon) {
         DocState* state = event_context_target_state(evcon);
         bool had_hover = state && state->hover_target;
@@ -2544,6 +2540,7 @@ static bool settle_template_retransform(EventContext* evcon,
         }
         evcon->need_repaint = true;
     }
+    render_map_prune_unpublished();
     if (out_model_reconciled) *out_model_reconciled = true;
     return true;
 }
@@ -2706,8 +2703,8 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
             return true;
         }
     }
-    // handler temporaries are runtime values; rendering opts into arena ownership separately.
-    TemplateUiAllocationScope handler_scope(handler_ctx, false);
+    // Evaluation uses runtime values before presentation copies its DOM occurrences.
+    TemplateAllocationScope handler_scope(handler_ctx);
 
     // F17: author/UA handlers receive the in-flight host record. When no JS
     // stage created it (a Lambda-only document), create the same record shape
@@ -3529,7 +3526,7 @@ public:
         model.set(radiant_dom_wrap_node(evcon->target));
         EmitHandlerScope emit_scope(event_context_target_document(evcon), evcon->target,
             model.get(), nullptr, evcon, &nested_selection);
-        TemplateUiAllocationScope handler_scope(context, false);
+        TemplateAllocationScope handler_scope(context);
         Item argument = {.item = b2it(canceled)};
         // cold T0 callbacks need interpreter admission; compiled entries have no AST module.
         result.set(function_has_abi(completion.get().function, FN_ENTRY_ABI_LAMBDA_INTERPRETED)

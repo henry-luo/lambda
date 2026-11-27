@@ -11,6 +11,7 @@
 #include "lib/mem.h"
 #include "lib/hashmap.h"
 #include "lib/hashmap_typed.hpp"
+#include "lib/arraylist.hpp"
 #include <limits.h>
 #include <string.h>
 #include <stdio.h>
@@ -477,10 +478,11 @@ Item render_map_get_result(Item source_item, const char* template_ref) {
 }
 
 int render_map_retransform(void) {
-    return render_map_retransform_with_results(NULL, 0);
+    return render_map_retransform_with_results(NULL, 0, NULL);
 }
 
-int render_map_retransform_with_results(RetransformResult* out_results, int max_results) {
+int render_map_retransform_with_results(RetransformResult* out_results, int max_results,
+                                        Item* result_roots) {
     HashMap* map = ensure_map();
     if (!g_template_registry) {
         log_error("render_map_retransform: no template registry");
@@ -552,10 +554,20 @@ int render_map_retransform_with_results(RetransformResult* out_results, int max_
             continue;
         }
         uint64_t invocation_start = render_map_invocation_begin();
-        Item new_result = template_invoke_body(tmpl, saved.key.source_item);
+        RootFrame roots(4);
+        Rooted<Item> source(roots, saved.key.source_item);
+        Rooted<Item> previous(roots, old_result);
+        Rooted<Item> parent(roots, tree_parent);
+        Rooted<Item> rendered(roots, template_invoke_body(tmpl, source.get()));
+        Item new_result = rendered.get();
 
         // record result before updating entry
         if (out_results && count < max_results) {
+            if (result_roots) {
+                result_roots[count * 3] = parent.get();
+                result_roots[count * 3 + 1] = previous.get();
+                result_roots[count * 3 + 2] = rendered.get();
+            }
             out_results[count].parent_result = tree_parent;
             out_results[count].new_result = new_result;
             out_results[count].old_result = old_result;
@@ -589,6 +601,78 @@ int render_map_retransform_with_results(RetransformResult* out_results, int max_
                   count, count < max_results ? count : max_results);
     }
     return count;
+}
+
+void render_map_visit_roots(void* visitor_context,
+                            void (*visit)(void* visitor_context, uint64_t item)) {
+    auto* state = context ? (RenderMapState*)context_capsule(
+        context, CONTEXT_CAPSULE_RENDER_MAP) : nullptr;
+    if (!state || !state->doc_root.item || !state->render_map) return;
+    size_t cursor = 0;
+    RenderMapEntry* entry;
+    while (RenderMap::next(state->render_map, &cursor, &entry)) {
+        visit(visitor_context, entry->key.source_item.item);
+        visit(visitor_context, entry->result_node.item);
+        visit(visitor_context, entry->parent_result.item);
+    }
+}
+
+struct RenderPublishedValue { uint64_t bits; };
+using RenderPublishedSet = TypedHashMap<RenderPublishedValue,
+    HashMapIntegralMemberKeyOps<RenderPublishedValue, &RenderPublishedValue::bits>>;
+
+static bool render_map_mark_published(HashMap* values, Item value, unsigned depth) {
+    if (!value.item || RenderPublishedSet::get(values, {value.item})) return true;
+    if (depth > 128) return false;
+    RenderPublishedSet::set(values, {value.item});
+    if (hashmap_oom(values)) return false;
+    TypeId kind = get_type_id(value);
+    if (kind != LMD_TYPE_ELEMENT && kind != LMD_TYPE_ARRAY) return true;
+    // Numeric lanes and virtual lists have no stored child Item slots to trace.
+    if (container_is_virtual_list(value.container) ||
+            (kind == LMD_TYPE_ARRAY && array_has_native_lane(value.array))) return true;
+    List* list = (List*)value.array;
+    if (!list || !list->items) return true;
+    for (int64_t i = 0; i < list->length; i++)
+        if (!render_map_mark_published(values, list->items[i], depth + 1)) return false;
+    return true;
+}
+
+void render_map_prune_unpublished(void) {
+    RenderMapState* state = render_map_state();
+    if (!state->render_map || !state->doc_root.item) return;
+    HashMap* values = RenderPublishedSet::create(64);
+    if (!values) return;
+    if (!render_map_mark_published(values, state->doc_root, 0)) {
+        RenderPublishedSet::destroy(values);
+        return;
+    }
+
+    // Array-valued templates may be flattened into a retained parent's child range.
+    lam::ArrayList<RenderMapEntry> expired(MEM_CAT_TEMP);
+    size_t cursor = 0;
+    RenderMapEntry* entry;
+    while (RenderMap::next(state->render_map, &cursor, &entry)) {
+        if (!RenderPublishedSet::get(values, {entry->result_node.item}) &&
+            !(entry->child_index >= 0 &&
+                RenderPublishedSet::get(values, {entry->parent_result.item}))) {
+            expired.push_back(*entry);
+        }
+    }
+    for (auto& row : expired) RenderMap::erase(state->render_map, row);
+    if (state->reverse_map) {
+        lam::ArrayList<ReverseMapEntry> reverse_expired(MEM_CAT_TEMP);
+        cursor = 0;
+        ReverseMapEntry* row;
+        while (ReverseMap::next(state->reverse_map, &cursor, &row)) {
+            RenderMapEntry* owner = render_map_entry(state->render_map, row->key);
+            if (!owner || (!RenderPublishedSet::get(values, {row->result_item_bits}) &&
+                           owner->result_node.item != row->result_item_bits))
+                reverse_expired.push_back(*row);
+        }
+        for (auto& row : reverse_expired) ReverseMap::erase(state->reverse_map, row);
+    }
+    RenderPublishedSet::destroy(values);
 }
 
 void render_map_reset(void) {
@@ -783,9 +867,12 @@ static bool render_map_replace_child_range(RenderMapEntry saved, Item parent_res
         return false;
     }
     int64_t required_capacity = new_length + parent->extra + new_scalar_tail_count;
+    // Initial presentation elements can still own child buffers in the Input.
+    Input* input = context->runtime ? context->runtime->result_input : nullptr;
+    Arena* arena = input && input->arena && arena_owns(input->arena, parent) ? input->arena : nullptr;
     while (parent->capacity < required_capacity) {
         int64_t previous_capacity = parent->capacity;
-        expand_list(parent, nullptr);
+        expand_list(parent, arena);
         parent = (List*)rooted_parent.get().array;
         // Allocation failure leaves capacity unchanged; retrying would spin
         // forever while a template transaction still owns the live document.

@@ -677,10 +677,10 @@ RADIANT_C_API Item radiant_dom_wrap_node(void* dom_elem) {
     if (!dom_elem) return ItemNull;
 
     DomNode* node = (DomNode*)dom_elem;
-
     Item cached = radiant_dom_lookup_wrapper(node);
     if (cached.item != ITEM_NULL) return cached;
 
+    DomDocument* document = radiant_dom_node_document(node, true);
     const JubeTypeDef* host_type =
         (const JubeTypeDef*)radiant_dom_host_type_for_node(node);
     Item wrapper = radiant_host_api->value->native_object_new(host_type, dom_elem);
@@ -688,8 +688,7 @@ RADIANT_C_API Item radiant_dom_wrap_node(void* dom_elem) {
         // Cache identity before initialization because inline handlers and
         // native DOM state attach expandos to this same wrapper recursively.
         // context-owned weak identity survives the interpreter worker's handoff.
-        if (!radiant_host_api->dom_catalog->cache_node_wrapper(node,
-                radiant_dom_node_document(node, true), wrapper)) {
+        if (!radiant_host_api->dom_catalog->cache_node_wrapper(node, document, wrapper)) {
             radiant_dom_host_invalidate(wrapper);
             return ItemNull;
         }

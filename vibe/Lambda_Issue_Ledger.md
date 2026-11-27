@@ -3597,6 +3597,39 @@ result owner. [Evidence and proposed P5](impl/Lambda_Impl_Sync_Memory_Tuning.md#
 
 **Implementation follow-up (2026-11-17):** Implemented P5: explicit JSON/Mark parses use a scoped Input, transfer escaping values/names/shapes/scalar owners into runtime ownership, and destroy the parser owner. Native owner-count and Unicode/NUL key regressions pass. Five versus twenty-five unchanged rounds retain identical Input arena counts/bytes. Other formats and automatic dispatch retain their previous ownership. See [implementation qualification](impl/Lambda_Impl_Sync_Memory_Tuning.md#implementation-and-qualification--2026-11-17).
 
+**Viewer replay (2026-11-27).** The mixed-document release replay retains
+about 1.6 MiB per round in `parse://inline/` arenas after garbage collection.
+The same documents visited in View mode retain about 0.1 MiB per round in
+that group. The mixed replay adds source scrolling, rich and source editing,
+and CSV saves. The Markdown editor reparses individual blocks for its round-trip
+checks, retaining hundreds of `Input` arenas per reopen. Explicit `parse` of
+Markdown now uses a scoped Input and transfers the returned tree to runtime
+ownership (D5.2.5, D6.3.3). Other formats have separate ownership. The layout
+storage measured in the same test is tracked in
+[RI-261](Radiant_Issue_Ledger.md#ri-261).
+
+## Abandoned template models retain editor subtrees — 2026-11-27
+
+**Fixed.** The session template-state table rooted its model keys and state
+values unconditionally. Opening and discarding a rich Markdown editor left two
+obsolete editor trees pinned by state that still referred to their DOM wrappers.
+The table now traces each value through its model key. A reachable model keeps
+all of its template states across redraws and template switches, and an
+unreachable model can release its state and wrappers (S12.1.3v6, D6.3.3,
+Reactive UI §5.2 Q2). A narrow edit replay reduced live view-property growth
+from about 4 MiB per reopen to about 5 KiB. A GC regression checks that both
+presentations keep their state while their shared model is live.
+
+## Occurrence checks retain unused validation reports — 2026-11-27
+
+**Fixed.** The viewer replay traced repeated
+40-byte allocations in the script pool to single-item occurrence
+validation (S11.1.6v2, D5.2.5). A run of one delegates to the operand
+validator, so allocating a result first leaked a report that was never
+returned. Predicate callers now use the existing verdicts for the zero
+and rejected branches, and reporting callers build a report only when
+that branch returns it.
+
 ## Large workspace capture fails during a SQLite statement — 2026-11-17
 
 Fixed and archived. See the [resolution and verification](<Lambda_Issue_Ledger (fixed).md#sync-capture-sqlite-staging>).

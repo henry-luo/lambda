@@ -20,6 +20,50 @@ observations still require re-verification. Add new Radiant issues here.
 
 ## Open issues
 
+<a id="ri-261"></a>
+
+### RI-261 — Viewer mode changes retain rebuilt presentation storage
+
+**Open, observed 2026-11-27.** Run `make test-viewer-navigation-memory` to
+replay 14 documents in one release viewer. The replay changes modes, scrolls
+highlighted source, and performs edits. Under the document lifetime and
+incremental presentation rules (D5.5.1–D5.5.3), retired occurrences should
+release their storage once live references are gone. Release allocator
+snapshots between rounds 2 and 4 showed about 29 MiB per round in the
+mixed replay before the validator fix, compared with about 6 MiB per round
+when replaying previews alone. The viewer's layout property pool,
+layout Input pool, and DOM document pool accounted for about 15 MiB per
+round.
+
+**Follow-up, 2026-11-27.** Editing event data now uses GC-owned values
+(D6.3.3). Reactive HTML insertion releases its temporary parse tree after
+publishing the copied occurrences. Copied element types build their field
+index once in the destination owner (D5.2.5). Together with RI-260, these
+changes reduced tracked live storage at the end of mixed round 5 from
+439 MiB to 405 MiB. The revised run still added 71.5 MiB between rounds 2
+and 5 after explicit collection. The active view-property pool gained
+17.2 MiB, the active DOM document pool 12.8 MiB, and the layout Input pool
+12.9 MiB. These are live allocation bytes. Layout retention remains open.
+
+The rich Markdown control traced most of the live view-property growth to
+obsolete editor subtrees pinned by template state. With model-keyed collection
+(S12.1.3v6, D6.3.3), the control adds about 5 KiB of view properties per round,
+down from 4 MiB. The style trace also found old generations referenced only
+by retired synthetic markers. View teardown now drops these bindings and
+releases the marker text. The mixed replay holds four stylesheet pools and
+adds about 0.1 MiB per round in the view-property pool. After the scoped
+Markdown parser change, tracked live growth from rounds 2 through 5 fell from
+25.1 MiB per round to 9.2 MiB, with 334 MiB live at round 5. The layout Input
+pool still adds about 4.3 MiB per round for copied type and field backing, and
+the main document's Input arena adds about 1.7 MiB. Their storage stays with
+the window after its replaced occurrences retire (D5.5.1–D5.5.3).
+The cascade scratch index now uses the subtree being styled instead of the
+window's lifetime allocation count. A focused test retires 512 elements and
+checks that styling the same retained subtree uses the same scratch space.
+The latest full release GTest reached round 21 of 24 before its 900-second
+viewer deadline. Its last process footprint was 202 MiB above the median of
+rounds 4–6. The 64 MiB growth budget remains in effect.
+
 <a id="ri-260"></a>
 
 ### RI-260 — Detached frame documents accumulate during viewer navigation
@@ -32,6 +76,17 @@ storage for exposed wrappers and adopted nodes until parent close. Timely
 retirement needs to track those lifetime edges and wait until the relevant
 evaluators are quiescent (D5.5.1, D6.3.3). This affects the mixed-document
 memory gate. Transformed inline previews have a separate lifetime.
+
+**Partial fix, 2026-11-27.** Reclaim detached frames between evaluator turns
+when their storage has no external wrapper, adopted node, or shared script
+owner. Foreign wrappers provide a weakly tracked hold on their native
+document. Renderer-owned child documents no longer receive a second strong
+wrapper root in the parent evaluator. In a release replay of the same HTML
+and EPUB fixtures, the old viewer added two document pools each round. The
+revised viewer held three live document pools across all 24 rounds. A
+detached frame remained readable through a live wrapper, and the iframe
+retirement replay passed under forced garbage collection and freed-storage
+poisoning (D6.3.3).
 
 <a id="ri-259"></a>
 

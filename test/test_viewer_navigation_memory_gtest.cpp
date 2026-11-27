@@ -4,7 +4,7 @@
 #include <string.h>
 #include "lib/shell.h"
 
-static constexpr unsigned navigation_rounds = 12;
+static constexpr unsigned navigation_rounds = 24;
 static constexpr uint64_t mib = 1024 * 1024;
 
 static uint64_t median_of_three(const uint64_t* samples) {
@@ -25,7 +25,7 @@ TEST(ViewerNavigationMemoryTest, RepeatedLoadsKeepWarmFootprintBounded) {
     const char* args[] = {python, "test/viewer_navigation_memory.py", executable, rounds, nullptr};
     ShellOptions options = {};
     options.merge_stderr = true;
-    options.timeout_ms = 180000;
+    options.timeout_ms = 930000;
     struct Capture {
         ShellResult result;
         ~Capture() { shell_result_free(&result); }
@@ -57,5 +57,5 @@ TEST(ViewerNavigationMemoryTest, RepeatedLoadsKeepWarmFootprintBounded) {
     constexpr uint64_t growth_budget = 64 * mib;
     RecordProperty("warm_mib", static_cast<int>(warm / mib));
     RecordProperty("late_mib", static_cast<int>(late / mib));
-    EXPECT_LE(late, warm + growth_budget) << "Warm rounds 4–6 and final rounds 10–12\n" << output;
+    EXPECT_LE(late, warm + growth_budget) << "Warm rounds 4–6 and final rounds 22–24\n" << output;
 }

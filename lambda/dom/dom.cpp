@@ -339,14 +339,14 @@ static Item dom_svg_get_animated_class_name(DomElement* elem);
 static Item dom_svg_create_transform(void);
 static Item dom_svg_create_transform_from_matrix(Item matrix);
 static Html5Parser* dom_create_fragment_parser(DomDocument* doc,
-                                               DomElement* context = nullptr) {
+                                               DomElement* context = nullptr,
+                                               Input* scratch = nullptr) {
     if (!doc || !doc->document_pool || !doc->input || !doc->input->arena) {
         return nullptr;
     }
-    // Fragment backing is inserted into the Mark tree, so keep it in the
-    // document Input arena rather than the separate DOM-wrapper arena.
-    return html5_fragment_parser_create(doc->document_pool, doc->input->arena,
-        doc->input, context ? context->tag_name() : nullptr,
+    Input* input = scratch ? scratch : doc->input;
+    return html5_fragment_parser_create(scratch ? scratch->pool : doc->document_pool,
+        input->arena, input, context ? context->tag_name() : nullptr,
         context && dom_element_is_svg(context));
 }
 
@@ -384,7 +384,8 @@ static void dom_set_fragment_script_state(DomElement* root, DomFragmentScriptMod
 
 // Fragment roots can be comments as well as layout elements; the element builder skips them.
 static DomNode* dom_build_fragment_node(Item item, DomDocument* doc, DomElement* context,
-                                       DomFragmentScriptMode script_mode = DomFragmentScriptMode::inert) {
+                                       DomFragmentScriptMode script_mode = DomFragmentScriptMode::inert,
+                                       bool retain_source = true) {
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_STRING) {
         String* text = dom_fragment_text(item);
@@ -393,8 +394,11 @@ static DomNode* dom_build_fragment_node(Item item, DomDocument* doc, DomElement*
     }
     if (type != LMD_TYPE_ELEMENT || !item.element || !item.element->type) return nullptr;
     const char* tag = ((TypeElmt*)item.element->type)->name.str;
-    if (dom_is_comment_tag(tag)) return dom_comment_create_detached(item.element, doc);
-    DomElement* root = build_dom_tree_from_element_detached(item.element, doc, context);
+    if (dom_is_comment_tag(tag)) {
+        if (!retain_source) item = MarkBuilder(doc->input).deep_copy_for_dom(item);
+        return get_type_id(item) == LMD_TYPE_ELEMENT ? dom_comment_create_detached(item.element, doc) : nullptr;
+    }
+    DomElement* root = build_dom_tree_from_element_detached(item.element, doc, context, retain_source);
     if (root) dom_set_fragment_script_state(root, script_mode);
     return root;
 }
@@ -3639,10 +3643,6 @@ struct IframeContentEntry {
 };
 static const int IFRAME_CACHE_SIZE = 32;
 
-// Side table: documents that have a non-null defaultView (browsing context).
-// Main doc and iframe content docs go here. Foreign docs from
-// document.implementation.create*Document do not.
-static const int DOC_WIN_TABLE_SIZE = 32;
 // Wrapper identity and foreign-document ownership are document-realm state.
 // Calls below use this direct capsule after their normal JS/host entry bind.
 struct DomPendingImageEvent {
@@ -3656,8 +3656,6 @@ struct DomPendingLoadDocument;
 struct JsDomForeignDocumentRuntimeState {
     ForeignDocCacheEntry* foreign_doc_cache = nullptr;
     int foreign_doc_cache_count = 0;
-    DomDocument* doc_with_window[DOC_WIN_TABLE_SIZE] = {};
-    int doc_with_window_count = 0;
     IframeContentEntry iframe_cache[IFRAME_CACHE_SIZE] = {};
     int iframe_cache_count = 0;
     int64_t published_frame_count = 0;
@@ -3694,8 +3692,6 @@ JS_FORWARD_STATIC_EXPRESSION(bool, dom_foreign_document_state_ensure, (),
 #define dom_foreign_document_rt_state ((JsDomForeignDocumentRuntimeState*)context_capsule(context, CONTEXT_CAPSULE_DOM_FOREIGN_DOCUMENT))
 #define s_foreign_doc_cache (dom_foreign_document_rt_state->foreign_doc_cache)
 #define s_foreign_doc_cache_count (dom_foreign_document_rt_state->foreign_doc_cache_count)
-#define s_doc_with_window (dom_foreign_document_rt_state->doc_with_window)
-#define s_doc_with_window_count (dom_foreign_document_rt_state->doc_with_window_count)
 #define s_iframe_cache (dom_foreign_document_rt_state->iframe_cache)
 #define s_iframe_cache_count (dom_foreign_document_rt_state->iframe_cache_count)
 #define s_pending_iframe_loads (dom_foreign_document_rt_state->pending_iframe_loads)
@@ -3709,18 +3705,10 @@ JS_FORWARD_STATIC_EXPRESSION(bool, dom_foreign_document_state_ensure, (),
 
 
 extern "C" bool dom_doc_has_browsing_context(void* doc) {
-    if (!doc || !dom_foreign_document_state_get()) return false;
-    for (int i = 0; i < s_doc_with_window_count; i++) {
-        if (s_doc_with_window[i] == (DomDocument*)doc) return true;
-    }
-    return false;
+    return doc && ((DomDocument*)doc)->has_browsing_context;
 }
 extern "C" void dom_doc_mark_has_browsing_context(void* doc) {
-    if (!doc || !dom_foreign_document_state_ensure()) return;
-    if (dom_doc_has_browsing_context(doc)) return;
-    if (s_doc_with_window_count < DOC_WIN_TABLE_SIZE) {
-        s_doc_with_window[s_doc_with_window_count++] = (DomDocument*)doc;
-    }
+    if (doc) ((DomDocument*)doc)->has_browsing_context = true;
 }
 
 static IframeContentEntry* lookup_iframe_entry(DomElement* iframe) {
@@ -3757,10 +3745,6 @@ static void reset_foreign_document_cache() {
     }
     s_iframe_cache_count = 0;
 
-    for (int i = 0; i < s_doc_with_window_count; i++) {
-        s_doc_with_window[i] = nullptr;
-    }
-    s_doc_with_window_count = 0;
 }
 static bool dom_retains_adopted_document(DomDocument* owner,
                                            DomDocument* target) {
@@ -3845,15 +3829,16 @@ static Item wrap_foreign_doc_owned(DomDocument* doc, bool owns_doc) {
     DomNode* node = (DomNode*)dom_get_or_create_doc_node(doc);
     Item it = node ? radiant_dom_wrap_node(node) : ItemNull;
     if (get_type_id(it) != LMD_TYPE_VELMT) return ItemNull;
+    // Borrowed browsing contexts use the node cache's weak identity. A second
+    // strong root would keep a detached frame alive until the outer realm closed.
+    virtual_host_set(it, radiant_dom_foreign_document_host_type(), node);
+    if (!owns_doc) return it;
     ForeignDocCacheEntry* entry = (ForeignDocCacheEntry*)mem_calloc(
         1, sizeof(ForeignDocCacheEntry), MEM_CAT_JS_RUNTIME);
     if (!entry) {
         log_error("dom-foreign-document: failed to retain document wrapper");
         return ItemNull;
     }
-    // The foreign brand selects active-document behavior; structural reads
-    // retain the same document-node backend as every other DOM Velmt.
-    virtual_host_set(it, radiant_dom_foreign_document_host_type(), node);
     entry->doc = doc;
     entry->item = it.item;
     entry->owns_doc = owns_doc;
@@ -3867,12 +3852,14 @@ JS_FORWARD_STATIC_ITEM(wrap_foreign_doc, (DomDocument* doc), wrap_foreign_doc_ow
 
 // Returns the foreign-doc wrapper for `doc` if one exists, else ItemNull.
 static Item lookup_foreign_doc_wrapper(DomDocument* doc) {
-    if (!dom_foreign_document_state_get()) return ItemNull;
-    for (ForeignDocCacheEntry* entry = s_foreign_doc_cache; entry;
-         entry = entry->next) {
-        if (entry->doc == doc) {
-            return (Item){.item = entry->item};
-        }
+    if (!doc) return ItemNull;
+    Item wrapper = dom_cached_node_wrapper(doc->js.doc_node);
+    if (virtual_host_type(wrapper) == radiant_dom_foreign_document_host_type()) return wrapper;
+    if (doc != _js_main_document && doc != _js_current_document &&
+            (doc->embedding_document || doc->retired_frame_owner) && doc->has_browsing_context) {
+        // A live child node can observe its document again after the old
+        // wrapper is collected. Recreate the same foreign-document surface.
+        return wrap_foreign_doc_owned(doc, false);
     }
     return ItemNull;
 }
@@ -4167,26 +4154,18 @@ extern "C" Item dom_iframe_get_content_document(DomElement* iframe) {
     if (!iframe || !dom_foreign_document_state_ensure()) return ItemNull;
     IframeContentEntry* e = lookup_iframe_entry(iframe);
     DomDocument* loaded = iframe->embed ? dom_engine_embed_property(iframe)->doc : nullptr;
-    if (e && loaded && e->doc != loaded) {
-        // the frames collection may have exposed about:blank before navigation committed.
-        if (!dom_transfer_document_storage(e->doc, loaded)) return ItemNull;
-        e->doc = loaded;
-        e->owns_doc = false;
+    if (loaded) {
+        if (e) {
+            // Transfer a provisional about:blank owner once. The renderer
+            // holds the committed child directly on the iframe.
+            if (e->doc != loaded && !dom_transfer_document_storage(e->doc, loaded)) return ItemNull;
+            *e = s_iframe_cache[--s_iframe_cache_count];
+            s_iframe_cache[s_iframe_cache_count] = {};
+        }
         dom_doc_mark_has_browsing_context(loaded);
+        return wrap_foreign_doc_owned(loaded, false);
     }
     if (!e) {
-        DomDocument* embedded_doc = iframe->embed ? dom_engine_embed_property(iframe)->doc : nullptr;
-        if (embedded_doc) {
-            dom_doc_mark_has_browsing_context(embedded_doc);
-            // A renderer-loaded srcdoc is already a full document; observing it must not reparse its body.
-            if (s_iframe_cache_count < IFRAME_CACHE_SIZE) {
-                s_iframe_cache[s_iframe_cache_count].iframe = iframe;
-                s_iframe_cache[s_iframe_cache_count].doc = embedded_doc;
-                s_iframe_cache[s_iframe_cache_count].owns_doc = false;
-                s_iframe_cache_count++;
-            }
-            return wrap_foreign_doc_owned(embedded_doc, false);
-        }
         DomDocument* doc = create_foreign_html_doc("");
         if (!doc) return ItemNull;
         dom_doc_mark_has_browsing_context(doc);
@@ -6471,6 +6450,16 @@ static void dom_collapse_selection_before_child_replace(DomElement* elem,
 
 
 
+struct DomFragmentInputScope {
+    Pool* pool;
+    Input* input;
+
+    explicit DomFragmentInputScope(bool temporary)
+        : pool(temporary ? mem_pool_create(nullptr, MEM_ROLE_INPUT, "input.dom.fragment") : nullptr),
+          input(pool ? Input::create(pool) : nullptr) {}
+    ~DomFragmentInputScope() { if (pool) mem_pool_destroy(pool); }
+};
+
 // Parse in the context's document without replacing its existing children.
 static bool dom_parse_markup_into(DomElement* target, StrView markup,
                                   bool notify_mutation, DomElement* context = nullptr,
@@ -6480,7 +6469,12 @@ static bool dom_parse_markup_into(DomElement* target, StrView markup,
     if (!doc || !doc->input) return false;
     if (!context) context = target->shadow_host_element();
     if (!context) context = target;
-    Html5Parser* parser = dom_create_fragment_parser(doc, context);
+    // Reactive documents already copy parser nodes into their published DOM.
+    // Keep the intermediate HTML tree and its parser storage scoped to this insert.
+    bool temporary_source = doc->element_dom_map && doc->page_kind != DOM_PAGE_KIND_HTML;
+    DomFragmentInputScope scratch(temporary_source);
+    if (temporary_source && !scratch.input) return false;
+    Html5Parser* parser = dom_create_fragment_parser(doc, context, scratch.input);
     Html5ParserScope parser_scope(parser);
     if (!parser) return false;
     parser->allow_declarative_shadow_roots = declarative;
@@ -6488,7 +6482,8 @@ static bool dom_parse_markup_into(DomElement* target, StrView markup,
     Element* body_elem = html5_fragment_get_body(parser);
     if (!body_elem) return false;
     for (int64_t i = 0; i < body_elem->length; i++) {
-        DomNode* child = dom_build_fragment_node(body_elem->items[i], doc, context, script_mode);
+        DomNode* child = dom_build_fragment_node(body_elem->items[i], doc, context, script_mode,
+            !temporary_source);
         if (!child || !dom_parser_move_child(target, child)) continue;
         dom_post_insert(target, child, notify_mutation);
         dom_observers_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT,
@@ -18856,8 +18851,6 @@ extern "C" void dom_foreign_documents_release_context(void) {
 #undef dom_foreign_document_rt_state
 #undef s_foreign_doc_cache
 #undef s_foreign_doc_cache_count
-#undef s_doc_with_window
-#undef s_doc_with_window_count
 #undef s_iframe_cache
 #undef s_iframe_cache_count
 #undef s_pending_iframe_loads
@@ -18872,7 +18865,7 @@ static void dom_foreign_document_capsule_destroy(void* capsule) {
     JsDomForeignDocumentRuntimeState* state =
         (JsDomForeignDocumentRuntimeState*)capsule;
     dom_destroy_context_state(capsule,
-        state->foreign_doc_cache_count || state->doc_with_window_count ||
+        state->foreign_doc_cache_count ||
         state->iframe_cache_count || state->pending_iframe_load_count ||
         state->pending_image_load_count || state->pending_load_documents,
         "js-dom-foreign-document");

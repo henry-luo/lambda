@@ -7737,7 +7737,7 @@ Item fn_parse2(Item str_item, Item type) {
         return text ? (Item){.item = s2it(text)} : ItemError;
     }
 
-    if (type_str && (!strcmp(type_str->chars, "json") || !strcmp(type_str->chars, "mark"))) {
+    if (type_str && input_supports_scoped_value_parse(type_str->chars)) {
         ScopedValueParse owner;
         parse_options.source_positions = source_positions;
         parse_options.io = context ? eval_context_security_io(context) : NULL;
@@ -12055,10 +12055,12 @@ static Item clone_parsed_attributes(Item source, MutableCloneContext* clone_ctx)
         if (get_type_id(status) == LMD_TYPE_ERROR) return status;
     }
     if (element) {
+        // Transfer the parser's stored child boundaries. Constructing new
+        // content here would merge adjacent parser-produced text nodes.
         for (int64_t i = 0; i < source.element->length; i++) {
             child.set(clone_mutable_item(source.element->items[i], clone_ctx));
             if (get_type_id(child.get()) == LMD_TYPE_ERROR) return child.get();
-            array_push_verbatim((Array*)destination.get().element, child.get());
+            array_append_one((Array*)destination.get().element, child.get());
         }
     }
     return destination.get();

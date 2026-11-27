@@ -196,7 +196,7 @@ static void array_expand_for_item(Array** owner, Item* item, uint64_t* scalar_ho
 // appends (D3.3.1). A native lane stores in place or widens first; every
 // other store goes through array_set, which rehomes 64-bit scalars into the
 // array's own tail.
-static void array_append_one(Array* arr, Item item) {
+void array_append_one(Array* arr, Item item) {
     uint64_t scalar_home = 0;
     if (array_has_native_lane(arr)) {
         if (arr->length >= arr->capacity) {

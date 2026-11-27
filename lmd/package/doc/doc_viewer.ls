@@ -1305,7 +1305,7 @@ pn navigate_pane(entry, previous, cache, revision, reload = false) map^ {
 edit <doc_editor_app> state csv_resize: null, pane: ~.initial_pane, editing: null, previews: [],
     active_preview: ~.initial_preview, preview_revision: 0 {
   <div class:"viewer-content",
-    if (editing != null) <div class:"viewer-edit-host", <style editor.stylesheet> editor.surface(editing, true, editing.modes)>
+    if (editing != null) <div class:"viewer-edit-host", editor.surface(editing, true, editing.modes)>
     else apply(pane)
   >
 }
@@ -1415,8 +1415,8 @@ fn viewer_document(tree_model, initial_pane = <document_pane file:null, initial_
   <head
     <meta charset:"UTF-8">
     <title if (initial_pane.file != null) initial_pane.file.name else "Lambda Document Viewer">
-    <style chrome.css>
-    <style source_editor.surface_css>
+    // All three modes share window-owned styles across editor mounts.
+    <style editor.stylesheet>
     latex.font_stylesheet();
     <style pdf_html.DEFAULT_CSS>
     <style latex_css.STYLESHEET>

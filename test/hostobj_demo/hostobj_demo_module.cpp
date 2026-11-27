@@ -6,8 +6,8 @@
 // everything the hand-written host dispatch used to do. The type's finalizer
 // lives on JubeTypeDef.destroy.
 
-#include "../../lambda.hpp"
-#include "../../jube/jube_registry.h"
+#include "../../lambda/lambda.hpp"
+#include "../../lambda/jube/jube_registry.h"
 #include "lib/mem.h"
 #include "lib/log.h"
 #include <string.h>
