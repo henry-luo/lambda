@@ -119,7 +119,9 @@ pub fn html(raw, viewport = null, snapshot = null, displayed = null) any^ {
         if (spec.navigator.visible==true and spec.navigator.position=="top") navigator.render(spec,viewport,snapshot);
         if (spec.toolbar.visible!=false and spec.toolbar.enabled!=false and spec.toolbar.position!="bottom") controls(spec,snapshot);
         if (len(spec.groups)>0) group_headers(spec,snapshot);
-        editing.pending(spec,snapshot);
+        // keep draft insertion below the live host so pending edits preserve its event target.
+        if (spec.edit.enabled==true) <div style:"display:contents",editing.pending(spec,snapshot)>
+        else editing.pending(spec,snapshot);
         *(if (spec.view=="cards" and spec.spacing=="sequence") [cards(spec,snapshot,displayed)]
         else [if (spec.view=="story") story_stage(spec,snapshot,active,sampled),
             <div class:"lambda-timeline-canvas",style:"position:relative;width:" ++ c.text(plan.width) ++ "px;height:" ++ c.text(plan.height) ++ "px;",

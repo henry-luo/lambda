@@ -7,7 +7,8 @@ var animation = new Animation(effect);
 
 console.log(typeof KeyframeEffect, effect instanceof KeyframeEffect);
 console.log(typeof Animation, animation instanceof Animation);
-console.log(typeof animation.play, typeof animation.pause, typeof animation.currentTime);
+// The constructor leaves currentTime unresolved until playback or a seek.
+console.log(typeof animation.play, typeof animation.pause, animation.currentTime === null);
 animation.play();
 animation.currentTime = 125;
 console.log(animation.currentTime);

@@ -14,6 +14,30 @@ are unchanged. Full evidence is under `../../lambda/temp/kianhup-style/`.
 
 ## Fixed issues
 
+<a id="ri-267"></a>
+
+### RI-267 — Flex aspect ratios use the wrong width or wrapping height
+
+**Fixed, 2026-11-27.** The viewer's small DOT preview enlarged its circular
+inline flex nodes by transferring the available width before shrink-to-fit.
+Wrapping columns also summed all item heights into the automatic minimum,
+preventing `flex-aspect-ratio-008` from wrapping. Radiant now transfers the
+measured width before line collection and uses the largest item extent for
+a wrapping column's minimum (**D9.1.3v2 / D9.5.6v2**). The sizing baseline
+passes all 776 cases, and `doc_viewer_preview_scrollbars` passes all 14
+assertions. [CSS Flexbox line sizing](https://www.w3.org/TR/css-flexbox-1/#line-sizing).
+
+<a id="ri-266"></a>
+
+### RI-266 — A degenerate SVG ratio produces an infinite layout height
+
+**Fixed, 2026-11-27.** `svg-no-ar-min-height-min-content.html` divided by
+the natural ratio of a zero-width SVG and emitted `inf` in streamed layout
+JSON. The invalid output aborted a sizing batch. SVG sizing now keeps
+natural dimensions and publishes a ratio only when it is finite and
+positive (**D9.1.3v2**). All 776 recorded sizing cases pass.
+[CSS Images natural dimensions](https://www.w3.org/TR/css-images-3/#natural-dimensions).
+
 <a id="ri-263"></a>
 
 ### RI-263 — Indefinite grid tracks collapse or absorb their gutters

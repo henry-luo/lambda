@@ -78,7 +78,8 @@ static void render_map_register_roots(RenderMapState* state) {
 #define s_reverse_map (render_map_state()->reverse_map)
 
 // forward declarations
-static Item find_parent_of(Item node, Item target, int* out_index, int depth = 0);
+static Item find_parent_of(Item node, Item target, int* out_index,
+                           int* out_depth = nullptr, int depth = 0);
 static Item render_map_find_tree_parent(RenderMapEntry saved, int* out_child_index);
 static bool render_map_replace_tree_result(RenderMapEntry saved, Item tree_parent,
                                            int tree_child_index, Item new_result);
@@ -477,6 +478,15 @@ Item render_map_get_result(Item source_item, const char* template_ref) {
     return found ? found->result_node : ItemNull;
 }
 
+struct DirtyRenderKey {
+    RenderMapKey key;
+    int depth;
+};
+
+static int render_map_compare_dirty_depth(const void* a, const void* b) {
+    return ((const DirtyRenderKey*)a)->depth - ((const DirtyRenderKey*)b)->depth;
+}
+
 int render_map_retransform(void) {
     return render_map_retransform_with_results(NULL, 0, NULL);
 }
@@ -503,8 +513,8 @@ int render_map_retransform_with_results(RetransformResult* out_results, int max_
         render_map_state()->known_clean = true;
         return 0;
     }
-    RenderMapKey* dirty_keys = (RenderMapKey*)mem_alloc(
-        dirty_count * sizeof(RenderMapKey), MEM_CAT_TEMP);
+    DirtyRenderKey* dirty_keys = (DirtyRenderKey*)mem_alloc(
+        dirty_count * sizeof(DirtyRenderKey), MEM_CAT_TEMP);
     if (!dirty_keys) {
         log_error("render_map_retransform: dirty key snapshot allocation failed");
         return 0;
@@ -513,14 +523,29 @@ int render_map_retransform_with_results(RetransformResult* out_results, int max_
     iter = 0;
     while (taken < dirty_count && hashmap_iter(map, &iter, &item)) {
         const RenderMapEntry* entry = (const RenderMapEntry*)item;
-        if (entry->dirty) dirty_keys[taken++] = entry->key;
+        if (!entry->dirty) continue;
+        int depth = 0;
+        if (dirty_count > 1) {
+            bool fragment = entry->child_index >= 0 && get_type_id(entry->parent_result) != LMD_TYPE_NULL;
+            Item target = fragment ? entry->parent_result : entry->result_node;
+            if (target.item != s_doc_root.item) {  // RAW_ITEM_EQ_OK: publication depth uses result identity.
+                int index = -1;
+                find_parent_of(s_doc_root, target, &index, &depth);
+                if (index < 0) depth = INT_MAX - 1;
+            }
+            if (fragment) depth++;
+        }
+        dirty_keys[taken++] = {entry->key, depth};
     }
+    // an ancestor's render can regenerate a dirty child. Publish the ancestor
+    // first so a separate child patch cannot leave an obsolete DOM source.
+    if (taken > 1) qsort(dirty_keys, taken, sizeof(*dirty_keys), render_map_compare_dirty_depth);
 
     int count = 0;
     for (size_t k = 0; k < taken; k++) {
         RenderMapEntry query;
         memset(&query, 0, sizeof(query));
-        query.key = dirty_keys[k];
+        query.key = dirty_keys[k].key;
         RenderMapEntry* entry = RenderMap::get(map, query);
         // an earlier re-execution may have recorded this entry afresh
         if (!entry || !entry->dirty) continue;
@@ -747,31 +772,23 @@ Item render_map_get_doc_root(void) {
 // Find the parent element/array that contains target as a direct child.
 // Returns the parent Item and sets *out_index to the child index.
 // Must be called BEFORE fn() re-execution while the tree is still valid.
-static Item find_parent_of(Item node, Item target, int* out_index, int depth) {
+static Item find_parent_of(Item node, Item target, int* out_index, int* out_depth, int depth) {
     if (depth > 64) return ItemNull;
-    TypeId tid = get_type_id(node);
-    if (tid == LMD_TYPE_ELEMENT) {
-        Element* elmt = it2elmt(node);
-        if (!elmt) return ItemNull;
-        for (unsigned i = 0; i < elmt->length; i++) {
-            if (elmt->items[i].item == target.item) {  // RAW_ITEM_EQ_OK: tree parent search needs exact child identity.
-                *out_index = (int)i;
-                return node;
-            }
-            Item found = find_parent_of(elmt->items[i], target, out_index, depth + 1);
-            if (get_type_id(found) != LMD_TYPE_NULL) return found;
+    TypeId kind = get_type_id(node);
+    if (kind != LMD_TYPE_ELEMENT && kind != LMD_TYPE_ARRAY) return ItemNull;
+    if (container_is_virtual_list(node.container) ||
+            (kind == LMD_TYPE_ARRAY && array_has_native_lane(node.array))) return ItemNull;
+    List* list = (List*)node.array;
+    if (!list || !list->items) return ItemNull;
+    for (int64_t i = 0; i < list->length; i++) {
+        Item child = list->items[i];
+        if (child.item == target.item) {  // RAW_ITEM_EQ_OK: tree parent search needs exact child identity.
+            *out_index = (int)i;
+            if (out_depth) *out_depth = depth + 1;
+            return node;
         }
-    } else if (tid == LMD_TYPE_ARRAY) {
-        Array* arr = it2arr(node);
-        if (!arr) return ItemNull;
-        for (unsigned i = 0; i < arr->length; i++) {
-            if (arr->items[i].item == target.item) {  // RAW_ITEM_EQ_OK: tree parent search needs exact child identity.
-                *out_index = (int)i;
-                return node;
-            }
-            Item found = find_parent_of(arr->items[i], target, out_index, depth + 1);
-            if (get_type_id(found) != LMD_TYPE_NULL) return found;
-        }
+        Item found = find_parent_of(child, target, out_index, out_depth, depth + 1);
+        if (get_type_id(found) != LMD_TYPE_NULL) return found;
     }
     return ItemNull;
 }

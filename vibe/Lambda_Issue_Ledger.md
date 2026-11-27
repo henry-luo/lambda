@@ -74,6 +74,19 @@ focused interpreter and eager-JIT probes reproduced the following cases.
 
 Focused sources and tier outputs are under `temp/formal_semantics_audit_20261124/`.
 
+<a id="lr12-73"></a>
+
+## LR12-73 — Overlapping template updates can leave obsolete event owners
+
+**Fixed in the working tree, 2026-11-27.** A click in `dtna_disclosure`
+marks both the collapse template and its enclosing app dirty. When hash
+iteration rendered the child first, the later parent render could publish
+a different child source while the overlapping native patches kept the
+earlier one. The next keyboard event could miss its author handler.
+Reconciliation now renders dirty ancestors before their descendants so
+their nested applications can refresh the child entries (**D5.5.3**).
+The fixture passes all 13 assertions with the baseline font directory.
+
 <a id="lr12-72"></a>
 
 ## LR12-72 — DOM mutation seam signature blocks the split build

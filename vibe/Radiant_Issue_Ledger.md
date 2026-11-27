@@ -20,6 +20,14 @@ observations still require re-verification. Add new Radiant issues here.
 
 ## Open issues
 
+<a id="ri-267"></a>
+
+- [RI-267 — Flex aspect ratios use the wrong width or wrapping height](<Radiant_Issue_Ledger (fixed).md#ri-267>).
+
+<a id="ri-266"></a>
+
+- [RI-266 — A degenerate SVG ratio produces an infinite layout height](<Radiant_Issue_Ledger (fixed).md#ri-266>).
+
 <a id="ri-265"></a>
 
 ### RI-265 — Viewer mode changes retain rebuilt presentation storage

@@ -6,6 +6,17 @@ remain in the [active issue ledger](Lib_Input_Issue_Ledger.md).
 
 ## Fixed issues
 
+<a id="li-129"></a>
+
+### LI-129 — A constructed document can have an indeterminate retired-frame owner
+
+**Fixed, 2026-11-27.** Scene3D's native agent fixture constructs a
+`DomDocument` directly. Creating a foreign DOM wrapper could follow the
+uninitialized retired-frame owner and crash during fixture setup. The
+document now begins with an empty retired-frame owner and focused-frame
+reference in both allocation paths (**D5.5.1 / D9.1.3v2**). All 128 focused
+Scene3D agent and audio cases pass with native macOS graphics.
+
 <a id="li-128"></a>
 
 ### LI-128 — A queued resource completion can reach a retired DOM element

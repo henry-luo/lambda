@@ -1,5 +1,5 @@
 function true
 function true
-function function number
+function function true
 125
 WEB_ANIMATION_CONSTRUCTORS_DONE
