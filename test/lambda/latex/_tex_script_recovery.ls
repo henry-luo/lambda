@@ -1,6 +1,7 @@
 import profile: lambda.doc.latex.tex_engine.profile
 import reconstruct: lambda.doc.latex.tex_engine.reconstruct
 import digest: lambda.doc.latex.tex_engine.digest
+import snapshot: ._tex_native_snapshot
 
 let kernel = input(sys.lambda.home ++ "/package/doc/latex/tex_engine/kernel.tex", "text")^;
 let options = {echo_definitions: true, adapters: [], resources: {local: {}, bundled: {}}};
@@ -28,19 +29,21 @@ pub fn check_expansion(source, settings = null, reference = null, cached = null)
         messages_match:r.messages,diagnostics_match:r.diagnostics}
 }
 
-pub fn inspect_tree(source, settings = null) any^ {
+// native captures make tree checks independent of the migrated public parser.
+pub fn inspect_tree(source, settings = null, cached = null, reference = null) any^ {
     let configured = if (settings == null) options else {*:options, *:settings};
-    let result = profile.expand_with_kernel(source, kernel, configured, 100000)^;
-    let native = parse(source, {type: "tex"})^;
+    let result = profile.expand_with_kernel(source, kernel, configured, 100000, cached)^;
+    let native = if (reference == null) parse(source, {type: "tex"})^ else reference.tex;
     let tree = digest.digest(result)^;
     {expansion_issue:result.issue,issue:tree.issue,unsupported:tree.unsupported,
-        text:reconstruct.reconstruct(result)^.text == native.text,
+        text:(reference == null or source == reference.source) and reconstruct.reconstruct(result)^.text == native.text,
         messages:result.messages == native.messages,diagnostics:result.diagnostic_records == native.diagnostics,
-        ast:if(tree.ast == null) null else tree.ast == parse(source, {type: "latex"})^}
+        ast:if(tree.ast == null) null else if(reference == null) tree.ast == parse(source, {type: "latex"})^
+            else snapshot.tree_matches(tree.ast,reference,source)^}
 }
 
-pub fn check_tree(source, settings = null) bool^ {
-    let result = inspect_tree(source, settings)^;
+pub fn check_tree(source, settings = null, cached = null, reference = null) bool^ {
+    let result = inspect_tree(source, settings, cached, reference)^;
     result.expansion_issue == null and result.issue == null and result.ast == true and
         result.text and result.messages and result.diagnostics
 }

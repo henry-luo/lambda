@@ -1,5 +1,5 @@
 import compare: ._tex_script_recovery
-[for(source in [
+let sources=[
   "\\ExplSyntaxOn\\ifx\\prop_if_exist:NTF\\cs_if_exist:NTF Y\\else N\\fi\\ifx\\prop_if_exist:NT\\cs_if_exist:NT Y\\else N\\fi\\ifx\\prop_if_exist:NF\\cs_if_exist:NF Y\\else N\\fi\\ifx\\prop_if_exist_p:N\\cs_if_exist_p:N Y\\else N\\fi\\ExplSyntaxOff",
   "\\ExplSyntaxOn\\let\\q\\prop_if_exist:NTF\\def\\cs_if_exist:NTF#1#2#3{BAD}\\q\\undefined{N}{Y}\\ExplSyntaxOff",
   "\\ExplSyntaxOn\\def\\foo{A}\\str_if_exist:NTF\\foo{Y}{N}\\str_if_exist:NTF\\missing{N}{Y}\\str_if_exist:NT\\foo{T}\\str_if_exist:NF\\missing{F}\\int_eval:n{\\str_if_exist_p:N\\foo+\\str_if_exist_p:N\\missing}\\ExplSyntaxOff",
@@ -16,4 +16,7 @@ import compare: ._tex_script_recovery
   "\\ExplSyntaxOn\\meaning\\prop_if_exist:NTF/\\meaning\\prop_if_exist_p:N\\ExplSyntaxOff",
   "\\ExplSyntaxOn\\meaning\\str_if_exist:NTF/\\meaning\\str_if_exist_p:N\\ExplSyntaxOff",
   "\\ExplSyntaxOn\\meaning\\dim_if_exist:NTF/\\meaning\\dim_if_exist_p:N\\ExplSyntaxOff"
-]) compare.check_expansion(source,{script_expl3:true})^]
+];
+let native=input("test/lambda/latex/fixtures/tex_expl3_exist_alias_cases_native.json","json")^;
+// retain a fresh first expansion and compare every source with its native capture.
+compare.check_native_expl_expansions(sources,native.cases)^

@@ -1,16 +1,17 @@
 import profile: lambda.doc.latex.tex_engine.profile
 import reconstruct: lambda.doc.latex.tex_engine.reconstruct
 
+let native_refs=input("test/lambda/latex/fixtures/tex_declaration_origin_native.json","json")^;
 let options = {adapters: [], resources: {local: {}, bundled: {}}, echo_definitions: true};
 let kernel = input(sys.lambda.home ++ "/package/doc/latex/tex_engine/kernel.tex", "text")^;
-fn check(source) any^ {
+fn check(source,reference) any^ {
     let expanded = profile.expand_with_kernel(source, kernel, options, 100000)^;
     let built = reconstruct.reconstruct(expanded)^;
-    let native = parse(source, {type: "tex"})^;
+    let native = reference.tex;
     {expansion_issue: expanded.issue, reconstruction_issue: built.issue,
-        text_match: built.text == native.text, diagnostics_match: expanded.diagnostics == native.diagnostics}
+        text_match: source == reference.source and built.text == native.text, diagnostics_match: expanded.diagnostics == native.diagnostics}
 }
-[for (source in [
+[for (index,source in [
     "\\documentclass{article}\n\\usepackage{xcolor}\n\\begin{document}A\\end{document}",
     "\\documentclass{article}\n\n\\usepackage{xcolor}\n\n\\begin{document}A\\end{document}",
     "\\documentclass [12pt] {article} [2020/01/01]\n\\begin{document}A\\end{document}",
@@ -26,7 +27,7 @@ fn check(source) any^ {
     "\\RequirePackage[foo]{xcolor}\n\\begin{document}A\\end{document}",
     "\\def\\p{xcolor}\\RequirePackage{\\p}\n\\begin{document}A\\end{document}",
     "\\documentclass{article}\\usepackage{xcolor}\\usepackage{xcolor}\n\\begin{document}A\\end{document}"
-]) check(source)^]
+]) check(source,native_refs.cases[index])^]
 
 let root = "test/lambda/latex/fixtures/local_packages/";
 let source = input(root ++ "document.tex", "text")^;
@@ -36,6 +37,7 @@ let captured = {*:options, source_name: root ++ "document.tex",
     resources: {local: {'lmdnotes.sty': {data: style}, 'lmdreport.cls': {data: class}}, bundled: {}}};
 let expanded = profile.expand_with_kernel(source, kernel, captured, 100000)^;
 let built = reconstruct.reconstruct(expanded)^;
-let native = input(root ++ "document.tex", "tex")^;
+let native = native_refs.local.tex;
 {expansion_issue: expanded.issue, reconstruction_issue: built.issue,
-    text_match: built.text == native.text, diagnostics_match: expanded.diagnostics == native.diagnostics}
+    text_match: root ++ "document.tex" == native_refs.local.source and source == native_refs.local.source_text and
+        style == native_refs.local.style_text and class == native_refs.local.class_text and built.text == native.text, diagnostics_match: expanded.diagnostics == native.diagnostics}

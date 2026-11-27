@@ -1,0 +1,324 @@
+{
+  "cases": [
+    {
+      "source": "\\ExplSyntaxOn\\tl_if_exist:NTF\\unknown{Y}{N}\\ExplSyntaxOff\\begin{document}Hello\\end{document}",
+      "tex": {
+        "text": "N\\begin{document}Hello\\end{document}",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              "N"
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 57,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "Hello"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\seq_if_exist:NTF\\unknown{Y}{N}\\ExplSyntaxOff\\begin{document}Hello\\end{document}",
+      "tex": {
+        "text": "N\\begin{document}Hello\\end{document}",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              "N"
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 58,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "Hello"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\int_if_exist:NTF\\unknown{Y}{N}\\ExplSyntaxOff\\begin{document}Hello\\end{document}",
+      "tex": {
+        "text": "N\\begin{document}Hello\\end{document}",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              "N"
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 58,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "Hello"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\bool_if_exist:NTF\\unknown{Y}{N}\\ExplSyntaxOff\\begin{document}Hello\\end{document}",
+      "tex": {
+        "text": "N\\begin{document}Hello\\end{document}",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              "N"
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 59,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "Hello"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\clist_if_exist:NTF\\unknown{Y}{N}\\ExplSyntaxOff\\begin{document}Hello\\end{document}",
+      "tex": {
+        "text": "N\\begin{document}Hello\\end{document}",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              "N"
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 60,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "Hello"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\prop_if_exist:NTF\\unknown{Y}{N}\\ExplSyntaxOff\\begin{document}Hello\\end{document}",
+      "tex": {
+        "text": "N\\begin{document}Hello\\end{document}",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              "N"
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 59,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "Hello"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\str_if_exist:NTF\\unknown{Y}{N}\\ExplSyntaxOff\\begin{document}Hello\\end{document}",
+      "tex": {
+        "text": "N\\begin{document}Hello\\end{document}",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              "N"
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 58,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "Hello"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\dim_if_exist:NTF\\unknown{Y}{N}\\ExplSyntaxOff\\begin{document}Hello\\end{document}",
+      "tex": {
+        "text": "N\\begin{document}Hello\\end{document}",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              "N"
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 58,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "Hello"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\let\\q\\tl_if_exist:NTF\\q\\unknown{Y}{N}\\ExplSyntaxOff\\begin{document}Hello\\end{document}",
+      "tex": {
+        "text": "N\\begin{document}Hello\\end{document}",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              "N"
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 65,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "Hello"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\let\\q\\seq_if_exist:NTF\\q\\unknown{Y}{N}\\ExplSyntaxOff\\begin{document}Hello\\end{document}",
+      "tex": {
+        "text": "N\\begin{document}Hello\\end{document}",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "latex": {
+        "$": "latex_document",
+        "_": [
+          {
+            "$": "paragraph",
+            "_": [
+              "N"
+            ]
+          },
+          {
+            "$": "document",
+            "source_offset": 66,
+            "_": [
+              {
+                "$": "paragraph",
+                "_": [
+                  "Hello"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

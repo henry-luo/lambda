@@ -368,16 +368,27 @@ fn collect_document_args(st, input, specs, index = 0, args = [], missing = []) a
 fn substitute(body, args) => [for (t in body)
     *(if (t.kind == "parameter") args[t.value] else [t])]
 
+// native C strings stop at the first NUL, before any enclosing buffer limit.
+fn native_c_prefix(bytes, limit) any^ {
+    let prefix = slice(bytes,0,min(len(bytes),limit))^;
+    let zeros = [for (i,b in prefix where b == 0) i];
+    slice(prefix,0,if (len(zeros)==0) len(prefix) else zeros[0])
+}
+
+// terminal lines retain bytes while buffering, then native exposes each as a C string.
+fn native_terminal_line(value) any^ {
+    let bytes = binary(value)^;
+    if (not any([for (byte in bytes) byte == 0])) value
+    else utf8.decode(native_c_prefix(bytes,len(bytes))^)
+}
+
 // native formats control names in a 128-byte C buffer, including slash and terminator.
 fn macro_diagnostic_name(call) any^ {
     if (call == null) null
     else if (call.kind == "active") call.value
     else {
-        let bytes = binary(call.value)^;
-        let prefix = slice(bytes,0,min(len(bytes),126))^;
-        let zeros = [for (i,b in prefix where b == 0) i];
-        let end = if (len(zeros) == 0) len(prefix) else zeros[0];
-        "\\" ++ parse(slice(prefix,0,end)^,{type:"text"})^
+        let prefix = native_c_prefix(binary(call.value)^,126)^;
+        "\\" ++ parse(prefix,{type:"text"})^
     }
 }
 
@@ -2801,7 +2812,7 @@ fn job_name(base) any^ {
 fn print_meaning(st, t) any^ {
     let m = meaning(st, t)^;
     if (m.kind == "undefined") "undefined"
-    else if (m.kind == "primitive") escape(st) ++ m.name
+    else if (m.kind == "primitive") escape(st) ++ primitives.meaning_name(m.name)
     else if (m.kind == "constructor") escape(st) ++ "protected macro:->" ++
         write_token(st, {kind: "control", value: m.name})^
     else if (m.kind == "register") escape(st) ++ "count" ++ string(m.index)
@@ -2829,15 +2840,18 @@ fn print_meaning(st, t) any^ {
 
 // terminal output is buffered until a line break or a flushing TeX command.
 fn terminal_flush(st: State) State^ => if (st.terminal_line == "") st
-    else {*:st, messages: [*st.messages, st.terminal_line], terminal_line: ""}
+    else {*:st, messages: [*st.messages, native_terminal_line(st.terminal_line)^], terminal_line: ""}
 fn terminal_print(st: State, text) State^ {
     let newline = parameter_value(st, "newlinechar")^;
     if (newline < 0 or newline >= 128) {*:st, terminal_line: st.terminal_line ++ text}
     else {
         let parts = split(text, chr(newline))^;
         if (len(parts) <= 1) {*:st, terminal_line: st.terminal_line ++ text}
-        else {*:st, messages: [*st.messages, st.terminal_line ++ parts[0], *slice(parts, 1, len(parts) - 1)^],
-            terminal_line: parts[len(parts) - 1]}
+        else {
+            let lines = [st.terminal_line ++ parts[0], *slice(parts, 1, len(parts) - 1)^];
+            {*:st, messages: [*st.messages, *[for (line in lines) native_terminal_line(line)^]],
+                terminal_line: parts[len(parts) - 1]}
+        }
     }
 }
 // preserve native diagnostic locations when the active source is known.
@@ -2848,8 +2862,12 @@ fn record_diagnostic(st: State, code, message, origin = null) State^ {
     let main = file != null and file == st.main_file;
     let foreign = file != null and not main and len(found) > 0;
     let bytes = binary(message)^;
-    // native diagnostic formatting truncates long or NUL-containing messages.
-    let exact_message = len(bytes) <= 511 and not any([for (byte in bytes) byte == 0]);
+    // native's 512-byte diagnostic buffer retains at most 511 bytes plus its terminator.
+    let has_zero = any([for (byte in bytes) byte == 0]);
+    let prefix = if (len(bytes) <= 511 and not has_zero) message
+        else utf8.decode(native_c_prefix(bytes,511)^) ^ {null};
+    // other formatted diagnostics can append text after a NUL-bearing argument.
+    let exact_message = prefix != null and (not has_zero or code == "tex-errmessage");
     let exhausted = active == null and st.input.root_eof == true;
     let known = ((file != null and (main or foreign)) or exhausted) and exact_message;
     let bytes_before = if (origin != null and len(found) > 0)
@@ -2857,7 +2875,7 @@ fn record_diagnostic(st: State, code, message, origin = null) State^ {
     let line = if (bytes_before != null) 1 + len([for (i,b in bytes_before where
         b == 13 or (b == 10 and (i == 0 or bytes_before[i - 1] != 13))) b])
         else if (active != null) active.line_no else 0;
-    let record = {code: code, message: message,
+    let record = {code: code, message: if (prefix == null) message else prefix,
         offset: if (origin != null and main) origin.start else st.input.last_main_offset,
         *:if (foreign) {file: found[0].name} else {},
         *:if (line > 0) {line: line} else {}};
@@ -6905,6 +6923,14 @@ pub fn enable_script_expl3(st: State) State^ {
         {name:"c_max_char_int", kind:"mathchardef", value:255},
         {name:"c__prop_basis_int", kind:"mathchardef", value:255 - 33},
         {name:"c_term_iow", kind:"mathchardef", value:16},
+        // expl3 error help uses the existing TeX token-list parameter.
+        {name:"tex_errhelp:D", kind:"primitive", value:"errhelp"},
+        // expl3 copies latex's frozen end primitive, not the end-environment command.
+        {name:"tex_end:D", kind:"primitive", value:"@@end"},
+        // the message machinery addresses these TeX primitives through aliases.
+        {name:"tex_escapechar:D", kind:"primitive", value:"escapechar"},
+        {name:"tex_inputlineno:D", kind:"primitive", value:"inputlineno"},
+        {name:"tex_errmessage:D", kind:"primitive", value:"errmessage"},
         {name:"tex_newlinechar:D", kind:"primitive", value:"newlinechar"},
         {name:"tex_immediate:D", kind:"primitive", value:"immediate"},
         {name:"tex_write:D", kind:"primitive", value:"write"},

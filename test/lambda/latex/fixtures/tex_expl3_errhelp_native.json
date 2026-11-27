@@ -1,0 +1,87 @@
+{
+  "cases": [
+    {
+      "source": "\\ExplSyntaxOn\\meaning\\tex_errhelp:D\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\textbackslash{}errhelp",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\ifx\\tex_errhelp:D\\errhelp Y\\else N\\fi\\ExplSyntaxOff",
+      "tex": {
+        "text": "Y",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tex_errhelp:D={alpha}\\the\\tex_errhelp:D\\ExplSyntaxOff",
+      "tex": {
+        "text": "alpha",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\errhelp={beta}\\the\\tex_errhelp:D\\ExplSyntaxOff",
+      "tex": {
+        "text": "beta",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tex_errhelp:D={outer}{\\tex_errhelp:D={inner}\\the\\tex_errhelp:D}/\\the\\tex_errhelp:D\\ExplSyntaxOff",
+      "tex": {
+        "text": "{inner}/outer",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tex_errhelp:D={outer}{\\global\\tex_errhelp:D={inner}}\\the\\tex_errhelp:D\\ExplSyntaxOff",
+      "tex": {
+        "text": "{}inner",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\let\\myhelp\\tex_errhelp:D\\myhelp={saved}\\the\\errhelp\\ExplSyntaxOff",
+      "tex": {
+        "text": "saved",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tex_errhelp:D={one}\\showthe\\tex_errhelp:D\\the\\errhelp\\ExplSyntaxOff",
+      "tex": {
+        "text": "one",
+        "messages": [
+          "> one."
+        ],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tex_errhelp:D={\\def\\foo{A}}\\the\\tex_errhelp:D\\ExplSyntaxOff",
+      "tex": {
+        "text": "",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    }
+  ]
+}
