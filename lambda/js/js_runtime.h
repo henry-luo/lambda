@@ -556,7 +556,7 @@ Item js_console_groupEnd_fn(void);
 Item js_console_trace_fn(Item label);
 Item js_console_dir_fn(Item object);
 Item js_console_table_fn(Item data);
-Item js_console_assert_fn(Item condition, Item message);
+Item js_console_assert_span(Item* args, int argc);
 
 // =============================================================================
 // Math Object Methods & Properties

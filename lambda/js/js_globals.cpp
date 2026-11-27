@@ -51,6 +51,7 @@
 #include "../module/radiant/radiant_dom_bridge.hpp"
 #include "lib/base64.h"
 #include "lib/arraylist.hpp"
+#include "lib/digest.h"
 #include "lib/escape.h"
 #include "lib/hashmap_helpers.h"
 #include "lib/log.h"
@@ -122,7 +123,7 @@ enum JsHostGlobalGroup {
     JS_HOST_GROUP_NODE_FILTER, JS_HOST_GROUP_ABORT_CONTROLLER, JS_HOST_GROUP_ABORT_SIGNAL,
     JS_HOST_GROUP_CODECS, JS_HOST_GROUP_STREAMS, JS_HOST_GROUP_HEADERS,
     JS_HOST_GROUP_PERFORMANCE, JS_HOST_GROUP_MESSAGING, JS_HOST_GROUP_URL,
-    JS_HOST_GROUP_EXCEPTION, JS_HOST_GROUP_OPTION, JS_HOST_GROUP_CANVAS,
+    JS_HOST_GROUP_EXCEPTION, JS_HOST_GROUP_CRYPTO, JS_HOST_GROUP_OPTION, JS_HOST_GROUP_CANVAS,
     JS_HOST_GROUP_CLIPBOARD, JS_HOST_GROUP_COUNT
 };
 struct JsHostGlobalSpec { const char* name; JsHostGlobalGroup group; };
@@ -154,6 +155,8 @@ static const JsHostGlobalSpec js_host_globals[] = {
     {"MessageChannel", JS_HOST_GROUP_MESSAGING},
     {"MessagePort", JS_HOST_GROUP_MESSAGING}, {"URLSearchParams", JS_HOST_GROUP_URL},
     {"URL", JS_HOST_GROUP_URL}, {"DOMException", JS_HOST_GROUP_EXCEPTION},
+    {"QuotaExceededError", JS_HOST_GROUP_EXCEPTION},
+    {"Crypto", JS_HOST_GROUP_CRYPTO}, {"crypto", JS_HOST_GROUP_CRYPTO},
     {"Option", JS_HOST_GROUP_OPTION}, {"OffscreenCanvas", JS_HOST_GROUP_CANVAS},
     {"Blob", JS_HOST_GROUP_CLIPBOARD}, {"File", JS_HOST_GROUP_CLIPBOARD},
     {"FileReader", JS_HOST_GROUP_CLIPBOARD}, {"ClipboardItem", JS_HOST_GROUP_CLIPBOARD},
@@ -2029,14 +2032,14 @@ static Item js_performance_entries(void) {
     return js_performance_timeline_entries(make_js_undefined(), make_js_undefined());
 }
 
-static Item js_performance_illegal_constructor(void) {
+static Item js_host_illegal_constructor(void) {
     return js_throw_type_error("Illegal constructor");
 }
 
 static Item js_install_user_timing(Item global) {
     RootFrame roots(6);
     Rooted<Item> owner(roots, global), base(roots, js_install_native_constructor(owner.get(),
-        "PerformanceEntry", js_performance_illegal_constructor));
+        "PerformanceEntry", js_host_illegal_constructor));
     Rooted<Item> prototype(roots, js_get_key_cstr(base.get(), "prototype"));
     Rooted<Item> constructor(roots, ItemNull), method(roots, ItemNull), key(roots, ItemNull);
     JsPerformanceState* state = js_performance_resources();
@@ -2059,7 +2062,7 @@ static Item js_install_user_timing(Item global) {
     for (const auto& definition : interfaces) {
         bool mark = definition.cls == JS_CLASS_PERFORMANCE_MARK;
         constructor.set(mark ? js_new_native_body_constructor(js_intrinsic_ctor_requires_new_call_body,
-            js_performance_mark_construct, 1) : js_new_native_constructor(js_performance_illegal_constructor));
+            js_performance_mark_construct, 1) : js_new_native_constructor(js_host_illegal_constructor));
         js_set_function_name(constructor.get(), js_name_item(definition.name));
         js_set_prototype(constructor.get(), base.get());
         prototype.set(js_new_object());
@@ -2077,7 +2080,7 @@ static Item js_install_user_timing(Item global) {
         js_set_key_cstr(owner.get(), definition.name, constructor.get());
     }
     constructor.set(js_install_native_constructor(owner.get(), "PerformanceResourceTiming",
-        js_performance_illegal_constructor));
+        js_host_illegal_constructor));
     *js_realm_slot(&js_runtime_state.realm_slots,
         JS_REALM_SLOT_PERFORMANCE_RESOURCE_TIMING_CONSTRUCTOR) = constructor.get();
     js_set_prototype(constructor.get(), base.get());
@@ -5359,11 +5362,13 @@ static int js_console_format_args(Item* args, int argc, char* buf, int capacity)
     int pos = 0;
     if (argc >= 2 && get_type_id(args[0]) == LMD_TYPE_STRING &&
         has_format_specifiers(it2s(args[0]))) {
-        Item arr = js_array_new(0);
+        RootFrame roots(1);
+        if (!roots.valid()) return 0;
+        Rooted<Item> arr(roots, js_array_new(0));
         for (int i = 0; i < argc; i++) {
-            js_array_push(arr, args[i]);
+            js_array_push(arr.get(), args[i]);
         }
-        Item formatted = js_host_hooks_format_console(arr);
+        Item formatted = js_host_hooks_format_console(arr.get());
         if (get_type_id(formatted) == LMD_TYPE_STRING) {
             String* s = it2s(formatted);
             if (s && s->len > 0) {
@@ -5390,9 +5395,13 @@ static int js_console_format_args(Item* args, int argc, char* buf, int capacity)
     return pos;
 }
 
-static void js_console_emit(Item* args, int argc, JsConsoleLevel level) {
+static void js_console_emit(Item* args, int argc, JsConsoleLevel level,
+                            const char* prefix = nullptr) {
     char buf[4096];
-    int message_len = js_console_format_args(args, argc, buf, (int)sizeof(buf));
+    int prefix_len = prefix ? (int)strlen(prefix) : 0;
+    if (prefix_len) memcpy(buf, prefix, prefix_len);
+    int message_len = prefix_len + js_console_format_args(args, argc,
+        buf + prefix_len, (int)sizeof(buf) - prefix_len);
 
     // Browser documents and command-line scripts share one formatter so their
     // captured output cannot drift from the diagnostic log representation.
@@ -5607,19 +5616,18 @@ extern "C" Item js_console_table_fn(Item data) {
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
-// console.assert(value, ...args) — if !value, print assertion failed
-extern "C" Item js_console_assert_fn(Item cond, Item msg) {
-    if (!js_is_truthy(cond)) {
-        char buf[4096];
-        int n = snprintf(buf, sizeof(buf), "Assertion failed");
-        if (get_type_id(msg) == LMD_TYPE_STRING) {
-            String* s = it2s(msg);
-            if (s && s->len > 0) n += snprintf(buf + n, sizeof(buf) - n, ": %.*s", (int)s->len, s->chars);
-        }
-        n += snprintf(buf + n, sizeof(buf) - n, "\n");
-        js_console_write_to_stderr(buf, n);
+extern "C" Item js_console_assert_span(Item* args, int argc) {
+    if (argc && js_is_truthy(args[0])) return make_js_undefined();
+    // Keep the message arguments in the shared formatter and only add the
+    // Console Standard's separator when the first diagnostic value is a string.
+    if (argc < 2) {
+        js_console_emit(nullptr, 0, JS_CONSOLE_ERROR, "Assertion failed");
+    } else {
+        const char* prefix = get_type_id(args[1]) == LMD_TYPE_STRING
+            ? "Assertion failed: " : "Assertion failed ";
+        js_console_emit(args + 1, argc - 1, JS_CONSOLE_ERROR, prefix);
     }
-    return (Item){.item = ITEM_JS_UNDEFINED};
+    return make_js_undefined();
 }
 
 // =============================================================================
@@ -13572,20 +13580,14 @@ static Item js_domexception_constructor(void) {
     return constructor.get();
 }
 
-// DOMException(message, nameOrOptions) constructor and internal factory.
-extern "C" Item js_domexception_new(Item message, Item name_arg) {
-    RootFrame roots(7);
-    Rooted<Item> message_root(roots, message), options(roots, name_arg);
-    Rooted<Item> constructor(roots, js_domexception_constructor());
-    JS_RETURN_IF_ERROR(constructor.get());
-    Rooted<Item> object(roots, js_new_object_with_class(JS_CLASS_DOM_EXCEPTION));
+static Item js_initialize_domexception(Item receiver, Item message, Item name_arg) {
+    RootFrame roots(6);
+    Rooted<Item> object(roots, receiver), message_root(roots, message), options(roots, name_arg);
     // D6.3.3: field conversion/getters may collect the unpublished exception.
-    js_set_prototype(object.get(),
-        *js_realm_intrinsic_slot_existing(JS_REALM_SLOT_DOM_EXCEPTION_PROTOTYPE, 0));
     Rooted<Item> actual_name(roots, js_name_item("Error"));
     Rooted<Item> cause(roots, make_js_undefined()), value(roots, ItemNull);
-    js_set_key_cstr(object.get(), "message", get_type_id(message_root.get()) == LMD_TYPE_STRING
-        ? message_root.get() : js_name_item(""));
+    JS_RETURN_IF_ERROR(js_define_own_key_storage(object.get(), js_name_item("message"),
+        get_type_id(message_root.get()) == LMD_TYPE_STRING ? message_root.get() : js_name_item("")));
     bool has_cause = false;
     if (get_type_id(options.get()) == LMD_TYPE_STRING) {
         actual_name.set(options.get());
@@ -13601,8 +13603,9 @@ extern "C" Item js_domexception_new(Item message, Item name_arg) {
             JS_RETURN_IF_ERROR(cause.get());
         }
     }
-    js_set_key_cstr(object.get(), "name", actual_name.get());
-    if (has_cause) js_set_key_cstr(object.get(), "cause", cause.get());
+    JS_RETURN_IF_ERROR(js_define_own_key_storage(object.get(), js_name_item("name"), actual_name.get()));
+    if (has_cause)
+        JS_RETURN_IF_ERROR(js_define_own_key_storage(object.get(), js_name_item("cause"), cause.get()));
 
     // DOMException legacy code mappings
     int code = 0;
@@ -13630,9 +13633,182 @@ extern "C" Item js_domexception_new(Item message, Item name_arg) {
             }
         }
     }
-    js_set_key_cstr(object.get(), "code", (Item){.item = i2it(code)});
-    js_set_key_cstr(object.get(), "stack", js_name_item(""));
+    JS_RETURN_IF_ERROR(js_define_own_key_storage(object.get(), js_name_item("code"), (Item){.item = i2it(code)}));
+    JS_RETURN_IF_ERROR(js_define_own_key_storage(object.get(), js_name_item("stack"), js_name_item("")));
     return object.get();
+}
+
+// DOMException(message, nameOrOptions) constructor and internal factory.
+extern "C" Item js_domexception_new(Item message, Item name_arg) {
+    RootFrame roots(3);
+    Rooted<Item> text(roots, message), name(roots, name_arg);
+    JS_RETURN_IF_ERROR(js_domexception_constructor());
+    Rooted<Item> object(roots, js_new_object_with_class(JS_CLASS_DOM_EXCEPTION));
+    JS_RETURN_IF_ERROR(object.get());
+    js_set_prototype(object.get(),
+        *js_realm_intrinsic_slot_existing(JS_REALM_SLOT_DOM_EXCEPTION_PROTOTYPE, 0));
+    return js_initialize_domexception(object.get(), text.get(), name.get());
+}
+
+static Item js_quota_exceeded_error_constructor(void);
+enum JsQuotaErrorField { JS_QUOTA, JS_QUOTA_REQUESTED, JS_QUOTA_FIELD_COUNT };
+
+static Item js_quota_error_get(Item callee, Item receiver, Item*, int, uint64_t*) {
+    uintptr_t field = js_fn_native((JsFunction*)callee.function)->target.bits;
+    JS_ASSIGN_OR_RETURN(record, js_native_private_array_state(receiver, JS_CLASS_QUOTA_EXCEEDED_ERROR,
+        JS_QUOTA_FIELD_COUNT, "Illegal QuotaExceededError receiver"));
+    return js_elements_get_int(record, field);
+}
+
+static Item js_quota_error_create(Item text, Item quota, Item requested, Item new_target) {
+    RootFrame roots(8);
+    Rooted<Item> message(roots, text), limit(roots, quota), amount(roots, requested), target(roots, new_target);
+    Rooted<Item> constructor(roots, js_quota_exceeded_error_constructor());
+    JS_RETURN_IF_ERROR(constructor.get());
+    Rooted<Item> prototype(roots, js_get_constructor_intrinsic_prototype(constructor.get()));
+    if (js_is_object_value(target.get()) && target.get().item != constructor.get().item) {
+        JS_ASSIGN_OR_RETURN(candidate, js_get_key_cstr(target.get(), "prototype"));
+        if (js_is_object_value(candidate)) prototype.set(candidate);
+    }
+    Rooted<Item> fields(roots, js_array_new(0));
+    JS_RETURN_IF_ERROR(js_array_push(fields.get(), limit.get()));
+    JS_RETURN_IF_ERROR(js_array_push(fields.get(), amount.get()));
+    Item key = *js_realm_intrinsic_slot_existing(JS_REALM_SLOT_QUOTA_EXCEEDED_ERROR_STATE_KEY, 0);
+    Rooted<Item> object(roots, js_native_private_array_object(JS_CLASS_QUOTA_EXCEEDED_ERROR,
+        key, fields.get(), prototype.get()));
+    JS_RETURN_IF_ERROR(object.get());
+    return js_initialize_domexception(object.get(), message.get(), js_name_item("QuotaExceededError"));
+}
+
+static const char* const js_quota_error_keys[] = {"quota", "requested"};
+
+static Item js_quota_error_construct(Item, Item* args, int count, Item new_target, uint64_t*) {
+    RootFrame roots(6);
+    Rooted<Item> options(roots, count > 1 ? args[1] : make_js_undefined()), target(roots, new_target);
+    Rooted<Item> message(roots, count && args[0].item != ITEM_JS_UNDEFINED ? js_to_string(args[0]) : js_name_item(""));
+    JS_RETURN_IF_ERROR(message.get());
+    TypeId options_type = get_type_id(options.get());
+    if (options_type != LMD_TYPE_NULL && options_type != LMD_TYPE_UNDEFINED && !js_is_object_value(options.get()))
+        return js_throw_type_error("QuotaExceededError options must be an object");
+
+    Rooted<Item> quota(roots, ItemNull), requested(roots, ItemNull), value(roots, ItemNull);
+    if (js_is_object_value(options.get())) {
+        // Web IDL converts dictionary members in key order before running the constructor.
+        Rooted<Item>* fields[] = {&quota, &requested};
+        double numbers[JS_QUOTA_FIELD_COUNT] = {};
+        for (int index = 0; index < JS_QUOTA_FIELD_COUNT; ++index) {
+            value.set(js_get_key_cstr(options.get(), js_quota_error_keys[index]));
+            JS_RETURN_IF_ERROR(value.get());
+            if (value.get().item == ITEM_JS_UNDEFINED) continue;
+            value.set(js_to_number(value.get()));
+            JS_RETURN_IF_ERROR(value.get());
+            numbers[index] = it2d(value.get());
+            if (!isfinite(numbers[index])) return js_throw_type_error("QuotaExceededError values must be finite");
+            fields[index]->set(value.get());
+        }
+        if (numbers[JS_QUOTA] < 0 || numbers[JS_QUOTA_REQUESTED] < 0 ||
+                (quota.get().item != ItemNull.item && requested.get().item != ItemNull.item &&
+                 numbers[JS_QUOTA_REQUESTED] < numbers[JS_QUOTA]))
+            return js_throw_range_error("Invalid QuotaExceededError quota or requested amount");
+    }
+    return js_quota_error_create(message.get(), quota.get(), requested.get(), target.get());
+}
+
+static Item js_quota_exceeded_error_constructor(void) {
+    if (!js_realm_intrinsic_slots_ensure_roots()) return ItemError;
+    Item* retained = js_realm_intrinsic_slot_existing(JS_REALM_SLOT_QUOTA_EXCEEDED_ERROR_CONSTRUCTOR, 0);
+    if (retained->item) return *retained;
+    RootFrame roots(5);
+    Rooted<Item> base(roots, js_domexception_constructor());
+    JS_RETURN_IF_ERROR(base.get());
+    Rooted<Item> constructor(roots, js_new_native_body_constructor(js_intrinsic_ctor_requires_new_call_body,
+        js_quota_error_construct, 0));
+    JS_RETURN_IF_ERROR(constructor.get());
+    Rooted<Item> prototype(roots, js_new_object()), getter(roots, ItemNull), tag(roots, js_well_known_symbol_key(4));
+    js_set_function_name(constructor.get(), js_name_item("QuotaExceededError"));
+    js_set_prototype(constructor.get(), base.get());
+    js_set_prototype(prototype.get(), js_get_constructor_intrinsic_prototype(base.get()));
+    JS_RETURN_IF_ERROR(js_initialize_native_constructor_prototype(constructor.get(), prototype.get()));
+    js_set_key_cstr(prototype.get(), "constructor", constructor.get());
+    js_mark_non_enumerable(prototype.get(), js_name_item("constructor"));
+    for (int index = 0; index < JS_QUOTA_FIELD_COUNT; ++index) {
+        getter.set(js_new_native_payload_function(js_quota_error_get, index, 0));
+        js_set_function_name(getter.get(), js_name_item(index == JS_QUOTA ? "get quota" : "get requested"));
+        js_install_native_accessor(prototype.get(), js_name_item(js_quota_error_keys[index]), getter.get(), ItemNull, 0);
+    }
+    js_set_key_default(prototype.get(), tag.get(), js_name_item("QuotaExceededError"));
+    js_mark_non_enumerable(prototype.get(), tag.get());
+    js_mark_non_writable(prototype.get(), tag.get());
+    NameRef key = name_pool_create_unique_private(context->name_pool, {"QuotaExceededError", sizeof("QuotaExceededError") - 1});
+    if (!key) return ItemError;
+    *js_realm_intrinsic_slot_existing(JS_REALM_SLOT_QUOTA_EXCEEDED_ERROR_STATE_KEY, 0) = (Item){.item = s2it(key)};
+    *retained = constructor.get();
+    return constructor.get();
+}
+
+static Item js_crypto_get_random_values(Item view) {
+    if (!js_object_has_class(js_get_this(), JS_CLASS_CRYPTO))
+        return js_throw_type_error("Illegal Crypto receiver");
+    RootFrame roots(1);
+    Rooted<Item> array(roots, view);
+    JsTypedArray* typed = js_is_typed_array(array.get()) ? js_get_typed_array_ptr(array.get().map) : nullptr;
+    JsDataView* data = typed ? nullptr : js_get_dataview_ptr(array.get());
+    if (!typed && !data) return js_throw_type_error("getRandomValues requires an ArrayBuffer view");
+    JsArrayBuffer* buffer = typed ? typed->base.buffer : data->buffer;
+    // Web IDL rejects shared and resizable buffers before the Web Crypto algorithm.
+    if (js_arraybuffer_shared(buffer) || js_arraybuffer_resizable(buffer))
+        return js_throw_type_error("getRandomValues requires a fixed, unshared ArrayBuffer");
+    if (!typed || !js_typed_array_is_integer_type(typed->element_type)) {
+        JS_ASSIGN_OR_RETURN(error, js_domexception_new(js_name_item("getRandomValues requires an integer typed array"),
+            js_name_item("TypeMismatchError")));
+        return js_throw_value(error);
+    }
+    const int length = js_typed_array_byte_length(array.get());
+    constexpr int max_random_bytes = 65536; // Web Crypto §10.1.1
+    if (length > max_random_bytes) {
+        JS_ASSIGN_OR_RETURN(error, js_quota_error_create(js_name_item("getRandomValues exceeded its byte limit"),
+            ItemNull, ItemNull, ItemNull));
+        return js_throw_value(error);
+    }
+    if (length == 0) return array.get();
+
+    // Publish bytes only after the entropy provider succeeds for the entire view.
+    void* bytes = mem_alloc((size_t)length, MEM_CAT_TEMP);
+    if (!bytes) return ItemError;
+    void* destination = crypto_random_bytes(bytes, (size_t)length)
+        ? js_typed_array_prepare_write_ptr(array.get()) : nullptr;
+    if (destination) memcpy(destination, bytes, (size_t)length);
+    mem_free(bytes);
+    if (!destination) {
+        JS_ASSIGN_OR_RETURN(error, js_domexception_new(js_name_item("getRandomValues could not produce random bytes"),
+            js_name_item("OperationError")));
+        return js_throw_value(error);
+    }
+    return array.get();
+}
+
+static Item js_install_crypto(Item global) {
+    RootFrame roots(6);
+    Rooted<Item> target(roots, global), constructor(roots, js_install_native_constructor(target.get(),
+        "Crypto", js_host_illegal_constructor));
+    JS_RETURN_IF_ERROR(constructor.get());
+    js_set_function_name(constructor.get(), js_name_item("Crypto"));
+    Rooted<Item> prototype(roots, js_get_constructor_intrinsic_prototype(constructor.get()));
+    js_set_key_cstr(prototype.get(), "constructor", constructor.get());
+    js_mark_non_enumerable(prototype.get(), js_name_item("constructor"));
+    Rooted<Item> method(roots, js_install_native_method(prototype.get(), "getRandomValues", js_crypto_get_random_values));
+    JS_RETURN_IF_ERROR(method.get());
+    js_set_function_name(method.get(), js_name_item("getRandomValues"));
+    Rooted<Item> tag(roots, js_well_known_symbol_key(4));
+    js_set_key_default(prototype.get(), tag.get(), js_name_item("Crypto"));
+    js_mark_non_enumerable(prototype.get(), tag.get());
+    js_mark_non_writable(prototype.get(), tag.get());
+    Rooted<Item> crypto(roots, js_new_object_with_class(JS_CLASS_CRYPTO));
+    JS_RETURN_IF_ERROR(crypto.get());
+    js_set_prototype(crypto.get(), prototype.get());
+    js_set_key_cstr(target.get(), "crypto", crypto.get());
+    js_mark_non_writable(target.get(), js_name_item("crypto"));
+    return crypto.get();
 }
 
 // forward declaration
@@ -14656,7 +14832,7 @@ static Item js_install_host_global_group(Item target, JsHostGlobalGroup group) {
             timing_root.set(js_new_object());
             js_set_key_cstr(perf_root.get(), "timing", timing_root.get());
             Rooted<Item> constructor_root(performance_roots, js_install_native_constructor(
-                global.get(), "Performance", js_performance_illegal_constructor));
+                global.get(), "Performance", js_host_illegal_constructor));
             Rooted<Item> prototype_root(performance_roots, js_new_object());
             Rooted<Item> method_root(performance_roots, ItemNull);
             js_set_function_name(constructor_root.get(), js_name_item("Performance"));
@@ -14696,7 +14872,7 @@ static Item js_install_host_global_group(Item target, JsHostGlobalGroup group) {
             js_set_key_cstr(observer_root.get(), "supportedEntryTypes", supported_types_root.get());
             js_attr_set_writable(observer_root.get(), "supportedEntryTypes", 19, false);
             constructor_root.set(js_install_native_constructor(global.get(), "PerformanceObserverEntryList",
-                js_performance_illegal_constructor));
+                js_host_illegal_constructor));
             performance->observer_list_prototype = js_get_key_cstr(constructor_root.get(), "prototype");
             js_install_native_method(performance->observer_list_prototype, "getEntries",
                 js_performance_observer_list_get_entries);
@@ -14743,13 +14919,17 @@ static Item js_install_host_global_group(Item target, JsHostGlobalGroup group) {
         break;
     }
     case JS_HOST_GROUP_EXCEPTION: {
-        // globalThis.DOMException constructor
-        {
-            RootFrame dom_exception_roots(1);
-            Rooted<Item> constructor(dom_exception_roots, js_domexception_constructor());
-            JS_RETURN_IF_ERROR(constructor.get());
-            js_set_key_cstr(global.get(), "DOMException", constructor.get());
-        }
+        RootFrame exception_roots(2);
+        Rooted<Item> constructor(exception_roots, js_domexception_constructor());
+        JS_RETURN_IF_ERROR(constructor.get());
+        js_set_key_cstr(global.get(), "DOMException", constructor.get());
+        Rooted<Item> quota(exception_roots, js_quota_exceeded_error_constructor());
+        JS_RETURN_IF_ERROR(quota.get());
+        js_set_key_cstr(global.get(), "QuotaExceededError", quota.get());
+        break;
+    }
+    case JS_HOST_GROUP_CRYPTO: {
+        JS_RETURN_IF_ERROR(js_install_crypto(global.get()));
         break;
     }
     case JS_HOST_GROUP_OPTION: {

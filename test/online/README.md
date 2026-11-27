@@ -4580,3 +4580,51 @@ layout match the preceding result, including the existing static
 `dom_view_role_nested` failure. The report has **49 high, zero critical
 and 1,018 low** across 1,067 comparisons.
 [Evidence](comparison/repairs.html#round-219).
+
+
+Round 220 restores ordinary **FramerAuth** captures. A completed transfer now
+validates its requesting element against the document registry before
+delivery (LI-127, **D5.5.1 / D9.1.2v2 / D9.1.3v2**). Both 1000 ms capture
+pairs show the membership heading, copy and actions (**D10.1.7**).
+FramerAuth stays high because the oversized badge displaces the hero and
+the native frame is missing the embedded demo. Mean error is 13.25% and
+12.79% in the two pairs. The regression and all 16 network scheduler cases,
+three stylesheet controls, 64 renderer resource cases and 25 harness cases
+pass. The report has **49 high, zero critical and 1,018 low** across 1,067
+comparisons. [Evidence](comparison/repairs.html#round-220).
+
+
+Round 221 corrects the **FramerAuth** badge. The SVG now uses the
+ratio-derived containing-block height (RI-259, **D9.1.1v4 / D9.1.3v2**).
+Both ordinary 1000 ms capture pairs show the compact badge (**D10.1.7**).
+The page stays high because the hero remains lower and the cross-origin
+demo is blank in Radiant. The two pairs measure 12.33% and 11.77% mean
+error. The report has **49 high, zero critical and 1,018 low** across 1,067
+comparisons. [Evidence](comparison/repairs.html#round-221).
+
+
+Round 222 restores the headline, cards and consent dialog on **Figma Pricing**.
+Web Crypto random bytes, standard English currency formatting and Canvas pixel
+creation/write each remove an observed initialization error (JS13-L94,
+JS10-L1, JS13-L95, **D8.4.4 / D9.5.6v2**). Both ordinary 1000 ms pairs measure
+4.89% mean error (**D10.1.7**). The native plan cards overlap and obscure text.
+The page stays high. The report has **49 high, zero critical and 1,018 low**
+across 1,067 comparisons. [Evidence](comparison/repairs.html#round-222).
+
+
+Round 223 clears **Figma Pricing**. The flexible sizing phase now runs for an
+indefinite grid block size, and gutters no longer inflate the synthesized
+space for flexible tracks (RI-261, **D9.1.3v2**). Both ordinary 1000 ms pairs
+show legible pricing panels and the consent dialog, at 4.23% mean error
+(**D10.1.7**). Full subgrid alignment remains open (RI-262). The report has
+**48 high, zero critical and 1,019 low** across 1,067 comparisons.
+[Evidence](comparison/repairs.html#round-223).
+
+
+Round 224 restores the **FigJam** heading, copy, buttons and consent dialog
+after correcting private field writes on native custom elements and publishing
+the shared console assertion (**JS13-L96 / JS13-L97, D8.4.4**). The two ordinary
+pairs measure 4.83% and 4.62% mean error. The large product board and decorative
+canvas remain blank because the Rive runtime reaches unavailable WebAssembly
+(**JS13-L87 / D10.1.7**). The report remains at **48 high, zero critical and
+1,019 low**. [Evidence](comparison/repairs.html#round-224).

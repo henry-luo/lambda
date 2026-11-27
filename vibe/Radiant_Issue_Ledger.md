@@ -20,6 +20,34 @@ observations still require re-verification. Add new Radiant issues here.
 
 ## Open issues
 
+<a id="ri-262"></a>
+
+### RI-262 — Nested row subgrids do not share their parent tracks
+
+**Open, 2026-11-27.** Figma Pricing uses three nested `subgrid` row axes.
+Its original overlap also exposed the independent flexible-track defect
+fixed by RI-261. With that defect repaired, both ordinary captures have
+legible first-row pricing panels and clear high severity (**D10.1.7**).
+The reduced authored structure still lays out as standalone grids in
+Radiant. Chromium shares eight row tracks and sizes the fixture to 580 px.
+The standalone control measures 472 px in both engines. Parser support,
+projection of intrinsic contributions to the parent, and shared used tracks
+belong to Input and Radiant (**D9.1.1v4 / D9.1.3v2**).
+[CSS Grid Level 2 §9](https://www.w3.org/TR/css-grid-2/#subgrids) ·
+[Round 223](../test/online/comparison/repairs.html#round-223).
+
+<a id="ri-261"></a>
+
+- [RI-261 — Indefinite grid tracks collapse or absorb their gutters](<Radiant_Issue_Ledger (fixed).md#ri-261>).
+
+<a id="ri-260"></a>
+
+- [RI-260 — Windowless file export skips native WebGL host acquisition](<Radiant_Issue_Ledger (fixed).md#ri-260>).
+
+<a id="ri-259"></a>
+
+- [RI-259 — A ratio-sized flex badge loses its descendant percentage height](<Radiant_Issue_Ledger (fixed).md#ri-259>).
+
 <a id="ri-258"></a>
 
 - [RI-258 — A broad rebuild loses the input measurements of its completed container cascade](<Radiant_Issue_Ledger (fixed).md#ri-258>).

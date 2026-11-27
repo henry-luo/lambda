@@ -122,7 +122,7 @@ static Item js_canvas_integer(Item input, bool unsigned_value, int64_t* out) {
     double value = NAN;
     Item error = js_canvas_number_value(input, &value);
     if (item_is_error(error)) return error;
-    // constructor dimensions wrap as unsigned long; readback coordinates use EnforceRange.
+    // constructor dimensions wrap as unsigned long; the pixel methods use EnforceRange.
     if (unsigned_value) {
         *out = (uint32_t)js_to_int32(value);
         return ItemNull;
@@ -262,7 +262,63 @@ static Item js_canvas_get_image_data(Item, Item receiver, Item* args, int argc, 
     return image.get();
 }
 
-extern "C" void dom_canvas_install_readback_interface(Item constructor,
+static Item js_canvas_create_image_data(Item, Item receiver, Item* args, int argc, uint64_t*) {
+    if (!js_canvas_is_2d_context(receiver))
+        return js_throw_type_error("Illegal CanvasRenderingContext2D receiver");
+    if (!argc) return js_throw_type_error("createImageData requires an ImageData or dimensions");
+    if (argc == 1) {
+        JS_ASSIGN_OR_RETURN(record, js_image_data_state(args[0]));
+        uint32_t width = (uint32_t)it2i(js_elements_get_int(record, 1));
+        uint32_t height = (uint32_t)it2i(js_elements_get_int(record, 2));
+        // Cloning a shape allocates fresh transparent storage.
+        return js_image_data_allocate(width, height);
+    }
+    int64_t width = 0, height = 0;
+    JS_RETURN_IF_ERROR(js_canvas_integer(args[0], false, &width));
+    JS_RETURN_IF_ERROR(js_canvas_integer(args[1], false, &height));
+    JS_RETURN_IF_ERROR(js_image_data_settings(argc > 2 ? args[2] : make_js_undefined()));
+    return js_image_data_allocate((uint32_t)(width < 0 ? -width : width),
+        (uint32_t)(height < 0 ? -height : height));
+}
+
+static Item js_canvas_put_image_data(Item, Item receiver, Item* args, int argc, uint64_t*) {
+    if (!js_canvas_is_2d_context(receiver))
+        return js_throw_type_error("Illegal CanvasRenderingContext2D receiver");
+    if (argc != 3 && argc < 7) return js_throw_type_error("putImageData requires three or seven arguments");
+    RootFrame roots(3);
+    Rooted<Item> owner(roots, receiver), record(roots, js_image_data_state(args[0]));
+    JS_RETURN_IF_ERROR(record.get());
+    Rooted<Item> pixels(roots, js_elements_get_int(record.get(), 0));
+    int64_t width = it2i(js_elements_get_int(record.get(), 1));
+    int64_t height = it2i(js_elements_get_int(record.get(), 2));
+    int64_t rect[] = {0, 0, 0, 0, width, height};
+    int count = argc >= 7 ? 6 : 2;
+    for (int index = 0; index < count; ++index)
+        JS_RETURN_IF_ERROR(js_canvas_integer(args[index + 1], false, &rect[index]));
+
+    // Numeric coercion can detach the array. Resolve the view only after user code has run.
+    void* element = js_canvas_context_element(owner.get());
+    if (!element) return js_throw_type_error("Illegal CanvasRenderingContext2D receiver");
+    const uint8_t* bytes = (const uint8_t*)js_typed_array_current_data_ptr(pixels.get());
+    size_t byte_length = (size_t)js_typed_array_byte_length(pixels.get());
+    if (!bytes || (uint64_t)width * height > byte_length / 4)
+        return dom_raise_exception("InvalidStateError", "Invalid ImageData pixel storage");
+
+    if (rect[4] < 0) { rect[2] += rect[4]; rect[4] = -rect[4]; }
+    if (rect[5] < 0) { rect[3] += rect[5]; rect[5] = -rect[5]; }
+    int64_t left = rect[2] > 0 ? rect[2] : 0, top = rect[3] > 0 ? rect[3] : 0;
+    int64_t right = rect[2] + rect[4] < width ? rect[2] + rect[4] : width;
+    int64_t bottom = rect[3] + rect[5] < height ? rect[3] + rect[5] : height;
+    if (left >= right || top >= bottom) return make_js_undefined();
+    size_t row_bytes = (size_t)width * 4;
+    size_t offset = (size_t)top * row_bytes + (size_t)left * 4;
+    if (!dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::put_pixels,
+            element, rect[0] + left, rect[1] + top, (uint32_t)(right - left), (uint32_t)(bottom - top),
+            bytes + offset, row_bytes, byte_length - offset)) return js_canvas_draw_failed();
+    return make_js_undefined();
+}
+
+extern "C" void dom_canvas_install_pixel_interface(Item constructor,
         Item image_data_prototype, Item context_prototype) {
     JsCanvasRuntimeState* state = canvas_runtime_state_ensure();
     if (!state || !root_vector_ensure_external(&state->image_data_roots)) return;
@@ -279,9 +335,16 @@ extern "C" void dom_canvas_install_readback_interface(Item constructor,
         js_set_function_name_from_property_key(function.get(), key.get(), 1);
         dom_realm_install_accessor(prototype.get(), key.get(), function.get(), ItemNull, 0);
     }
-    function.set(js_new_native_payload_function(js_canvas_get_image_data, 0, 4));
-    js_set_function_name(function.get(), js_name_item("getImageData"));
-    dom_realm_set_name(context_root.get(), "getImageData", function.get());
+    static const struct { const char* name; JsNativeCallBody call; int length; } methods[] = {
+        {"createImageData", js_canvas_create_image_data, 1},
+        {"getImageData", js_canvas_get_image_data, 4},
+        {"putImageData", js_canvas_put_image_data, 3},
+    };
+    for (const auto& method : methods) {
+        function.set(js_new_native_payload_function(method.call, 0, method.length));
+        js_set_function_name(function.get(), js_name_item(method.name));
+        dom_realm_set_name(context_root.get(), method.name, function.get());
+    }
 }
 
 static bool js_canvas_numbers_are_finite(const float* values, int count) {

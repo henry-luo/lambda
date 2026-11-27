@@ -162,6 +162,8 @@ enum JsClass : uint8_t {
     JS_CLASS_INTERSECTION_OBSERVER_ENTRY,
     JS_CLASS_INTL_PLURAL_RULES,
     JS_CLASS_INTL_LIST_FORMAT,
+    JS_CLASS_CRYPTO,
+    JS_CLASS_QUOTA_EXCEEDED_ERROR,
     JS_CLASS__COUNT  // sentinel
 };
 
@@ -199,6 +201,7 @@ static inline JsClass js_class_from_name(const char* nm, int nl) {
             if (!strncmp(nm, "Event", 5)) return JS_CLASS_EVENT;
             break;
         case 6:
+            if (!strncmp(nm, "Crypto", 6)) return JS_CLASS_CRYPTO;
             if (!strncmp(nm, "Number", 6)) return JS_CLASS_NUMBER;
             if (!strncmp(nm, "String", 6)) return JS_CLASS_STRING;
             if (!strncmp(nm, "Object", 6)) return JS_CLASS_OBJECT;
@@ -317,6 +320,9 @@ static inline JsClass js_class_from_name(const char* nm, int nl) {
             if (!strncmp(nm, "GeneratorFunction", 17)) return JS_CLASS_GENERATOR_FUNCTION;
             if (!strncmp(nm, "SharedArrayBuffer", 17)) return JS_CLASS_SHARED_ARRAY_BUFFER;
             break;
+        case 18:
+            if (!strncmp(nm, "QuotaExceededError", 18)) return JS_CLASS_QUOTA_EXCEEDED_ERROR;
+            break;
         case 21:
             if (!strncmp(nm, "CSSNestedDeclarations", 21)) return JS_CLASS_CSS_NESTED_DECLARATIONS;
             break;
@@ -387,6 +393,8 @@ static inline const char* js_class_to_name(JsClass cls) {
         case JS_CLASS_FILE_READER: return "FileReader";
         case JS_CLASS_EVENT_EMITTER: return "EventEmitter";
         case JS_CLASS_DOM_EXCEPTION: return "DOMException";
+        case JS_CLASS_QUOTA_EXCEEDED_ERROR: return "QuotaExceededError";
+        case JS_CLASS_CRYPTO: return "Crypto";
         case JS_CLASS_ABORT_CONTROLLER: return "AbortController";
         case JS_CLASS_ABORT_SIGNAL: return "AbortSignal";
         case JS_CLASS_ABORT_ERROR: return "AbortError";

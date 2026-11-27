@@ -81,6 +81,10 @@ static Item host_console_group(Context* context, MvpLmdProgram* program,
 static Item host_console_group_end(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item, Item) {
     return js_console_groupEnd_fn();
 }
+static Item host_console_assert(Context*, MvpLmdProgram*, Item* arguments,
+        uint64_t count, Item, Item, Item) {
+    return js_console_assert_span(arguments, (int)count);
+}
 struct MvpLmdConsoleArgumentBinding { const char* name; Item (*call)(Item); bool coerce_label = true; };
 static Item host_console_argument(Context*, MvpLmdProgram*, Item* arguments, uint64_t count, Item self, Item, Item) {
     const auto* binding = (const MvpLmdConsoleArgumentBinding*)((MvpLmdNativeCallable*)self.function)->state;
@@ -296,6 +300,7 @@ Item mvp_lmd_host_initialize(MvpLmdProgram* program, MvpLmdHostState* state,
             {LMD_HOST_CONSOLE, "debug", host_console_log<>, 0},
             {LMD_HOST_CONSOLE, "error", host_console_log<true>, 0},
             {LMD_HOST_CONSOLE, "warn", host_console_log<true>, 0},
+            {LMD_HOST_CONSOLE, "assert", host_console_assert, 0},
             {LMD_HOST_CONSOLE, "dir", host_console_log<false, true>, 1},
             {LMD_HOST_CONSOLE, "table", host_console_log<false, true>, 1},
             {LMD_HOST_CONSOLE, "group", host_console_group, 0},

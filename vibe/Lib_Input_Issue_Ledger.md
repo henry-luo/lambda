@@ -15,6 +15,10 @@ Resolved records are in the [fixed issue ledger](<Lib_Input_Issue_Ledger (fixed)
 
 ## Open issues
 
+<a id="li-127"></a>
+
+- [LI-127 — A queued resource completion can reach a retired DOM element](<Lib_Input_Issue_Ledger (fixed).md#li-127>).
+
 <a id="li-126"></a>
 
 - [LI-126 — The CSS mask shorthand and its geometry had no property dispatch](<Lib_Input_Issue_Ledger (fixed).md#li-126>).

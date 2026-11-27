@@ -14,6 +14,70 @@ are unchanged. Full evidence is under `../../lambda/temp/kianhup-style/`.
 
 ## Fixed issues
 
+<a id="ri-261"></a>
+
+### RI-261 — Indefinite grid tracks collapse or absorb their gutters
+
+**Fixed, 2026-11-27.** An auto-height grid with two flexible rows and
+spanning content collapsed all four tracks to zero. In the transposed
+max-content grid, the flexible column widths included the gutters a second
+time. Radiant now runs the content-based flex fraction phase on indefinite
+rows. The synthesized track space excludes gutters, while the reported
+container extent includes them (**D9.1.3v2**).
+[CSS Grid Level 2 §12.7](https://www.w3.org/TR/css-grid-2/#algo-flex-tracks).
+
+Both axis reductions match Chromium with 58 px flexible tracks and a
+152 px container. The 57 other passing grid checks and the three existing
+flex-content alignment failures retain their results. Static and JS layout
+outcomes are unchanged. The ordinary Figma Pricing viewport no longer has
+overlapping cards. Both pairs clear high severity (**D10.1.7**).
+[Regression](../test/online/render_grid_spanning_minimum.test.cjs) ·
+[Round 223](../test/online/comparison/repairs.html#round-223).
+
+<a id="ri-260"></a>
+
+### RI-260 — Windowless file export skips native WebGL host acquisition
+
+**Fixed, 2026-11-27.** HTML file export permits acquiring a native graphics
+host on demand. Scene3D already requested that host, while the WebGL Canvas
+provider required a window to exist before `getContext('webgl2')`. It now
+follows the existing export policy when a canvas first requests WebGL. A
+missing native provider still yields a null context (**D9.1.3v2 / D9.5.6v2 /
+D10.1.7**).
+
+The four WebGL export tests start windowless and check rendered red and blue
+pixels through PNG, SVG and PDF. The preceding release fails the same
+control. The Canvas 2D control also passes. Handhold draws its ribbon in
+both ordinary native runs. Chromium returns no WebGL context on this host
+for the shared local control and omits the ribbon in both current live
+references. Its consent dialog is also inconsistent between pairs. Handhold
+remains high. Evidence is in `temp/online-visual-round248/`.
+[Export tests](../test/test_pdf_render_visual_gtest.cpp:7990).
+
+<a id="ri-259"></a>
+
+### RI-259 — A ratio-sized flex badge loses its descendant percentage height
+
+**Fixed, 2026-11-27.** FramerAuth's initial SVG has no `viewBox` and fills
+a percentage-height wrapper inside an aspect-ratio flex item. Radiant
+gave the icon 150 px of height and its badge 166 px. Chromium used 24 px
+and 40 px with the same markup and CSS (**D9.1.1v4 / D9.1.3v2**).
+
+Intrinsic height queries now identify the box that supplies the transferred
+height. During layout, a provisional flex item record from an `aspect-ratio`
+declaration no longer overrides the actual parent formatting context. The
+SVG viewport uses the current containing block when deciding whether its
+percentage height is definite. [CSS Sizing 4 §4.2–4.3](https://www.w3.org/TR/css-sizing-4/#aspect-ratio).
+
+Two reduced controls cover explicit `aspect-ratio: auto` and `inherit` on
+the wrapper. Both now produce 24 px for the flex row, icon, wrapper and
+SVG. The six existing intrinsic image controls also pass. Both ordinary
+FramerAuth pairs show the compact badge. Its hero remains lower and the
+cross-origin demo is blank. The static and JS layout gate results are
+unchanged. Evidence is in `temp/online-visual-round248/`.
+[Regression](../test/online/render_intrinsic_image_basis.test.cjs) ·
+[Round 221](../test/online/comparison/repairs.html#round-221).
+
 <a id="ri-258"></a>
 
 ### RI-258 — A broad rebuild loses the input measurements of its completed container cascade

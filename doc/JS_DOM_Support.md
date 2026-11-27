@@ -42,10 +42,13 @@ forms. The Test262 cross-realm constructor case remains open
 (**D6.3.3 / D6.4.1 / D7.2.2 / D8.4.4**).
 [JS10-L3](../vibe/jube/JS_Issue_Ledger.md#js10-l3).
 
-`Intl.NumberFormat` supports English decimal, compact and percent formatting
-with default and fraction precision, grouping and parts (**D8.4.4**).
-Broader locale data, currency formatting and explicit compact significant-digit
-precision remain incomplete. [JS10-L4](../vibe/jube/JS_Issue_Ledger.md#js10-l4).
+`Intl.NumberFormat` supports English decimal, compact, percent and standard
+currency formatting with default and fraction precision, grouping and parts.
+Standard currency uses CLDR 48 precision and English locale patterns
+(**D8.4.4**). Broader locale data, compact currency notation and explicit
+compact significant-digit precision remain incomplete.
+[JS10-L1](../vibe/jube/JS_Issue_Ledger.md#js10-l1) ·
+[JS10-L4](../vibe/jube/JS_Issue_Ledger.md#js10-l4).
 
 The baseline excludes intl402, proper tail calls, `Temporal`, and
 ES2025-or-later features such as iterator helpers.
@@ -78,7 +81,7 @@ profile; XML node factories and newer constructor APIs remain unqualified
 
 The DOM lives in `lambda/dom/` and is realm-neutral: the same nodes are driven by JavaScript (`el.querySelector(...)`) and by Lambda (`import dom`, and the `radiant.*` behaviours the `dom` package uses). The catalogue is 351 operations plus events, CSSOM, canvas, XHR/fetch, `FormData`, observers, selection and clipboard. Highlights:
 
-- **Canvas pixel readback**: HTML Canvas 2D `getImageData` copies real bitmap pixels into owned RGBA8/sRGB `ImageData` storage. Negative rectangles normalize without flipping, outside pixels are transparent, and drawing transforms/clip/alpha do not affect reads. `ImageData` supports dimension and clamped-array constructors, subclassing and branded readonly getters; the existing pixel budget is retained (**D9.5.1 / D9.5.6v2 / D6.3.3**). Wide-gamut/float16 readback, `createImageData`/`putImageData`, real OffscreenCanvas bitmaps and full image-origin taint tracking remain incomplete. See [JS13-L77](../vibe/jube/JS_Issue_Ledger.md#js13-l77).
+- **Canvas pixel access** copies real bitmap pixels into owned RGBA8/sRGB `ImageData` storage with `getImageData`. `createImageData` allocates transparent pixels, and `putImageData` replaces pixels inside the clipped source and destination rectangles. Pixel access bypasses drawing transforms, clip and alpha. `ImageData` has dimension and clamped-array constructors, subclassing and branded readonly getters (**D9.5.1 / D9.5.6v2 / D6.3.3**). Wide-gamut/float16 access, real OffscreenCanvas bitmaps and full origin taint tracking remain incomplete. [JS13-L77](../vibe/jube/JS_Issue_Ledger.md#js13-l77) · [JS13-L95](../vibe/jube/JS_Issue_Ledger.md#js13-l95).
 - **Nodes and traversal**: the `Node`/`Element`/`Document` APIs, `querySelector[All]`, `matches`/`closest`, `cloneNode`, `insertAdjacent*`, fragments, comments, `importNode`/`adoptNode`, `createElementNS` with the namespace recorded. `hasAttributes()` observes live HTML and namespaced attributes; imported fragments initialize their custom descendants before property binding, preserving detached lifecycle behavior (**D8.4.4 / D9.5.4**, [JS13-L8/L9](../vibe/jube/JS_Issue_Ledger.md#js13-l8--missing-elementhasattributes-rejects-dynamic-lit-templates--resolved)).
 - **Namespace lookup**: `Node.lookupNamespaceURI` supports captured prototype calls, HTML/SVG/XML expanded names, namespace declarations and node-kind dispatch, including fragment isolation. Four native/Chromium fixtures cover this surface; other namespace methods and complete WebIDL/XML conformance remain unqualified (**D8.4.4 / D9.5.6v2**; [JS13-L37](../vibe/jube/JS_Issue_Ledger.md#js13-l37--missing-nodelookupnamespaceuri-breaks-captured-consent-wrapper-calls--fixed)).
 - **Node constants**: node-kind and document-position constants are inherited from `Node.prototype` and available on the constructor. The shared Node/CSSRule installer uses enumerable, readonly, non-configurable descriptors (**D8.4.4 / D9.5.6v2**; [JS13-L35](../vibe/jube/JS_Issue_Ledger.md#js13-l35--missing-inherited-node-constants-crash-ancestor-walks--fixed)).
