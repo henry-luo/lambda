@@ -4182,7 +4182,8 @@ extern "C" Item dom_iframe_get_content_document(DomElement* iframe) {
         // cache only preserves identity and must not duplicate that ownership.
         return wrap_foreign_doc_owned(doc, false);
     }
-    return wrap_foreign_doc_owned(e->doc, e->owns_doc);
+    // Repeated reads borrow the same provisional document from the iframe cache.
+    return wrap_foreign_doc_owned(e->doc, false);
 }
 JS_FORWARD_ITEM(dom_iframe_get_content_window, (DomElement* iframe), dom_iframe_get_content_document, (iframe))
 
