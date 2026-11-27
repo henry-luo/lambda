@@ -6,9 +6,9 @@ remain in the [active issue ledger](Lib_Input_Issue_Ledger.md).
 
 ## Fixed issues
 
-<a id="li-127"></a>
+<a id="li-128"></a>
 
-### LI-127 — A queued resource completion can reach a retired DOM element
+### LI-128 — A queued resource completion can reach a retired DOM element
 
 **Fixed, 2026-11-27.** FramerAuth's native capture crashed when a queued
 image completion passed a retired element to the Radiant image processor.
@@ -31,6 +31,19 @@ captures now complete in 109.42 s and 93.43 s. Both show the heading, copy,
 and primary actions. The vertically displaced hero and missing demo media
 keep the page high (**D10.1.7**). Crash, tests and paired capture evidence
 are in `temp/online-visual-round247/` and `temp/online-visual-round248/`.
+
+<a id="li-127"></a>
+
+### LI-127 — Re-registering a math font grows the font resource registry
+
+**Fixed 2026-11-26.** Repeatedly visiting the same LaTeX and math previews
+registered identical `@font-face` resources in the window's font context.
+Each pass added about 184 KiB to the font arena and lengthened font lookup.
+Equivalent descriptors now share the stored resource and loaded handle.
+Re-registering an equivalent face preserves last-rule precedence within its
+family. Distinct sources, faces, and Unicode ranges remain separate
+(D5.5.1, D10.2.4). The 31-case font-context suite passes, including a
+repeated-registration replay that checks precedence, count and arena usage.
 
 <a id="li-126"></a>
 

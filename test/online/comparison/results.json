@@ -12065,7 +12065,7 @@
       "browser_height": 800,
       "manual_major_remaining": "",
       "severity": "low",
-      "severity_reason": "RI-261 sizes flexible tracks from intrinsic content in indefinite block space and keeps gutters out of available track space. Two independent ordinary pairs show legible pricing cards and consent. Full subgrid alignment remains open.",
+      "severity_reason": "RI-263 sizes flexible tracks from intrinsic content in indefinite block space and keeps gutters out of available track space. Two independent ordinary pairs show legible pricing cards and consent. Full subgrid alignment remains open.",
       "lambda_animation_origin": "post-load",
       "browser_http_user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
       "lambda_script_load_clock": "elapsed",

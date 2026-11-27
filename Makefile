@@ -587,7 +587,7 @@ help:
 	@echo "  test-all      - Run ALL test suites (baseline + extended)"
 	@echo "  test-all-baseline - Run ALL BASELINE test suites (core functionality, must pass 100%)"
 	@echo "  test-lambda-baseline - Run LAMBDA baseline test suite only"
-	@echo "  test-lambda-full - Lambda baseline plus focused JavaScript, TeX, concurrency, extended-runtime and input gates"
+	@echo "  test-lambda-full - Lambda baseline plus focused JavaScript, TeX, concurrency, input and viewer memory gates"
 	@echo "  test-gc-rooting - Run exact-root forced-GC JIT/interpreter/root-effect gates"
 	@echo "  test-mir-gc-stress - Run batched GC stress and reviewed backend-parity probes"
 	@echo "  test-mir-gc-stress-full - Force GC for every MIR corpus fixture"
@@ -1654,6 +1654,16 @@ test-lambda-full: test-lambda-baseline
 	@./test/test_validator_input_gtest.exe
 	@echo "Running semantics-model verification gate..."
 	@python3 test/lambda/sem/semantics_verify.py
+	@$(MAKE) --no-print-directory test-viewer-navigation-memory
+
+.PHONY: test-viewer-navigation-memory
+test-viewer-navigation-memory:
+	@mkdir -p temp
+	# Keep the baseline's debug host and build marker available to other tests.
+	@$(MAKE) build-lambda-split SPLIT_PROFILE=release SPLIT_OUTPUT=temp/viewer-navigation-release.exe
+	$(call run_make_with_error_summary,viewer-navigation-memory,release_native,,test_viewer_navigation_memory_gtest)
+	@LAMBDA_VIEWER_MEMORY_EXE="$(abspath temp/viewer-navigation-release.exe)" LAMBDA_VIEWER_MEMORY_PYTHON="$(PYTHON)" \
+		./test/test_viewer_navigation_memory_gtest.exe
 
 # Permanent exact-root CI lane. Collection is injected only at public allocator
 # boundaries, and poison makes a missed root deterministic instead of relying

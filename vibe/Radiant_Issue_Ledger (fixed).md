@@ -14,9 +14,9 @@ are unchanged. Full evidence is under `../../lambda/temp/kianhup-style/`.
 
 ## Fixed issues
 
-<a id="ri-261"></a>
+<a id="ri-263"></a>
 
-### RI-261 — Indefinite grid tracks collapse or absorb their gutters
+### RI-263 — Indefinite grid tracks collapse or absorb their gutters
 
 **Fixed, 2026-11-27.** An auto-height grid with two flexible rows and
 spanning content collapsed all four tracks to zero. In the transposed
@@ -34,9 +34,9 @@ overlapping cards. Both pairs clear high severity (**D10.1.7**).
 [Regression](../test/online/render_grid_spanning_minimum.test.cjs) ·
 [Round 223](../test/online/comparison/repairs.html#round-223).
 
-<a id="ri-260"></a>
+<a id="ri-262"></a>
 
-### RI-260 — Windowless file export skips native WebGL host acquisition
+### RI-262 — Windowless file export skips native WebGL host acquisition
 
 **Fixed, 2026-11-27.** HTML file export permits acquiring a native graphics
 host on demand. Scene3D already requested that host, while the WebGL Canvas
@@ -54,9 +54,9 @@ references. Its consent dialog is also inconsistent between pairs. Handhold
 remains high. Evidence is in `temp/online-visual-round248/`.
 [Export tests](../test/test_pdf_render_visual_gtest.cpp:7990).
 
-<a id="ri-259"></a>
+<a id="ri-261"></a>
 
-### RI-259 — A ratio-sized flex badge loses its descendant percentage height
+### RI-261 — A ratio-sized flex badge loses its descendant percentage height
 
 **Fixed, 2026-11-27.** FramerAuth's initial SVG has no `viewBox` and fills
 a percentage-height wrapper inside an aspect-ratio flex item. Radiant
@@ -77,6 +77,23 @@ cross-origin demo is blank. The static and JS layout gate results are
 unchanged. Evidence is in `temp/online-visual-round248/`.
 [Regression](../test/online/render_intrinsic_image_basis.test.cjs) ·
 [Round 221](../test/online/comparison/repairs.html#round-221).
+
+<a id="ri-259"></a>
+
+### RI-259 — Cached previews repeat stylesheet, font and layout allocation
+
+**Fixed 2026-11-26.** Switching between the math Markdown and intensive TeX
+fixtures in `lambda view` recreated 298 parsed inline sheets per round in
+the same document pool. Reconnecting an unchanged style element now reuses
+its unexposed sheet. Stylesheet removal still withdraws its rules from the
+cascade. An author that obtained the old CSSOM object retains its own copy.
+Animation and font caches are invalidated when the changed sheets contribute
+their at-rules. CSS font registration publishes directly to the shared font
+registry (D5.5.1, D5.5.3, D10.2.4 and LI-127).
+
+Retained layout replay now allocates live text rectangles from the same list
+to which it returns them. Retiring a border releases its computed corners,
+with layout and paint sharing the currently owned snapshot (D5.5.1, D5.5.3).
 
 <a id="ri-258"></a>
 

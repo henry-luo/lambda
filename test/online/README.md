@@ -4584,7 +4584,7 @@ and 1,018 low** across 1,067 comparisons.
 
 Round 220 restores ordinary **FramerAuth** captures. A completed transfer now
 validates its requesting element against the document registry before
-delivery (LI-127, **D5.5.1 / D9.1.2v2 / D9.1.3v2**). Both 1000 ms capture
+delivery (LI-128, **D5.5.1 / D9.1.2v2 / D9.1.3v2**). Both 1000 ms capture
 pairs show the membership heading, copy and actions (**D10.1.7**).
 FramerAuth stays high because the oversized badge displaces the hero and
 the native frame is missing the embedded demo. Mean error is 13.25% and
@@ -4595,7 +4595,7 @@ comparisons. [Evidence](comparison/repairs.html#round-220).
 
 
 Round 221 corrects the **FramerAuth** badge. The SVG now uses the
-ratio-derived containing-block height (RI-259, **D9.1.1v4 / D9.1.3v2**).
+ratio-derived containing-block height (RI-261, **D9.1.1v4 / D9.1.3v2**).
 Both ordinary 1000 ms capture pairs show the compact badge (**D10.1.7**).
 The page stays high because the hero remains lower and the cross-origin
 demo is blank in Radiant. The two pairs measure 12.33% and 11.77% mean
@@ -4614,9 +4614,9 @@ across 1,067 comparisons. [Evidence](comparison/repairs.html#round-222).
 
 Round 223 clears **Figma Pricing**. The flexible sizing phase now runs for an
 indefinite grid block size, and gutters no longer inflate the synthesized
-space for flexible tracks (RI-261, **D9.1.3v2**). Both ordinary 1000 ms pairs
+space for flexible tracks (RI-263, **D9.1.3v2**). Both ordinary 1000 ms pairs
 show legible pricing panels and the consent dialog, at 4.23% mean error
-(**D10.1.7**). Full subgrid alignment remains open (RI-262). The report has
+(**D10.1.7**). Full subgrid alignment remains open (RI-264). The report has
 **48 high, zero critical and 1,019 low** across 1,067 comparisons.
 [Evidence](comparison/repairs.html#round-223).
 

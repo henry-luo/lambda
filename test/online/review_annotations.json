@@ -1017,7 +1017,7 @@
       "reviewed_at": "2026-11-27T01:31:01.777Z",
       "evidence": "comparison/repairs.html#round-222",
       "resolved_at": "2026-11-27T01:42:40.867Z",
-      "resolution": "RI-261 sizes flexible tracks from intrinsic content in indefinite block space and keeps gutters out of available track space. Two independent ordinary pairs show legible pricing cards and consent. Full subgrid alignment remains open.",
+      "resolution": "RI-263 sizes flexible tracks from intrinsic content in indefinite block space and keeps gutters out of available track space. Two independent ordinary pairs show legible pricing cards and consent. Full subgrid alignment remains open.",
       "resolution_evidence": "comparison/repairs.html#round-223",
       "resolved_previous_manual_major_remaining": "The pricing heading, plan cards and consent dialog render. In Radiant the third and fourth plan cards overlap the first two and obscure several prices and descriptions. Chromium uses nested row subgrids to place those cards below the first row.",
       "resolved_capture_settle_ms": 1000

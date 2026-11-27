@@ -5503,7 +5503,6 @@ TEST_F(FontLocalSourceTest, CompletedDownloadStaysAfterLocalNamesInTheOriginalRu
     EXPECT_STREQ(registered->sources[0].local_name, "Missing Online Regression Face");
     EXPECT_STREQ(registered->sources[1].path, cached_path.get());
     // the registry owns its source paths after the layout descriptor is released (D5.5.1).
-    fontface_cleanup(&ui);
     expect_name(font_face_load(ctx, registered, 20.0f), "SVGTestRectangle-Regular");
 
     css_engine_destroy(engine);

@@ -20,13 +20,13 @@ observations still require re-verification. Add new Radiant issues here.
 
 ## Open issues
 
-<a id="ri-262"></a>
+<a id="ri-264"></a>
 
-### RI-262 — Nested row subgrids do not share their parent tracks
+### RI-264 — Nested row subgrids do not share their parent tracks
 
 **Open, 2026-11-27.** Figma Pricing uses three nested `subgrid` row axes.
 Its original overlap also exposed the independent flexible-track defect
-fixed by RI-261. With that defect repaired, both ordinary captures have
+fixed by RI-263. With that defect repaired, both ordinary captures have
 legible first-row pricing panels and clear high severity (**D10.1.7**).
 The reduced authored structure still lays out as standalone grids in
 Radiant. Chromium shares eight row tracks and sizes the fixture to 580 px.
@@ -36,17 +36,34 @@ belong to Input and Radiant (**D9.1.1v4 / D9.1.3v2**).
 [CSS Grid Level 2 §9](https://www.w3.org/TR/css-grid-2/#subgrids) ·
 [Round 223](../test/online/comparison/repairs.html#round-223).
 
+<a id="ri-263"></a>
+
+- [RI-263 — Indefinite grid tracks collapse or absorb their gutters](<Radiant_Issue_Ledger (fixed).md#ri-263>).
+
+<a id="ri-262"></a>
+
+- [RI-262 — Windowless file export skips native WebGL host acquisition](<Radiant_Issue_Ledger (fixed).md#ri-262>).
+
 <a id="ri-261"></a>
 
-- [RI-261 — Indefinite grid tracks collapse or absorb their gutters](<Radiant_Issue_Ledger (fixed).md#ri-261>).
+- [RI-261 — A ratio-sized flex badge loses its descendant percentage height](<Radiant_Issue_Ledger (fixed).md#ri-261>).
 
 <a id="ri-260"></a>
 
-- [RI-260 — Windowless file export skips native WebGL host acquisition](<Radiant_Issue_Ledger (fixed).md#ri-260>).
+### RI-260 — Detached frame documents accumulate during viewer navigation
+
+**Open, observed 2026-11-26.** Repeatedly switch between a local HTML page
+and a text file in `lambda view`. The allocator report retains a separate
+set of document, view and Input pools for each retired frame. The frame
+teardown path transfers ownership to the parent's resources, which preserve
+storage for exposed wrappers and adopted nodes until parent close. Timely
+retirement needs to track those lifetime edges and wait until the relevant
+evaluators are quiescent (D5.5.1, D6.3.3). This affects the mixed-document
+memory gate. Transformed inline previews have a separate lifetime.
 
 <a id="ri-259"></a>
 
-- [RI-259 — A ratio-sized flex badge loses its descendant percentage height](<Radiant_Issue_Ledger (fixed).md#ri-259>).
+- [RI-259 — Cached previews repeat stylesheet, font and layout allocation](<Radiant_Issue_Ledger (fixed).md#ri-259>).
 
 <a id="ri-258"></a>
 
