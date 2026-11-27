@@ -1,4 +1,4 @@
-#include "mvp_lmd_runtime.h"
+#include "js_mir_runtime.h"
 #include "../js_exec_profile.h"
 #include "../js_regexp_compile.h"
 #include "../js_runtime.h"

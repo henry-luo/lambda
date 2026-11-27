@@ -1,8 +1,8 @@
-// mvp_lmd_program.cpp — MIR-free MVP program and realm runtime: unit and
+// js_mir_program.cpp — MIR-free MVP program and realm runtime: unit and
 // realm ownership, realm-library ambient state, internal names, callable
 // preparation and dynamic-source globals. It is shared by every build;
-// only mvp_lmd_mir.cpp generates code (vibe/Lambda_Design_Mobile.md MB22).
-#include "mvp_lmd_internal.h"
+// only js_mir_mir.cpp generates code (vibe/Lambda_Design_Mobile.md MB22).
+#include "js_mir_internal.h"
 
 MvpLmdProgram* mvp_lmd_new_unit(MvpLmdExecution* execution, MvpLmdProgram* realm) {
     if (!execution->units) execution->units = arraylist_new(8);

@@ -1,4 +1,4 @@
-#include "mvp_lmd_runtime.h"
+#include "js_mir_runtime.h"
 #include "../js_ast.hpp"
 #include "../js_props.h"
 #include "lambda/core/js_well_known_names.h"

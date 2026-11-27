@@ -9,9 +9,9 @@
 #include "lambda/dom/dom.h"
 #include "lambda/dom/dom_realm_hooks.h"
 #include <gtest/gtest.h>
-#include "lambda/js/mvp-lmd/mvp_lmd.h"
-#include "lambda/js/mvp-lmd/mvp_lmd_runtime.h"
-#include "lambda/js/mvp-lmd/mvp_lmd_internal.h"
+#include "lambda/js/mir/js_mir.h"
+#include "lambda/js/mir/js_mir_runtime.h"
+#include "lambda/js/mir/js_mir_internal.h"
 #include "lambda/js/js_object_meta.h"
 #include "lambda/js/js_typed_array.h"
 #include "lambda/js/parser/js_parser.h"

@@ -1,6 +1,6 @@
-#include "mvp_lmd_runtime.h"
+#include "js_mir_runtime.h"
 #include "../js_host_hooks.h"
-#include "mvp_lmd_dynamic.h"
+#include "js_mir_dynamic.h"
 #include "../js_props.h"
 #include "../js_builtin_catalog.hpp"
 #include "../js_runtime.h"

@@ -1,4 +1,4 @@
-#include "mvp_internal.hpp"
+#include "mir_internal.hpp"
 #include "../interp.hpp"
 #include "lambda/io/mark_output_builder.hpp"
 #include "../type_contract.hpp"

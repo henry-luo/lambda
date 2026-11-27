@@ -1,4 +1,4 @@
-#include "mvp_lmd_runtime.h"
+#include "js_mir_runtime.h"
 #include "../../runtime/suspended_activation.hpp"
 #include "../../runtime/lambda-root-frame.hpp"
 #include "../../runtime/runtime-state.h"

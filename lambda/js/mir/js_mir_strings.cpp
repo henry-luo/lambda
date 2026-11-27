@@ -1,4 +1,4 @@
-#include "mvp_lmd_runtime.h"
+#include "js_mir_runtime.h"
 #include "../js_host_hooks.h"
 #include "../js_runtime.h"
 #include "../../runtime/lambda-root-frame.hpp"

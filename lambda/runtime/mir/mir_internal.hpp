@@ -1,6 +1,6 @@
 #pragma once
 
-#include "mvp.hpp"
+#include "mir.hpp"
 #include "../mir_emitter_shared.hpp"
 #include "../lambda-error.h"
 #include "../type_contract.hpp"

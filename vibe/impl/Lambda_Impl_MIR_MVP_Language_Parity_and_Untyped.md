@@ -6,7 +6,7 @@
 
 **Starting tree:** `71296a16a9622f764229720ed2c321330efcd278`, branch `master`.
 
-Extend the existing compiler in `lambda/runtime/mvp/` to execute the full
+Extend the existing compiler in `lambda/runtime/mir/` to execute the full
 Lambda language surface, pass the Lambda GTests, and beat Full MIR on every
 registered untyped benchmark. Preserve the existing typed benchmark performance.
 Features that Full MIR already routes to the AST interpreter may use that same
@@ -298,7 +298,7 @@ These observations identify work; they are not a completed coverage census.
 | Current boundary | Evidence and required expansion |
 |---|---|
 | Compiler selection | `runner.cpp::load_script` requires explicit JIT for MVP and rejects MVP with AUTO/interp. The GTests deliberately invoke all three tiers. A global environment override is therefore insufficient. |
-| Function planning | `mvp_plan.cpp::lambda_mvp_plan` rejects captured, variadic, dependent and suspending definitions, and most nested named definitions. Rejection diagnostics are not always precise descriptions of the predicates. |
+| Function planning | `mir_plan.cpp::lambda_mvp_plan` rejects captured, variadic, dependent and suspending definitions, and most nested named definitions. Rejection diagnostics are not always precise descriptions of the predicates. |
 | Calls | `admitted_call` rejects named/spread/pipe arguments and indirect calls. Existing support includes direct fixed-arity calls, some defaults, public imports and noncapturing function values; extend it rather than replace it. |
 | Content and control | Planning rejects multi-value functional content and non-while loop forms. Query support already includes grouping/ordering, but multiple sources, optional/keyed forms, `let`, limits and offsets remain restricted. |
 | Patterns and recovery | Match admission is limited to base-type cases; filtered handlers and further contract forms remain outside the admitted subset. |
@@ -584,8 +584,8 @@ geometric mean.
 
 | Area | Existing owner / planned changes |
 |---|---|
-| Admission and function plans | `lambda/runtime/mvp/mvp_plan.cpp`, `mvp_internal.hpp`: replace subset exclusions with complete semantic plans; consume shared inference/effect/capture facts. |
-| MIR lowering | `lambda/runtime/mvp/mvp_mir.cpp`: boxed completeness, expanded syntax and guarded untyped/native consumers. Split coherent implementation units if needed; do not clone switches/helpers. |
+| Admission and function plans | `lambda/runtime/mir/mir_plan.cpp`, `mir_internal.hpp`: replace subset exclusions with complete semantic plans; consume shared inference/effect/capture facts. |
+| MIR lowering | `lambda/runtime/mir/mir_lower.cpp`: boxed completeness, expanded syntax and guarded untyped/native consumers. Split coherent implementation units if needed; do not clone switches/helpers. |
 | Shared analysis | `lambda/runtime/ast-core.*`, `build_ast.cpp`, existing type/call/COW analyses: add reusable facts only at their proper shared owner. |
 | Physical emission | `mir_emitter_shared.hpp`, `mir_container_access.hpp`, `mir_path.hpp`, `mir_function_value.hpp`: shared transport, guards, roots, places and construction. |
 | Runtime boundaries | `lambda-eval.cpp`, `sys_func_registry.*`, `interp.hpp`/`interp.cpp`, `activation.*`, existing document/type helpers: reuse or narrowly extend canonical behavior with audited effects. |
@@ -4808,7 +4808,7 @@ Paraffins improves to 0.259/Full 0.209/P50 0.273 ms without crossing.
 A text extraction initially matched a forward declaration and changed earlier
 functions. The failed build was never executed. Recovery exactly matches the
 frozen P52 source SHA256, after which the stride extraction was reapplied only
-to its definition. `p52-recovered-mvp_mir.cpp` and the failed edit/build artifacts
+to its definition. `p52-recovered-mir_lower.cpp` and the failed edit/build artifacts
 are retained under `temp/mvp_untyped_tuning_goal/`.
 
 P55 extends the existing scalar-place walk to inferred nested paths. Observed

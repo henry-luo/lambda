@@ -1,5 +1,5 @@
-#include "mvp_lmd_runtime.h"
-#include "mvp_lmd_dynamic.h"
+#include "js_mir_runtime.h"
+#include "js_mir_dynamic.h"
 #include "../js_property_attrs.h"
 #include "../js_props.h"
 #include "../js_exec_profile.h"

@@ -1,4 +1,4 @@
-#include "mvp_lmd_internal.h"
+#include "js_mir_internal.h"
 
 // MIR needs ABI offsets for inherited callable and nominal class records, as in the Lambda emitter.
 #pragma clang diagnostic push

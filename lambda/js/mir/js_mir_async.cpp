@@ -1,5 +1,5 @@
-#include "mvp_lmd_async.h"
-#include "mvp_lmd_dynamic.h"
+#include "js_mir_async.h"
+#include "js_mir_dynamic.h"
 #include "../js_runtime.h"
 #include "../js_runtime_internal.hpp"
 #include "../js_runtime_state.hpp"

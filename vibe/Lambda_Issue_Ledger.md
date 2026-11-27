@@ -1877,7 +1877,7 @@ still use clean returns after fallible admissions/assignments and unchecked
 loop conversions. Six incompatible fixtures were found against `88d30f849`;
 the latest MVP work at `1b0927e30` brings the current count to eleven.
 `admitted_call` explicitly rejects propagation, and unary admission excludes
-`OPERATOR_PROPAGATE` (`lambda/runtime/mvp/mvp_plan.cpp`). Adapt fixtures and
+`OPERATOR_PROPAGATE` (`lambda/runtime/mir/mir_plan.cpp`). Adapt fixtures and
 prototype together; do not restore declaration exits or erase error outcomes.
 Normal admission and post-binding recovery also need prototype qualification.
 **USER, 2026-11-03: leave MVP adaptation to the ongoing main-checkout work.**
@@ -2433,7 +2433,7 @@ preserves the exact HTTP golden. Initial serial MIR runs take
 Existing `js-mvp-phases` logging attributes one 6.014-second run to 0.008
 seconds parsing, 0.124 seconds planning, 0.998 seconds emission and 4.294
 seconds finalization/link/code generation. `lower_pass` in
-`lambda/js/mvp-lmd/mvp_lmd_mir.cpp` eagerly generates all 1,528 functions,
+`lambda/js/mir/js_mir_mir.cpp` eagerly generates all 1,528 functions,
 then retrieves every native address with `MIR_gen`. Its largest function is
 46,138 instructions and the existing shared policy already selects O1.
 The ordinary `JS_TRANSPILE_TIMING` MIR record is zero because the formal

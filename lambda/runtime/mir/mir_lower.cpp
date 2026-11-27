@@ -1,4 +1,4 @@
-#include "mvp_internal.hpp"
+#include "mir_internal.hpp"
 #include "../mir_policy.hpp"
 #include "../lambda-number-types.hpp"
 #include "../type_contract.hpp"

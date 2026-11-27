@@ -581,7 +581,7 @@ constructors into that payload. Static assignment across `HTMLElement`
 reported success but stored on the wrong function; native inherited methods
 also observed that wrong receiver. Implicit constructors did not reproduce.
 
-`mvp_lmd_dynamic.cpp` now shares a public-receiver conversion that retains
+`js_mir_dynamic.cpp` now shares a public-receiver conversion that retains
 class shells for foreign properties, native calls and prototype arguments.
 Body invocation keeps the existing executable unwrapping. The focused
 `JsFormalMir.DynamicClassStaticWritesAcrossNativeSuperclassKeepPublicReceiver`
@@ -1673,7 +1673,7 @@ Monarch's UI and consent panel closely match current Chromium, but the large
 video in its retained reference is absent from both current frames; that
 media/timing difference stays high and is not assigned to this startup bug.
 No additional baseline sweep follows the recent 630/630 milestone. Temporary diagnostics have
-been removed from both `js_interp.cpp` and `mvp_lmd_runtime.cpp`.
+been removed from both `js_interp.cpp` and `js_mir_runtime.cpp`.
 
 Evidence: `temp/online-visual-round207/{member-origin/,console-trace-before.log,
 browser-console-trace.json,monarch-console-chunk.js}` and

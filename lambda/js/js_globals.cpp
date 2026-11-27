@@ -31,7 +31,7 @@
 #include "js_runtime_internal.hpp"
 #include "js_exec_profile.h"
 #include "js_interp.hpp"
-#include "mvp-lmd/mvp_lmd_dynamic.h"
+#include "mir/js_mir_dynamic.h"
 
 #include "js_function.hpp"
 #include "js_builtin_catalog.hpp"

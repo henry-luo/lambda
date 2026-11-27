@@ -1,5 +1,5 @@
 #pragma once
-#include "mvp_lmd_runtime.h"
+#include "js_mir_runtime.h"
 
 // enabled only for programs that admit Promise or async syntax.
 Item mvp_lmd_promise_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state);

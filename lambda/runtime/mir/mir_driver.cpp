@@ -1,4 +1,4 @@
-#include "mvp.hpp"
+#include "mir.hpp"
 #include "../interp.hpp"
 #include "../mir_emitter_shared.hpp"
 #include "../mir_policy.hpp"

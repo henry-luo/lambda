@@ -505,7 +505,7 @@ debug code image before entry, starting with unoptimized MIR bodies; existing
 active frames finish under their admitted policy. General deoptimization,
 arbitrary-PC OSR and full optimized stepping are outside the first design.
 Do not patch vendored MIR or promise native stepping before these contracts
-exist. The production JS path is `lambda/js/mvp-lmd/`, not the retired LJS MIR
+exist. The production JS path is `lambda/js/mir/`, not the retired LJS MIR
 backend (D8.4.5).
 
 ## 8. Resources, performance and memory
@@ -662,7 +662,7 @@ Reuse/promote existing helpers rather than copying static implementations.
 | Radiant adapter | [`radiant/devtools_adapter.cpp`](../radiant/devtools_adapter.cpp): weak handles, DOM/style snapshots, CSS edits, coordinate picking, screenshots and source snapshot. [`resolve_css_style.cpp`](../radiant/radiant/resolve_css_style.cpp) and [`lambda/input/css/css_engine.hpp`](../lambda/input/css/css_engine.hpp) remain the seams for cascade provenance. |
 | Diagnostics / counters | [`lambda/js/js_globals.cpp`](../lambda/js/js_globals.cpp): `js_console_emit`; [`radiant/render_profiler.cpp`](../radiant/radiant/render_profiler.cpp); [`lambda/js/js_exec_profile.h`](../lambda/js/js_exec_profile.h): existing producer/counter seams, not a unified tracing API. |
 | Resource loading | [`lambda/network/network_resource_manager.h`](../lambda/network/network_resource_manager.h), [`http_client.h`](../lambda/network/http_client.h), [`radiant/network_integration.h`](../radiant/radiant/network_integration.h), [`resource_loaders.h`](../radiant/radiant/resource_loaders.h): acquisition and owner-thread processing boundaries. |
-| MIR / memory | [`lambda/runtime/transpile-mir.cpp`](../lambda/runtime/transpile-mir.cpp), [`lambda/js/mvp-lmd/`](../lambda/js/mvp-lmd/), [`lambda/runtime/lambda-mem.cpp`](../lambda/runtime/lambda-mem.cpp): current lowering and lifetime owners; add observations without changing semantic decisions or vendor code. |
+| MIR / memory | [`lambda/runtime/transpile-mir.cpp`](../lambda/runtime/transpile-mir.cpp), [`lambda/js/mir/`](../lambda/js/mir/), [`lambda/runtime/lambda-mem.cpp`](../lambda/runtime/lambda-mem.cpp): current lowering and lifetime owners; add observations without changing semantic decisions or vendor code. |
 
 `make devtool` opens the frontend; choose **Live** to launch an inspector target.
 `lambda devtools <document> --pipe <inherited-fd> [--headless]` is the native

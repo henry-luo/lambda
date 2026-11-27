@@ -1,5 +1,5 @@
-#include "mvp_lmd_dynamic.h"
-#include "mvp_lmd.h"
+#include "js_mir_dynamic.h"
+#include "js_mir.h"
 #include "../js_interp.hpp"
 #include "../js_exec_profile.h"
 #include "../js_interp_env.h"

@@ -62,7 +62,7 @@
     "lambda/io",
     "lambda/devtools",
     "lambda/runtime",
-    "lambda/runtime/mvp",
+    "lambda/runtime/mir",
     "lambda/runtime/gc",
     "lambda/runtime/grammar",
     "lambda/jube",
@@ -76,7 +76,7 @@
     "lambda/format",
     "lambda/validator",
     "lambda/js",
-    "lambda/js/mvp-lmd",
+    "lambda/js/mir",
     "lambda/dom",
     "lambda/dom/realm",
     "lambda/module/radiant",
@@ -534,13 +534,13 @@
       "lang": "c++17",
       "source_patterns": [
         "lambda/js/*.cpp",
-        "lambda/js/mvp-lmd/*.cpp",
+        "lambda/js/mir/*.cpp",
         "lambda/dom/*.cpp",
         "lambda/dom/realm/*.cpp",
         "lambda/jube/*.cpp",
         "lambda/ts/*.cpp",
         "lambda/runtime/*.cpp",
-        "lambda/runtime/mvp/*.cpp",
+        "lambda/runtime/mir/*.cpp",
         "lambda/runtime/gc/*.c",
         "lambda/runtime/grammar/*.cpp",
         "lambda/validator/*.cpp"
@@ -586,7 +586,7 @@
         "lambda/runtime/lambda-eval-science.cpp",
         "lambda/runtime/lambda-eval-num.cpp",
         "lambda/runtime/runner.cpp",
-        "lambda/runtime/mvp/mvp_driver.cpp",
+        "lambda/runtime/mir/mir_driver.cpp",
         "lambda/runtime/transpile_shared.cpp",
         "lambda/runtime/safety_analyzer.cpp",
         "lambda/runtime/vmap.cpp",
@@ -1192,7 +1192,7 @@
         "lambda/network",
         "lib/font",
         "lib/font/woff2",
-        "lambda/runtime/mvp",
+        "lambda/runtime/mir",
         "lambda/devtools"
       ],
       "source_files": [
@@ -1421,12 +1421,12 @@
       "description": "Desktop twin of the iOS phase-1 profile (vibe/Lambda_Design_Mobile.md MB2): the full lambda.exe with GLFW Radiant and the JS/TS runtime, minus MIR -- T0 AST interpreters only (Lambda and LambdaJS), no JIT, no MIR code generation",
       "output": "lambda-nomir.exe",
       "extra_exclude_source_files": [
-        "lambda/runtime/mvp/mvp_driver.cpp",
-        "lambda/runtime/mvp/mvp_plan.cpp",
-        "lambda/runtime/mvp/mvp_mir.cpp",
+        "lambda/runtime/mir/mir_driver.cpp",
+        "lambda/runtime/mir/mir_plan.cpp",
+        "lambda/runtime/mir/mir_lower.cpp",
         "lambda/runtime/mir.c",
         "lambda/runtime/mir_dump.cpp",
-        "lambda/js/mvp-lmd/mvp_lmd_mir.cpp"
+        "lambda/js/mir/js_mir_mir.cpp"
       ],
       "exclude_libraries": [
         "mir"
@@ -2551,12 +2551,12 @@
         "lambda/host/safety/worker_main.cpp"
       ],
       "extra_exclude_source_files": [
-        "lambda/runtime/mvp/mvp_driver.cpp",
-        "lambda/runtime/mvp/mvp_plan.cpp",
-        "lambda/runtime/mvp/mvp_mir.cpp",
+        "lambda/runtime/mir/mir_driver.cpp",
+        "lambda/runtime/mir/mir_plan.cpp",
+        "lambda/runtime/mir/mir_lower.cpp",
         "lambda/runtime/mir.c",
         "lambda/runtime/mir_dump.cpp",
-        "lambda/js/mvp-lmd/mvp_lmd_mir.cpp",
+        "lambda/js/mir/js_mir_mir.cpp",
         "lambda/io/security_policy.cpp",
         "lambda/runtime/devtools_scratch.cpp"
       ],

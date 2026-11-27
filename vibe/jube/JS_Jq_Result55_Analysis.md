@@ -150,10 +150,10 @@ without replacing the cleanup ownership mechanism would be incorrect.
 
 ### 3. Every iterator hop performs a general object protocol
 
-In [mvp_lmd_generators.cpp](../../lambda/js/mvp-lmd/mvp_lmd_generators.cpp),
+In [mvp_lmd_generators.cpp](../../lambda/js/mir/js_mir_generators.cpp),
 `mvp_lmd_iterator_result` allocates an ordinary object and inserts `value` and
 `done` through two named setters. The MIR compiler's `iterator_value` in
-[mvp_lmd_mir.cpp](../../lambda/js/mvp-lmd/mvp_lmd_mir.cpp) invokes `next`, then
+[mvp_lmd_mir.cpp](../../lambda/js/mir/js_mir_mir.cpp) invokes `next`, then
 reads `done` and `value` through property access. Acquiring an iterator also
 allocates a private two-slot record and resolves its methods.
 

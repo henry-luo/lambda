@@ -1,5 +1,5 @@
 #pragma once
-#include "mvp_lmd_runtime.h"
+#include "js_mir_runtime.h"
 
 // Dynamic source executes only through the retained shared AST interpreter.
 Item mvp_lmd_dynamic_initialize(MvpLmdProgram*);

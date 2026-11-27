@@ -1,14 +1,14 @@
-// mvp_lmd_internal.h — types shared by the MVP code generator
-// (mvp_lmd_mir.cpp) and the MIR-free program/realm runtime
-// (mvp_lmd_program.cpp). MIR names appear only as field types; a
+// js_mir_internal.h — types shared by the MVP code generator
+// (js_mir_mir.cpp) and the MIR-free program/realm runtime
+// (js_mir_program.cpp). MIR names appear only as field types; a
 // build without MIR (LAMBDA_NO_MIR) can instantiate runtime-only realms
 // without compiler plans or generated code (D8.4.5).
 #pragma once
 
-#include "mvp_lmd.h"
-#include "mvp_lmd_runtime.h"
-#include "mvp_lmd_async.h"
-#include "mvp_lmd_dynamic.h"
+#include "js_mir.h"
+#include "js_mir_runtime.h"
+#include "js_mir_async.h"
+#include "js_mir_dynamic.h"
 #include "../js_transpiler.hpp"
 #include "../js_source_module.hpp"
 #include "../js_runtime.h"
@@ -351,7 +351,7 @@ struct MvpLmdRealm {
     const MvpLmdHost* host;
 };
 
-// --- shared between mvp_lmd_program.cpp and mvp_lmd_mir.cpp ---
+// --- shared between js_mir_program.cpp and js_mir_mir.cpp ---
 inline const char* const intrinsic_names[] = {"undefined", "NaN", "Infinity", "Map", "Object",
     "Math", "Int32Array", "Uint8Array", "Float64Array", "Array", "String", "Error",
     "Number", "parseInt", "isNaN", "performance", "console", "process", "require", "JSON", "Date", "RegExp", "globalThis", "Symbol", "Set", "Reflect", "Proxy",

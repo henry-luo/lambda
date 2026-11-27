@@ -1,4 +1,4 @@
-#include "mvp_lmd_runtime.h"
+#include "js_mir_runtime.h"
 #include "../js_runtime.h"
 #include "../js_props.h"
 #include "../js_object_meta.h"

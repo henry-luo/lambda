@@ -39,7 +39,7 @@
 #include "js_class.h"
 #include "js_props.h"
 #include "js_property_attrs.h"
-#include "mvp-lmd/mvp_lmd_runtime.h"
+#include "mir/js_mir_runtime.h"
 #include "../dom/dom_ops.h"
 #include "lambda/input/css/css_style.hpp"
 #include "js_runtime_state.hpp"

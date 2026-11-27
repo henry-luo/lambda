@@ -1,5 +1,5 @@
-#include "mvp_lmd_runtime.h"
-#include "mvp_lmd_dynamic.h"
+#include "js_mir_runtime.h"
+#include "js_mir_dynamic.h"
 #include "../../runtime/lambda-root-frame.hpp"
 #include "../../runtime/runtime-state.h"
 #include "../../runtime/side_stack.h"

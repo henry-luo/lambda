@@ -115,7 +115,7 @@ emission-time branch carriers agree. `infer_proc_native_return_lane` tests only
 integer, float and boolean candidates; it supplies no inferred string result
 lane. String-success information still needs an honest error channel.
 
-JS MVP's [`kind`](../../lambda/js/mvp-lmd/mvp_lmd_mir.cpp) joins both conditional
+JS MVP's [`kind`](../../lambda/js/mir/js_mir_mir.cpp) joins both conditional
 arms and consults direct callees' result kinds. Reference that proof structure;
 Lambda must retain its own numeric/null/error semantics (**S1.11**).
 

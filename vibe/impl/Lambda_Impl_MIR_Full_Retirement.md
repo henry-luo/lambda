@@ -107,7 +107,7 @@ performance receipts remain usable as separately identified controls.
   shared; T0/AUTO/JIT and publication policy are preserved (D8.3.1–D8.3.5).
 - Deleted the 49,836-line Full emitter and its unused loop-hoisting header.
   Shared linker, view registration and satellite lifetime now live in
-  `lambda/runtime/mvp/mvp_driver.cpp`; compiler-neutral constants live in
+  `lambda/runtime/mir/mir_driver.cpp`; compiler-neutral constants live in
   `const_materialize.cpp`. Unused Full variant/cache fields are removed.
 - MVP worker plans borrow read-only frontend analysis and retain private
   compiler pools/constants; old Full variant clones are gone (D8.3.4).

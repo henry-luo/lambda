@@ -85,7 +85,7 @@
 #include "js/js_interp.hpp"          // retained AST harness execution
 #include "js/js_exec_profile.h"      // profile flush on the batch _exit path
 #include "js/js_runtime_state.hpp"
-#include "js/mvp-lmd/mvp_lmd.h"
+#include "js/mir/js_mir.h"
 #endif // LAMBDA_NO_JS
 #include "lib/uv_loop.h"          // JS worker cleanup for libuv loop
 #include "lib/time_util.h"
