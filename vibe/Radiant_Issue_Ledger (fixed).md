@@ -14,6 +14,29 @@ are unchanged. Full evidence is under `../../lambda/temp/kianhup-style/`.
 
 ## Fixed issues
 
+<a id="ri-246"></a>
+
+### RI-246 — The macOS caret query aborts for a hidden text control
+
+**Fixed, 2026-11-27.** Homer Town Builder aborted when AppKit requested a
+caret rectangle after a camera gesture. A programmatic value write on its
+hidden textarea publishes a caret, while `display:none` leaves the element
+without a layout box. The caret geometry query used an asserting cast even
+though the DOM control and its selection can exist independently of layout.
+Radiant's caret, selection-rectangle, point-hit, and line-navigation queries
+now return unavailable when the text control has no box (D9.1.3v2).
+
+`DynamicLayoutTest.HiddenTextareaHasNoEditingGeometryAfterValueWrite`
+reproduced the same `view_type_is_block` assertion before the fix. After the
+fix, all 151 dynamic layout tests pass, including the visible textarea
+soft-wrap control. The rebuilt Lambda host passes the native Meadow zoom and
+pan replay with a copy of the saved board, plus the Harbour and Walk replays.
+The platform caret callback aborted after zoom in an isolated unfixed Meadow
+replay and returned no rectangle in the fixed replay. Both traces are in
+`temp/town-caret-control/probe.log`. The broader baseline's custom native
+test link error and `dom_view_role_nested` geometry mismatch also reproduce
+with the original editing geometry. See `temp/town-caret-control/`.
+
 <a id="ri-244"></a>
 
 ### RI-244 — Textarea caret geometry ignores soft-wrapped lines

@@ -20,6 +20,10 @@ observations still require re-verification. Add new Radiant issues here.
 
 ## Open issues
 
+<a id="ri-246"></a>
+
+- [RI-246 — The macOS caret query aborts for a hidden text control](<Radiant_Issue_Ledger (fixed).md#ri-246>).
+
 <a id="ri-245"></a>
 
 ### RI-245 — Textarea caret needs affinity at a soft-wrap boundary

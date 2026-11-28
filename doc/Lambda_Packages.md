@@ -4590,6 +4590,12 @@ A texture's `color-space:'srgb'/'linear'` overrides that choice. Materials
 accept `alpha-mode:'opaque'/'blend'/'mask'`; mask discards below
 `alpha-cutoff` (default 0.5, greater than 0 and at most 1).
 
+Built-in transparent materials blend in linear light by default. Set
+`blend-space:'srgb'` to composite their tone-mapped colors in sRGB display space;
+this mode requires an opaque scene background and does not apply to shader
+materials. `blend-space:'linear'` explicitly selects the default. Scene3D keeps
+its graphics context and resources behind the native waist (**D9.5.1**).
+
 `material('physical', options)` adds clearcoat and sheen to standard shading.
 Both factors default to 0 and accept [0,1]. `clearcoat-roughness` defaults to
 0, `sheen-roughness` to 1 (both [0,1]); `sheen-color` defaults to white.

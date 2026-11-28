@@ -13502,3 +13502,31 @@ TEST_F(Scene3dAgentTest, NavigationAgentsDoNotHijackReusedBodyIdsAndFollowExplic
     scene3d_follow_rebuild(&doc,original,replacement);ASSERT_TRUE(scene3d_runtime_step(runtime,1));Item followed=agent_command(R"({"operation":"navigation_agent_read","agent":"a0"})");auto read=ItemReader(followed.to_const()).asMap();
     EXPECT_STREQ(read.get("status").cstring(),"moving")<<read.get("diagnostic").cstring();EXPECT_GT(read.get("path_generation").asInt(),path);
 }
+
+TEST_F(Scene3dTest, DisplaySpaceBlendMatchesEncodedSourceAndRestoresLinearDrawState) {
+    attr(root, "background", "#d7e4e0");
+    DomElement* first = mesh("plane", "#3d747c");
+    attr(first, "position", "-1 0 0");
+    DomElement* display = first->last_child->as_element();
+    attr(display, "transparent", "true"); attr(display, "opacity", ".5"); attr(display, "blend-space", "srgb");
+    DomElement* second = mesh("plane", "#3d747c");
+    attr(second, "position", "1 0 0");
+    DomElement* linear = second->last_child->as_element();
+    attr(linear, "transparent", "true"); attr(linear, "opacity", ".5");
+    ImageSurface* image = snapshot(); ASSERT_NE(image, nullptr);
+    pixel(image, 48, 64, 138, 172, 174); pixel(image, 80, 64, 162, 183, 183);
+    attr(root, "background", "#000000"); image = snapshot(); ASSERT_NE(image, nullptr);
+    pixel(image, 48, 64, 31, 58, 62);
+    attr(root, "background", "#ffffff"); image = snapshot(); ASSERT_NE(image, nullptr);
+    pixel(image, 48, 64, 158, 185, 189);
+    scene3d_context_lost(root); pixel(snapshot(), 48, 64, 158, 185, 189);
+    attr(root, "background", "transparent");
+    EXPECT_EQ(scene3d_snapshot(root, &ui, 128, 128, 1), nullptr);
+    EXPECT_NE(strstr(scene3d_diagnostic(root), "opaque scene background"), nullptr);
+    attr(root, "background", "#ffffff"); attr(display, "blend-space", "unknown");
+    EXPECT_EQ(scene3d_snapshot(root, &ui, 128, 128, 1), nullptr);
+    EXPECT_NE(strstr(scene3d_diagnostic(root), "invalid material blend space"), nullptr);
+    attr(display, "blend-space", "srgb"); attr(display, "type", "shader");
+    EXPECT_EQ(scene3d_snapshot(root, &ui, 128, 128, 1), nullptr);
+    EXPECT_NE(strstr(scene3d_diagnostic(root), "not supported by shader materials"), nullptr);
+}

@@ -86,6 +86,7 @@ fn check_sampler(by_id, v) bool^ {
         raise fail("shader uniform names no simulation variable") else true
 }
 fn check_shader(n, by_id) bool^ {
+    let checked_blend = if (n["blend-space"] != null) raise fail("blend-space is not supported by shader materials")
     let checked_outdoor = if (any([for (key in [*OUTDOOR_NUMBERS,"foliage-color"]) n[key]!=null]))
         raise fail("outdoor factors require a built-in material")
     let checked_sources = if (not text(n.vertex) or not text(n.fragment)) raise fail("shader material requires vertex and fragment sources")
@@ -387,6 +388,7 @@ fn check_node(n, all_nodes, by_id) bool^ {
         let checked_transparent = if (n.transparent != null and not (n.transparent is bool)) raise fail("invalid transparency")
         let checked_depth = if (n.depth_only!=null and (not (n.depth_only is bool) or n.depth_only and (n.transparent==true or n.opacity!=null and n.opacity!=1)))
             raise fail("depth-only materials must be opaque")
+        let checked_blend = if (n["blend-space"] != null and not contains(["linear", "srgb"], string(n["blend-space"]))) raise fail("invalid material blend space")
         let checked_alpha = if (n["alpha-mode"] != null and not contains(['opaque', 'blend', 'mask'], n["alpha-mode"])) raise fail("invalid material alpha mode")
         let checked_cutoff = if (n["alpha-cutoff"] != null and (not numeric(n["alpha-cutoff"]) or n["alpha-cutoff"] <= 0 or n["alpha-cutoff"] > 1))
             raise fail("invalid material alpha cutoff")
@@ -559,6 +561,8 @@ pub fn validate(scene) bool^ {
         raise fail("scene accepts one postprocessing chain")
     let checked_bloom = if (any([for (n in all_nodes) name(n) == 'effect' and n.type == 'bloom']) and
         not opaque_color(scene.background)) raise fail("bloom currently requires an opaque viewport background")
+    let checked_blend_background = if (any([for (n in all_nodes) name(n) == 'material' and n["blend-space"] != null and string(n["blend-space"]) == "srgb"]) and
+        not opaque_color(scene.background)) raise fail("sRGB blending requires an opaque scene background")
     // physical descriptions share the native validator used by batch and live worlds.
     let checked_physics = if (any([for (n in all_nodes) contains(['physics','rigid-body','collider','collision-geometry','joint'],name(n)) or n.physics != null]))
         lambda.sys.physics_validate(scene)^
