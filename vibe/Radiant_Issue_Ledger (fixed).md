@@ -14,6 +14,115 @@ are unchanged. Full evidence is under `../../lambda/temp/kianhup-style/`.
 
 ## Fixed issues
 
+RI-270 through RI-277 are recorded in the
+[test repair implementation note](impl/Radiant_Impl_Test_Repair_2026-11-28.md).
+
+<a id="ri-277"></a>
+
+### RI-277 — Native regression fixtures use obsolete output, clipping and sizing inputs
+
+**Fixed in the working tree, 2026-11-28.** Four device-loss tests created
+headless virtual submixes, which correctly do not join the physical bus. They
+now create device-backed submixes with offline rendering; a separate check
+confirms a virtual submix survives device retirement. The direct boundary
+painter receives a nonempty clip, the ruby intrinsic query requests the box's
+preferred-size contribution, and the nested-flex replay uses a definite basis
+while retaining its percentage-basis rejection checks (**D9.1.3v2**).
+The full Radiant document binary passes 545/545 with macOS service access.
+
+<a id="ri-276"></a>
+
+### RI-276 — Textarea family changes lose the user-agent font size
+
+**Fixed in the working tree, 2026-11-28.** Changing only a textarea's font
+family made inherited medium size replace its 13.333px user-agent size. Font
+resolution now retains that size for both named and generic families, while
+explicit `medium` and `inherit` sizes continue to resolve separately
+(**D9.1.3v2**). The extended `WinningFontFamilyDeterminesTheMonospaceMediumAdjustment`
+case and Chromium controls pass.
+
+<a id="ri-275"></a>
+
+### RI-275 — Table row minimum classifies a substituted length as a percentage
+
+**Fixed in the working tree, 2026-11-28.** The table cell's row-minimum path
+classified `var()` as a possible percentage before substitution, dropping a
+definite length. It now consumes the shared substituted CSS size facts
+(**D9.1.3v2**). `TableCellLengthsUseTheDeclaringFontAndOrientation` passes its
+retained font, writing-mode and `var(--extent)` states.
+
+<a id="ri-274"></a>
+
+### RI-274 — Flex intrinsic measurement drops the percentage term of mixed margins
+
+**Fixed in the working tree, 2026-11-28.** Intrinsic flex measurement resolved
+a mixed `calc()` margin against zero even when the containing inline size was
+known. It now resolves against that size on the containing writing-mode axis,
+and keeps zero as the cyclic fallback when no basis exists (**D9.1.3v2**).
+`GridIntrinsicMarginsResolveChildVariablesFontAndPercentageBasis` passes its
+live custom-property states and agrees with Chromium.
+
+<a id="ri-273"></a>
+
+### RI-273 — Ruby annotation realignment doubles an atomic child's relative offset
+
+**Fixed in the working tree, 2026-11-28.** A later inline font-box alignment
+replaced the wrapper's already-shifted vertical coordinate. Ruby then
+subtracted the wrapper's offset a second time while positioning its atomic
+child. Rebased font boxes now retain applied inline-chain offsets
+(**D9.1.3v2**). `RubyRelativeOffsetsSurviveColumnAndLinePlacement` and the
+full document binary pass.
+
+<a id="ri-272"></a>
+
+### RI-272 — Provisional flex heights and embedded SVG minimums use incorrect constraints
+
+**Fixed in the working tree, 2026-11-28.** A provisional height inherited
+from an auto-sized flex row was treated as a definite percentage basis, so an
+SVG resolved to 30px instead of its 10px natural height. Embedded SVG also
+missed its user-agent hidden overflow, and replaced flex automatic minimums
+used an authored main size as the content suggestion. The percentage basis,
+overflow default and content suggestion now retain their separate constraints;
+the suggestion still receives a definite cross-size transfer (**D9.1.3v2**).
+The auto/definite/auto height transition, dynamic overflow controls and the
+eight existing image-basis cases pass; Chromium agrees with the tested geometry.
+
+<a id="ri-271"></a>
+
+### RI-271 — Aborted DOM edits leave host and descendant attributes changed
+
+**Fixed in the working tree, 2026-11-28.** A rejected editing transaction
+restored its host and descendant content but did not snapshot and restore their
+attributes. The rollback path now captures host attributes alongside its tree
+snapshots and restores each element through the shared attribute restore helper,
+notifying DOM consumers as restored values are applied (**D10.2.1 / D5.5.1 /
+D9.1.3v2**).
+`RadiantDocumentTest.AbortedEditRestoresHostAndDescendantAttributes` passes.
+
+<a id="ri-270"></a>
+
+### RI-270 — Detached layout measurement closes an uninitialized counter checkpoint
+
+**Fixed in the working tree, 2026-11-28.** A detached inline measurement can
+create an idle `CounterCheckpoint` without a counter context. Its three
+`lam::Up<>` owners had no null initializers, so `close()` could read an
+indeterminate owner and crash while returning from scalar-control sizing.
+Initializing the owners to null makes the idle checkpoint safe to close
+(**D5.5.1 / D9.1.3v2**). `RadiantDocumentTest.ScalarControlSizingPreservesContainingFlexContent` passes.
+
+<a id="ri-269"></a>
+
+### RI-269 — Custom-layout paint test uses a stale aggregate initializer
+
+**Fixed, 2026-11-27.** `make test-radiant-full` failed while compiling
+`test_layout_custom_gtest.cpp`: its two-field aggregate initializer still
+placed the layer array first, but `CustomLayoutPaintState` now starts with a
+document-resource owner (**D5.5.1**). The test now zero-initializes the state
+and assigns `layers` and `layer_count` by name, leaving the owner empty because
+this test covers stacking order only. The suite passes all 13 cases; the full
+gate now compiles and reaches runtime tests, where unrelated failures and
+timeouts remain.
+
 <a id="ri-268"></a>
 
 ### RI-268 — Scene3D animation repeatedly revalidated live targets
@@ -5477,6 +5586,12 @@ ancestor hide also preserves a blur listener's refocus and layout read. A
 keyboard edit followed by hiding the input delivers `change`, `blur`, and
 `focusout` in order. Reproduction and verification are in
 `temp/css-focus-fixup/`.
+
+**Detached-target follow-up, 2026-11-28.** Invalid editor navigation detached
+the focused textarea while its blur sequence was still being delivered. The
+event scope now retains the owner document and resolves the pinned node identity
+for `blur`/`focusout` even after disconnection (**D1.10 / D5.5.1 / D9.1.3v2**).
+`doc_viewer_edit_navigation_invalid` passes all 7 assertions.
 
 <a id="ri-018"></a>
 

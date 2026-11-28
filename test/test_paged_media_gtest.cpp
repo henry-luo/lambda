@@ -6863,10 +6863,12 @@ TEST_F(SecondaryViewTest, TableBaselineUsesFirstNestedLineOrTheEmptyCellContentE
         ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
         ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
         LayoutViewNode* empty_box = view_tree_node_state(tree, empty, false)->first_occurrence;
+        LayoutViewNode* row_box = view_tree_node_state(tree, row, false)->first_occurrence;
         LayoutViewNode* text = view_tree_node_state(tree, nested->first_child, false)->first_occurrence;
         LayoutViewNode* image_box = view_tree_node_state(tree, img, false)->first_occurrence;
-        ASSERT_NE(text->glyph_run, nullptr); ASSERT_NE(image_box->image_box, nullptr);
-        EXPECT_FLOAT_EQ(text->glyph_run->baseline_y, empty_box->rect.y + 33.0f);
+        ASSERT_NE(row_box, nullptr); ASSERT_NE(text->glyph_run, nullptr); ASSERT_NE(image_box->image_box, nullptr);
+        // the fixed empty-cell height does not replace the nested line baseline (CSS 2.1 §17.5.3).
+        EXPECT_FLOAT_EQ(text->glyph_run->baseline_y, row_box->rect.y + 23.0f);
         EXPECT_FLOAT_EQ(image_box->rect.y + image_box->rect.height + 2.0f, text->glyph_run->baseline_y);
         EXPECT_FLOAT_EQ(empty_box->computed_boundary->padding.top, 2.0f);
         EXPECT_FLOAT_EQ(empty_box->computed_boundary->padding.bottom, 9.0f);

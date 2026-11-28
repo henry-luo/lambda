@@ -11867,7 +11867,13 @@ struct FocusDispatchScope {
         DomNode* node = dom_node_ref_validate(document, ref);
         return node && dom_node_is_connected(node) ? static_cast<View*>(node) : nullptr;
     }
+    View* resolve_retained(DomNodeRef ref) {
+        DomNode* node = dom_node_ref_validate(document, ref);
+        return node ? static_cast<View*>(node) : nullptr;
+    }
     View* before() { return resolve(from); }
+    // retain the pinned identity when a focus listener detaches its target (D5.5.1).
+    View* before_retained() { return resolve_retained(from); }
     View* after() { return resolve(to); }
 };
 
@@ -11915,16 +11921,16 @@ static void dispatch_focus_change_observed(EventContext* evcon, View* target) {
 }
 
 static void dispatch_focus_blur_observed(EventContext* evcon,
+                                         DocState* owner_state,
                                          View* target,
                                          View* related_target) {
-    if (!evcon || !target) return;
-    DocState* state = event_context_target_state(evcon);
-    if (!state) return;
-    FocusDispatchScope sequence(state, target, related_target);
-    radiant_dispatch_focus_event(evcon, sequence.before(), "blur", sequence.after());
-    sm_observe_action(event_context_target_state(evcon),
-                      SM_ACT_DISPATCH_BLUR);
-    if (sequence.before()) radiant_dispatch_focus_event(evcon, sequence.before(), "focusout", sequence.after());
+    if (!evcon || !owner_state || !target) return;
+    FocusDispatchScope sequence(owner_state, target, related_target);
+    View* blur_target = sequence.before_retained();
+    radiant_dispatch_focus_event(evcon, blur_target, "blur", sequence.after());
+    sm_observe_action(owner_state, SM_ACT_DISPATCH_BLUR);
+    blur_target = sequence.before_retained();
+    if (blur_target) radiant_dispatch_focus_event(evcon, blur_target, "focusout", sequence.after());
 }
 
 /**
@@ -11979,7 +11985,7 @@ void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard
             if (should_dispatch_change) {
                 dispatch_focus_change_observed(evcon, sequence.before());
             }
-            dispatch_focus_blur_observed(evcon, sequence.before(), sequence.after());
+            dispatch_focus_blur_observed(evcon, state, sequence.before_retained(), sequence.after());
             sm_guard.commit();
         } else {
             focus_set_programmatic(state, new_focus, from_keyboard);
@@ -12028,7 +12034,7 @@ void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard
             if (should_dispatch_change) {
                 dispatch_focus_change_observed(evcon, sequence.before());
             }
-            dispatch_focus_blur_observed(evcon, sequence.before(), nullptr);
+            dispatch_focus_blur_observed(evcon, state, sequence.before_retained(), nullptr);
             sm_guard.commit();
         } else {
             focus_clear(state);

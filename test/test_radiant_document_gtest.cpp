@@ -8116,6 +8116,13 @@ TEST_F(RadiantDocumentTest, CompletedFlexContentEnlargesProvisionalAncestorHeigh
         EXPECT_FLOAT_EQ(find("resource-content")->height, 30.0f);
         EXPECT_FLOAT_EQ(find("resource-svg")->height, 10.0f);
     }
+    // a definite flex height supplies the percentage basis; restoring auto removes it.
+    ASSERT_TRUE(dom_cssom_set_inline_property(find("resource-page"), "height", "100px"));
+    ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+    EXPECT_FLOAT_EQ(find("resource-svg")->height, 80.0f);
+    ASSERT_TRUE(dom_cssom_set_inline_property(find("resource-page"), "height", "auto"));
+    ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+    EXPECT_FLOAT_EQ(find("resource-svg")->height, 10.0f);
     ASSERT_TRUE(find("auto-page")->set_attribute("style", "width:20px"));
     ASSERT_TRUE(dom_text_set_content(find("auto-text")->first_child->as_text(), "XX XX XX"));
     layout_html_doc(&ui, document, true);
@@ -8125,6 +8132,29 @@ TEST_F(RadiantDocumentTest, CompletedFlexContentEnlargesProvisionalAncestorHeigh
     EXPECT_FLOAT_EQ(find("auto-sidebar")->height, 100.0f);
     EXPECT_FLOAT_EQ(find("auto-dependent")->height, 100.0f);
     EXPECT_FLOAT_EQ(find("auto-footer")->y - find("auto-article")->y, 80.0f);
+}
+
+TEST_F(RadiantDocumentTest, EmbeddedSvgFlexMinimumFollowsOverflowAndNaturalSize) {
+    StrBuf* source = strbuf_new();
+    strbuf_append_str(source,
+        "<!doctype html><style>body{margin:0}.row{display:flex;width:40px}"
+        ".row>svg{width:300px}</style><div id=result><div class=row>"
+        "<svg id=icon width=100 height=100></svg></div></div>");
+    ASSERT_NE(layout_script_source(source), nullptr);
+    DomElement* svg = dom_find_element_by_id(document->root, "icon");
+    ASSERT_NE(svg, nullptr);
+    ASSERT_NE(svg->scroller, nullptr);
+    EXPECT_EQ(svg->scroll()->overflow_x, CSS_VALUE_HIDDEN);
+    EXPECT_FLOAT_EQ(svg->width, 40.0f);
+    const struct { const char* overflow; float width; } states[] = {
+        {"visible", 100.0f}, {"clip", 100.0f}, {"hidden", 40.0f},
+    };
+    for (const auto& state : states) {
+        SCOPED_TRACE(state.overflow);
+        ASSERT_TRUE(dom_cssom_set_inline_property(svg, "overflow", state.overflow));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        EXPECT_FLOAT_EQ(svg->width, state.width);
+    }
 }
 
 TEST_F(RadiantDocumentTest, FlexShellReservesDescendantHeightConstraintsForItsFooter) {
@@ -15418,6 +15448,9 @@ TEST_F(RadiantDocumentTest, BoundaryFragmentsAreConsumedOncePerBox) {
     raster.paint_list = lam::up(&paint);
     raster.dl = lam::up(&list);
     raster.raster_scale = 1.0f;
+    // the direct painter uses a local origin, so retain its full viewport of ink.
+    raster.block.clip = {-ui.viewport_width, -ui.viewport_height,
+                         ui.viewport_width, ui.viewport_height};
     struct Case { const char* id; int commands; } cases[] = {{"cell", 4}, {"fragment", 2}};
     for (const auto& entry : cases) {
         SCOPED_TRACE(entry.id);
@@ -15906,7 +15939,8 @@ TEST_F(RadiantDocumentTest, WinningFontFamilyDeterminesTheMonospaceMediumAdjustm
         {"ua", 13.0f}, {"named", 16.0f}, {"generic", 13.0f},
         {"generic-span", 13.0f}, {"named-pre", 16.0f},
         {"sized-named", 20.0f}, {"sized-ua", 20.0f}, {"shorthand", 20.0f},
-        {"textarea", 13.333333f},
+        {"textarea", 13.333333f}, {"textarea-mono", 13.333333f},
+        {"textarea-medium", 13.0f}, {"textarea-inherit", 16.0f},
     };
     for (const Case& entry : cases) {
         DomElement* element = dom_find_element_by_id(document->root->as_element(), entry.id);
@@ -16935,8 +16969,8 @@ TEST_F(RadiantDocumentTest, RubyInlineMarginsContributeToColumnsWithoutEnteringB
             EXPECT_FLOAT_EQ(part(entry, true, unit)->width, column);
             IntrinsicSizes sizes = measure_physical_widths(ruby);
             EXPECT_FLOAT_EQ(sizes.min_content, column); EXPECT_FLOAT_EQ(sizes.max_content, column);
-            IntrinsicSizes row_sizes = measure_physical_widths(row);
-            // preferred intrinsic keywords constrain the parent's contribution as well as its used width.
+            // query the contribution, since content-only widths intentionally ignore the preferred size.
+            IntrinsicSizes row_sizes = measure_physical_widths(row, nullptr, false);
             EXPECT_FLOAT_EQ(row_sizes.min_content, entry.width == CSS_VALUE_MAX_CONTENT ? column + 10.0f : column);
             EXPECT_FLOAT_EQ(row_sizes.max_content, entry.width == CSS_VALUE_MIN_CONTENT ? column : column + 10.0f);
             if (entry.width == CSS_VALUE_MIN_CONTENT) EXPECT_FLOAT_EQ(row->width, column);
@@ -22053,6 +22087,14 @@ protected:
     void use_fake_speech() {
         ASSERT_TRUE(speech_engine.use_fake());
     }
+    AudioSubmixId prepare_offline_device_submix() {
+        // exercise device retirement without opening hardware; headless submixes are independent.
+        bool headless = ui.headless;
+        ui.headless = false;
+        AudioSubmixId mix = radiant_document_submix(document);
+        ui.headless = headless;
+        return mix;
+    }
     uint64_t open_clip(uint32_t frames = 64, int16_t left = 16384, int16_t right = -8192) {
         unsigned char bytes[44 + 1024 * 4];
         size_t length = audio_fixture_wave(bytes, sizeof(bytes), AUDIO_BUS_RATE, 2, frames, left, right);
@@ -22172,7 +22214,8 @@ TEST_F(RadiantAudioCapture, RevocationAndDeviceLossJoinTheProducerAndReleaseItsQ
     ASSERT_TRUE(radiant_capture_info(document, token, &info)); EXPECT_STREQ(info.state, "revoked"); EXPECT_EQ(host.closes, 3u);
 }
 TEST_F(RadiantAudioCapture, OutputLossLeavesRecordingActiveAndMonitoringMustBeReenabled) {
-    prepare(); ASSERT_TRUE(radiant_capture_grant(document, true)); auto token = radiant_capture_open(document);
+    prepare(); ASSERT_NE(prepare_offline_device_submix(), 0u);
+    ASSERT_TRUE(radiant_capture_grant(document, true)); auto token = radiant_capture_open(document);
     ASSERT_TRUE(radiant_capture_monitor(document, token, .5f)); audio_bus_retire_output(); AudioCaptureInfo info;
     ASSERT_TRUE(radiant_capture_info(document, token, &info)); EXPECT_STREQ(info.state, "capturing");
     EXPECT_TRUE(info.monitor_lost); EXPECT_FLOAT_EQ(info.monitor_gain, 0); EXPECT_EQ(host.closes, 0u);
@@ -22279,6 +22322,8 @@ TEST_F(RadiantDecodedAudio, HeadlessAudioStaysOffDeviceAndAdvancesOnDocumentCloc
     double start = 0; ASSERT_TRUE(radiant_document_clock(document, &start));
     uint64_t token = open_clip(960); ASSERT_NE(token, 0u);
     ASSERT_TRUE(radiant_audio_play(document, token, 1));
+    audio_bus_retire_output();
+    EXPECT_STREQ(radiant_audio_state(document, token), "playing");
     float output[16] = {}; audio_bus_mix(output, 8);
     for (float sample : output) EXPECT_FLOAT_EQ(sample, 0);
     EXPECT_DOUBLE_EQ(radiant_audio_clock(document), 0);
@@ -22470,6 +22515,7 @@ TEST_F(RadiantDecodedAudio, ClipAndVoiceLimitsRejectWithoutRetiringAcceptedPeers
 
 TEST_F(RadiantDecodedAudio, DeviceRetirementReleasesReadersBeforeClipsAndAllowsFreshVoices) {
     ASSERT_NE(load("test/lambda/ui/_window_fullscreen.ls"), nullptr);
+    ASSERT_NE(prepare_offline_device_submix(), 0u);
     uint64_t token = open_clip(); ASSERT_NE(token, 0u); ASSERT_TRUE(radiant_audio_play(document, token, 1));
     audio_bus_retire_output(); EXPECT_STREQ(radiant_audio_state(document, token), "error");
     EXPECT_FALSE(radiant_audio_frames_pending(document)); EXPECT_FALSE(radiant_audio_play(document, token, 1));
@@ -22596,6 +22642,7 @@ TEST_F(RadiantDecodedAudio, PausedSharedSourcesRespectTheDocumentPlayerLimitAndR
 
 TEST_F(RadiantDecodedAudio, ASceneSourceCanReplaceItsLostPlayerWithoutReacquiringPcm) {
     ASSERT_NE(load("test/lambda/ui/_window_fullscreen.ls"), nullptr);
+    ASSERT_NE(prepare_offline_device_submix(), 0u);
     uint64_t asset = open_clip(); ASSERT_NE(asset, 0u); auto parameters = rdt_audio_default_parameters();
     uint64_t source = radiant_audio_source_start(document, asset, 0, &parameters, 1); ASSERT_NE(source, 0u);
     audio_bus_retire_output(); EXPECT_STREQ(radiant_audio_state(document, source), "error");
@@ -22963,6 +23010,7 @@ TEST_F(RadiantDecodedAudio, MidiPreparationPauseAndEndRetainTransportWithoutIdle
 }
 TEST_F(RadiantDecodedAudio, MidiReverbTailOutlivesItsEndedVoiceAndDeviceLossClearsIt) {
     auto* owner = load("test/lambda/ui/_window_fullscreen.ls"); ASSERT_NE(owner, nullptr);
+    ASSERT_NE(prepare_offline_device_submix(), 0u);
     uint64_t token = open_midi(owner); ASSERT_NE(token, 0u); ASSERT_TRUE(radiant_midi_command(document, token, "play", 0));
     float output[1536 * 2]; auto mix = radiant_document_submix(document); ASSERT_TRUE(audio_submix_render(mix, output, 480));
     MidiSnapshot snapshot; ASSERT_TRUE(radiant_midi_info(document, token, &snapshot)); EXPECT_EQ(snapshot.state, MIDI_ENDED);

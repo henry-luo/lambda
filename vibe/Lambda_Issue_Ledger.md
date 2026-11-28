@@ -87,6 +87,29 @@ Reconciliation now renders dirty ancestors before their descendants so
 their nested applications can refresh the child entries (**D5.5.3**).
 The fixture passes all 13 assertions with the baseline font directory.
 
+<a id="lr12-74"></a>
+
+## LR12-74 — Standalone EPUB and diff views bypass registered package transforms
+
+**Fixed in the working tree, 2026-11-28.** The standalone `view` route sent
+`.epub`, `.diff` and `.patch` files through the generic file transform, so the
+registered ebook and diff package handlers did not run. The CLI now resolves
+these input kinds through the transform registry before constructing the view
+(**D9.3.4**). The EPUB save/moved-book/resume checker passes, and the
+`diff_patch` UI replay passes all 6 assertions.
+
+<a id="lr12-75"></a>
+
+## LR12-75 — Standalone SVG views lose their document resource context
+
+**Fixed in the working tree, 2026-11-28.** The standalone `view` route sent
+local SVG files to the document browser's isolated image preview, so relative
+images were unavailable and the SVG's own DOM was not exposed. Standalone SVG
+now opens in its document surface (**D10.1.5**); image previews retain their
+isolated processing. The original `svg_relative_resource` replay passes all
+5 assertions, the isolated foreign-object resource replay passes 12/12, and
+the ordinary and archive image preview replays both pass.
+
 <a id="lr12-72"></a>
 
 ## LR12-72 — DOM mutation seam signature blocks the split build

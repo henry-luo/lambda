@@ -429,6 +429,8 @@ view any { ~ }
 fn rendered_children(item) any^ => [for (child in content(item)^) apply(child)]
 
 view <doc> { <div class:"document-body", *[rendered_children(~)]> }
+// Markup metadata is outside the body tree but its title belongs in the preview (RI-215).
+view <meta> { if (~.title != null) <h1 class:"document-source-title", ~.title> else "" }
 // HTML previews expose document content while keeping imported page chrome and
 // executable/style nodes from altering the editor itself.
 view <html> { <div class:"document-body", *[rendered_children(~)]> }

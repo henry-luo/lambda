@@ -5,6 +5,7 @@
 #include "radiant/layout.hpp"
 #include "radiant/event.hpp"
 #include "../lambda/module/radiant/event_adapter.hpp"
+#include "../lambda/module/radiant/radiant_runtime_init.hpp"
 #include "lambda/input/input.hpp"
 #include "lambda/input/css/dom_element.hpp"
 #include "../lambda/dom/dom.h"
@@ -48,7 +49,11 @@ protected:
     UiContext ui{};
     DomDocument* document = nullptr;
     DomElement* viewport = nullptr;
-    void SetUp() override { ASSERT_EQ(ui_context_init(&ui, true, 1), 0); }
+    void SetUp() override {
+        // script fixtures require the Lambda host adapters before document loading.
+        ASSERT_TRUE(radiant_register_dom_engine_providers());
+        ASSERT_EQ(ui_context_init(&ui, true, 1), 0);
+    }
     void TearDown() override {
         ui.document = nullptr;
         if (document) free_document(document);

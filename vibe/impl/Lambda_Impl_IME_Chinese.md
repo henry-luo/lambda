@@ -1398,3 +1398,13 @@ path. The local Mac has no valid signing identity, so this distribution path
 has not yet been run; notarization, TIS discovery and cross-app use remain
 open. The development app still stages under the original ID and is not a
 registration acceptance artifact.
+
+## Popover placement regression — 2026-11-28
+
+The fuzzy-candidate popover measured as zero-height before its first layout,
+so placement treated below-anchor space as sufficient and let the rendered
+panel overflow the viewport. Placement uses the available-space cap to pick
+the side and anchors the panel's near edge to the control, without relying on
+an uncommitted height. The `ime_chinese_fuzzy` event replay passes 67/67
+assertions, including short panels above and below the control
+(**D9.3.4 / D5.5.3**).

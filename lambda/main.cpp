@@ -4585,10 +4585,12 @@ static int lambda_main_impl(int argc, char *argv[]) {
         bool is_pptx_file = ext && str_ieq_cstr(ext, ".pptx");
         bool is_xlsx_file = ext && str_ieq_cstr(ext, ".xlsx");
         bool is_ebook_file = input_path_is_ebook(filename);
-        // presentations open in the full-window player, including imported decks.
+        bool is_diff_file = ext && (str_ieq_cstr(ext, ".diff") || str_ieq_cstr(ext, ".patch"));
+        // SVG documents need their own DOM and resource base, rather than image-mode isolation (D10.1.5).
         const bool full_window_document = is_pptx_file || input_path_is_xhtml(filename) ||
             (ext && (str_ieq_cstr(ext, ".html") || str_ieq_cstr(ext, ".htm") ||
-                str_ieq_cstr(ext, ".ls") || str_ieq_cstr(ext, ".slides")));
+                str_ieq_cstr(ext, ".ls") || str_ieq_cstr(ext, ".slides") ||
+                str_ieq_cstr(ext, ".svg")));
         bool browse_tree = file_is_dir(filename) || launch.browse_archive ||
             (!is_docx_file && !is_pptx_file && !is_xlsx_file && !is_ebook_file && lambda_view_path_is_archive(filename));
         if (browse_tree) {
@@ -4599,6 +4601,18 @@ static int lambda_main_impl(int argc, char *argv[]) {
             log_info("VIEW_FILE_TREE: opening directory or archive: %s", filename);
             exit_code = view_lambda_document_transform_with_events(filename, &browser_transform,
                 nullptr, 0, event_file, headless, font_dirs, font_dir_count, event_log, state_dump, launch.fullscreen, launch.microphone);
+        } else if (is_ebook_file || is_diff_file) {
+            // standalone package views need their registered handlers and runtime (D9.3.4).
+            const char* input_type = is_ebook_file ? "ebook" : "diff";
+            const LambdaDocumentTransformConfig* transform =
+                lambda_document_transform_for_input_type(input_type);
+            if (!transform) {
+                printf("Error: %s document transform is not configured\n", input_type);
+                return lambda_main_finish(1);
+            }
+            exit_code = view_lambda_document_transform_with_events(filename, transform,
+                nullptr, 0, event_file, headless, font_dirs, font_dir_count,
+                event_log, state_dump, launch.fullscreen, launch.microphone);
         } else if (ext && str_ieq_cstr(ext, ".glb")) {
             // A model needs a camera and lights before it can be displayed (D9.3.4).
             static const LambdaDocumentTransformConfig model_transform = {
@@ -4633,12 +4647,11 @@ static int lambda_main_impl(int argc, char *argv[]) {
             };
             exit_code = view_lambda_document_transform_with_events(filename, &file_transform,
                 nullptr, 0, event_file, headless, font_dirs, font_dir_count, event_log, state_dump, launch.fullscreen, launch.microphone);
-        } else if (full_window_document || is_docx_file || is_ebook_file || is_graph_file ||
+        } else if (full_window_document || is_docx_file || is_graph_file ||
                     eps_source_expected(filename, nullptr, 0) || (ext && (strcmp(ext, ".pdf") == 0 ||
                     strcmp(ext, ".md") == 0 || strcmp(ext, ".markdown") == 0 ||
                     strcmp(ext, ".tex") == 0 || strcmp(ext, ".latex") == 0 ||
                     strcmp(ext, ".pgf") == 0 ||
-                    str_ieq_cstr(ext, ".diff") || str_ieq_cstr(ext, ".patch") ||
                     strcmp(ext, ".xml") == 0 || strcmp(ext, ".rst") == 0 ||
                     strcmp(ext, ".wiki") == 0 || strcmp(ext, ".svg") == 0 ||
                     strcmp(ext, ".png") == 0 || strcmp(ext, ".jpg") == 0 ||

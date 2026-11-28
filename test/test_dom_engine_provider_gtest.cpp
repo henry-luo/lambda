@@ -40,10 +40,13 @@ static void provider_run_workers(void* (*worker)(void*), unsigned* failures) {
 }
 
 static unsigned graphics_error_count;
+static const RadiantCanvasRadialGradient graphics_test_gradient = {};
 static bool graphics_test_canvas_ensure(void* canvas) { return canvas == &graphics_error_count; }
-static bool graphics_test_canvas_rect(void* canvas, float x, float y, float width, float height) {
+static bool graphics_test_canvas_rect(void* canvas, float x, float y, float width, float height,
+                                      const RadiantCanvasRadialGradient* gradient) {
+    // the provider must forward the synchronous gradient borrow along with the rectangle.
     return graphics_test_canvas_ensure(canvas) && x == 1.0f && y == 2.0f &&
-           width == 3.0f && height == 4.0f;
+           width == 3.0f && height == 4.0f && gradient == &graphics_test_gradient;
 }
 static void graphics_test_webgl_error(uint64_t canvas, unsigned error) {
     if (canvas == 42 && error == 0x0502)
@@ -74,7 +77,7 @@ static bool graphics_registration_round() {
         dom_canvas_engine_ops() == &graphics_test_canvas &&
         dom_webgl_engine_ops() == &graphics_test_webgl &&
         dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::fill_rect,
-            &graphics_error_count, 1, 2.0, 3.0f, 4, nullptr);
+            &graphics_error_count, 1, 2.0, 3.0f, 4, &graphics_test_gradient);
     dom_provider_call(dom_webgl_engine_ops(), &DomWebGlEngineOps::error, 42, 0x0502);
     return accepted;
 }

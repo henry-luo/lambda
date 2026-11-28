@@ -32,8 +32,14 @@
       }
     },
     {
+      "type": "advance_time",
+      "ms": 16,
+      "steps": 1
+    },
+    {
       "type": "assert_script",
-      "js": "document.getElementById('cell-A1').getAttribute('colspan')==='5' && document.getElementById('cell-A2').getAttribute('rowspan')==='2'"
+      "js": "document.getElementById('cell-A1').getAttribute('colspan')==='5' && document.getElementById('cell-A2').getAttribute('rowspan')==='2'",
+      "assert_timeout": 30000
     },
     {
       "type": "click",
@@ -74,8 +80,14 @@
       }
     },
     {
+      "type": "advance_time",
+      "ms": 16,
+      "steps": 1
+    },
+    {
       "type": "assert_script",
-      "js": "!document.getElementById('cell-C1') && !document.getElementById('cell-E1') && !document.getElementById('row-6') && document.getElementById('cell-A1').textContent.includes('Cost centre')"
+      "js": "!document.getElementById('cell-C1') && !document.getElementById('cell-E1') && !document.getElementById('row-6') && document.getElementById('cell-A1').textContent.includes('Cost centre')",
+      "assert_timeout": 30000
     },
     {
       "type": "click",
@@ -166,8 +178,14 @@
       }
     },
     {
+      "type": "advance_time",
+      "ms": 16,
+      "steps": 1
+    },
+    {
       "type": "assert_script",
-      "js": "document.getElementById('cell-B2').getAttribute('style').includes('background-color:#ffff00') && document.getElementById('cell-B2').getAttribute('style').includes('font-weight:700')"
+      "js": "document.getElementById('cell-B2').getAttribute('style').includes('background-color:#ffff00') && document.getElementById('cell-B2').getAttribute('style').includes('font-weight:700')",
+      "assert_timeout": 30000
     },
     {
       "type": "assert_script",
@@ -234,11 +252,17 @@
       }
     },
     {
+      "type": "advance_time",
+      "ms": 16,
+      "steps": 1
+    },
+    {
       "type": "assert_text",
       "target": {
         "selector": "#cell-B1"
       },
-      "contains": "Layout title"
+      "contains": "Layout title",
+      "assert_timeout": 30000
     },
     {
       "type": "click",

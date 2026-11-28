@@ -83,6 +83,12 @@ key_with_underscore = "underscore key value"
 key123 = "numeric key value"
 "quoted key with spaces" = "quoted key value"
 
+# Dotted keys belong to the root table and must precede every table header.
+name = "Orange"
+physical.color = "orange"
+physical.shape = "round"
+site."google.com" = true
+
 [database]
 # Database configuration section
 server = "192.168.1.1"
@@ -207,23 +213,6 @@ datetime_utc = 1979-05-27T07:32:00Z
 # Comments at the end
 # End of test TOML file
 
-# Array of tables (if supported)
-# Note: This advanced feature may not be fully supported
-[[products]]
-name = "Hammer"
-sku = 738594937
-
-[[products]]
-name = "Nail"
-sku = 284758393
-color = "gray"
-
-# Dotted keys (if supported)
-name = "Orange"
-physical.color = "orange"
-physical.shape = "round"
-site."google.com" = true
-
 # Complex nested structures to stress test the parser
 [deeply_nested]
 level1 = { level2 = { level3 = { level4 = "deep value" } } }
@@ -265,3 +254,13 @@ string_looks_like_bool = "true"
 string_looks_like_date = "1979-05-27"
 string_looks_like_array = "[1, 2, 3]"
 string_looks_like_table = "{ key = value }"
+
+# Arrays of tables are last because TOML cannot return to the root table.
+[[products]]
+name = "Hammer"
+sku = 738594937
+
+[[products]]
+name = "Nail"
+sku = 284758393
+color = "gray"

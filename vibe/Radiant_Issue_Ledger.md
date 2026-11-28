@@ -20,6 +20,42 @@ observations still require re-verification. Add new Radiant issues here.
 
 ## Open issues
 
+<a id="ri-277"></a>
+
+- [RI-277 — Native regression fixtures use obsolete output, clipping and sizing inputs](<Radiant_Issue_Ledger (fixed).md#ri-277>).
+
+<a id="ri-276"></a>
+
+- [RI-276 — Textarea family changes lose the user-agent font size](<Radiant_Issue_Ledger (fixed).md#ri-276>).
+
+<a id="ri-275"></a>
+
+- [RI-275 — Table row minimum classifies a substituted length as a percentage](<Radiant_Issue_Ledger (fixed).md#ri-275>).
+
+<a id="ri-274"></a>
+
+- [RI-274 — Flex intrinsic measurement drops the percentage term of mixed margins](<Radiant_Issue_Ledger (fixed).md#ri-274>).
+
+<a id="ri-273"></a>
+
+- [RI-273 — Ruby annotation realignment doubles an atomic child's relative offset](<Radiant_Issue_Ledger (fixed).md#ri-273>).
+
+<a id="ri-272"></a>
+
+- [RI-272 — Provisional flex heights and embedded SVG minimums use incorrect constraints](<Radiant_Issue_Ledger (fixed).md#ri-272>).
+
+<a id="ri-271"></a>
+
+- [RI-271 — Aborted DOM edits leave host and descendant attributes changed](<Radiant_Issue_Ledger (fixed).md#ri-271>).
+
+<a id="ri-270"></a>
+
+- [RI-270 — Detached layout measurement closes an uninitialized counter checkpoint](<Radiant_Issue_Ledger (fixed).md#ri-270>).
+
+<a id="ri-269"></a>
+
+- [RI-269 — Custom-layout paint test uses a stale aggregate initializer](<Radiant_Issue_Ledger (fixed).md#ri-269>).
+
 <a id="ri-268"></a>
 
 - [RI-268 — Scene3D animation repeatedly revalidated live targets](<Radiant_Issue_Ledger (fixed).md#ri-268>).
@@ -340,6 +376,12 @@ between input and the preview (**D10.1.2 / S12.1.3v6**).
 Both assertion outcomes reproduce with the original editor source and the
 pre-fix viewer. Evidence is under
 `temp/radiant-ten-under-five/doc-regression-control/`.
+
+**2026-11-28 update.** The markup-formats preview mismatch is fixed. The
+editor preview now renders the top-level Mark `meta.title` before the body,
+and `doc_editor_markup_formats` passes all 8 assertions. The tree-alignment
+replay still points to the input-owned test
+source path and remains open under **D9.1.1v4**.
 
 <a id="ri-214"></a>
 
@@ -1019,26 +1061,28 @@ before/final PNGs, and canonical `test/online/snapshots/` logs for these labels.
 
 ### RI-052 — Existing empty-cell table baseline assertion differs by 10px
 
-**Status:** open, qualification limitation, 2026-11-12. Native ownership:
-**D9.1.1v4 / D9.1.3v2**. Cause is **unconfirmed**.
+**Status:** resolved, stale assertion corrected, 2026-11-28. Native ownership:
+**D9.1.1v4 / D9.1.3v2**. The failure was in the integration oracle.
 
 `SecondaryViewTest.TableBaselineUsesFirstNestedLineOrTheEmptyCellContentEdge`
 reports glyph baseline 33 versus empty-cell y 10 + expected 33 = 43, for both fixed
-and auto table layout. It reproduces identically with pagination source from
+and auto table layout. It reproduced identically with pagination source from
 `340ad59` and the current source, with all remaining linked objects and flags
-held constant. The full current Lambda paged inventory passes 504/505 after the
-new nested-width acceptance and owner font lookup correction.
+held constant. At that time, the full Lambda paged inventory passed 504/505
+after the new nested-width acceptance and owner font lookup correction.
 
 Evidence in Lambda-opus: `temp/paged-p7-integration/paged-final.xml`,
 `control/table.xml`, `control/receipt.json` and `updated-focused.xml`.
-This blocks an all-green legacy paged integration claim; it does not block the
-19 focused native fragmentation cases or the 947-pass owner baseline. Leave the
-assertion visible until its layout or coordinate-oracle cause is established.
+At the time of this reproduction, the mismatch blocked an all-green legacy
+paged integration claim; it did not block the 19 focused native fragmentation
+cases or the 947-pass owner baseline. Its layout or coordinate-oracle cause was
+still open then.
 
 Continuation evidence: Lambda-opus `temp/paged-advanced-integration/paged.xml`
 still passes 504/505, with the same failure messages as `paged-final.xml`.
-The expanded Radiant core now passes 60 focused cases, 988 owner-native cases
-(one disabled) and 4,481 layout cases (six skips). RI-052 stays open.
+The expanded Radiant core then passed 60 focused cases, 988 owner-native cases
+(one disabled) and 4,481 layout cases (six skips). RI-052 remained open at
+that checkpoint.
 
 Reservation/nested-row continuation: Lambda-opus
 `temp/paged-reservations-integration-final/paged.xml` remains 504/505 with the
@@ -1050,12 +1094,19 @@ nested line and the image at a baseline 23px below the row top for fixed and
 auto table layout. Varying the empty cell's height from 0px to 60px increases
 the row height when needed while leaving that baseline at 23px in Chromium.
 Radiant's existing empty-cell change (`b17a3c0`) captures the content edge
-before the cell's height contributes to the row minimum. The Lambda
-integration assertion still derives its expected baseline from the empty
+before the cell's height contributed to the row minimum. The Lambda
+integration assertion then derived its expected baseline from the empty
 cell's specified 30px height plus its top border and padding. Native
-`EmptyTableCellDoesNotRaiseTextBaselineToSpecifiedHeight` passes.
-The integration assertion remains open under **D9.1.1v4 / D9.1.3v2**.
+`EmptyTableCellDoesNotRaiseTextBaselineToSpecifiedHeight` passed.
+The assertion remained open at this recheck and is resolved below (**D9.1.1v4 / D9.1.3v2**).
 Evidence: `temp/radiant-ledger-continuation/{browser-probes.log,table-native-before.log}`.
+
+**2026-11-28 resolution.** The browser and native evidence above agree that the
+empty cell's specified height does not raise the row baseline above the first
+nested line. The assertion used the empty cell's 30px height to derive a 33px
+offset, although the nested line remains 23px below the row top. The test now
+checks that row-relative baseline, and the fixed and auto cases pass. No layout
+change was needed (**CSS 2.1 §17.5.3**; ownership **D9.1.3v2**).
 
 <a id="ri-051"></a>
 
