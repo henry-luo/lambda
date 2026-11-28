@@ -1,0 +1,148 @@
+{
+  "cases": [
+    {
+      "source": "\\ExplSyntaxOn\\ifx\\prop_if_exist:NTF\\cs_if_exist:NTF Y\\else N\\fi\\ifx\\prop_if_exist:NT\\cs_if_exist:NT Y\\else N\\fi\\ifx\\prop_if_exist:NF\\cs_if_exist:NF Y\\else N\\fi\\ifx\\prop_if_exist_p:N\\cs_if_exist_p:N Y\\else N\\fi\\ExplSyntaxOff",
+      "tex": {
+        "text": "YYYY",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\let\\q\\prop_if_exist:NTF\\def\\cs_if_exist:NTF#1#2#3{BAD}\\q\\undefined{N}{Y}\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\def\\cs_if_exist:NTF#1#2#3{BAD}Y",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\def\\foo{A}\\str_if_exist:NTF\\foo{Y}{N}\\str_if_exist:NTF\\missing{N}{Y}\\str_if_exist:NT\\foo{T}\\str_if_exist:NF\\missing{F}\\int_eval:n{\\str_if_exist_p:N\\foo+\\str_if_exist_p:N\\missing}\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\def\\foo{A}YYTF1",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\ifx\\str_if_exist:NTF\\cs_if_exist:NTF Y\\else N\\fi\\ifx\\str_if_exist:NT\\cs_if_exist:NT Y\\else N\\fi\\ifx\\str_if_exist:NF\\cs_if_exist:NF Y\\else N\\fi\\ifx\\str_if_exist_p:N\\cs_if_exist_p:N Y\\else N\\fi\\ExplSyntaxOff",
+      "tex": {
+        "text": "YYYY",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\let\\q\\str_if_exist:NTF\\def\\cs_if_exist:NTF#1#2#3{BAD}\\q\\undefined{N}{Y}\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\def\\cs_if_exist:NTF#1#2#3{BAD}Y",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\def\\foo{A}\\dim_if_exist:NTF\\foo{Y}{N}\\dim_if_exist:NTF\\missing{N}{Y}\\dim_if_exist:NT\\foo{T}\\dim_if_exist:NF\\missing{F}\\int_eval:n{\\dim_if_exist_p:N\\foo+\\dim_if_exist_p:N\\missing}\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\def\\foo{A}YYTF1",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\ifx\\dim_if_exist:NTF\\cs_if_exist:NTF Y\\else N\\fi\\ifx\\dim_if_exist:NT\\cs_if_exist:NT Y\\else N\\fi\\ifx\\dim_if_exist:NF\\cs_if_exist:NF Y\\else N\\fi\\ifx\\dim_if_exist_p:N\\cs_if_exist_p:N Y\\else N\\fi\\ExplSyntaxOff",
+      "tex": {
+        "text": "YYYY",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\let\\q\\dim_if_exist:NTF\\def\\cs_if_exist:NTF#1#2#3{BAD}\\q\\undefined{N}{Y}\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\def\\cs_if_exist:NTF#1#2#3{BAD}Y",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\meaning\\tl_if_exist:NTF/\\meaning\\tl_if_exist_p:N\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\textbackslash{}long macro:\\#1->\\textbackslash{}if\\_meaning:w \\#1\\textbackslash{}scan\\_stop: \\textbackslash{}use\\_i:nnnn \\textbackslash{}else: \\textbackslash{}fi: \\textbackslash{}if\\_cs\\_exist:N \\#1\\textbackslash{}\\_\\_prg\\_TF\\_true:w \\textbackslash{}fi: \\textbackslash{}use\\_ii:nn /\\textbackslash{}long macro:\\#1->\\textbackslash{}if\\_meaning:w \\#1\\textbackslash{}scan\\_stop: \\textbackslash{}use\\_i:nnnn \\textbackslash{}else: \\textbackslash{}fi: \\textbackslash{}if\\_cs\\_exist:N \\#1\\textbackslash{}\\_\\_prg\\_p\\_true:w \\textbackslash{}fi: \\textbackslash{}c\\_false\\_bool ",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\meaning\\seq_if_exist:NTF/\\meaning\\seq_if_exist_p:N\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\textbackslash{}long macro:\\#1->\\textbackslash{}if\\_meaning:w \\#1\\textbackslash{}scan\\_stop: \\textbackslash{}use\\_i:nnnn \\textbackslash{}else: \\textbackslash{}fi: \\textbackslash{}if\\_cs\\_exist:N \\#1\\textbackslash{}\\_\\_prg\\_TF\\_true:w \\textbackslash{}fi: \\textbackslash{}use\\_ii:nn /\\textbackslash{}long macro:\\#1->\\textbackslash{}if\\_meaning:w \\#1\\textbackslash{}scan\\_stop: \\textbackslash{}use\\_i:nnnn \\textbackslash{}else: \\textbackslash{}fi: \\textbackslash{}if\\_cs\\_exist:N \\#1\\textbackslash{}\\_\\_prg\\_p\\_true:w \\textbackslash{}fi: \\textbackslash{}c\\_false\\_bool ",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\meaning\\int_if_exist:NTF/\\meaning\\int_if_exist_p:N\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\textbackslash{}long macro:\\#1->\\textbackslash{}if\\_meaning:w \\#1\\textbackslash{}scan\\_stop: \\textbackslash{}use\\_i:nnnn \\textbackslash{}else: \\textbackslash{}fi: \\textbackslash{}if\\_cs\\_exist:N \\#1\\textbackslash{}\\_\\_prg\\_TF\\_true:w \\textbackslash{}fi: \\textbackslash{}use\\_ii:nn /\\textbackslash{}long macro:\\#1->\\textbackslash{}if\\_meaning:w \\#1\\textbackslash{}scan\\_stop: \\textbackslash{}use\\_i:nnnn \\textbackslash{}else: \\textbackslash{}fi: \\textbackslash{}if\\_cs\\_exist:N \\#1\\textbackslash{}\\_\\_prg\\_p\\_true:w \\textbackslash{}fi: \\textbackslash{}c\\_false\\_bool ",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\meaning\\bool_if_exist:NTF/\\meaning\\bool_if_exist_p:N\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\textbackslash{}long macro:\\#1->\\textbackslash{}if\\_meaning:w \\#1\\textbackslash{}scan\\_stop: \\textbackslash{}use\\_i:nnnn \\textbackslash{}else: \\textbackslash{}fi: \\textbackslash{}if\\_cs\\_exist:N \\#1\\textbackslash{}\\_\\_prg\\_TF\\_true:w \\textbackslash{}fi: \\textbackslash{}use\\_ii:nn /\\textbackslash{}long macro:\\#1->\\textbackslash{}if\\_meaning:w \\#1\\textbackslash{}scan\\_stop: \\textbackslash{}use\\_i:nnnn \\textbackslash{}else: \\textbackslash{}fi: \\textbackslash{}if\\_cs\\_exist:N \\#1\\textbackslash{}\\_\\_prg\\_p\\_true:w \\textbackslash{}fi: \\textbackslash{}c\\_false\\_bool ",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\meaning\\clist_if_exist:NTF/\\meaning\\clist_if_exist_p:N\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\textbackslash{}long macro:\\#1->\\textbackslash{}if\\_meaning:w \\#1\\textbackslash{}scan\\_stop: \\textbackslash{}use\\_i:nnnn \\textbackslash{}else: \\textbackslash{}fi: \\textbackslash{}if\\_cs\\_exist:N \\#1\\textbackslash{}\\_\\_prg\\_TF\\_true:w \\textbackslash{}fi: \\textbackslash{}use\\_ii:nn /\\textbackslash{}long macro:\\#1->\\textbackslash{}if\\_meaning:w \\#1\\textbackslash{}scan\\_stop: \\textbackslash{}use\\_i:nnnn \\textbackslash{}else: \\textbackslash{}fi: \\textbackslash{}if\\_cs\\_exist:N \\#1\\textbackslash{}\\_\\_prg\\_p\\_true:w \\textbackslash{}fi: \\textbackslash{}c\\_false\\_bool ",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\meaning\\prop_if_exist:NTF/\\meaning\\prop_if_exist_p:N\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\textbackslash{}long macro:\\#1->\\textbackslash{}if\\_meaning:w \\#1\\textbackslash{}scan\\_stop: \\textbackslash{}use\\_i:nnnn \\textbackslash{}else: \\textbackslash{}fi: \\textbackslash{}if\\_cs\\_exist:N \\#1\\textbackslash{}\\_\\_prg\\_TF\\_true:w \\textbackslash{}fi: \\textbackslash{}use\\_ii:nn /\\textbackslash{}long macro:\\#1->\\textbackslash{}if\\_meaning:w \\#1\\textbackslash{}scan\\_stop: \\textbackslash{}use\\_i:nnnn \\textbackslash{}else: \\textbackslash{}fi: \\textbackslash{}if\\_cs\\_exist:N \\#1\\textbackslash{}\\_\\_prg\\_p\\_true:w \\textbackslash{}fi: \\textbackslash{}c\\_false\\_bool ",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\meaning\\str_if_exist:NTF/\\meaning\\str_if_exist_p:N\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\textbackslash{}long macro:\\#1->\\textbackslash{}if\\_meaning:w \\#1\\textbackslash{}scan\\_stop: \\textbackslash{}use\\_i:nnnn \\textbackslash{}else: \\textbackslash{}fi: \\textbackslash{}if\\_cs\\_exist:N \\#1\\textbackslash{}\\_\\_prg\\_TF\\_true:w \\textbackslash{}fi: \\textbackslash{}use\\_ii:nn /\\textbackslash{}long macro:\\#1->\\textbackslash{}if\\_meaning:w \\#1\\textbackslash{}scan\\_stop: \\textbackslash{}use\\_i:nnnn \\textbackslash{}else: \\textbackslash{}fi: \\textbackslash{}if\\_cs\\_exist:N \\#1\\textbackslash{}\\_\\_prg\\_p\\_true:w \\textbackslash{}fi: \\textbackslash{}c\\_false\\_bool ",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\meaning\\dim_if_exist:NTF/\\meaning\\dim_if_exist_p:N\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\textbackslash{}long macro:\\#1->\\textbackslash{}if\\_meaning:w \\#1\\textbackslash{}scan\\_stop: \\textbackslash{}use\\_i:nnnn \\textbackslash{}else: \\textbackslash{}fi: \\textbackslash{}if\\_cs\\_exist:N \\#1\\textbackslash{}\\_\\_prg\\_TF\\_true:w \\textbackslash{}fi: \\textbackslash{}use\\_ii:nn /\\textbackslash{}long macro:\\#1->\\textbackslash{}if\\_meaning:w \\#1\\textbackslash{}scan\\_stop: \\textbackslash{}use\\_i:nnnn \\textbackslash{}else: \\textbackslash{}fi: \\textbackslash{}if\\_cs\\_exist:N \\#1\\textbackslash{}\\_\\_prg\\_p\\_true:w \\textbackslash{}fi: \\textbackslash{}c\\_false\\_bool ",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    }
+  ]
+}

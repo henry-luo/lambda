@@ -26,6 +26,13 @@ pub let css = "
   .preview-kind.rendered { background: #e3f4eb; color: #1b7447; }
   .preview-kind.source { background: #e8edf5; color: #536275; }
   .preview-kind.editing { background: #dce9fd; color: #1c5da6; }
+  .document-tabs { flex: none; display: flex; align-items: center; gap: 2px; }
+  .document-tab { padding: 4px 9px; border: 0; border-radius: 999px; background: transparent;
+                  color: var(--document-muted); cursor: pointer; font-size: 12px; font-weight: 650; }
+  .document-tab:hover { background-color: #e8edf5; color: #31425a; }
+  .tab-view.active { background: #e3f4eb; color: #1b7447; }
+  .tab-source.active { background: #e8edf5; color: #536275; }
+  .tab-edit.active { background: #dce9fd; color: #1c5da6; }
 "
 
 pub fn title(path, name, name_class = "document-name") =>
@@ -36,10 +43,32 @@ pub fn title(path, name, name_class = "document-name") =>
 
 pub fn badge(label, kind) => <span class:("preview-kind " ++ kind), label>
 
+view <document_mode_button> {
+  <button type:"button", class:"document-tab tab-" ++ lower(~.caption) ++ (if (~.active) " active" else ""),
+    'aria-current':if (~.active) "true" else null, ~.caption>
+}
+on mousedown(evt) {
+  // Rich and source commands use the editor's current selection.
+  if (~.intent != null and ~.intent.event == "edit_cmd") { return 'prevent-default' }
+  return 'pass'
+}
+on click(evt) {
+  if (not ~.active and ~.intent != null) {
+    emit(~.intent.event, {*:~.intent.detail, node:evt.target, event:evt})
+  }
+  return 'pass'
+}
+
+pub fn mode_button(caption, active, intent = null) =>
+  apply(<document_mode_button caption:caption, active:active, intent:intent>)
+
+pub fn mode_tabs(buttons) => <nav class:"document-tabs", 'aria-label':"Document mode", *buttons>
+
 pub fn collection_summary(kind, count) =>
   (if (kind == 'object') "Object · " else "Array · ") ++ string(count) ++
   (if (kind == 'object') (if (count == 1) " property" else " properties")
    else if (count == 1) " item" else " items")
 
-pub fn header(path, name, label, kind) =>
-  <header class:"document-header", *[title(path, name), badge(label, kind)]>
+pub fn header(path, name, label, kind = null) =>
+  <header class:"document-header", title(path, name);
+    if (kind == null) label else badge(label, kind)>

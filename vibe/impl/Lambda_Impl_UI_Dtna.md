@@ -143,6 +143,13 @@ all definition hashes and generated-asset hash are retained in the repository.
    fixtures are permanent forced-interpreter/forced-JIT checks in the focused
    target (**D8.3.6**).
 
+### Alert action-slot line height — 2026-11-28
+
+The controlled alert geometry replay found that the inline action wrapper
+created an extra line box and made the status row three pixels too tall. The
+wrapper now uses a centered flex row, keeping the action slot aligned with the
+alert content. `dtna_alert_modes` passes all 43 assertions (**D9.3.4 / D5.5.3**).
+
 Boolean HTML attributes must be absent when false: emitting a null-valued
 `disabled`/`checked` attribute still has presence semantics in the Lambda DOM.
 The shared descriptor helper centralizes that rule. Nested providers emit only

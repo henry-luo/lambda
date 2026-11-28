@@ -11,6 +11,7 @@
     {"type":"script","js":"let p=document.getElementById('result-scroll');p.scrollTop=1300;p.scrollLeft=1200;p.dispatchEvent(new Event('scroll'))"},
     {"type":"assert_script","js":"(()=>{let p=document.getElementById('result-scroll'),g=document.getElementById('result-grid');return p.scrollTop>1000&&p.scrollLeft>1000&&+g.dataset.firstRow>20&&+g.dataset.firstColumn>4})()","assert_timeout":30000},
     {"type":"click","target":{"selector":"#tab-new"}},
+    {"type":"advance_time","ms":32,"steps":2},
     {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-active-tab","equals":"2"},
     {"type":"click","target":{"selector":"#tab-1"}},
     {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-active-tab","equals":"1"},

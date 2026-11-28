@@ -33,12 +33,14 @@
 #include "lib/font/font.h"
 #include "lib/log.h"
 #include "lib/mem.h"
+#include "lib/ownership.hpp"
 #include "lib/str.h"
 #include "lib/strbuf.h"
 
 #include <string.h>
 #include <stdlib.h>
 #include <ctype.h>
+#include <limits.h>
 #include <math.h>
 
 
@@ -48,12 +50,21 @@
 
 #define MAX_CANVAS_FONT_HANDLES 64
 
+enum CanvasIntrinsicSlot {
+    CANVAS_IMAGE_DATA_KEY,
+    CANVAS_IMAGE_DATA_PROTOTYPE,
+    CANVAS_RADIAL_GRADIENT_KEY,
+    CANVAS_GRADIENT_PROTOTYPE,
+    CANVAS_STYLE_STACK_KEY,
+    CANVAS_INTRINSIC_COUNT,
+};
+
 struct JsCanvasRuntimeState {
     FontContext* font_context;
     FontHandle* font_handles[MAX_CANVAS_FONT_HANDLES];
     int font_handle_count;
-    RootVector image_data_roots;
-    Item image_data_slots[2]; // private brand key and intrinsic prototype
+    RootVector intrinsic_roots;
+    Item intrinsics[CANVAS_INTRINSIC_COUNT];
 };
 
 static JsCanvasRuntimeState* canvas_runtime_state(void) {
@@ -76,8 +87,8 @@ static JsCanvasRuntimeState* canvas_runtime_state_ensure(void) {
     if (!state) {
         state = (JsCanvasRuntimeState*)context_capsule_ensure(
             context, CONTEXT_CAPSULE_DOM_CANVAS, &js_canvas_capsule_ops);
-        if (state) root_vector_bind_external(&state->image_data_roots, (Context*)context,
-            state->image_data_slots, 2, "Canvas ImageData intrinsics");
+        if (state) root_vector_bind_external(&state->intrinsic_roots, (Context*)context,
+            state->intrinsics, CANVAS_INTRINSIC_COUNT, "Canvas intrinsics");
     }
     return state;
 }
@@ -122,7 +133,7 @@ static Item js_canvas_integer(Item input, bool unsigned_value, int64_t* out) {
     double value = NAN;
     Item error = js_canvas_number_value(input, &value);
     if (item_is_error(error)) return error;
-    // constructor dimensions wrap as unsigned long; readback coordinates use EnforceRange.
+    // constructor dimensions wrap as unsigned long; the pixel methods use EnforceRange.
     if (unsigned_value) {
         *out = (uint32_t)js_to_int32(value);
         return ItemNull;
@@ -134,15 +145,15 @@ static Item js_canvas_integer(Item input, bool unsigned_value, int64_t* out) {
     return ItemNull;
 }
 
-static Item js_image_data_intrinsic(int slot) {
-    JsCanvasRuntimeState* state = canvas_runtime_state_ensure();
-    Item* value = state ? root_vector_external_at(&state->image_data_roots, slot) : nullptr;
+static Item js_canvas_intrinsic(CanvasIntrinsicSlot slot) {
+    JsCanvasRuntimeState* state = canvas_runtime_state();
+    Item* value = state ? root_vector_external_at(&state->intrinsic_roots, slot) : nullptr;
     return value ? *value : ItemNull;
 }
 
 static Item js_image_data_state(Item receiver) {
     if (!dom_realm_object_has_class(receiver, JS_CLASS_WEB_API_RESOURCE) ||
-        js_private_in(receiver, js_image_data_intrinsic(0)).item != ITEM_TRUE)
+        js_private_in(receiver, js_canvas_intrinsic(CANVAS_IMAGE_DATA_KEY)).item != ITEM_TRUE)
         return js_throw_type_error("Illegal ImageData receiver");
     return dom_realm_native_private_array_state(receiver, JS_CLASS_WEB_API_RESOURCE, 3,
         "Illegal ImageData receiver");
@@ -174,7 +185,8 @@ static Item js_image_data_settings(Item settings) {
 static Item js_image_data_create(Item data, uint32_t width, uint32_t height) {
     RootFrame roots(4);
     Rooted<Item> pixels(roots, data), record(roots, js_array_new(0));
-    Rooted<Item> key(roots, js_image_data_intrinsic(0)), prototype(roots, js_image_data_intrinsic(1));
+    Rooted<Item> key(roots, js_canvas_intrinsic(CANVAS_IMAGE_DATA_KEY));
+    Rooted<Item> prototype(roots, js_canvas_intrinsic(CANVAS_IMAGE_DATA_PROTOTYPE));
     JS_RETURN_IF_ERROR(js_array_push(record.get(), pixels.get()));
     JS_RETURN_IF_ERROR(js_array_push(record.get(), (Item){.item = i2it(width)}));
     JS_RETURN_IF_ERROR(js_array_push(record.get(), (Item){.item = i2it(height)}));
@@ -262,16 +274,73 @@ static Item js_canvas_get_image_data(Item, Item receiver, Item* args, int argc, 
     return image.get();
 }
 
-extern "C" void dom_canvas_install_readback_interface(Item constructor,
+static Item js_canvas_create_image_data(Item, Item receiver, Item* args, int argc, uint64_t*) {
+    if (!js_canvas_is_2d_context(receiver))
+        return js_throw_type_error("Illegal CanvasRenderingContext2D receiver");
+    if (!argc) return js_throw_type_error("createImageData requires an ImageData or dimensions");
+    if (argc == 1) {
+        JS_ASSIGN_OR_RETURN(record, js_image_data_state(args[0]));
+        uint32_t width = (uint32_t)it2i(js_elements_get_int(record, 1));
+        uint32_t height = (uint32_t)it2i(js_elements_get_int(record, 2));
+        // Cloning a shape allocates fresh transparent storage.
+        return js_image_data_allocate(width, height);
+    }
+    int64_t width = 0, height = 0;
+    JS_RETURN_IF_ERROR(js_canvas_integer(args[0], false, &width));
+    JS_RETURN_IF_ERROR(js_canvas_integer(args[1], false, &height));
+    JS_RETURN_IF_ERROR(js_image_data_settings(argc > 2 ? args[2] : make_js_undefined()));
+    return js_image_data_allocate((uint32_t)(width < 0 ? -width : width),
+        (uint32_t)(height < 0 ? -height : height));
+}
+
+static Item js_canvas_put_image_data(Item, Item receiver, Item* args, int argc, uint64_t*) {
+    if (!js_canvas_is_2d_context(receiver))
+        return js_throw_type_error("Illegal CanvasRenderingContext2D receiver");
+    if (argc != 3 && argc < 7) return js_throw_type_error("putImageData requires three or seven arguments");
+    RootFrame roots(3);
+    Rooted<Item> owner(roots, receiver), record(roots, js_image_data_state(args[0]));
+    JS_RETURN_IF_ERROR(record.get());
+    Rooted<Item> pixels(roots, js_elements_get_int(record.get(), 0));
+    int64_t width = it2i(js_elements_get_int(record.get(), 1));
+    int64_t height = it2i(js_elements_get_int(record.get(), 2));
+    int64_t rect[] = {0, 0, 0, 0, width, height};
+    int count = argc >= 7 ? 6 : 2;
+    for (int index = 0; index < count; ++index)
+        JS_RETURN_IF_ERROR(js_canvas_integer(args[index + 1], false, &rect[index]));
+
+    // Numeric coercion can detach the array. Resolve the view only after user code has run.
+    void* element = js_canvas_context_element(owner.get());
+    if (!element) return js_throw_type_error("Illegal CanvasRenderingContext2D receiver");
+    const uint8_t* bytes = (const uint8_t*)js_typed_array_current_data_ptr(pixels.get());
+    size_t byte_length = (size_t)js_typed_array_byte_length(pixels.get());
+    if (!bytes || (uint64_t)width * height > byte_length / 4)
+        return dom_raise_exception("InvalidStateError", "Invalid ImageData pixel storage");
+
+    if (rect[4] < 0) { rect[2] += rect[4]; rect[4] = -rect[4]; }
+    if (rect[5] < 0) { rect[3] += rect[5]; rect[5] = -rect[5]; }
+    int64_t left = rect[2] > 0 ? rect[2] : 0, top = rect[3] > 0 ? rect[3] : 0;
+    int64_t right = rect[2] + rect[4] < width ? rect[2] + rect[4] : width;
+    int64_t bottom = rect[3] + rect[5] < height ? rect[3] + rect[5] : height;
+    if (left >= right || top >= bottom) return make_js_undefined();
+    size_t row_bytes = (size_t)width * 4;
+    size_t offset = (size_t)top * row_bytes + (size_t)left * 4;
+    if (!dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::put_pixels,
+            element, rect[0] + left, rect[1] + top, (uint32_t)(right - left), (uint32_t)(bottom - top),
+            bytes + offset, row_bytes, byte_length - offset)) return js_canvas_draw_failed();
+    return make_js_undefined();
+}
+
+extern "C" void dom_canvas_install_pixel_interface(Item constructor,
         Item image_data_prototype, Item context_prototype) {
     JsCanvasRuntimeState* state = canvas_runtime_state_ensure();
-    if (!state || !root_vector_ensure_external(&state->image_data_roots)) return;
+    if (!state || !root_vector_ensure_external(&state->intrinsic_roots)) return;
     RootFrame roots(5);
     Rooted<Item> target(roots, constructor), prototype(roots, image_data_prototype);
     Rooted<Item> context_root(roots, context_prototype), function(roots, ItemNull), key(roots, ItemNull);
     key.set(dom_realm_private_key_for_class(target.get(), js_name_item("#ImageData")));
     if (item_is_error(key.get())) return;
-    state->image_data_slots[0] = key.get(); state->image_data_slots[1] = prototype.get();
+    state->intrinsics[CANVAS_IMAGE_DATA_KEY] = key.get();
+    state->intrinsics[CANVAS_IMAGE_DATA_PROTOTYPE] = prototype.get();
     static const char* names[] = {"data", "width", "height", "colorSpace", "pixelFormat"};
     for (int slot = 0; slot < 5; slot++) {
         key.set(js_name_item(names[slot]));
@@ -279,9 +348,154 @@ extern "C" void dom_canvas_install_readback_interface(Item constructor,
         js_set_function_name_from_property_key(function.get(), key.get(), 1);
         dom_realm_install_accessor(prototype.get(), key.get(), function.get(), ItemNull, 0);
     }
-    function.set(js_new_native_payload_function(js_canvas_get_image_data, 0, 4));
-    js_set_function_name(function.get(), js_name_item("getImageData"));
-    dom_realm_set_name(context_root.get(), "getImageData", function.get());
+    static const struct { const char* name; JsNativeCallBody call; int length; } methods[] = {
+        {"createImageData", js_canvas_create_image_data, 1},
+        {"getImageData", js_canvas_get_image_data, 4},
+        {"putImageData", js_canvas_put_image_data, 3},
+    };
+    for (const auto& method : methods) {
+        function.set(js_new_native_payload_function(method.call, 0, method.length));
+        js_set_function_name(function.get(), js_name_item(method.name));
+        dom_realm_set_name(context_root.get(), method.name, function.get());
+    }
+}
+
+static bool js_canvas_is_radial_gradient(Item value) {
+    return dom_realm_object_has_class(value, JS_CLASS_WEB_API_RESOURCE) &&
+        js_private_in(value, js_canvas_intrinsic(CANVAS_RADIAL_GRADIENT_KEY)).item == ITEM_TRUE;
+}
+
+static Item js_canvas_create_radial_gradient(Item, Item receiver, Item* args, int argc, uint64_t*) {
+    if (!js_canvas_is_2d_context(receiver))
+        return dom_realm_throw_type_error("Illegal CanvasRenderingContext2D receiver");
+    if (argc < 6) return js_throw_type_error("createRadialGradient requires six arguments");
+    double circles[6];
+    for (int index = 0; index < 6; index++) {
+        JS_RETURN_IF_ERROR(js_canvas_number_value(args[index], &circles[index]));
+        if (!isfinite(circles[index])) return js_throw_type_error("Canvas gradient coordinates must be finite");
+    }
+    if (circles[2] < 0.0 || circles[5] < 0.0)
+        return dom_raise_exception("IndexSizeError", "Canvas gradient radii must be non-negative");
+
+    RootFrame roots(4);
+    Rooted<Item> record(roots, js_array_new(0)), stops(roots, js_array_new(0));
+    Rooted<Item> key(roots, js_canvas_intrinsic(CANVAS_RADIAL_GRADIENT_KEY));
+    Rooted<Item> prototype(roots, js_canvas_intrinsic(CANVAS_GRADIENT_PROTOTYPE));
+    for (double coordinate : circles)
+        JS_RETURN_IF_ERROR(js_array_push(record.get(), js_make_number(coordinate)));
+    JS_RETURN_IF_ERROR(js_array_push(record.get(), stops.get()));
+    return dom_realm_native_private_array_object(JS_CLASS_WEB_API_RESOURCE, key.get(),
+        record.get(), prototype.get());
+}
+
+static double js_canvas_stop_offset(Item stop) {
+    double offset;
+    js_canvas_number_value(js_elements_get_int(stop, 0), &offset);
+    return offset;
+}
+
+static Item js_canvas_add_color_stop(Item, Item receiver, Item* args, int argc, uint64_t*) {
+    if (!js_canvas_is_radial_gradient(receiver))
+        return js_throw_type_error("Illegal CanvasGradient receiver");
+    if (argc < 2) return js_throw_type_error("addColorStop requires an offset and a color");
+    RootFrame roots(5);
+    Rooted<Item> record(roots, dom_realm_native_private_array_state(
+        receiver, JS_CLASS_WEB_API_RESOURCE, 7, "Illegal CanvasGradient receiver"));
+    if (item_is_error(record.get())) return record.get();
+    double offset;
+    JS_RETURN_IF_ERROR(js_canvas_number_value(args[0], &offset));
+    if (!isfinite(offset)) return js_throw_type_error("Canvas gradient offset must be finite");
+    Rooted<Item> text(roots, js_to_string(args[1]));
+    if (item_is_error(text.get())) return text.get();
+    if (offset < 0.0 || offset > 1.0)
+        return dom_raise_exception("IndexSizeError", "Canvas gradient offset is outside [0, 1]");
+    String* color_text = it2s(text.get());
+    CssColor color = {};
+    if (!color_text || memchr(color_text->chars, '\0', color_text->len) ||
+            !css_parse_color(color_text->chars, &color)) {
+        return dom_raise_exception("SyntaxError", "Invalid canvas gradient color");
+    }
+    // CSS resolves currentColor to the initial color without an associated element.
+    uint32_t rgba = color.type == CSS_COLOR_CURRENT ? 0xff000000u :
+        (uint32_t)color.r | (uint32_t)color.g << 8 | (uint32_t)color.b << 16 | (uint32_t)color.a << 24;
+    Rooted<Item> stops(roots, js_elements_get_int(record.get(), 6));
+    Rooted<Item> stop(roots, js_array_new(0)), previous(roots, ItemNull);
+    JS_RETURN_IF_ERROR(js_array_push(stop.get(), js_make_number(offset)));
+    JS_RETURN_IF_ERROR(js_array_push(stop.get(), (Item){.item = i2it(rgba)}));
+    int64_t position = js_array_length(stops.get());
+    JS_RETURN_IF_ERROR(js_array_push(stops.get(), stop.get()));
+    // Equal offsets keep their insertion order for hard stops.
+    while (position > 0) {
+        previous.set(js_elements_get_int(stops.get(), position - 1));
+        if (js_canvas_stop_offset(previous.get()) <= offset) break;
+        JS_RETURN_IF_ERROR(js_elements_set_int_direct(stops.get(), position, previous.get()));
+        position--;
+    }
+    JS_RETURN_IF_ERROR(js_elements_set_int_direct(stops.get(), position, stop.get()));
+    return make_js_undefined();
+}
+
+extern "C" void dom_canvas_install_gradient_interface(Item constructor, Item prototype,
+        Item context_constructor, Item context_prototype) {
+    JsCanvasRuntimeState* state = canvas_runtime_state_ensure();
+    if (!state || !root_vector_ensure_external(&state->intrinsic_roots)) return;
+    RootFrame roots(6);
+    Rooted<Item> target(roots, constructor), gradient_proto(roots, prototype);
+    Rooted<Item> context_ctor(roots, context_constructor), context_proto(roots, context_prototype);
+    Rooted<Item> key(roots, dom_realm_private_key_for_class(target.get(), js_name_item("#CanvasRadialGradient")));
+    Rooted<Item> function(roots, ItemNull);
+    if (item_is_error(key.get())) return;
+    state->intrinsics[CANVAS_RADIAL_GRADIENT_KEY] = key.get();
+    state->intrinsics[CANVAS_GRADIENT_PROTOTYPE] = gradient_proto.get();
+    key.set(dom_realm_private_key_for_class(context_ctor.get(), js_name_item("#CanvasStyleStack")));
+    if (item_is_error(key.get())) return;
+    state->intrinsics[CANVAS_STYLE_STACK_KEY] = key.get();
+
+    function.set(js_new_native_payload_function(js_canvas_add_color_stop, 0, 2));
+    js_set_function_name(function.get(), js_name_item("addColorStop"));
+    dom_realm_set_name(gradient_proto.get(), "addColorStop", function.get());
+    function.set(js_new_native_payload_function(js_canvas_create_radial_gradient, 0, 6));
+    js_set_function_name(function.get(), js_name_item("createRadialGradient"));
+    dom_realm_set_name(context_proto.get(), "createRadialGradient", function.get());
+}
+
+struct CanvasGradientBorrow {
+    RadiantCanvasRadialGradient value;
+    lam::Temp<RasterGradientStop> stops;
+    bool active = false;
+
+    const RadiantCanvasRadialGradient* get() const { return active ? &value : nullptr; }
+};
+
+static Item js_canvas_borrow_gradient(Item context, bool stroke, CanvasGradientBorrow* borrow) {
+    RootFrame roots(3);
+    Rooted<Item> style(roots, dom_realm_get_name(context, stroke ? "strokeStyle" : "fillStyle"));
+    if (item_is_error(style.get())) return style.get();
+    if (!js_canvas_is_radial_gradient(style.get())) return ItemNull;
+    Rooted<Item> record(roots, dom_realm_native_private_array_state(
+        style.get(), JS_CLASS_WEB_API_RESOURCE, 7, "Illegal CanvasGradient receiver"));
+    if (item_is_error(record.get())) return record.get();
+    Rooted<Item> stops(roots, js_elements_get_int(record.get(), 6));
+    double circles[6];
+    for (int index = 0; index < 6; index++)
+        JS_RETURN_IF_ERROR(js_canvas_number_value(js_elements_get_int(record.get(), index), &circles[index]));
+    int64_t count = js_array_length(stops.get());
+    if (count > INT_MAX) return js_canvas_draw_failed();
+    if (count) {
+        borrow->stops = lam::temp_array<RasterGradientStop>((size_t)count, MEM_CAT_JS_RUNTIME);
+        if (!borrow->stops) return js_canvas_draw_failed();
+    }
+    for (int64_t index = 0; index < count; index++) {
+        style.set(js_elements_get_int(stops.get(), index));
+        uint32_t rgba = (uint32_t)it2i(js_elements_get_int(style.get(), 1));
+        borrow->stops[index] = {(float)js_canvas_stop_offset(style.get()), (uint8_t)rgba,
+            (uint8_t)(rgba >> 8), (uint8_t)(rgba >> 16), (uint8_t)(rgba >> 24)};
+    }
+    // The renderer sees an independent snapshot and never stores a JS reference.
+    borrow->value = {circles[0], circles[1], circles[2], circles[3], circles[4], circles[5],
+        borrow->stops.get(), (int)count};
+    borrow->active = true;
+    return ItemNull;
 }
 
 static bool js_canvas_numbers_are_finite(const float* values, int count) {
@@ -301,7 +515,7 @@ static void js_canvas_note_paint(void* canvas_element) {
 }
 
 extern "C" void js_canvas_ctx_set_font(Item ctx_obj, Item font_val);
-static void js_canvas_apply_native_state(Item context);
+static void js_canvas_apply_native_state(Item context, Item fill_gradient, Item stroke_gradient);
 
 static Item js_canvas_color_item(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
     static const char hex[] = "0123456789abcdef";
@@ -338,18 +552,49 @@ static const char* js_canvas_text_align_name(uint8_t align) {
 static Item js_canvas_context_save(Item callee, Item this_value,
                                    Item* args, int argc, uint64_t* result_home) {
     (void)callee; (void)args; (void)argc; (void)result_home;
-    void* element = js_canvas_context_element(this_value);
+    RootFrame roots(4);
+    Rooted<Item> owner(roots, this_value);
+    void* element = js_canvas_context_element(owner.get());
     if (!element) return dom_realm_throw_type_error("CanvasRenderingContext2D receiver required");
-    return dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::save, element) ? make_js_undefined() : js_canvas_draw_failed();
+    Rooted<Item> key(roots, js_canvas_intrinsic(CANVAS_STYLE_STACK_KEY));
+    Rooted<Item> saved(roots, js_array_new(0)), style(roots, ItemNull);
+    const char* names[] = {"fillStyle", "strokeStyle"};
+    for (const char* name : names) {
+        style.set(dom_realm_get_name(owner.get(), name));
+        if (item_is_error(style.get())) return style.get();
+        JS_RETURN_IF_ERROR(js_array_push(saved.get(),
+            js_canvas_is_radial_gradient(style.get()) ? style.get() : ItemNull));
+    }
+    style.set(dom_realm_get(owner.get(), key.get()));
+    if (item_is_error(style.get())) return style.get();
+    JS_RETURN_IF_ERROR(js_array_push(saved.get(), style.get()));
+    if (!dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::save, element))
+        return js_canvas_draw_failed();
+    // The parallel JS frame retains each mutable gradient by identity.
+    Item stored = js_private_property_set(owner.get(), key.get(), saved.get(), 1);
+    if (item_is_error(stored)) {
+        dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::restore, element);
+        return stored;
+    }
+    return make_js_undefined();
 }
 
 static Item js_canvas_context_restore(Item callee, Item this_value,
                                       Item* args, int argc, uint64_t* result_home) {
     (void)callee; (void)args; (void)argc; (void)result_home;
-    void* element = js_canvas_context_element(this_value);
+    RootFrame roots(3);
+    Rooted<Item> owner(roots, this_value);
+    void* element = js_canvas_context_element(owner.get());
     if (!element) return dom_realm_throw_type_error("CanvasRenderingContext2D receiver required");
-    if (!dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::restore, element)) return js_canvas_draw_failed();
-    js_canvas_apply_native_state(this_value);
+    Rooted<Item> key(roots, js_canvas_intrinsic(CANVAS_STYLE_STACK_KEY));
+    Rooted<Item> saved(roots, dom_realm_get(owner.get(), key.get()));
+    if (item_is_error(saved.get())) return saved.get();
+    if (get_type_id(saved.get()) != LMD_TYPE_ARRAY) return make_js_undefined();
+    if (!dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::restore, element))
+        return js_canvas_draw_failed();
+    JS_RETURN_IF_ERROR(js_private_property_set(owner.get(), key.get(), js_elements_get_int(saved.get(), 2), 1));
+    js_canvas_apply_native_state(owner.get(), js_elements_get_int(saved.get(), 0),
+        js_elements_get_int(saved.get(), 1));
     return make_js_undefined();
 }
 
@@ -618,24 +863,26 @@ static Item js_canvas_context_arc_to(Item, Item receiver, Item* args, int argc, 
         ? make_js_undefined() : js_canvas_draw_failed();
 }
 
-static Item js_canvas_context_fill(Item callee, Item this_value,
-                                   Item* args, int argc, uint64_t* result_home) {
-    (void)callee; (void)args; (void)argc; (void)result_home;
-    void* element = js_canvas_context_element(this_value);
+static Item js_canvas_context_paint_path(Item receiver, bool stroke) {
+    RootFrame roots(1);
+    Rooted<Item> owner(roots, receiver);
+    void* element = js_canvas_context_element(owner.get());
     if (!element) return dom_realm_throw_type_error("CanvasRenderingContext2D receiver required");
-    if (!dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::fill, element)) return js_canvas_draw_failed();
+    CanvasGradientBorrow gradient = {};
+    JS_RETURN_IF_ERROR(js_canvas_borrow_gradient(owner.get(), stroke, &gradient));
+    const DomCanvasEngineOps* operations = dom_canvas_engine_ops();
+    if (!dom_provider_call(operations, stroke ? &DomCanvasEngineOps::stroke : &DomCanvasEngineOps::fill,
+            element, gradient.get())) return js_canvas_draw_failed();
     js_canvas_note_paint(element);
     return make_js_undefined();
 }
 
-static Item js_canvas_context_stroke(Item callee, Item this_value,
-                                     Item* args, int argc, uint64_t* result_home) {
-    (void)callee; (void)args; (void)argc; (void)result_home;
-    void* element = js_canvas_context_element(this_value);
-    if (!element) return dom_realm_throw_type_error("CanvasRenderingContext2D receiver required");
-    if (!dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::stroke, element)) return js_canvas_draw_failed();
-    js_canvas_note_paint(element);
-    return make_js_undefined();
+static Item js_canvas_context_fill(Item, Item receiver, Item*, int, uint64_t*) {
+    return js_canvas_context_paint_path(receiver, false);
+}
+
+static Item js_canvas_context_stroke(Item, Item receiver, Item*, int, uint64_t*) {
+    return js_canvas_context_paint_path(receiver, true);
 }
 
 static Item js_canvas_context_clip(Item callee, Item this_value,
@@ -656,20 +903,22 @@ static Item js_canvas_context_rect(Item callee, Item this_value,
                                    Item* args, int argc, uint64_t* result_home,
                                    bool stroke, bool clear) {
     (void)callee; (void)result_home;
+    RootFrame roots(1);
+    Rooted<Item> owner(roots, this_value);
     float values[4] = {};
     for (int index = 0; index < 4; index++) {
         Item error = js_canvas_number_arg(args, argc, index, &values[index]);
         if (item_is_error(error)) return error;
     }
     if (!js_canvas_numbers_are_finite(values, 4)) return make_js_undefined();
-    void* element = js_canvas_context_element(this_value);
+    void* element = js_canvas_context_element(owner.get());
     if (!element) return dom_realm_throw_type_error("CanvasRenderingContext2D receiver required");
+    CanvasGradientBorrow gradient = {};
+    if (!clear) JS_RETURN_IF_ERROR(js_canvas_borrow_gradient(owner.get(), stroke, &gradient));
     bool drawn = clear ? dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::clear_rect, element, values[0], values[1],
                                                     values[2], values[3])
-        : stroke ? dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::stroke_rect, element, values[0], values[1],
-                                               values[2], values[3])
-        : dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::fill_rect, element, values[0], values[1],
-                                   values[2], values[3]);
+        : dom_provider_call(dom_canvas_engine_ops(), stroke ? &DomCanvasEngineOps::stroke_rect : &DomCanvasEngineOps::fill_rect,
+            element, values[0], values[1], values[2], values[3], gradient.get());
     if (!drawn) return js_canvas_draw_failed();
     js_canvas_note_paint(element);
     return make_js_undefined();
@@ -727,9 +976,6 @@ static Item js_canvas_context_fill_text(Item callee, Item this_value,
     Rooted<Item> handle_id_root(roots,
         dom_realm_get_name(context_root.get(), "__font_handle_id"));
     if (item_is_error(text_root.get())) return text_root.get();
-    String* text = get_type_id(text_root.get()) == LMD_TYPE_STRING ? it2s(text_root.get()) : nullptr;
-    if (!text) return js_throw_type_error("Canvas text is unavailable");
-
     float values[2] = {};
     for (int index = 0; index < 2; index++) {
         Item error = js_canvas_number_arg(args, argc, index + 1, &values[index]);
@@ -751,8 +997,12 @@ static Item js_canvas_context_fill_text(Item callee, Item this_value,
         !state->font_handles[handle_id]) {
         return js_throw_range_error("Canvas font resource is unavailable");
     }
+    CanvasGradientBorrow gradient = {};
+    JS_RETURN_IF_ERROR(js_canvas_borrow_gradient(context_root.get(), false, &gradient));
+    String* text = get_type_id(text_root.get()) == LMD_TYPE_STRING ? it2s(text_root.get()) : nullptr;
+    if (!text) return js_throw_type_error("Canvas text is unavailable");
     if (!dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::fill_text, element, state->font_handles[handle_id], text->chars,
-                                  text->len, values[0], values[1], max_width)) {
+                                  text->len, values[0], values[1], max_width, gradient.get())) {
         return js_canvas_draw_failed();
     }
     js_canvas_note_paint(element);
@@ -863,6 +1113,10 @@ static Item js_canvas_2d_context_for(Item canvas) {
     if (get_type_id(prototype_root.get()) == LMD_TYPE_MAP) {
         // The branded native context still needs its realm-owned WebIDL prototype.
         js_set_prototype(context_root.get(), prototype_root.get());
+    }
+    Item stack_key = js_canvas_intrinsic(CANVAS_STYLE_STACK_KEY);
+    if (get_type_id(stack_key) == LMD_TYPE_STRING) {
+        JS_RETURN_IF_ERROR(js_private_field_define(context_root.get(), stack_key, ItemNull));
     }
     dom_realm_set_name(context_root.get(), "canvas", canvas_root.get());
     js_canvas_ctx_set_font(context_root.get(), font_root.get());
@@ -1165,20 +1419,20 @@ extern "C" void js_canvas_ctx_set_font(Item ctx_obj, Item font_val) {
     }
 }
 
-static void js_canvas_apply_native_state(Item context) {
-    void* element = js_canvas_context_element(context);
+static void js_canvas_apply_native_state(Item context, Item fill_gradient, Item stroke_gradient) {
+    RootFrame roots(4);
+    Rooted<Item> context_root(roots, context), fill(roots, fill_gradient), stroke(roots, stroke_gradient);
+    void* element = js_canvas_context_element(context_root.get());
     DomCanvasStateSnapshot state = {};
     if (!element || !dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::get_state, element, &state)) return;
-    RootFrame roots(2);
-    Rooted<Item> context_root(roots, context);
     Rooted<Item> font_root(roots, js_name_item(state.font));
     // Restore's native frame is authoritative; project it without re-entering setters.
     bool was_intercepting = s_in_canvas_property_intercept;
     s_in_canvas_property_intercept = true;
-    dom_realm_set_name(context_root.get(), "fillStyle",
+    dom_realm_set_name(context_root.get(), "fillStyle", fill.get().item != ITEM_NULL ? fill.get() :
                        js_canvas_color_item(state.fill_r, state.fill_g,
                                             state.fill_b, state.fill_a));
-    dom_realm_set_name(context_root.get(), "strokeStyle",
+    dom_realm_set_name(context_root.get(), "strokeStyle", stroke.get().item != ITEM_NULL ? stroke.get() :
                        js_canvas_color_item(state.stroke_r, state.stroke_g,
                                             state.stroke_b, state.stroke_a));
     dom_realm_set_name(context_root.get(), "lineWidth", flt2it(state.line_width));
@@ -1200,6 +1454,9 @@ extern "C" void dom_canvas_reset_context(Item canvas) {
         dom_realm_get_name(canvas_root.get(), "__lambda_canvas_2d_context"));
     Rooted<Item> font_root(roots, js_name_item("10px sans-serif"));
     if (!js_canvas_is_2d_context(context_root.get())) return;
+    Item stack_key = js_canvas_intrinsic(CANVAS_STYLE_STACK_KEY);
+    if (get_type_id(stack_key) == LMD_TYPE_STRING)
+        js_private_property_set(context_root.get(), stack_key, ItemNull, 1);
 
     // The bitmap reset is owned by Radiant; mirror the specified JS state so
     // the context's observable defaults cannot diverge from that native state.
@@ -1263,7 +1520,7 @@ extern "C" bool js_canvas_property_set_intercept(Item obj, Item key, Item value)
                     ? dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::set_fill_color, element, color.r, color.g, color.b, color.a)
                     : dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::set_stroke_color, element, color.r, color.g, color.b, color.a);
             }
-        }
+        } else valid = js_canvas_is_radial_gradient(value);
         if (valid) dom_realm_set_name(obj, fill ? "fillStyle" : "strokeStyle", value);
         s_in_canvas_property_intercept = false;
         return true;
@@ -1369,7 +1626,7 @@ extern "C" void js_canvas_cleanup(void) {
 
 static void js_canvas_capsule_destroy(void* capsule) {
     JsCanvasRuntimeState* state = (JsCanvasRuntimeState*)capsule;
-    root_vector_destroy(&state->image_data_roots);
+    root_vector_destroy(&state->intrinsic_roots);
     for (int i = 0; i < state->font_handle_count; i++) {
         if (state->font_handles[i]) font_handle_release(state->font_handles[i]);
     }

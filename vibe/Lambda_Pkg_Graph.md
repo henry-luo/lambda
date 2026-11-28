@@ -638,6 +638,14 @@ Element and relationship styles lower to canonical style assignments and pass th
 
 The D2 reader handles bare identifiers including spaces, slashes and dotted keys, labels, node and style blocks, graph direction, and all four connection operators. A chain expands in source order and applies its trailing label to each link. A left-pointing link uses its logical source and destination for ranking. The shared scanner follows S12.1.1v5 and S12.1.2v3. The D2 routing golden and the pinned upstream render corpus cover source Mark and rendered behavior.
 
+A root `shape: sequence_diagram` selects the shared `lambda.chart` sequence
+renderer (D9.3.4, D9.5.6v2). Top-level actors use declaration or first
+appearance order. Connections keep source order, direction, and arrow ends.
+The D2 style draws dashed lifelines and measures message labels to space the
+actors. The SVG scales to the preview width. The golden and viewer replay
+exercise `seq_diagram.d2`, including its self-message.
+[D2 sequence diagram reference](https://d2lang.com/tour/sequence-diagrams/).
+
 ### 11.8 TikZ and PGFPlots
 
 The TikZ reader belongs in `lambda.doc.tikz` (D9.3.4). It builds the existing `<tikz_picture>` Mark for authored picture environments and standalone fragments. Its consumers handle explicit coordinates, paths, style resolution, PGF math, and plot geometry. Standalone TikZ/PGF input, embedded LaTeX graphics islands, and generated fragments all use this reader. TikZ shares suitable scanning mechanics with the graph formats and TeX-specific lexical behavior with the LaTeX package. Its rendering contract is documented in [Lambda_Impl_Latex_Phase4.md](impl/Lambda_Impl_Latex_Phase4.md).
@@ -702,6 +710,21 @@ The retained package tests use checked-in references and render selected cases i
 
 **Open items.**
 
+- **Nested compound layout (D9.3.4).** `nested-subgraphs-3.mmd` exposes the
+  flat ranker's inability to lay out each cluster independently: X and Y each
+  occupy multiple global ranks, and their cycle through P makes the outer
+  arrangement a single vertical chain. The Mermaid reference lays out each
+  cluster's internal edge horizontally while placing X, Y and P independently.
+  Add hierarchical cluster measurement and placement, including local
+  directions and compound feedback edges, before routing against the resulting
+  boundaries. Cover the source fixture, nested cycles, explicit directions,
+  cross-cluster edges and existing Graphviz compound layouts.
+- **Mermaid subgraph references (D9.3.4).** In `nested-sg-outgoing-5.mmd`,
+  a reference to the previously declared `container_Beta` occurs inside
+  `container_Alpha`. The pinned reference depicts Beta inside Alpha, while the
+  canonical graph keeps the two declarations as siblings. Establish the
+  source-language membership rule for subgraph references, including repeated
+  references and cycles, before lowering this case and laying out its hierarchy.
 - **Structurizr diagnostics.** Some codes in §11.6.7 are not yet emitted.
 - **Mermaid families.** ER relationship word aliases, exhaustive quoted/Unicode identifiers, Markdown-rich entity names, and multiple shorthand classes; composite states, nested transitions, concurrency regions, history states, richer state descriptions, and `hide empty description`; requirement, architecture, block, and mindmap adapters.
 - **D2.** Nested container declarations, edge arrowhead maps, and advanced layouts such as grids need dedicated coverage and implementation.

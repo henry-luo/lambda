@@ -1,0 +1,431 @@
+{
+  "cases": [
+    {
+      "source": "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_set_from_clist:Nn\\l_s_seq{a,b,c}\\seq_if_in:NnTF\\l_s_seq{b}{Y}{N}\\ExplSyntaxOff",
+      "tex": {
+        "text": "Y",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_set_from_clist:Nn\\l_s_seq{a,b,c}\\seq_if_in:NnTF\\l_s_seq{d}{Y}{N}\\ExplSyntaxOff",
+      "tex": {
+        "text": "N",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_set_from_clist:Nn\\l_s_seq{a,b,c}\\seq_if_in:NnT\\l_s_seq{b}{Y}X\\ExplSyntaxOff",
+      "tex": {
+        "text": "YX",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_set_from_clist:Nn\\l_s_seq{a,b,c}\\seq_if_in:NnT\\l_s_seq{d}{Y}X\\ExplSyntaxOff",
+      "tex": {
+        "text": "X",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_set_from_clist:Nn\\l_s_seq{a,b,c}\\seq_if_in:NnF\\l_s_seq{b}{N}X\\ExplSyntaxOff",
+      "tex": {
+        "text": "X",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_set_from_clist:Nn\\l_s_seq{a,b,c}\\seq_if_in:NnF\\l_s_seq{d}{N}X\\ExplSyntaxOff",
+      "tex": {
+        "text": "NX",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_if_in:NnTF\\l_s_seq{}{Y}{N}\\ExplSyntaxOff",
+      "tex": {
+        "text": "N",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_put_right:Nn\\l_s_seq{}\\seq_if_in:NnTF\\l_s_seq{}{Y}{N}\\ExplSyntaxOff",
+      "tex": {
+        "text": "Y",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_set_from_clist:Nn\\l_s_seq{a,{b,c},d}\\seq_if_in:NnTF\\l_s_seq{b,c}{Y}{N}\\ExplSyntaxOff",
+      "tex": {
+        "text": "Y",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_set_from_clist:Nn\\l_s_seq{a,{b,c},d}\\seq_if_in:NnTF\\l_s_seq{{b,c}}{Y}{N}\\ExplSyntaxOff",
+      "tex": {
+        "text": "N",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\def\\foo{A}\\seq_put_right:Nn\\l_s_seq{\\foo}\\seq_if_in:NnTF\\l_s_seq{\\foo}{Y}{N}\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\def\\foo{A}Y",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\def\\foo{A}\\seq_put_right:Nn\\l_s_seq{\\foo}\\seq_if_in:NnTF\\l_s_seq{A}{Y}{N}\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\def\\foo{A}N",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\def\\foo{A}\\seq_put_right:Nn\\l_s_seq{\\foo}\\def\\foo{B}\\seq_if_in:NnTF\\l_s_seq{\\foo}{Y}{N}\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\def\\foo{A}\\def\\foo{B}Y",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_put_right:Nn\\l_s_seq{~}\\seq_if_in:NnTF\\l_s_seq{~}{Y}{N}\\ExplSyntaxOff",
+      "tex": {
+        "text": "Y",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_set_from_clist:Nn\\l_s_seq{a,b,c}\\let\\s\\l_s_seq\\seq_clear:N\\l_s_seq\\seq_if_in:NnTF\\s{b}{Y}{N}\\ExplSyntaxOff",
+      "tex": {
+        "text": "Y",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_set_from_clist:Nn\\l_s_seq{a,b,c}{\\seq_put_right:Nn\\l_s_seq{d}\\seq_if_in:NnTF\\l_s_seq{d}{Y}{N}}\\seq_if_in:NnTF\\l_s_seq{d}{Y}{N}\\ExplSyntaxOff",
+      "tex": {
+        "text": "{Y}N",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_set_from_clist:Nn\\l_s_seq{a,b,c}\\seq_if_in:NnTF\\l_s_seq{a}{\\seq_if_in:NnTF\\l_s_seq{b}{Y}{N}}{N}\\ExplSyntaxOff",
+      "tex": {
+        "text": "Y",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_set_from_clist:Nn\\l_s_seq{a,b,c}\\let\\contains\\seq_if_in:NnTF\\contains\\l_s_seq{b}{Y}{N}\\ExplSyntaxOff",
+      "tex": {
+        "text": "Y",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_set_from_clist:Nn\\l_s_seq{a,b,c}\\edef\\test{\\seq_if_in:NnTF\\noexpand\\l_s_seq{b}{Y}{N}}\\test\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\edef\\test{\\seq_if_in:NnTF\\noexpand\\l_s_seq{b}{Y}{N}}Y",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_set_from_clist:Nn\\l_s_seq{a,b,c}\\seq_if_in:NnTF\\l_s_seq{b}{Y}{\\undefined}\\ExplSyntaxOff",
+      "tex": {
+        "text": "Y",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_set_from_clist:Nn\\l_s_seq{a,b,c}\\seq_if_in:NnTF\\l_s_seq{b}{\\int_eval:n{2+3}}{N}\\ExplSyntaxOff",
+      "tex": {
+        "text": "5",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_set_from_clist:Nn\\l_s_seq{a,b,c}\\afterassignment X\\seq_if_in:NnTF\\l_s_seq{b}{Y}{N}\\ExplSyntaxOff",
+      "tex": {
+        "text": "XY",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_set_from_clist:Nn\\l_s_seq{a,b,c}\\afterassignment X\\seq_if_in:NnTF\\l_s_seq{d}{Y}{N}\\ExplSyntaxOff",
+      "tex": {
+        "text": "XN",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_set_from_clist:Nn\\l_s_seq{a,b,c}\\globaldefs=1 \\seq_if_in:NnTF\\l_s_seq{b}{Y}{N}\\globaldefs=0 \\ExplSyntaxOff",
+      "tex": {
+        "text": "Y",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_set_from_clist:Nn\\l_s_seq{a,b,c}\\seq_reverse:N\\l_s_seq\\seq_if_in:NnTF\\l_s_seq{b}{Y}{N}\\ExplSyntaxOff",
+      "tex": {
+        "text": "Y",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_put_right:Nn\\l_s_seq{x}\\catcode`x=12 \\seq_if_in:NnTF\\l_s_seq{x}{Y}{N}\\catcode`x=11 \\ExplSyntaxOff",
+      "tex": {
+        "text": "Y\\ExplSyntaxOff",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_put_right:Nn\\l_s_seq{x}\\catcode`x=12 \\seq_put_right:Nn\\l_s_seq{x}\\seq_if_in:NnTF\\l_s_seq{x}{Y}{N}\\catcode`x=11 \\ExplSyntaxOff",
+      "tex": {
+        "text": "N\\ExplSyntaxOff",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_set_from_clist:Nn\\l_s_seq{a,b,c}\\tl_set:Nn\\l__seq_internal_a_tl{BEFORE}\\tl_set:Nn\\l__seq_internal_b_tl{OLD}\\globaldefs=1 \\seq_if_in:NnTF\\l_s_seq{b}{Y}{N}\\globaldefs=0 /\\tl_use:N\\l__seq_internal_a_tl/\\tl_use:N\\l__seq_internal_b_tl\\ExplSyntaxOff",
+      "tex": {
+        "text": "Y/b/b",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_set_from_clist:Nn\\l_s_seq{a,b,c}\\tl_set:Nn\\l__seq_internal_a_tl{BEFORE}\\tl_set:Nn\\l__seq_internal_b_tl{OLD}\\seq_if_in:NnTF\\l_s_seq{b}{Y}{N}/\\tl_use:N\\l__seq_internal_a_tl/\\tl_use:N\\l__seq_internal_b_tl\\ExplSyntaxOff",
+      "tex": {
+        "text": "Y/BEFORE/OLD",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_set_from_clist:Nn\\l_s_seq{a,b,c}\\tl_set:Nn\\l__seq_internal_a_tl{BEFORE}\\tl_set:Nn\\l__seq_internal_b_tl{OLD}\\globaldefs=1 \\seq_if_in:NnTF\\l_s_seq{z}{Y}{N}\\globaldefs=0 /\\tl_use:N\\l__seq_internal_a_tl/\\tl_use:N\\l__seq_internal_b_tl\\ExplSyntaxOff",
+      "tex": {
+        "text": "N/z/c",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_set_from_clist:Nn\\l_s_seq{a,b,c}\\tl_set:Nn\\l__seq_internal_a_tl{BEFORE}\\tl_set:Nn\\l__seq_internal_b_tl{OLD}\\afterassignment X\\seq_if_in:NnTF\\l_s_seq{b}{Y}{N}/\\tl_use:N\\l__seq_internal_a_tl\\ExplSyntaxOff",
+      "tex": {
+        "text": "XY/BEFORE",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\meaning\\seq_if_in:NnTF\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\textbackslash{}protected\\textbackslash{}long macro:\\#1\\#2->\\textbackslash{}group\\_begin: \\textbackslash{}tl\\_set:Nn \\textbackslash{}l\\_\\_seq\\_internal\\_a\\_tl \\{\\#2\\}\\textbackslash{}cs\\_set\\_protected:Npn \\textbackslash{}\\_\\_seq\\_item:n \\#\\#1\\{\\textbackslash{}tl\\_set:Nn \\textbackslash{}l\\_\\_seq\\_internal\\_b\\_tl \\{\\#\\#1\\}\\textbackslash{}if\\_meaning:w \\textbackslash{}l\\_\\_seq\\_internal\\_a\\_tl \\textbackslash{}l\\_\\_seq\\_internal\\_b\\_tl \\textbackslash{}exp\\_after:wN \\textbackslash{}\\_\\_seq\\_if\\_in: \\textbackslash{}fi: \\}\\#1\\textbackslash{}group\\_end: \\textbackslash{}prg\\_return\\_false: \\textbackslash{}prg\\_break\\_point: \\textbackslash{}exp\\_end: ",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\meaning\\seq_if_in:NnT\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\textbackslash{}protected\\textbackslash{}long macro:\\#1\\#2->\\textbackslash{}group\\_begin: \\textbackslash{}tl\\_set:Nn \\textbackslash{}l\\_\\_seq\\_internal\\_a\\_tl \\{\\#2\\}\\textbackslash{}cs\\_set\\_protected:Npn \\textbackslash{}\\_\\_seq\\_item:n \\#\\#1\\{\\textbackslash{}tl\\_set:Nn \\textbackslash{}l\\_\\_seq\\_internal\\_b\\_tl \\{\\#\\#1\\}\\textbackslash{}if\\_meaning:w \\textbackslash{}l\\_\\_seq\\_internal\\_a\\_tl \\textbackslash{}l\\_\\_seq\\_internal\\_b\\_tl \\textbackslash{}exp\\_after:wN \\textbackslash{}\\_\\_seq\\_if\\_in: \\textbackslash{}fi: \\}\\#1\\textbackslash{}group\\_end: \\textbackslash{}prg\\_return\\_false: \\textbackslash{}prg\\_break\\_point: \\textbackslash{}exp\\_end: \\textbackslash{}use:n \\textbackslash{}use\\_none:n ",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\meaning\\seq_if_in:NnF\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\textbackslash{}protected\\textbackslash{}long macro:\\#1\\#2->\\textbackslash{}group\\_begin: \\textbackslash{}tl\\_set:Nn \\textbackslash{}l\\_\\_seq\\_internal\\_a\\_tl \\{\\#2\\}\\textbackslash{}cs\\_set\\_protected:Npn \\textbackslash{}\\_\\_seq\\_item:n \\#\\#1\\{\\textbackslash{}tl\\_set:Nn \\textbackslash{}l\\_\\_seq\\_internal\\_b\\_tl \\{\\#\\#1\\}\\textbackslash{}if\\_meaning:w \\textbackslash{}l\\_\\_seq\\_internal\\_a\\_tl \\textbackslash{}l\\_\\_seq\\_internal\\_b\\_tl \\textbackslash{}exp\\_after:wN \\textbackslash{}\\_\\_seq\\_if\\_in: \\textbackslash{}fi: \\}\\#1\\textbackslash{}group\\_end: \\textbackslash{}prg\\_return\\_false: \\textbackslash{}prg\\_break\\_point: \\textbackslash{}exp\\_end: \\{\\}",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\show\\seq_if_in:NnTF\\ExplSyntaxOff",
+      "tex": {
+        "text": "",
+        "messages": [
+          "> \\seq_if_in:NnTF=\\protected\\long macro:#1#2->\\group_begin: \\tl_set:Nn \\l__seq_internal_a_tl {#2}\\cs_set_protected:Npn \\__seq_item:n ##1{\\tl_set:Nn \\l__seq_internal_b_tl {##1}\\if_meaning:w \\l__seq_internal_a_tl \\l__seq_internal_b_tl \\exp_after:wN \\__seq_if_in: \\fi: }#1\\group_end: \\prg_return_false: \\prg_break_point: \\exp_end: ."
+        ],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_put_right:Nn\\l_s_seq{α藏}\\seq_if_in:NnTF\\l_s_seq{α藏}{Y}{N}\\ExplSyntaxOff",
+      "tex": {
+        "text": "Y",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_put_right:Nn\\l_s_seq{a}\\seq_if_in:NnTF\\l_s_seq{a}{\\seq_if_in:NnTF\\l_s_seq{z}{N}{Y}}{N}\\ExplSyntaxOff",
+      "tex": {
+        "text": "Y",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\protected\\def\\s{\\s__seq\\__seq_item:n{a}\\__seq_item:n{b}}\\seq_if_in:NnTF\\s{b}{Y}{N}\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\protected\\def\\s{\\s__seq\\__seq_item:n{a}\\__seq_item:n{b}}Y",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\long\\def\\s{\\s__seq\\__seq_item:n a\\__seq_item:n b}\\seq_if_in:NnTF\\s{b}{Y}{N}\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\long\\def\\s{\\s__seq\\__seq_item:n a\\__seq_item:n b}Y",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_put_right:Nn\\l_s_seq{a}\\group_begin:\\seq_if_in:NnTF\\l_s_seq{a}{Y}{N}\\group_end:\\ExplSyntaxOff",
+      "tex": {
+        "text": "Y",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_put_right:Nn\\l_s_seq{a}\\let\\s\\seq_if_in:NnTF\\ifx\\s\\seq_if_in:NnTF Y\\else N\\fi\\ExplSyntaxOff",
+      "tex": {
+        "text": "Y",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_put_right:Nn\\l_s_seq{a}\\seq_if_in:NnTF\\l_s_seq{a}{\\seq_put_right:Nn\\l_s_seq{b}}{}\\seq_use:Nn\\l_s_seq{|}\\ExplSyntaxOff",
+      "tex": {
+        "text": "a|b",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_put_right:Nn\\l_s_seq{\\par}\\seq_if_in:NnTF\\l_s_seq{\\par}{Y}{N}\\ExplSyntaxOff",
+      "tex": {
+        "text": "Y",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_put_right:Nn\\l_s_seq{{a}{b}}\\seq_if_in:NnTF\\l_s_seq{{a}{b}}{Y}{N}\\ExplSyntaxOff",
+      "tex": {
+        "text": "Y",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_put_right:Nn\\l_s_seq{a}\\seq_if_in:NnTF\\l_s_seq{a}{Y}{N}\\meaning\\__seq_item:n\\ExplSyntaxOff",
+      "tex": {
+        "text": "Y\\textbackslash{}long macro:->\\textbackslash{}msg\\_expandable\\_error:nn \\{seq\\}\\{misused\\}\\textbackslash{}use\\_none:n ",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_put_right:Nn\\l_s_seq{a}\\seq_if_in:NnTF\\l_s_seq{a}{Y}{N}\\show\\__seq_item:n\\ExplSyntaxOff",
+      "tex": {
+        "text": "Y",
+        "messages": [
+          "> \\__seq_item:n=\\long macro:->\\msg_expandable_error:nn {seq}{misused}\\use_none:n ."
+        ],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_put_right:Nn\\l_s_seq{a}\\globaldefs=1 \\seq_if_in:NnTF\\l_s_seq{a}{Y}{N}\\globaldefs=0 \\seq_if_in:NnTF\\l_s_seq{b}{Y}{N}\\ExplSyntaxOff",
+      "tex": {
+        "text": "YN",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    }
+  ]
+}

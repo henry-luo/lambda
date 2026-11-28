@@ -10,28 +10,31 @@ fn failure(issue, unsupported = null, request = null) =>
     {root:null, issue:issue, unsupported:unsupported, request:request}
 
 // Both public results retain source definitions in the expanded stream.
-fn expand_once(source, configured, budget, preload = null) any^ {
+fn expand_once(source, configured, budget, preload = null, capture_checkpoint: bool = false) any^ {
     let cached = if (preload is map) if (configured.script_expl3 == true) preload.expl3 else preload.ordinary else null;
     if (configured.ini == true)
-        expansion.expand(stream.from_reader(reader.reader(source)), budget, configured)
+        expansion.expand(stream.from_reader(reader.reader(source)), budget, configured, capture_checkpoint)
     else if (cached is map and configured.kernel_source is string) {
         // bind this attempt's captures when resuming the resource-free kernel.
         let bound = {*:cached, resources:configured.resources, resource_requests:configured.resource_requests == true};
-        profile.expand_with_kernel(source, configured.kernel_source, configured, budget, bound)
+        profile.expand_with_kernel(source, configured.kernel_source, configured, budget, bound, capture_checkpoint)
     }
-    else profile.expand(source, configured, budget)
+    else profile.expand(source, configured, budget, capture_checkpoint)
 }
 
-fn expand(source, options, budget, echo_definitions = true, preload = null) any^ {
+fn expand(source, options, budget, echo_definitions = true, preload = null, checkpoint = null,
+        capture_checkpoint: bool = false) any^ {
     let configured = {*:expansion.options_map(options), echo_definitions:echo_definitions, auto_expl3:true};
     // Ask the host for the expl3 snapshot only when this document needs it.
     if (configured.script_expl3 == true and preload is map and preload.request_expl3 == true)
         failure("tex-expl3-preload-needed")
     else {
-        let first = expand_once(source, configured, budget, preload)^;
+        let first = if (checkpoint is map)
+            profile.continue_document(checkpoint.state, configured.resources, checkpoint.messages, budget)^
+            else expand_once(source, configured, budget, preload, capture_checkpoint)^;
         if (first.issue == "tex-expl3-restart")
             if (preload is map and preload.request_expl3 == true) failure("tex-expl3-preload-needed")
-            else expand_once(source, {*:configured, script_expl3:true}, budget, preload)
+            else expand_once(source, {*:configured, script_expl3:true}, budget, preload, capture_checkpoint)
         else first
     }
 }
@@ -65,7 +68,7 @@ pub fn host_capture(options: map, scope: string, name: string, data, no_base = f
 }
 
 // Only resource-free preloads can be reused without retaining a file grant.
-fn reusable_preload(loaded) bool^ => loaded is map and loaded.issue == null and len(loaded.resources_seen) == 0
+fn reusable_preload(loaded) bool^ => loaded is map and loaded.issue == null and loaded.resource_lookups == 0
 
 fn host_preload_options(options: map, math: bool) map =>
     // a lookup during preload must request a resource even if a caller supplied it.
@@ -76,62 +79,58 @@ pub fn host_kernel_preload(options: map, math: bool) any^ {
     if (options.ini == true or not (options.kernel_source is string)) null
     else {
         let configured = host_preload_options(options, math);
-        let ordinary = profile.preload_kernel(options.kernel_source, configured)^;
+        let ordinary = profile.preload_kernel(options.kernel_source, configured, 20000000, false)^;
         if (not reusable_preload(ordinary)^) null
         else {ordinary:ordinary,expl3:null,request_expl3:true}
     }
 }
 
 pub fn host_expl3_preload(options: map, math: bool, preload: map) map^ {
-    let expl3 = profile.preload_expl3_kernel(options.kernel_source, host_preload_options(options, math)) ^ { null };
+    let expl3 = profile.preload_expl3_kernel(options.kernel_source, host_preload_options(options, math), 20000000, false) ^ { null };
     {*:preload, expl3:if (reusable_preload(expl3)^) expl3 else null, request_expl3:false}
 }
 
-// Native TeX returns diagnostics and local package names alongside expanded text.
-pub fn tex(source: string, options = null, budget: int = 20000000, preload = null) any^ {
-    let expanded = expand(source, document_options(options), budget, true, preload)^;
-    if (expanded.issue != null) failure(expanded.issue, expanded.unsupported, expanded.resource_request)
-    else if (not complete_diagnostics(expanded)^)
-        failure("tex-diagnostic-unsupported")
-    else {
+fn parsed_result(expanded, format) any^ {
+    if (expanded.issue != null) {
+        let halted = failure(expanded.issue, expanded.unsupported, expanded.resource_request);
+        if (expanded.resource_checkpoint is map)
+            {*:halted, checkpoint:{state:expanded.resource_checkpoint, messages:expanded.kernel_messages or []}}
+        else halted
+    }
+    else if (not complete_diagnostics(expanded)^) failure("tex-diagnostic-unsupported")
+    else if (format == "tex") {
+        // Native TeX returns diagnostics and local package names alongside expanded text.
         let built = reconstruct.reconstruct(expanded)^;
         if (built.issue != null) failure(built.issue)
         else {root:{text:built.text, messages:expanded.messages,
             diagnostics:expanded.diagnostic_records,
             packages:[for (entry in expanded.packages where entry.kind == "local") entry.name]},
             issue:null, unsupported:null}
-    }
-}
-
-// Definition spans are required by the source-aware LaTeX digester.
-pub fn latex(source: string, options = null, budget: int = 20000000, preload = null) any^ {
-    let expanded = expand(source, document_options(options), budget, true, preload)^;
-    if (expanded.issue != null) failure(expanded.issue, expanded.unsupported, expanded.resource_request)
-    else if (not complete_diagnostics(expanded)^) failure("tex-diagnostic-unsupported")
-    else {
-        let parsed = digest.digest(expanded)^;
+    } else {
+        let parsed = if (format == "math") digest.math(expanded)^ else digest.digest(expanded)^;
         {root:parsed.ast, issue:parsed.issue, unsupported:parsed.unsupported}
     }
 }
 
-// Standalone math uses the same expanded token stream and atom digester as documents.
-fn math_using(source: string, options, budget, preload) any^ {
-    if (len(source) == 0) {root:null, issue:null, unsupported:null}
+fn parse_using(source: string, options, format: string, budget: int, preload, checkpoint = null,
+        capture_checkpoint: bool = false) any^ {
+    let math = format == "math";
+    if (math and len(source) == 0) {root:null, issue:null, unsupported:null}
     else {
-        let configured = {*:expansion.options_map(options), math_mode:true};
-        let expanded = expand(source, configured, budget, false, preload)^;
-        if (expanded.issue != null) failure(expanded.issue, expanded.unsupported, expanded.resource_request)
-        else if (not complete_diagnostics(expanded)^) failure("tex-diagnostic-unsupported")
-        else {
-            let parsed = digest.math(expanded)^;
-            {root:parsed.ast, issue:parsed.issue, unsupported:parsed.unsupported}
-        }
+        let options = if (math) {*:expansion.options_map(options), math_mode:true} else document_options(options);
+        parsed_result(expand(source, options, budget, not math, preload, checkpoint, capture_checkpoint)^, format)
     }
 }
 
-pub fn math(source: string, options = null, budget: int = 20000000) any^ =>
-    math_using(source, options, budget, null)
+pub fn tex(source: string, options = null, budget: int = 20000000, preload = null) any^ =>
+    parse_using(source, options, "tex", budget, preload)
 
-// The host supplies a preload only after matching its complete configuration.
-pub fn host_math(source: string, options: map, preload) any^ =>
-    math_using(source, options, 20000000, preload)
+pub fn latex(source: string, options = null, budget: int = 20000000, preload = null) any^ =>
+    parse_using(source, options, "latex", budget, preload)
+
+pub fn math(source: string, options = null, budget: int = 20000000) any^ =>
+    parse_using(source, options, "math", budget, null)
+
+// Host checkpoints consume a capture only with the parse that requested it.
+pub fn host_parse(source: string, options: map, format: string, preload, checkpoint) any^ =>
+    parse_using(source, options, format, 20000000, preload, checkpoint, true)

@@ -986,7 +986,8 @@ fn render_drawing(picture, external_declarations = [],
         "px;height:" ++ string(height) ++ "px;vertical-align:bottom;" ++
         (if (len(clips) == 0) "" else "clip-path:polygon(" ++ join([for (point in clip_mapped)
             string(point[0]) ++ "px " ++ string(point[1]) ++ "px"], ",") ++ ");");
-    <span class: "tikz-picture", style: style,
+    // Return only the picture; functional validation statements also produce null (S2.5.3v3).
+    return <span class: "tikz-picture", style: style,
         graphic
         for (label in label_elements) label
     >

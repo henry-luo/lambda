@@ -104,17 +104,12 @@ fn category_of(key) => [for (c in CATEGORIES where c.key == key) c][0]
 fn in_category(key) => [for (d in DEMOS where d.cat == key) d]
 fn is_running(running, key) => len([for (r in running where r.name == key) r]) > 0
 
-// drifting light, a dot lattice and λ glyphs rising through the page
-let GLYPHS = [[6, 22, 0], [14, 14, 6], [23, 30, 3], [34, 18, 9], [47, 26, 1], [58, 16, 7],
-    [66, 34, 4], [75, 20, 10], [84, 28, 2], [93, 15, 8]]
+// drifting light and a dot lattice
 fn backdrop() => <div class:"backdrop", 'aria-hidden':"true",
     <div class:"orb orb-a">
     <div class:"orb orb-b">
     <div class:"orb orb-c">
-    <div class:"lattice">
-    for (g in GLYPHS) <span class:"glyph",
-        style:"left:" ++ string(g[0]) ++ "%;font-size:" ++ string(g[1]) ++ "px;animation-delay:-" ++ string(g[2]) ++ "s",
-        "λ">>
+    <div class:"lattice">>
 
 // "Living" rides a wave, a letter at a time
 fn living() => <span class:"lead-word", for (i, ch in split("Living", "")) <span class:"wave",

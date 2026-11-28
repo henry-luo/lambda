@@ -2,7 +2,7 @@
 
 #include "test_lambda_compiler.hpp"
 #include "../lambda/runtime/interp.hpp"
-#include "../lambda/runtime/mvp/mvp.hpp"
+#include "../lambda/runtime/mir/mir.hpp"
 
 // native fixtures share the CLI compiler policy, including explicit T0/AUTO
 // controls. Restore both selectors even when a fatal assertion exits a test.

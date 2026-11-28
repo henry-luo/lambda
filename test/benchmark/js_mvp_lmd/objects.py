@@ -31,7 +31,7 @@ output.parent.mkdir(parents=True, exist_ok=True)
 sha = lambda path: hashlib.sha256(Path(path).read_bytes()).hexdigest()
 archive = output.parent / 'lambda-map-phase.exe'
 shutil.copy2(binary, archive)
-production = list(Path('lambda/js/mvp-lmd').glob('*.[ch]*')) + [Path(path) for path in (
+production = list(Path('lambda/js/mir').glob('*.[ch]*')) + [Path(path) for path in (
     'lambda/core/name_pool.cpp', 'lambda/input/input.cpp', 'lambda/js/js_runtime_value.cpp', 'lambda/js/js_runtime.cpp',
     'lambda/lambda.h', 'lambda/lambda.hpp',
     'lambda/runtime/gc/gc_heap.c', 'lambda/runtime/lambda-data-runtime.cpp',

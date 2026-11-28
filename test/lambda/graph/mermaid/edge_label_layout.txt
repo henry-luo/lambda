@@ -27,5 +27,7 @@
     }, {
       x: 40,
       y: 110
-    }]
+    }],
+  right_label_clears_edge: true,
+  cluster_borders_clear: true
 }

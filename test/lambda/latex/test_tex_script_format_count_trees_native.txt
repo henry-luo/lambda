@@ -1,0 +1,97 @@
+[[{
+      issue: null,
+      unsupported: null,
+      matches: true
+    }, {
+      issue: null,
+      unsupported: null,
+      matches: true
+    }, {
+      issue: null,
+      unsupported: null,
+      matches: true
+    }, {
+      issue: null,
+      unsupported: null,
+      matches: true
+    }, {
+      issue: null,
+      unsupported: null,
+      matches: true
+    }, {
+      issue: null,
+      unsupported: null,
+      matches: true
+    }, {
+      issue: null,
+      unsupported: null,
+      matches: true
+    }, {
+      issue: null,
+      unsupported: null,
+      matches: true
+    }, {
+      issue: "latex-digest-unsupported",
+      unsupported: "expl3 register allocation source mapping",
+      matches: null
+    }, {
+      issue: "latex-digest-unsupported",
+      unsupported: "expl3 register allocation source mapping",
+      matches: null
+    }, {
+      issue: "latex-digest-unsupported",
+      unsupported: "expl3 register allocation source mapping",
+      matches: null
+    }, {
+      issue: "latex-digest-unsupported",
+      unsupported: "expl3 register allocation source mapping",
+      matches: null
+    }], [{
+      issue: null,
+      unsupported: null,
+      matches: true
+    }, {
+      issue: null,
+      unsupported: null,
+      matches: true
+    }, {
+      issue: null,
+      unsupported: null,
+      matches: true
+    }, {
+      issue: null,
+      unsupported: null,
+      matches: true
+    }, {
+      issue: null,
+      unsupported: null,
+      matches: true
+    }, {
+      issue: null,
+      unsupported: null,
+      matches: true
+    }, {
+      issue: null,
+      unsupported: null,
+      matches: true
+    }, {
+      issue: null,
+      unsupported: null,
+      matches: true
+    }, {
+      issue: null,
+      unsupported: null,
+      matches: true
+    }, {
+      issue: null,
+      unsupported: null,
+      matches: true
+    }, {
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 register initialization",
+      matches: null
+    }, {
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 register initialization",
+      matches: null
+    }]]

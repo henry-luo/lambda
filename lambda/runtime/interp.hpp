@@ -36,8 +36,8 @@ Item interp_call_emit(Function* fn, const Item* args, int argc, List* destinatio
 Item lambda_call_rooted_into(Function* fn, List* args, const AstFuncNode* definition,
     uint64_t* result_home);
 void lambda_tier_set(LambdaTier tier);
-// Default AUTO function-entry promotion threshold (5); LAMBDA_FUNC_JIT_THRESHOLD
-// overrides it. A `jit` REPL session sets 1 (D8.3.6).
+// Select the command's default AUTO function-entry threshold (D8.3.2).
+// LAMBDA_FUNC_JIT_THRESHOLD overrides it.
 void interp_set_func_jit_threshold_default(uint32_t threshold);
 
 // REPL entry interrupt (D8.3.6). `request` is async-signal-safe; T0 raises

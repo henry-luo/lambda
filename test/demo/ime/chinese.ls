@@ -42,10 +42,14 @@ pn position_options(body) {
     let height = max(1,min(520,max(below,above)));
     dom.style_set_property(panel,"width",string(width)^ ++ "px")
     dom.style_set_property(panel,"max-height",string(height)^ ++ "px")
-    let box = dom.bounding_box(panel)
-    let top = if (below >= box.height) anchor.y + anchor.height + 6
-        else max(8,anchor.y - box.height - 6);
-    dom.style_set_property(panel,"top",string(top)^ ++ "px")
+    // anchor the near edge because a newly opened panel has no committed height yet.
+    if (below >= height) {
+        dom.style_set_property(panel,"top",string(anchor.y + anchor.height + 6)^ ++ "px")
+        dom.style_set_property(panel,"bottom","auto")
+    } else {
+        dom.style_set_property(panel,"top","auto")
+        dom.style_set_property(panel,"bottom",string(max(8,viewport.height - anchor.y + 6))^ ++ "px")
+    }
     dom.style_set_property(panel,"left",string(max(8,min(anchor.x,viewport.width - width - 8))) ++ "px")
 }
 

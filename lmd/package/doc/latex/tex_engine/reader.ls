@@ -1,10 +1,11 @@
 // Incremental TeX scanning uses explicit snapshots so callers can change category codes.
 type LineIndex = {length: int, parts: any}
+type LineState = "new" | "mid" | "skip"
 pub type Reader = {
     source: string, file_id: int, next_line: int, line: string, position: int,
     line_index: LineIndex, next_part: int,
     line_start: int, line_end: int, line_next: int, loaded: bool, eol_done: bool,
-    next_byte: int, line_byte: int, position_byte: int, state: "new" | "mid" | "skip",
+    next_byte: int, line_byte: int, position_byte: int, state: LineState,
     endline: int, catcodes: map, origin: string, end_input: bool, seq: int, line_no: int,
     preserve_source?: bool
 }
@@ -34,27 +35,27 @@ fn delimiter_scan(end: int, closed: bool, present: bool = true) DelimiterScan =>
 pub fn definition_command(name: string) bool => contains(["def", "gdef", "edef", "xdef", "newcommand", "renewcommand",
     "providecommand", "newenvironment", "renewenvironment"], name)
 
-// Out-of-range character access is the reader's end-of-input sentinel.
-fn ch(s: string, i: int) string => if (i < 0 or i >= len(s)) "" else text_span(s, i, i + 1)
+// The span normalizes an empty upper slice, while negative indices must not wrap.
+fn ch(s: string, i: int) string => if (i < 0) "" else text_span(s, i, i + 1)
 
 // Query absence is normalized once, at the source-reading boundary (S7.10.7).
 pub fn text_span(s: string, start: int, end: int) string => slice(s, start, end) or ""
 fn code_point(c: string) int => ord(c) or 0
 
 pub fn catcode(c: string, overrides: map) int {
-    let standard = if (c == "\\") 0
+    let custom = overrides[c];
+    // A valid override supplies the category without computing the default.
+    if (custom is int) {
+        let code = int(custom) ^ { -1 };
+        if (code >= 0 and code <= 15) { return code }
+    }
+    return if (c == "\\") 0
         else if (c == "%") 14
         else if (c == "\u{0}") 9
         else if (c == "\r") 5
         else if (c == " ") 10
         else if (c == "\u{7f}") 15
-        else if ((c >= "a" and c <= "z") or (c >= "A" and c <= "Z")) 11 else 12;
-    let custom = overrides[c];
-    // category-code input is optional; malformed overrides use the standard category.
-    if (custom is int) {
-        let code = int(custom) ^ { standard };
-        if (code >= 0 and code <= 15) code else standard
-    } else standard
+        else if ((c >= "a" and c <= "z") or (c >= "A" and c <= "Z")) 11 else 12
 }
 
 fn line_end(s: string, i: int) int {
@@ -68,14 +69,15 @@ fn trim_end(s: string, end: int) int {
     while (at > 0 and ch(s, at - 1) == " ") { at = at - 1 }
     return at
 }
-fn utf8_width(c: string) int => if (code_point(c) < 128) 1 else if (code_point(c) < 2048) 2 else if (code_point(c) < 65536) 3 else 4
-fn byte_count(s: string, i: int, end: int) int {
-    var at = i, count = 0
-    while (at < end) {
-        count = count + utf8_width(ch(s, at));
-        at = at + 1
+// Source positions count the original UTF-8 bytes, including any superscript spelling.
+fn byte_count(s: string, i: int, end: int) int => len(binary(text_span(s, i, end)) ^ { null })
+
+fn character_bytes(line: string, start: int, scan: TextScan) int {
+    if (scan.end != start + 1) byte_count(line, start, scan.end)
+    else {
+        let code = code_point(scan.value);
+        if (code < 128) 1 else if (code < 2048) 2 else if (code < 65536) 3 else 4
     }
-    return count
 }
 
 pub fn reader(source: string, file_id: int = 0) Reader => {source: source, file_id: file_id, next_line: 0, line: "", position: 0,
@@ -236,7 +238,10 @@ fn hex_digit(c: string) int => if (c == "") -1 else index_of("0123456789abcdef",
 
 fn decode_super(line: string, initial: string, after: int, cats: map) TextScan {
     var value = initial, end = after
-    while (value != "" and catcode(value, cats) == 7 and code_point(value) <= 127 and ch(line, end) == value) {
+    while (value != "") {
+        // Category 7 is supplied by an override, so default categories need no lookup.
+        let code = cats[value];
+        if (not (code is int) or code != 7 or code_point(value) > 127 or ch(line, end) != value) { break }
         let digit = ch(line, end + 1);
         let high = hex_digit(digit), low = hex_digit(ch(line, end + 2));
         if (digit == "") { break }
@@ -261,60 +266,85 @@ fn character(r: Reader, pos: int) TextScan {
     return decode_super(r.line, c, pos + 1, r.catcodes)
 }
 
-fn word(r: Reader, pos: int) TextScan {
-    var at = pos, text = ""
+fn word(r: Reader, pos: int, initial: string) TextScan {
+    var at = pos, start = pos, text = initial
     while (true) {
-        let c = character(r, at);
-        if (c.value == "" or catcode(c.value, r.catcodes) != 11) { break }
-        text = text ++ c.value;
-        at = c.end
+        let raw = ch(r.line, at);
+        if (raw == "") { break }
+        let cat = catcode(raw, r.catcodes);
+        if (cat == 11) { at = at + 1 }
+        // Only a superscript pair can turn a nonletter into part of a control word.
+        else if (cat == 7 and r.preserve_source != true) {
+            let c = decode_super(r.line, raw, at + 1, r.catcodes);
+            if (catcode(c.value, r.catcodes) != 11) { break }
+            text = text ++ text_span(r.line, start, at) ++ c.value;
+            start = c.end;
+            at = c.end
+        }
+        else { break }
     }
-    return text_scan(text, at)
+    return text_scan(text ++ text_span(r.line, start, at), at)
 }
 
-fn token(kind: TokenKind, value: string, cat: int?, start: int, end: int) Token =>
-    {kind: kind, value: value, cat: cat, start: start, end: end}
-fn done(r: Reader, t: Token) ReadStep =>
-    {reader: {*:r, seq: r.seq + 1}, token: {*:t, file: r.file_id, direct: true, seq: r.seq + 1}}
+fn token(r: Reader, kind: TokenKind, value: string, cat: int?, start: int, end: int) Token =>
+    {kind:kind, value:value, cat:cat, start:start, end:end, file:r.file_id, direct:true, seq:r.seq + 1}
+// Publish the final cursor and sequence together for a returned token.
+fn done(r: Reader, t: Token, position: int, position_byte: int, eol_done: bool, line_state: LineState | "") ReadStep =>
+    {reader: {*:r, position:position, position_byte:position_byte, eol_done:eol_done,
+        state:if (line_state == "") r.state else line_state, seq:r.seq + 1},
+        token: t}
+
+fn advance(r: Reader, position: int, position_byte: int, eol_done: bool) Reader =>
+    {*:r, position:position, position_byte:position_byte, eol_done:eol_done}
 
 // Return one token so callers can change category codes between reads.
 pub fn next(r: Reader?) ReadStep? {
     // Ignored input can span arbitrarily many physical lines.
     var current: Reader = r or reader("")
     while (true) {
-        if ((not current.loaded or (current.position >= len(current.line) and current.eol_done))) {
+        let at_eol = current.position >= len(current.line);
+        if ((not current.loaded or (at_eol and current.eol_done))) {
             let step = read_line(current);
             if (step.eof) { return null }
             current = step.reader
         }
         else {
-            let at_eol = current.position >= len(current.line);
             let c = if (at_eol) (if (current.endline >= 0 and current.endline <= 1114111)
                 text_scan(chr(current.endline), current.position) else text_scan("", current.position)) else character(current, current.position);
-            let advanced: Reader = {*:current, position: if (c.value == "") current.position else c.end,
-                position_byte: current.position_byte + if (c.value == "" or at_eol) 0 else byte_count(current.line, current.position, c.end),
-                eol_done: at_eol or current.eol_done};
-            if (c.value == "") { current = advanced }
+            let position = if (c.value == "") current.position else c.end;
+            let position_byte = current.position_byte + if (c.value == "" or at_eol) 0
+                else character_bytes(current.line, current.position, c);
+            let eol_done = at_eol or current.eol_done;
+            if (c.value == "") { current = advance(current, position, position_byte, eol_done) }
             else {
                 let cat = catcode(c.value, current.catcodes);
                 let start = current.line_byte + current.position_byte;
-                let end = if (at_eol) current.next_byte else current.line_byte + advanced.position_byte;
-                if (cat == 0) { return control(advanced, start, at_eol) }
-                else if (cat == 13) { return done({*:advanced, state: "mid"}, token("active", c.value, cat, start, end)) }
+                let end = if (at_eol) current.next_byte else current.line_byte + position_byte;
+                if (cat == 0) { return control(advance(current, position, position_byte, eol_done), start, at_eol) }
+                else if (cat == 13) {
+                    return done(current, token(current, "active", c.value, cat, start, end), position, position_byte, eol_done, "mid")
+                }
                 else if (cat == 5) {
-                    let consumed: Reader = {*:advanced, position: len(current.line), eol_done: true};
-                    if (current.state == "new") { return done(consumed, token("control", "par", null, start, current.next_byte)) }
-                    else if (current.state == "mid") { return done(consumed, token("char", " ", 10, start, current.next_byte)) }
-                    else { current = consumed }
+                    let line_end = len(current.line);
+                    if (current.state != "skip") {
+                        let ending = if (current.state == "new") token(current, "control", "par", null, start, current.next_byte)
+                            else token(current, "char", " ", 10, start, current.next_byte);
+                        return done(current, ending, line_end, position_byte, true, "")
+                    }
+                    current = advance(current, line_end, position_byte, true)
                 }
-                else if (cat == 9) { current = advanced }
+                else if (cat == 9) { current = advance(current, position, position_byte, eol_done) }
                 else if (cat == 10) {
-                    if (current.state == "mid") { return done({*:advanced, state: "skip"}, token("char", " ", 10, start, end)) }
-                    else { current = advanced }
+                    if (current.state == "mid") {
+                        return done(current, token(current, "char", " ", 10, start, end), position, position_byte, eol_done, "skip")
+                    }
+                    current = advance(current, position, position_byte, eol_done)
                 }
-                else if (cat == 14) { current = {*:advanced, position: len(current.line), eol_done: true} }
-                else if (cat == 15) { return done(advanced, token("invalid", c.value, cat, start, end)) }
-                else { return done({*:advanced, state: "mid"}, token("char", c.value, cat, start, end)) }
+                else if (cat == 14) { current = advance(current, len(current.line), position_byte, true) }
+                else if (cat == 15) {
+                    return done(current, token(current, "invalid", c.value, cat, start, end), position, position_byte, eol_done, "")
+                }
+                else { return done(current, token(current, "char", c.value, cat, start, end), position, position_byte, eol_done, "mid") }
             }
         }
     }
@@ -323,18 +353,18 @@ pub fn next(r: Reader?) ReadStep? {
 
 fn control(r: Reader, start: int, at_eol: bool) ReadStep {
     let c = if (at_eol) text_scan("", r.position) else character(r, r.position);
-    if (c.value == "") done({*:r, eol_done: true, state: "mid"},
-        token("control", if (r.endline >= 0 and r.endline <= 1114111) chr(r.endline) else "",
-            null, start, r.next_byte))
-    else if (catcode(c.value, r.catcodes) == 11) {
-        let w = word(r, r.position);
+    let cat = catcode(c.value, r.catcodes);
+    if (c.value == "") done(r, token(r, "control", if (r.endline >= 0 and r.endline <= 1114111) chr(r.endline) else "",
+        null, start, r.next_byte), r.position, r.position_byte, true, "mid")
+    else if (cat == 11) {
+        // The escape scanner already consumed and classified the first letter.
+        let w = word(r, c.end, c.value);
         let end_byte = r.position_byte + byte_count(r.line, r.position, w.end);
-        done({*:r, position: w.end, position_byte: end_byte, state: "skip"},
-            token("control", w.value, null, start, r.line_byte + end_byte))
+        done(r, token(r, "control", w.value, null, start, r.line_byte + end_byte), w.end, end_byte, r.eol_done, "skip")
     }
     else {
-        let end_byte = r.position_byte + byte_count(r.line, r.position, c.end);
-        done({*:r, position: c.end, position_byte: end_byte, state: if (catcode(c.value, r.catcodes) == 10) "skip" else "mid"},
-            token("control", c.value, null, start, r.line_byte + end_byte))
+        let end_byte = r.position_byte + character_bytes(r.line, r.position, c);
+        done(r, token(r, "control", c.value, null, start, r.line_byte + end_byte), c.end, end_byte, r.eol_done,
+            if (cat == 10) "skip" else "mid")
     }
 }

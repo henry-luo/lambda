@@ -2,7 +2,7 @@
  * JavaScript runtime built-in registry tables for Lambda.
  */
 #include "js_runtime_internal.hpp"
-#include "mvp-lmd/mvp_lmd_runtime.h"
+#include "mir/js_mir_runtime.h"
 #include "lib/hash.h"
 
 // =============================================================================

@@ -4,6 +4,8 @@
 #include "template_state.h"
 #include "render_map.h"
 #include "runtime-state.h"
+#include "gc/gc_heap.h"
+#include "lib/arraylist.hpp"
 #include "lib/log.h"
 #include "lib/hashmap.h"
 #include "lib/hashmap_typed.hpp"
@@ -17,6 +19,7 @@
 typedef struct TemplateStateStore {
     HashMap* map;
     bool owns_map;
+    bool stale_entries;
 } TemplateStateStore;
 
 static const ContextCapsuleOps template_state_capsule_ops = {
@@ -72,6 +75,10 @@ static HashMap* ensure_map(void) {
     return s_template_state_map;
 }
 
+static bool template_state_entry_live(const TemplateStateEntry* entry) {
+    return entry && entry->live_model.item == entry->key.model_item.item;
+}
+
 // ============================================================================
 // Public API
 // ============================================================================
@@ -100,7 +107,7 @@ Item tmpl_state_get(Item model_item, const char* template_ref, const char* state
     query.key.template_ref = template_ref;
     query.key.state_name = state_name;
     const TemplateStateEntry* found = TemplateStateMap::get(map, query);
-    return found ? found->value : ItemNull;
+    return template_state_entry_live(found) ? found->value : ItemNull;
 }
 
 void tmpl_state_set(Item model_item, const char* template_ref,
@@ -112,6 +119,7 @@ void tmpl_state_set(Item model_item, const char* template_ref,
     entry.key.template_ref = template_ref;
     entry.key.state_name = state_name;
     entry.value = value;
+    entry.live_model = model_item;
     TemplateStateMap::set(map, entry);
 
     // mark the render map entry dirty for observer-based reconciliation
@@ -127,7 +135,7 @@ Item tmpl_state_get_or_init(Item model_item, const char* template_ref,
     query.key.template_ref = template_ref;
     query.key.state_name = state_name;
     const TemplateStateEntry* found = TemplateStateMap::get(map, query);
-    if (found) {
+    if (template_state_entry_live(found)) {
         return found->value;
     }
     // not found — initialize with default
@@ -137,6 +145,7 @@ Item tmpl_state_get_or_init(Item model_item, const char* template_ref,
     entry.key.template_ref = template_ref;
     entry.key.state_name = state_name;
     entry.value = default_value;
+    entry.live_model = model_item;
     TemplateStateMap::set(map, entry);
 
     log_debug("tmpl_state_get_or_init: initialized tmpl=%s state=%s",
@@ -151,7 +160,7 @@ bool tmpl_state_has(Item model_item, const char* template_ref, const char* state
     query.key.model_item = model_item;
     query.key.template_ref = template_ref;
     query.key.state_name = state_name;
-    return TemplateStateMap::get(map, query) != NULL;
+    return template_state_entry_live(TemplateStateMap::get(map, query));
 }
 
 void tmpl_state_reset(void) {
@@ -173,17 +182,43 @@ void tmpl_state_set_map(struct hashmap* map) {
     s_owns_map = false;
 }
 
-void tmpl_state_visit_roots(void* visitor_context,
-                            void (*visit)(void* visitor_context, uint64_t item)) {
-    if (!context || !visit) return;
+static void template_state_key_collected(uint64_t, void* context) {
+    ((TemplateStateStore*)context)->stale_entries = true;
+}
+
+static void template_state_prune_stale(TemplateStateStore* store) {
+    if (!store->stale_entries) return;
+    store->stale_entries = false;
+    // The collector clears slots in place. Erase old entries before handing
+    // out their addresses in the next collection because erasure moves slots.
+    lam::ArrayList<TemplateStateEntry> stale(MEM_CAT_TEMP);
+    size_t cursor = 0;
+    TemplateStateEntry* entry;
+    while (TemplateStateMap::next(store->map, &cursor, &entry)) {
+        if (!template_state_entry_live(entry) && !stale.push_back(*entry)) {
+            store->stale_entries = true;
+            break;
+        }
+    }
+    for (const auto& old : stale) TemplateStateMap::erase(store->map, old);
+}
+
+void tmpl_state_trace(gc_heap_t* gc) {
+    if (!context || !gc) return;
     TemplateStateStore* store = (TemplateStateStore*)context_capsule(
         context, CONTEXT_CAPSULE_TEMPLATE_STATE);
     if (!store || !store->map) return;
+    template_state_prune_stale(store);
     size_t cursor = 0;
     TemplateStateEntry* entry = NULL;
     while (TemplateStateMap::next(store->map, &cursor, &entry)) {
-        // The hashmap is native storage; the collector cannot see either Item.
-        visit(visitor_context, entry->key.model_item.item);
-        visit(visitor_context, entry->value.item);
+        if (!template_state_entry_live(entry)) continue;
+        // A reachable model keeps every template's state across redraws.
+        // Session state alone cannot keep a discarded model or its DOM alive.
+        if (!gc_register_ephemeron(gc, &entry->live_model.item, &entry->value.item,
+                template_state_key_collected, store)) {
+            gc_mark_item(gc, entry->live_model.item);
+            gc_mark_item(gc, entry->value.item);
+        }
     }
 }

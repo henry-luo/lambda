@@ -14,9 +14,9 @@ are unchanged. Full evidence is under `../../lambda/temp/kianhup-style/`.
 
 ## Fixed issues
 
-<a id="ri-246"></a>
+<a id="ri-280"></a>
 
-### RI-246 — The macOS caret query aborts for a hidden text control
+### RI-280 — The macOS caret query aborts for a hidden text control
 
 **Fixed, 2026-11-27.** Homer Town Builder aborted when AppKit requested a
 caret rectangle after a camera gesture. A programmatic value write on its
@@ -36,6 +36,577 @@ replay and returned no rectangle in the fixed replay. Both traces are in
 `temp/town-caret-control/probe.log`. The broader baseline's custom native
 test link error and `dom_view_role_nested` geometry mismatch also reproduce
 with the original editing geometry. See `temp/town-caret-control/`.
+
+RI-272 through RI-279 are recorded in the
+[test repair implementation note](impl/Radiant_Impl_Test_Repair_2026-11-28.md).
+
+<a id="ri-279"></a>
+
+### RI-279 — Native regression fixtures use obsolete output, clipping and sizing inputs
+
+**Fixed in the working tree, 2026-11-28.** Four device-loss tests created
+headless virtual submixes, which correctly do not join the physical bus. They
+now create device-backed submixes with offline rendering; a separate check
+confirms a virtual submix survives device retirement. The direct boundary
+painter receives a nonempty clip, the ruby intrinsic query requests the box's
+preferred-size contribution, and the nested-flex replay uses a definite basis
+while retaining its percentage-basis rejection checks (**D9.1.3v2**).
+The full Radiant document binary passes 545/545 with macOS service access.
+
+<a id="ri-278"></a>
+
+### RI-278 — Textarea family changes lose the user-agent font size
+
+**Fixed in the working tree, 2026-11-28.** Changing only a textarea's font
+family made inherited medium size replace its 13.333px user-agent size. Font
+resolution now retains that size for both named and generic families, while
+explicit `medium` and `inherit` sizes continue to resolve separately
+(**D9.1.3v2**). The extended `WinningFontFamilyDeterminesTheMonospaceMediumAdjustment`
+case and Chromium controls pass.
+
+<a id="ri-277"></a>
+
+### RI-277 — Table row minimum classifies a substituted length as a percentage
+
+**Fixed in the working tree, 2026-11-28.** The table cell's row-minimum path
+classified `var()` as a possible percentage before substitution, dropping a
+definite length. It now consumes the shared substituted CSS size facts
+(**D9.1.3v2**). `TableCellLengthsUseTheDeclaringFontAndOrientation` passes its
+retained font, writing-mode and `var(--extent)` states.
+
+<a id="ri-276"></a>
+
+### RI-276 — Flex intrinsic measurement drops the percentage term of mixed margins
+
+**Fixed in the working tree, 2026-11-28.** Intrinsic flex measurement resolved
+a mixed `calc()` margin against zero even when the containing inline size was
+known. It now resolves against that size on the containing writing-mode axis,
+and keeps zero as the cyclic fallback when no basis exists (**D9.1.3v2**).
+`GridIntrinsicMarginsResolveChildVariablesFontAndPercentageBasis` passes its
+live custom-property states and agrees with Chromium.
+
+<a id="ri-275"></a>
+
+### RI-275 — Ruby annotation realignment doubles an atomic child's relative offset
+
+**Fixed in the working tree, 2026-11-28.** A later inline font-box alignment
+replaced the wrapper's already-shifted vertical coordinate. Ruby then
+subtracted the wrapper's offset a second time while positioning its atomic
+child. Rebased font boxes now retain applied inline-chain offsets
+(**D9.1.3v2**). `RubyRelativeOffsetsSurviveColumnAndLinePlacement` and the
+full document binary pass.
+
+<a id="ri-274"></a>
+
+### RI-274 — Provisional flex heights and embedded SVG minimums use incorrect constraints
+
+**Fixed in the working tree, 2026-11-28.** A provisional height inherited
+from an auto-sized flex row was treated as a definite percentage basis, so an
+SVG resolved to 30px instead of its 10px natural height. Embedded SVG also
+missed its user-agent hidden overflow, and replaced flex automatic minimums
+used an authored main size as the content suggestion. The percentage basis,
+overflow default and content suggestion now retain their separate constraints;
+the suggestion still receives a definite cross-size transfer (**D9.1.3v2**).
+The auto/definite/auto height transition, dynamic overflow controls and the
+eight existing image-basis cases pass; Chromium agrees with the tested geometry.
+
+<a id="ri-273"></a>
+
+### RI-273 — Aborted DOM edits leave host and descendant attributes changed
+
+**Fixed in the working tree, 2026-11-28.** A rejected editing transaction
+restored its host and descendant content but did not snapshot and restore their
+attributes. The rollback path now captures host attributes alongside its tree
+snapshots and restores each element through the shared attribute restore helper,
+notifying DOM consumers as restored values are applied (**D10.2.1 / D5.5.1 /
+D9.1.3v2**).
+`RadiantDocumentTest.AbortedEditRestoresHostAndDescendantAttributes` passes.
+
+<a id="ri-272"></a>
+
+### RI-272 — Detached layout measurement closes an uninitialized counter checkpoint
+
+**Fixed in the working tree, 2026-11-28.** A detached inline measurement can
+create an idle `CounterCheckpoint` without a counter context. Its three
+`lam::Up<>` owners had no null initializers, so `close()` could read an
+indeterminate owner and crash while returning from scalar-control sizing.
+Initializing the owners to null makes the idle checkpoint safe to close
+(**D5.5.1 / D9.1.3v2**). `RadiantDocumentTest.ScalarControlSizingPreservesContainingFlexContent` passes.
+
+<a id="ri-271"></a>
+
+### RI-271 — Text measurement repeated writing-orientation queries
+
+**Fixed, 2026-11-27.** Intrinsic text measurement resolved orientation
+for every measured cluster without using the layout context's policy cache.
+Text runs now share that cache through their owning DOM node. The resolved
+inherited-declaration mask also proves when `text-orientation` or
+`text-combine-upright` has its default throughout an ancestor chain
+(**D5.5.1**). The debug layout baseline passed 5,632 cases. Profiles and
+case timings are under `temp/radiant-case-tuning/`.
+
+<a id="ri-270"></a>
+
+### RI-270 — The animation mixer scanned all bindings for each sampled track
+
+**Fixed, 2026-11-27.** CPU samples of the Fishing assisted-catch replay showed
+animation sampling walking the mixer's property list for each channel. An
+action now retains one binding per immutable channel when admitted, and the
+existing property reference counts govern the lifetime of those bindings
+(**S12.1.5v2 / D5.5.1**). Sampling and root-motion extraction use the retained
+bindings. Removing an action releases its references before pruning unused
+properties. Evidence is in `temp/radiant-under-five/`.
+
+<a id="ri-269"></a>
+
+### RI-269 — Custom-layout paint test uses a stale aggregate initializer
+
+**Fixed, 2026-11-27.** `make test-radiant-full` failed while compiling
+`test_layout_custom_gtest.cpp`: its two-field aggregate initializer still
+placed the layer array first, but `CustomLayoutPaintState` now starts with a
+document-resource owner (**D5.5.1**). The test now zero-initializes the state
+and assigns `layers` and `layer_count` by name, leaving the owner empty because
+this test covers stacking order only. The suite passes all 13 cases; the full
+gate now compiles and reaches runtime tests, where unrelated failures and
+timeouts remain.
+
+<a id="ri-268"></a>
+
+### RI-268 — Scene3D animation repeatedly revalidated live targets
+
+**Fixed, 2026-11-27.** In the Fishing assisted-catch replay, CPU samples
+showed repeated DOM ownership walks from `scene3d_animation_write`.
+Sampling passed each weak target by value, so a successful validation
+could not refresh its lifetime stamp after retirement elsewhere in the
+document. Scene3D retains the validated stamp and shares one ownership
+snapshot across bindings when a sampling tick needs to validate them
+again. Every target still checks its identity and whether it remains in
+the scene (**D5.5.1 / S12.1.5v2**).
+The debug baseline passed all 659 native Scene3D cases. With the scene
+and worker budget changes, the assisted-catch replay took 7.79 s.
+
+<a id="ri-267"></a>
+
+### RI-267 — Flex aspect ratios use the wrong width or wrapping height
+
+**Fixed, 2026-11-27.** The viewer's small DOT preview enlarged its circular
+inline flex nodes by transferring the available width before shrink-to-fit.
+Wrapping columns also summed all item heights into the automatic minimum,
+preventing `flex-aspect-ratio-008` from wrapping. Radiant now transfers the
+measured width before line collection and uses the largest item extent for
+a wrapping column's minimum (**D9.1.3v2 / D9.5.6v2**). The sizing baseline
+passes all 776 cases, and `doc_viewer_preview_scrollbars` passes all 14
+assertions. [CSS Flexbox line sizing](https://www.w3.org/TR/css-flexbox-1/#line-sizing).
+
+<a id="ri-266"></a>
+
+### RI-266 — A degenerate SVG ratio produces an infinite layout height
+
+**Fixed, 2026-11-27.** `svg-no-ar-min-height-min-content.html` divided by
+the natural ratio of a zero-width SVG and emitted `inf` in streamed layout
+JSON. The invalid output aborted a sizing batch. SVG sizing now keeps
+natural dimensions and publishes a ratio only when it is finite and
+positive (**D9.1.3v2**). All 776 recorded sizing cases pass.
+[CSS Images natural dimensions](https://www.w3.org/TR/css-images-3/#natural-dimensions).
+
+<a id="ri-263"></a>
+
+### RI-263 — Indefinite grid tracks collapse or absorb their gutters
+
+**Fixed, 2026-11-27.** An auto-height grid with two flexible rows and
+spanning content collapsed all four tracks to zero. In the transposed
+max-content grid, the flexible column widths included the gutters a second
+time. Radiant now runs the content-based flex fraction phase on indefinite
+rows. The synthesized track space excludes gutters, while the reported
+container extent includes them (**D9.1.3v2**).
+[CSS Grid Level 2 §12.7](https://www.w3.org/TR/css-grid-2/#algo-flex-tracks).
+
+Both axis reductions match Chromium with 58 px flexible tracks and a
+152 px container. The 57 other passing grid checks and the three existing
+flex-content alignment failures retain their results. Static and JS layout
+outcomes are unchanged. The ordinary Figma Pricing viewport no longer has
+overlapping cards. Both pairs clear high severity (**D10.1.7**).
+[Regression](../test/online/render_grid_spanning_minimum.test.cjs) ·
+[Round 223](../test/online/comparison/repairs.html#round-223).
+
+<a id="ri-262"></a>
+
+### RI-262 — Windowless file export skips native WebGL host acquisition
+
+**Fixed, 2026-11-27.** HTML file export permits acquiring a native graphics
+host on demand. Scene3D already requested that host, while the WebGL Canvas
+provider required a window to exist before `getContext('webgl2')`. It now
+follows the existing export policy when a canvas first requests WebGL. A
+missing native provider still yields a null context (**D9.1.3v2 / D9.5.6v2 /
+D10.1.7**).
+
+The four WebGL export tests start windowless and check rendered red and blue
+pixels through PNG, SVG and PDF. The preceding release fails the same
+control. The Canvas 2D control also passes. Handhold draws its ribbon in
+both ordinary native runs. Chromium returns no WebGL context on this host
+for the shared local control and omits the ribbon in both current live
+references. Its consent dialog is also inconsistent between pairs. Handhold
+remains high. Evidence is in `temp/online-visual-round248/`.
+[Export tests](../test/test_pdf_render_visual_gtest.cpp:7990).
+
+<a id="ri-261"></a>
+
+### RI-261 — A ratio-sized flex badge loses its descendant percentage height
+
+**Fixed, 2026-11-27.** FramerAuth's initial SVG has no `viewBox` and fills
+a percentage-height wrapper inside an aspect-ratio flex item. Radiant
+gave the icon 150 px of height and its badge 166 px. Chromium used 24 px
+and 40 px with the same markup and CSS (**D9.1.1v4 / D9.1.3v2**).
+
+Intrinsic height queries now identify the box that supplies the transferred
+height. During layout, a provisional flex item record from an `aspect-ratio`
+declaration no longer overrides the actual parent formatting context. The
+SVG viewport uses the current containing block when deciding whether its
+percentage height is definite. [CSS Sizing 4 §4.2–4.3](https://www.w3.org/TR/css-sizing-4/#aspect-ratio).
+
+Two reduced controls cover explicit `aspect-ratio: auto` and `inherit` on
+the wrapper. Both now produce 24 px for the flex row, icon, wrapper and
+SVG. The six existing intrinsic image controls also pass. Both ordinary
+FramerAuth pairs show the compact badge. Its hero remains lower and the
+cross-origin demo is blank. The static and JS layout gate results are
+unchanged. Evidence is in `temp/online-visual-round248/`.
+[Regression](../test/online/render_intrinsic_image_basis.test.cjs) ·
+[Round 221](../test/online/comparison/repairs.html#round-221).
+
+<a id="ri-259"></a>
+
+### RI-259 — Cached previews repeat stylesheet, font and layout allocation
+
+**Fixed 2026-11-26.** Switching between the math Markdown and intensive TeX
+fixtures in `lambda view` recreated 298 parsed inline sheets per round in
+the same document pool. Reconnecting an unchanged style element now reuses
+its unexposed sheet. Stylesheet removal still withdraws its rules from the
+cascade. An author that obtained the old CSSOM object retains its own copy.
+Animation and font caches are invalidated when the changed sheets contribute
+their at-rules. CSS font registration publishes directly to the shared font
+registry (D5.5.1, D5.5.3, D10.2.4 and LI-127).
+
+Retained layout replay now allocates live text rectangles from the same list
+to which it returns them. Retiring a border releases its computed corners,
+with layout and paint sharing the currently owned snapshot (D5.5.1, D5.5.3).
+
+<a id="ri-258"></a>
+
+### RI-258 — A broad rebuild loses the input measurements of its completed container cascade
+
+**Fixed, 2026-11-26.** Broad DOM reconciliation applied the new cascade
+against existing query container boxes, then reset their view resources.
+Layout compared its first probe to an empty baseline and repeated the
+full probe and cascade even when the query measurements were unchanged.
+The Radiant rebuild now snapshots the same eligible container boxes
+before releasing the view resources. Committed effects still follow the
+settled query pass, and changed dimensions or names still recascade
+(**D5.5.1 / D9.1.1v4 / D9.1.3v2**).
+
+The stylesheet mutation control has five matching native and Chromium
+CSSOM observations. Unchanged input needs two native passes, down from
+three. Three changed input cases still need three. All 62 local render
+tests and 13 UI fixtures pass. Dock’s stable broad rebuilds take about
+8.5–8.8 seconds in the candidate trace, compared with 14.5–15.5 seconds
+in the preceding release. Its ordinary capture still times out (RI-031).
+Evidence is in `temp/online-visual-round244/`.
+[Regression](../test/online/render_relational_mutations.test.cjs).
+
+<a id="ri-257"></a>
+
+### RI-257 — SVG auto-height measurement ignores its resolved width
+
+**Fixed, 2026-11-26.** An SVG with 777 × 358 presentation attributes used
+a CSS width of 576 px and a height percentage without a definite basis.
+Its final viewport was 265.39 px tall, but its flex wrapper measured
+358 px. Chromium used 265.38 px for both. Ease Health’s original hero
+stylesheet produced the same mismatch at a larger width.
+
+Intrinsic replaced-height measurement transfers a definite resolved width
+through the SVG’s natural ratio when the block dimension is automatic.
+The other intrinsic queries retain the natural-size fallback
+(**D9.1.3v2 / D5.5.1**). The regression checks geometry and the area below
+the wrapper. The ordinary captures restore the product animation, with a
+residual crop at the right edge during the card reveal (**D10.1.7**).
+[Regression](../test/online/render_svg_flex_ratio.test.cjs) ·
+[Round 214](../test/online/comparison/repairs.html#round-214).
+
+<a id="ri-256"></a>
+
+### RI-256 — Flex layout loses ratio-transferred height
+
+**Fixed, 2026-11-26.** A 240 px flex container with an 8:5 ratio and a short
+text child shrank to 20 px. In a nested column, its parent assigned 150 px
+and late child wrapping replaced that height with 120 px. Chromium kept
+150 px in both cases. Refrakt reproduced the nested loss with its original
+stylesheet and a script-free replay. Its 1,200 × 750 px gallery clipped to
+125.4 px in Radiant. [CSS Box Sizing Level 4](https://drafts.csswg.org/css-sizing-4/#aspect-ratio).
+
+Final flex sizing transfers a definite width through the preferred ratio
+before distributing space. A content-based automatic minimum can grow the
+box, while intrinsic probes retain their natural measurement. Late layout
+of a nested column reuses the fixed-axis decision that already recognizes
+the parent's assigned height (**D9.1.3v2 / D5.5.1**).
+
+All 62 focused controls pass. The new geometry fixture covers row and column
+flex, growth, overflow, max-height, border-box sizing and nested text wrap.
+Both ordinary Refrakt captures restore the gallery and centered title at
+the existing frame (**D10.1.7**). [Round 213](../test/online/comparison/repairs.html#round-213).
+
+<a id="ri-255"></a>
+
+### RI-255 — Shadow stylesheets skip their own host
+
+**Fixed, 2026-11-26.** The scoped stylesheet walk began at the shadow
+fragment. It matched the nodes inside the fragment and never collected
+rules on the host. Linktree and Bento left their consent panels below the
+viewport. Teachable drew its panel text over a transparent background
+because the host's custom properties were missing.
+
+Full and per element cascades now apply the host's own shadow sheets before
+its descendants read inherited values. They use the source tree and
+declaration context from [LI-125](<Lib_Input_Issue_Ledger (fixed).md#li-125>)
+under **D9.1.1v4 / D9.1.3v2 / D5.5.1**. The fixture checks fixed geometry,
+paint, a generated box, inherited values, and live class, attribute, CSSOM
+and media changes. It passes in AST, MIR and Chromium. All 15 selected
+AST shadow and slot checks and the Radiant integer cast lint pass.
+
+Linktree and Bento restore the complete consent panel in ordinary matched
+captures and clear high severity at 1.45% and 1.14% mean error. Teachable's
+panel now has a readable background, text and button. The current Chromium
+capture has no panel and shows the primary offer action. The current
+Lambda frame still rates high. Evidence is in
+`temp/online-visual-round235/` and [round 207](../test/online/comparison/repairs.html#round-207).
+
+<a id="ri-254"></a>
+
+### RI-254 — Nested flex height queries lose the percentage containing width
+
+**Fixed, 2026-11-26.** Native layout ownership **D9.1.3v2**, with selected
+measurement state governed by **D5.5.1**. Comand 524's hero column measures
+355.6px instead of 420.4px, moving its correctly sized headline down 129.6px
+and clipping the copy/action. The unchanged saved, script-free document
+reproduces the live result. The RI-065 inline formatter remains correct.
+
+The child-height fallback computes a fixed-width parent's content width,
+subtracts child margins and passes the wrapping width into the intrinsic
+query. It drops the distinct percentage containing width. Resolving the
+child's `width:100%` then uses a stale ancestor basis: a reduced 240px query
+becomes 1200px or 560px, losing a wrapped line. A percentage-width group
+happens to materialize styles through a different earlier query and hides
+the error. Recascading also hides the first-layout defect in the old test.
+
+The shared fallback now performs the height query while supplying both
+widths to the existing containing-block scope. Both callers use that helper;
+there is no alternate line algorithm, authored-width override or site check.
+The existing dynamic regression now checks the first fixed-width layout,
+horizontal child margins, fixed/percentage group widths, recascade, break
+visibility, repeated constrained queries and selected text preservation.
+Its new cold-layout assertions fail before the repair by 36px.
+
+**Qualification:** all 11 focused intrinsic-height, column, ratio and
+percentage-basis tests pass; the layout integer-cast lint passes. The saved
+Comand document now measures 420.4px and places the headline at 333.6px,
+against current Chromium's 420.391px and 333.609px. The ordinary live PNG
+also restores the copy and primary action placement. The missing background
+video remains separate; this is not a complete Comand clearance. Broad
+baselines have not been repeated for this layout change.
+
+Evidence: `temp/online-visual-round234/{unit-before.log,unit-final.log,
+fixed-group-trace2.log,fixed-group-after.json,comand-saved-after.json,
+comand-geometry.json,lint.log}` and the ordinary qualified capture. Temporary
+trace instrumentation is excluded from production source and the candidate.
+
+The subsequent JS13-L88 repair restores Comand's video in two ordinary
+captures. The earlier geometry repair and the timer repair are both present
+in the release that clears the page at 2.09% mean error (**D10.1.7**).
+[Round 208](../test/online/comparison/repairs.html#round-208).
+
+<a id="ri-253"></a>
+
+### RI-253 — Loading animation frames silently age held CSS effects
+
+**Fixed, 2026-11-26.** The headless elapsed-load profile holds CSS age until
+its selected post-load interval, while JavaScript and host timelines advance.
+Pre-load rAF dispatch introduced by JS13-L86 called the shared scheduler's
+host anchor. After its initial anchor, that function advanced current_time
+without rebasing held CSS start/pause clocks. CSS effects therefore consumed
+load time even though the frame preparation sampled only timeline drivers.
+The no-rAF control selected the correct half-yellow one-second fade; the
+same script/image load waits with rAF selected a fully finished green fade.
+Both new maintained CSS-age assertions fail on the preceding release.
+
+The existing host-anchor helper now accepts a preserve_css_time option.
+Loading snapshot frames rebase CSS animation/transition start and pause clocks
+as host time advances; timeline and media clocks retain their elapsed time.
+Normal host and selected virtual frames keep their prior behavior. Lambda's
+DOM bridge supplies the actual loading phase through its existing frame hook
+(**D9.1.3v2 / D9.5.6v2 / D10.1.7**). No RuntimeState layout, authored CSS,
+visibility, capture origin or timer budget changes. The CSS pixel assertion
+is shared between the clock and frame fixtures rather than copied.
+
+**Qualification:** 22 scheduler tests pass, including two new clock/paused
+cases. Five AST controls, four MIR controls and two Chromium controls pass;
+each loading-frame fixture now also checks CSS age and the authored pause.
+The Radiant integer-cast lint passes. One accumulated JS-layout baseline is
+**630/630**, with no failures, errors, skips or partials. Ordinary native
+captures preserve Family's resolved hero/actions; Frame.io retains its dark,
+low montage, so no further page clearance is assigned to this repair.
+Report205 remains **68 high / zero critical / 999 low**.
+
+Evidence: `temp/online-visual-round232/{maintained-css-age-before.log,
+scheduler-unit.log,focused-ast-chromium.log,focused-mir.log,baseline-js.json,
+lint.log,qualified-run,checkpoint.md}`. Final release SHA256:
+`01392e8090f48504a81b27cc7c3ce8f89b1844c94e0da70e96994ad1c266a98c`.
+
+<a id="ri-252"></a>
+
+### RI-252 — Demo tile hover triggers a full catalog layout
+
+**Fixed, 2026-11-26.** D9.1.1v4 and D9.5.6v2 place event handling in
+Lambda's host adapter and native layout and painting in Radiant. On the
+unnamed `lambda demo` page, the ancestor hover selectors for the Open pill
+sent every tile enter and exit through full layout, even though the rules
+only changed colors.
+
+The hover adapter now uses the existing retained paint refresh for
+paint-only selectors that reach their subject through child or descendant
+combinators. It matches against the old and new hover paths to refresh
+both tiles. Geometry-changing rules and selectors with broader effects
+still use the existing restyle path. The demo's border transition now
+uses a 90 ms ease-out.
+
+Across 32 native macOS pointer moves in release builds, the median to the
+first presented frame fell from 195 ms to 68 ms. The expected border
+color crossed the sampled pixel threshold after 259 ms before the fix
+and 68 ms after it. The headless profile showed eight hover reflows
+before the fix and only the initial layout after it. Fifteen focused
+headless replays passed, including scoped geometry and the extended
+descendant pixel fixture. A native demo replay also verified that the
+Open pills switch and clear when crossing between tiles.
+
+<a id="ri-251"></a>
+
+### RI-251 — Widening a window retains narrow flex and grid geometry
+
+**Fixed, 2026-11-26.** Radiant owns layout and its property storage under
+D9.1.3v2 and D5.5.1. Open `lambda demo`, narrow it below 760 CSS pixels,
+then widen it. The media query stops matching, but the hero still stacks
+its emblem above the title and the catalog keeps the sidebar above its
+contents. A minimal page reproduced the same stale flex direction, gap
+and explicit grid tracks.
+
+Full style resolution now restores the flex and grid container inputs
+from the allocation defaults before applying the current cascade. It
+releases the old grid templates and keeps the last committed baselines
+and used track text available until layout replaces them. The geometry
+regression fails on both returns to the wide viewport before the change
+and passes after it. All 151 tests in the native dynamic-layout suite pass.
+The release demo restores its wide geometry after both breakpoints in a
+native macOS window and headless. Eight additional headless replays and
+the native archive closure pass.
+
+<a id="ri-250"></a>
+
+### RI-250 — Demo window resizing repeats shadow and cascade work
+
+**Fixed, 2026-11-26.** Radiant owns native paint and layout under
+D9.1.3v2 and D9.5.6v2. In the unnamed `lambda demo`, changing the
+catalog width invalidated the shadow cache. Radiant blurred the whole
+panel, including its offscreen extent. Each viewport change also
+rematched the whole stylesheet between media-query breakpoints.
+
+Outer shadows now convolve identical straight spans once and reconstruct
+the original pixel image before applying the existing masks. The cascade
+compares media conditions at the old and new viewport sizes and retains
+the specified style when they agree. Layout still resolves lengths against
+the new viewport. Shadow roots and container-query documents retain the
+full recascade path.
+
+Across 40 distinct native resize steps in the release build, median
+resize-to-frame time was 47.7 ms before and 46.6 ms after. The 90th
+percentile fell from 180.4 ms to 82.3 ms and the maximum from 225.3 ms
+to 100.6 ms. Eight shadow captures at 1× and 2× matched pixel for pixel.
+Ten focused replays covered the demo's responsive layout, imported and
+nested media rules, observers, editors and clipping. Native Scene3D
+resize and the Radiant integer-cast lint also passed.
+
+<a id="ri-249"></a>
+
+### RI-249 — macOS clears the visible drawable during native resize
+
+**Fixed, 2026-11-26.** Radiant owns the native present and graphics
+resources under D9.1.3v2 and D9.5.1. After RI-248 removed the interim
+swap, a native probe still found black pixels in the NSGL front buffer
+after both growing and shrinking the window and before reflow. The
+drawable's storage is coupled to the window's size.
+
+On macOS the existing GL presenter now draws the completed frame into a
+separate IOSurface and publishes it through a non-animating Core
+Animation transaction. The layer keeps the completed image at the
+top left at its original pixel scale during reflow. A resized backing
+buffer becomes visible after paint and GPU composition finish. The
+presenter checks the native current GL context because nested Cocoa
+resize callbacks can restore it without updating GLFW's bookkeeping.
+
+The native regression verifies identical retained pixels after growth and
+shrink, followed by replacement with the completed frame at the new size.
+Native Markdown and GPU resize replays pass. Pixel checks across Markdown,
+Scene3D and WebGL presentations report no differences beyond tolerance.
+Fifteen native tests and ten focused UI tests pass.
+
+<a id="ri-248"></a>
+
+### RI-248 — Native resize presents a stale frame before repaint
+
+**Fixed, 2026-11-26.** Radiant owns native presentation under D9.1.1v4 and
+D9.1.3v2. Dragging a `lambda view` window edge showed the previous
+viewport's frame in the new drawable. The framebuffer resize helper
+explicitly presented the previous image before the window turn laid out,
+painted, and presented the new viewport.
+
+Framebuffer resize now allocates the new surface and invalidates paint. The
+existing live resize turn publishes the completed frame after reflow. The
+native regression checks that allocation leaves GL draw state untouched and
+that the new pixels reach the front buffer after repaint at each size.
+The draw-state check fails at all three sizes with the original resize code
+and passes with the fix. Ten focused UI cases and the layout integer-cast
+check pass.
+This supersedes the early swap recorded in
+[Proc Gen §2l–2m](impl/Lambda_Impl_Proc_Gen.md#2l-native-resize-presentation-2026-10-27).
+
+<a id="ri-247"></a>
+
+### RI-247 — Collapsed table borders spill out of scroll panes
+
+**Fixed, 2026-11-26.** Radiant owns native paint under D9.1.1v4,
+D9.1.2v2 and D9.1.3v2. Horizontal scrolling in the embedded CSV editor
+painted cell borders over the file sidebar. The raster table painter
+recorded resolved borders without the rectangular block clip. It now
+applies that clip when a cell's border paint can cross the viewport.
+
+The scroll replay checks both axes and the visible borders at the clip
+edges. Five pixels outside the pane failed before the fix. All nine
+assertions pass at 1× and 2×. The before-and-after replay in
+`test_tab.csv` changes only pixels in the sidebar where borders spilled.
+[`collapsed_table_overflow_clip.json`](../test/ui/collapsed_table_overflow_clip.json).
+
+<a id="ri-246"></a>
+
+### RI-246 — Rounded inline backgrounds spill past rectangular scroll clips
+
+**Fixed, 2026-11-26.** Radiant owns native paint under D9.1.1v4 and D9.1.3v2.
+In `lambda view AGENTS.md`, a rounded inline code background could extend
+from the scrollable preview into the bottom toolbar. The rounded background's
+vector fill bypassed the rectangular block clip.
+
+The raster text painter now records the rectangular clip around a rounded fill
+that can cross the clip boundary. The regression checks that the background
+stays visible inside the pane and stops at its bottom edge before scrolling
+and its top edge afterward. Both outside pixels failed before the fix. The
+case passes at 1× and 2× display scale. A headless capture of the default
+`AGENTS.md` viewer confirms that the fill stops at the toolbar boundary.
+[`inline_code_overflow_clip.json`](../test/ui/inline_code_overflow_clip.json).
 
 <a id="ri-244"></a>
 
@@ -5062,6 +5633,12 @@ ancestor hide also preserves a blur listener's refocus and layout read. A
 keyboard edit followed by hiding the input delivers `change`, `blur`, and
 `focusout` in order. Reproduction and verification are in
 `temp/css-focus-fixup/`.
+
+**Detached-target follow-up, 2026-11-28.** Invalid editor navigation detached
+the focused textarea while its blur sequence was still being delivered. The
+event scope now retains the owner document and resolves the pinned node identity
+for `blur`/`focusout` even after disconnection (**D1.10 / D5.5.1 / D9.1.3v2**).
+`doc_viewer_edit_navigation_invalid` passes all 7 assertions.
 
 <a id="ri-018"></a>
 

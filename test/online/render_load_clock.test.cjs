@@ -1,17 +1,14 @@
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),puppeteer=require('puppeteer');
 const {renderFixtures,rgb,loggedResult,serveFixtureResources}=require('./render_fixture.cjs');
-const {serveLoadClock}=require('./load_clock_fixtures.cjs');
+const {serveLoadClock,checkCssClockFrame}=require('./load_clock_fixtures.cjs');
 const {captureBrowser,parseOptions}=require('./capture_snapshots.cjs');
 const {pngLibrary}=require('./compare_snapshots.cjs');
 const render=renderFixtures('load-clock'),origin=serveFixtureResources(serveLoadClock);
 
 function checkFrame(image) {
     assert.deepEqual(rgb(image,40,40),[0,255,0],'load time counts toward the 1800ms script timer');
-    const fade=rgb(image,40,120);
-    assert.ok(Math.abs(fade[0]-128)<20&&Math.abs(fade[1]-128)<20&&fade[2]===0,
-        'CSS animation age includes the one-second settlement, excluding loading: '+fade);
-    assert.deepEqual(rgb(image,40,200),[255,0,0],'authored CSS pause stays paused');
+    checkCssClockFrame(image);
 }
 
 test('elapsed loading carries timers into the fixed post-load frame without aging CSS',async()=>{

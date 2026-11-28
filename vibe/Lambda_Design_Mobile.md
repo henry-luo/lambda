@@ -73,7 +73,7 @@ Every phase-1 demo already runs entirely in T0. Phase 1 therefore needs **no new
 
 ### 1.3 What phase 1 must build
 
-1. **The `lambda-nomir` desktop twin** (MB2, MB22): exactly `lambda.exe` minus MIR. `make lambda-nomir` builds it from the `lambda-nomir` variant in `build_lambda_config.json`: `LAMBDA_NO_MIR`, no `libmir`, and the four MIR translation units excluded (`transpile-mir.cpp`, `runtime/mir.c`, `mir_dump.cpp`, `js/mvp-lmd/mvp_lmd_mir.cpp`). Progress is recorded in §1.7.
+1. **The `lambda-nomir` desktop twin** (MB2, MB22): exactly `lambda.exe` minus MIR. `make lambda-nomir` builds it from the `lambda-nomir` variant in `build_lambda_config.json`: `LAMBDA_NO_MIR`, no `libmir`, and the four MIR translation units excluded (`transpile-mir.cpp`, `runtime/mir.c`, `mir_dump.cpp`, `js/mir/js_mir_mir.cpp`). Progress is recorded in §1.7.
 2. **The platform seam** (MB7) and **tick inversion** (MB8), done on desktop first with no behavior change.
 3. **The iOS cross-build** (MB16) of only the libraries the phase-1 closure links: mpdecimal, utf8proc, fribidi, libuv, ThorVG (+ patches), Brotli, and the in-tree image codecs and miniaudio. zlib, bzip2 and iconv come from the SDK.
 4. **A minimal UIKit shell:**
@@ -124,12 +124,12 @@ P1.0 and P1.1 need no iOS SDK.
   - JS importing a Lambda module throws "excluded from this build" (MB5);
   - Lambda namespace registration for JS, satellite-image teardown, `execute_script_and_create_output` and the batch MIR error handler are compiled out with MIR.
 
-**LambdaJS: `mvp_lmd_mir.cpp` split (MB23).** That file was not only the MVP code generator. It also held MIR-free JS runtime used by the AST interpreter and the DOM: private internal names (RegExp iterators, URL records, PerformanceObserver), template-object ops, realm-library ambient state and its activation hook, `MvpLmdRealmScope`, and program/callable accessors. The split, by user ruling 2026-10-26:
+**LambdaJS: `js_mir_mir.cpp` split (MB23).** That file was not only the MVP code generator. It also held MIR-free JS runtime used by the AST interpreter and the DOM: private internal names (RegExp iterators, URL records, PerformanceObserver), template-object ops, realm-library ambient state and its activation hook, `MvpLmdRealmScope`, and program/callable accessors. The split, by user ruling 2026-10-26:
 
-- `mvp-lmd/mvp_lmd_internal.h` holds the types both halves share: the include block, the `LmdKind`/`LmdIntrinsic` enums, the compiler-plan structs `MvpLmdProgram` embeds, `MvpLmdCode`/`Program`/`Execution`/`Realm`, and the intrinsic tables. MIR names appear there only as field types; a no-MIR build includes the in-tree MIR headers for those types and never links `libmir`.
-- `mvp-lmd/mvp_lmd_program.cpp` (≈450 lines) holds the MIR-free runtime: unit creation, reset, program/realm accessors, template-object ops, `object_create`, the realm-library thread-locals and ambient hook, internal names, `MvpLmdRealmScope`, function source/name, the realm-intrinsic predicates, and the dynamic-global entries.
+- `mir/js_mir_internal.h` holds the types both halves share: the include block, the `LmdKind`/`LmdIntrinsic` enums, the compiler-plan structs `MvpLmdProgram` embeds, `MvpLmdCode`/`Program`/`Execution`/`Realm`, and the intrinsic tables. MIR names appear there only as field types; a no-MIR build includes the in-tree MIR headers for those types and never links `libmir`.
+- `mir/js_mir_program.cpp` (≈450 lines) holds the MIR-free runtime: unit creation, reset, program/realm accessors, template-object ops, `object_create`, the realm-library thread-locals and ambient hook, internal names, `MvpLmdRealmScope`, function source/name, the realm-intrinsic predicates, and the dynamic-global entries.
 - `mvp_lmd_function_prepare` split along its own ABI gate. The shared half returns interpreter functions unchanged and rejects non-MVP ABIs, as before. MVP-callable materialization moved to `mvp_lmd_function_materialize` in the generator file.
-- Four entries that compile or plan through the generator stay in `mvp_lmd_mir.cpp`: `create_realm`, `prepare_module_realm`, `dynamic_import` and `dynamic_class`. They are reachable only from an MVP program, which a no-MIR build never creates (MVP library state is owned by a program, and only MIR instantiation creates one). In that build one guarded block in `mvp_lmd_program.cpp` defines them as explicit "MIR code generation is excluded" failures.
+- Four entries that compile or plan through the generator stay in `js_mir_mir.cpp`: `create_realm`, `prepare_module_realm`, `dynamic_import` and `dynamic_class`. They are reachable only from an MVP program, which a no-MIR build never creates (MVP library state is owned by a program, and only MIR instantiation creates one). In that build one guarded block in `js_mir_program.cpp` defines them as explicit "MIR code generation is excluded" failures.
 - The JS selector forces `ast` and disables AUTO at compile time under `LAMBDA_NO_MIR` (`js_interp.hpp`, MB4). The MVP fallbacks and preamble images in `js_execution.cpp` and the MVP batch in `main.cpp` fail explicitly. The P2 promotion region of `js_interp.cpp` (admission scan, satellites, loop handoff) compiles to "never promotes" definitions, the JS counterpart of `INTERP_DISABLED_MIR_HOOK`.
 
 **Result.** `make lambda-nomir` links `lambda-nomir.exe` (27 MB debug) with **zero MIR symbols and no `pthread_jit_write_protect_np` reference**; `lambda.exe` has 143 MIR symbols. Every phase-1 demo script passes on it, headless, with `interp: fallback=0 excluded=0`:
@@ -321,7 +321,7 @@ Under AUTO these go to MIR. Under MB1 they become hard E501 errors. The support 
 The interpreter exists (`js_interp.cpp`, 8,305 lines). Its support scan (`js_interp_node_is_supported`, `js_interp.cpp:5847-5940`) admits classes, async/await, generators, destructuring, try, modules and regex. **But LambdaJS cannot be built without MIR today:**
 
 - There are no `LAMBDA_NO_MIR` guards anywhere under `lambda/js/`.
-- `lambda/js/mvp-lmd/mvp_lmd_mir.cpp` (15,121 lines) and the MIR context and `MIR_finish` in `js_execution.cpp:42,763-809` are compiled unconditionally.
+- `lambda/js/mir/js_mir_mir.cpp` (15,121 lines) and the MIR context and `MIR_finish` in `js_execution.cpp:42,763-809` are compiled unconditionally.
 - Under AUTO, unsupported units fall back to whole-module MIR (`js_execution.cpp:667-692`).
 - Promotion compiles through `mvp_lmd_compile_function_satellite` / `_loop_satellite` (`js_interp.cpp:6477,6774`).
 - 17 tests are pinned to MIR (`test/js/mir_list.txt`).
@@ -647,7 +647,7 @@ M0–M3 need no iOS SDK and can proceed in parallel with dependency cross-buildi
 | MB17 | Radiant renders app-owned documents; arbitrary web navigation goes to WebKit | 7.2 |
 | MB18 | TLS on iOS: the OS evaluates each presented chain (`SecTrustEvaluateWithError`) behind the existing `curl_trust_ssl_ctx` hook; no bundled CA set | 5.4 |
 | ~~MB19~~ | ~~Phase 1 builds Radiant with `LAMBDA_NO_JS`~~ — superseded by MB22 (Appendix S) | 1.2 |
-| MB23 | `mvp_lmd_mir.cpp` is split: shared types in `mvp_lmd_internal.h`, MIR-free program/realm runtime in `mvp_lmd_program.cpp`; the no-MIR build drops the generator file whole (user ruling 2026-10-26) | 1.7 |
+| MB23 | `js_mir_mir.cpp` is split: shared types in `js_mir_internal.h`, MIR-free program/realm runtime in `js_mir_program.cpp`; the no-MIR build drops the generator file whole (user ruling 2026-10-26) | 1.7 |
 | MB22 | The phase-1 build is `lambda.exe` minus MIR: the LambdaJS runtime and AST interpreter stay, because the DOM is built on the JS object model; only MIR code generation is excluded | 1.2 |
 | MB20 | Phase-1 demo set: tetris, sentence-game, greetings (core); draw, superlambda (stretch) | 1.1 |
 | MB21 | A document without a `viewport` meta lays out at a 1024 CSS px layout viewport scaled to fit, with pinch-zoom | 1.4 |
@@ -698,7 +698,7 @@ If this design is accepted, these formal-spec changes would follow. **None is ma
 | Strict-interp refusal | `lambda/runtime/runner.cpp:1548-1564` |
 | JS→Lambda JIT pin | `lambda/runtime/runner.cpp:2398-2415`, `lambda/js/js_source_module.cpp:45`, `lambda/runtime/module_registry.cpp:396` |
 | JS interpreter and its scan | `lambda/js/js_interp.cpp:5847-5940`; satellites at 6477, 6774 |
-| Unconditional JS MIR | `lambda/js/js_execution.cpp:42, 667-692, 763-809`; `lambda/js/mvp-lmd/mvp_lmd_mir.cpp` |
+| Unconditional JS MIR | `lambda/js/js_execution.cpp:42, 667-692, 763-809`; `lambda/js/mir/js_mir_mir.cpp` |
 | MIR-interp thunks | `lambda/mir/mir-interp.c:1778, 2058` |
 | Executable-memory allocator (MIR only) | `lambda/mir/mir-code-alloc-default.c:21-63` |
 | Fiber assembly | `lib/fiber.c:50-57, 137-185` |

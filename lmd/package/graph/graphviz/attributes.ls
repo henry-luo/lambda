@@ -6,8 +6,14 @@ import colors: .colors
 fn property_matches(entry, name) any^ => lower(string(entry.name)) == name
 
 pub fn last_entry(properties, name) {
-  let matches = [for (entry in properties where ((property_matches(entry, name)) ^ { false })) entry];
-  if (len(matches) > 0) matches[len(matches) - 1] else null
+  // Later DOT properties override earlier defaults and declarations.
+  var i = len(properties) ^ { 0 }
+  while (i > 0) {
+    i = i - 1
+    let entry = properties[i]
+    if ((property_matches(entry, name) ^ { false })) { return entry }
+  }
+  return null
 }
 
 fn last_named_entry(properties, names) any^ {
@@ -242,10 +248,16 @@ fn edge_attrs(properties) {
   ])
 }
 
+// An empty property list always lowers to the same immutable defaults.
+let default_node_attrs = node_attrs([])
+let default_edge_attrs = edge_attrs([])
+
 pub fn canonical(kind, properties) {
   if (kind == "graph") graph_attrs(properties)
   else if (kind == "cluster") cluster_attrs(properties)
-  else if (kind == "node") node_attrs(properties)
-  else if (kind == "edge") edge_attrs(properties)
+  else if (kind == "node")
+    (if ((len(properties) == 0) ^ { false }) default_node_attrs else node_attrs(properties))
+  else if (kind == "edge")
+    (if ((len(properties) == 0) ^ { false }) default_edge_attrs else edge_attrs(properties))
   else {}
 }

@@ -1296,9 +1296,6 @@ static void append_browser_document_preamble(StrBuf* script_buf, const DomDocume
         "document.prerendering = false;\n"
         "document.visibilityState = 'visible';\n"
         "document.fonts = document.fonts || {};\n"
-        // FontFaceSet.load returns a Promise, but it must remain pending until
-        // the native font-resource phase can truthfully report completion.
-        "document.fonts.load = document.fonts.load || function(){ return new Promise(function(){}); };\n"
         "function FontFace(family, source, descriptors) {\n"
         "  if (!(this instanceof FontFace)) throw new TypeError('FontFace constructor requires new');\n"
         "  descriptors = descriptors || {};\n"

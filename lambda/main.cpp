@@ -85,7 +85,7 @@
 #include "js/js_interp.hpp"          // retained AST harness execution
 #include "js/js_exec_profile.h"      // profile flush on the batch _exit path
 #include "js/js_runtime_state.hpp"
-#include "js/mvp-lmd/mvp_lmd.h"
+#include "js/mir/js_mir.h"
 #endif // LAMBDA_NO_JS
 #include "lib/uv_loop.h"          // JS worker cleanup for libuv loop
 #include "lib/time_util.h"
@@ -4304,6 +4304,15 @@ static int lambda_main_impl(int argc, char *argv[]) {
         return lambda_main_finish(exit_code);
     }
 
+#ifndef LAMBDA_NO_MIR
+    // Repeated layout helpers can queue compiler work while the viewer is
+    // preparing its first frame. Delay promotion until use is sustained (D8.3.2).
+    bool view_command = argc >= 2 && strcmp(argv[1], "view") == 0;
+    if (view_command || (argc >= 2 && strcmp(argv[1], "edit") == 0)) {
+        interp_set_func_jit_threshold_default(view_command ? 80 : 32);
+    }
+#endif
+
     // Handle edit command: open one existing local document in the lambda.edit
     // authoring application. Format selection belongs to the package registry,
     // so the CLI only checks that a local file exists (Radiant_Design_Edit_Mode §1).
@@ -4384,6 +4393,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("  .pdf       Portable Document Format\n");
             fputs("  .docx      Word document (semantic content)\n", stdout);
             fputs("  .pptx      PowerPoint presentation (imported slides)\n", stdout);
+            fputs("  .xlsx      Excel workbook (worksheet preview)\n", stdout);
             fputs("  .epub      EPUB 2/3 eBook reader\n", stdout); // PRINTF_OK: CLI help.
             fputs("  .diff/.patch  Unified diff review\n", stdout); // PRINTF_OK: CLI help.
             printf("  .html      HyperText Markup Language\n");
@@ -4413,7 +4423,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("  .csv/.tsv  Delimited tables\n");
             printf("  .zip/.jar  ZIP-backed archives (file tree)\n"); // PRINTF_OK: user-facing CLI help.
             printf("\nOptions:\n");
-            fputs("  --archive                 Browse the underlying ZIP parts, including DOCX\n", stdout);
+            fputs("  --archive                 Browse the underlying ZIP parts of documents and archives\n", stdout);
             fputs("  --standalone              Open with the native document loader\n", stdout);
             printf("  --event-file <file.json>   Load simulated events from JSON file for testing\n");
             printf("  --event-result <file.json> Write a machine-readable event result\n");
@@ -4537,7 +4547,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 // Get file extension from Content-Type
                 effective_ext = content_type_to_extension(response->content_type);
                 ArchiveFormat archive_format = archive_source_format(filename, response->data, response->size);
-                if (archive_format != ARCHIVE_UNKNOWN) {
+                if (archive_format != ARCHIVE_UNKNOWN && !str_ieq_cstr(effective_ext, ".xlsx")) {
                     static const char* extensions[] = {"", ".zip", ".7z", ".tar", ".rar", ".rar"};
                     effective_ext = extensions[archive_format];
                 }
@@ -4582,13 +4592,16 @@ static int lambda_main_impl(int argc, char *argv[]) {
         // A document format takes precedence over its ZIP storage; --archive exposes the parts.
         bool is_docx_file = ext && str_ieq_cstr(ext, ".docx");
         bool is_pptx_file = ext && str_ieq_cstr(ext, ".pptx");
+        bool is_xlsx_file = ext && str_ieq_cstr(ext, ".xlsx");
         bool is_ebook_file = input_path_is_ebook(filename);
-        // presentations open in the full-window player, including imported decks.
+        bool is_diff_file = ext && (str_ieq_cstr(ext, ".diff") || str_ieq_cstr(ext, ".patch"));
+        // SVG documents need their own DOM and resource base, rather than image-mode isolation (D10.1.5).
         const bool full_window_document = is_pptx_file || input_path_is_xhtml(filename) ||
             (ext && (str_ieq_cstr(ext, ".html") || str_ieq_cstr(ext, ".htm") ||
-                str_ieq_cstr(ext, ".ls") || str_ieq_cstr(ext, ".slides")));
+                str_ieq_cstr(ext, ".ls") || str_ieq_cstr(ext, ".slides") ||
+                str_ieq_cstr(ext, ".svg")));
         bool browse_tree = file_is_dir(filename) || launch.browse_archive ||
-            (!is_docx_file && !is_pptx_file && !is_ebook_file && lambda_view_path_is_archive(filename));
+            (!is_docx_file && !is_pptx_file && !is_xlsx_file && !is_ebook_file && lambda_view_path_is_archive(filename));
         if (browse_tree) {
             static const LambdaDocumentTransformConfig browser_transform = {
                 "browse", "lambda.doc.doc_viewer", "open_browser",
@@ -4597,6 +4610,18 @@ static int lambda_main_impl(int argc, char *argv[]) {
             log_info("VIEW_FILE_TREE: opening directory or archive: %s", filename);
             exit_code = view_lambda_document_transform_with_events(filename, &browser_transform,
                 nullptr, 0, event_file, headless, font_dirs, font_dir_count, event_log, state_dump, launch.fullscreen, launch.microphone);
+        } else if (is_ebook_file || is_diff_file) {
+            // standalone package views need their registered handlers and runtime (D9.3.4).
+            const char* input_type = is_ebook_file ? "ebook" : "diff";
+            const LambdaDocumentTransformConfig* transform =
+                lambda_document_transform_for_input_type(input_type);
+            if (!transform) {
+                printf("Error: %s document transform is not configured\n", input_type);
+                return lambda_main_finish(1);
+            }
+            exit_code = view_lambda_document_transform_with_events(filename, transform,
+                nullptr, 0, event_file, headless, font_dirs, font_dir_count,
+                event_log, state_dump, launch.fullscreen, launch.microphone);
         } else if (ext && str_ieq_cstr(ext, ".glb")) {
             // A model needs a camera and lights before it can be displayed (D9.3.4).
             static const LambdaDocumentTransformConfig model_transform = {
@@ -4622,8 +4647,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
 
             lambda_view_log_completion(exit_code);
             return lambda_main_finish(exit_code);
-        } else if (!is_http_url && !launch.standalone && !launch.autoplay && !launch.microphone &&
-                !full_window_document) {
+        } else if (is_xlsx_file || (!is_http_url && !launch.standalone && !launch.autoplay &&
+                !launch.microphone && !full_window_document)) {
             // local files share the browser pane when they have no full-window surface (D9.3.4).
             static const LambdaDocumentTransformConfig file_transform = {
                 "document", "lambda.doc.doc_viewer", "open_file",
@@ -4631,12 +4656,11 @@ static int lambda_main_impl(int argc, char *argv[]) {
             };
             exit_code = view_lambda_document_transform_with_events(filename, &file_transform,
                 nullptr, 0, event_file, headless, font_dirs, font_dir_count, event_log, state_dump, launch.fullscreen, launch.microphone);
-        } else if (full_window_document || is_docx_file || is_ebook_file || is_graph_file ||
+        } else if (full_window_document || is_docx_file || is_graph_file ||
                     eps_source_expected(filename, nullptr, 0) || (ext && (strcmp(ext, ".pdf") == 0 ||
                     strcmp(ext, ".md") == 0 || strcmp(ext, ".markdown") == 0 ||
                     strcmp(ext, ".tex") == 0 || strcmp(ext, ".latex") == 0 ||
                     strcmp(ext, ".pgf") == 0 ||
-                    str_ieq_cstr(ext, ".diff") || str_ieq_cstr(ext, ".patch") ||
                     strcmp(ext, ".xml") == 0 || strcmp(ext, ".rst") == 0 ||
                     strcmp(ext, ".wiki") == 0 || strcmp(ext, ".svg") == 0 ||
                     strcmp(ext, ".png") == 0 || strcmp(ext, ".jpg") == 0 ||
@@ -4654,7 +4678,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                                                        state_dump, nullptr, launch.fullscreen, launch.microphone);
         } else {
             printf("Error: Unsupported file format '%s'\n", ext ? ext : "(no extension)");
-            printf("Supported formats: .epub, .docx, .pptx, .pdf, .html, .xhtml, .xht, .md, .tex, .pgf, .ls, .slides, .xml, .svg, .png, .jpg, .gif, .psd, .json, .yaml, .toml, .txt, .csv\n");
+            printf("Supported formats: .epub, .docx, .pptx, .xlsx, .pdf, .html, .xhtml, .xht, .md, .tex, .pgf, .ls, .slides, .xml, .svg, .png, .jpg, .gif, .psd, .json, .yaml, .toml, .txt, .csv\n");
             if (temp_file_path) {
                 if (temp_file_path_is_local) file_delete(temp_file_path);
                 mem_free(temp_file_path);

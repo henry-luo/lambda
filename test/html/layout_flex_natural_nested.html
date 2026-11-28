@@ -5,7 +5,8 @@ body { margin: 0; font: 20px/1 HeightMetrics; }
 .row { display: flex; width: 200px; }
 .column { display: flex; flex-direction: column; flex: 1; }
 .small { font-size: 10px; }
-.fill { flex: 1; }
+/* a definite basis allows the natural-flow replay; percent bases are tested below. */
+.fill { flex: 1 1 0px; }
 </style>
 <div id="result">
   <div id="row" class="row"><div id="column" class="column"><div id="first"><span id="text" class="small">XX</span></div><div id="last"><span class="small">XX</span></div></div></div>

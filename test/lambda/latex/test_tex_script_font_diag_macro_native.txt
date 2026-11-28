@@ -1,0 +1,49 @@
+[{
+    text: "\\def\\bad{\\fontdimen8\\f}0.0pt",
+    diagnostics: [{
+        code: "tex-font-params",
+        message: "Font cmr10 has only 7 fontdimen parameters",
+        offset: 81,
+        line: 1
+      }]
+  }, {
+    text: "\\def\\bad{\\fontdimen0\\f=1sp\\relax}",
+    diagnostics: [{
+        code: "tex-font-params",
+        message: "Font cmr10 has only 7 fontdimen parameters",
+        offset: 87,
+        line: 1
+      }]
+  }, {
+    text: "\\def\\bad{\\fontdimen8\\f}macro:->0.0pt",
+    diagnostics: [{
+        code: "tex-font-params",
+        message: "Font cmr10 has only 7 fontdimen parameters",
+        offset: 89,
+        line: 1
+      }]
+  }, {
+    text: "{0.0pt} ",
+    diagnostics: [{
+        code: "tex-font-params",
+        message: "Font cmr10 has only 7 fontdimen parameters",
+        offset: 70,
+        line: 1
+      }]
+  }, {
+    text: "\\def\\bad{\\fontdimen8\\f}\n0.0pt",
+    diagnostics: [{
+        code: "tex-font-params",
+        message: "Font cmr10 has only 7 fontdimen parameters",
+        offset: 83,
+        line: 3
+      }]
+  }, {
+    text: "\\def\\bad{\\fontdimen8\\f}0.0pt",
+    diagnostics: [{
+        code: "tex-font-params",
+        message: "Font cmr10 has only 7 fontdimen parameters",
+        offset: 91,
+        line: 1
+      }]
+  }]

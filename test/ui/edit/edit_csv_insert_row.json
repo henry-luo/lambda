@@ -4,7 +4,8 @@
   "html": "test/fixtures/edit/columns.csv",
   "working_copy": "temp/edit-ui/edit_csv_insert_row.csv",
   "events": [
-    {"type": "click", "target": {"selector": "button[title='Insert row before row 2']"}},
+    {"type": "click", "target": {"selector": ".property-grid tbody tr:nth-child(2) th"}, "button": 1},
+    {"type": "click", "target": {"selector": "#property-grid-menu [aria-label='Insert row above']"}},
     {"type": "assert_count", "target": {"selector": ".property-grid tbody tr"}, "count": 4},
     {"type": "click", "target": {"selector": "#grid-cell-1-0"}},
     {"type": "type", "text": "Grace"},

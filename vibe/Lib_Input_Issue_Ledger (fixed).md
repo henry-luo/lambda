@@ -6,6 +6,114 @@ remain in the [active issue ledger](Lib_Input_Issue_Ledger.md).
 
 ## Fixed issues
 
+<a id="li-130"></a>
+
+### LI-130 — Attribute reads scanned all managed DOM backings
+
+**Fixed, 2026-11-27.** In the debug Radiant baseline,
+`doc_editor_source_scroll_reset` took 46.2 s. CPU samples during its
+directory-row layout concentrated in `dom_node_refresh_managed_backing`.
+Each attribute read walked the document's list of registered backings.
+The document now indexes backings by node address. Root slots keep their
+registered addresses through index growth and cross-document adoption.
+Failed adoption withdraws the staged destination entries. This preserves
+the rooted-borrow and presentation lifetime rules (**D5.5.1–D5.5.3**).
+The six editor replays passed in 1.16–4.51 s in the full debug baseline.
+The focused DOM backing, retirement and copy checks passed all 52 cases.
+
+<a id="li-129"></a>
+
+### LI-129 — A constructed document can have an indeterminate retired-frame owner
+
+**Fixed, 2026-11-27.** Scene3D's native agent fixture constructs a
+`DomDocument` directly. Creating a foreign DOM wrapper could follow the
+uninitialized retired-frame owner and crash during fixture setup. The
+document now begins with an empty retired-frame owner and focused-frame
+reference in both allocation paths (**D5.5.1 / D9.1.3v2**). All 128 focused
+Scene3D agent and audio cases pass with native macOS graphics.
+
+<a id="li-128"></a>
+
+### LI-128 — A queued resource completion can reach a retired DOM element
+
+**Fixed, 2026-11-27.** FramerAuth's native capture crashed when a queued
+image completion passed a retired element to the Radiant image processor.
+The fault was in `process_image_resource` when it accessed the reclaimed
+element's embed field. Both new requests and byte prefetches promoted to
+element delivery now store a `DomNodeRef`. Delivery resolves that reference
+in the requesting document before calling the processor. A live image or
+SVG owner stays retained during the call. A stylesheet from a retired link
+cannot become a document-wide rule source. Failed delivery and cancellation
+use the same owner lookup. Cached bytes and completion accounting remain
+available when an element has retired (**D5.5.1 / D9.1.2v2 / D9.1.3v2**).
+
+`NetworkResourceManager.QueuedElementDeliveryChecksDomLifetime` reproduced
+the stale callback on the previous source. It now verifies that the retired
+image is skipped, the live SVG receives one completion, and both entries
+are counted. The prefetch-promotion test also verifies delivery before and
+after the initial byte-only completion. The three downloaded-stylesheet
+checks and all 16 network scheduler tests pass. Two ordinary FramerAuth
+captures now complete in 109.42 s and 93.43 s. Both show the heading, copy,
+and primary actions. The vertically displaced hero and missing demo media
+keep the page high (**D10.1.7**). Crash, tests and paired capture evidence
+are in `temp/online-visual-round247/` and `temp/online-visual-round248/`.
+
+<a id="li-127"></a>
+
+### LI-127 — Re-registering a math font grows the font resource registry
+
+**Fixed 2026-11-26.** Repeatedly visiting the same LaTeX and math previews
+registered identical `@font-face` resources in the window's font context.
+Each pass added about 184 KiB to the font arena and lengthened font lookup.
+Equivalent descriptors now share the stored resource and loaded handle.
+Re-registering an equivalent face preserves last-rule precedence within its
+family. Distinct sources, faces, and Unicode ranges remain separate
+(D5.5.1, D10.2.4). The 31-case font-context suite passes, including a
+repeated-registration replay that checks precedence, count and arena usage.
+
+<a id="li-126"></a>
+
+### LI-126 — The CSS mask shorthand and its geometry had no property dispatch
+
+**Fixed, 2026-11-26.** Dock uses a URL, a `bottom` position, a slash size and
+`no-repeat` in one `mask` declaration. Craft uses the image, size and repeat
+longhands. Input previously recognized the image longhand by itself. The
+shorthand and its geometry now use the shared image-layer position, size
+and repeat grammar. Mask modes, boxes and composite keywords use the mask
+grammar. New entries in the shared name catalog preserve existing NameIds
+and let both standalone parsing and the live CSS registry dispatch these
+properties (**D9.1.1v4 / D9.1.3v2**).
+
+All 126 cases in `test_css_parser_gtest` pass, including a raw shorthand,
+vendor alias and invalid declarations. [CSS Masking shorthand](https://www.w3.org/TR/css-masking-1/#the-mask).
+
+<a id="li-125"></a>
+
+### LI-125 — CSS matching loses the meaning of shadow host selectors
+
+**Fixed, 2026-11-26.** Input owns selector parsing, matching and declaration
+priority under **D9.1.1v4 / D9.1.3v2**. The parser treated `:host(...)` as
+`:is(...)`. An ordinary document `matches(':host(.active)')` could return
+true, while the scoped matcher stopped at the fragment and failed to match
+`:host(.active) > .tile` within that root.
+
+The parser distinguishes bare and functional `:host` from logical
+selectors. The matcher can see the owning host at the root boundary in a
+shadow stylesheet. It exposes the host's attributes only to the functional
+argument. The declaration records which side of the boundary supplied it.
+Normal declarations from the enclosing tree and important declarations
+from the inner tree win before specificity or layer order. Style recipes
+and declaration copies retain the context (**D5.5.1**).
+[CSS Shadow §3.2](https://drafts.csswg.org/css-shadow-1/#shadow-dom-selectors)
+and [CSS Cascade §6.1](https://drafts.csswg.org/css-cascade-5/#cascade-sort)
+describe these rules.
+
+The maintained render fixture fails on the preceding release and passes
+in AST, MIR and Chromium. It checks a nested root, host arguments, outer
+document isolation, inline important priority and shadow descendants.
+Radiant's [RI-255](<Radiant_Issue_Ledger (fixed).md#ri-255>) qualifies
+the cascade integration. Evidence is in `temp/online-visual-round235/`.
+
 <a id="li-123"></a>
 
 ### LI-123 — External shape fingerprints hashed pointer identities byte by byte
@@ -21,6 +129,11 @@ bundled LaTeX fixture took 53.43/49.82 and 52.24/48.17 seconds respectively,
 each matching the golden. These are individual measurements, not a statistical
 benchmark; the separate corpus timeout remains open. Evidence is under
 `temp/latex-retirement/hash-experiment/`.
+
+The 2026-11-27 follow-up combines integer metadata as words too. Pooled
+field names use their IDs to select candidates. Edge admission still checks
+their spelling across name pools, together with contracts, flags and offsets
+(D3.4.3–D3.4.4). The debug viewer profiles are in `temp/radiant-under-five/`.
 
 <a id="li-122"></a>
 

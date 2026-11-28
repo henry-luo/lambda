@@ -1,6 +1,7 @@
 import model: lambda.graph.model
 import normalize: lambda.graph.normalize
 import transform: lambda.graph.transform
+import graph_content: lambda.graph.transform.content
 
 fn direct_children(value, wanted) => [
   for (child in model.element_children(value) where ((model.tag(child) == wanted) ^ { false })) child
@@ -20,11 +21,19 @@ let html = transform.to_html(graph)
 let html_nodes = direct_children(html, "node")
 let html_edges = direct_children(html, "edge")
 let html_ports = direct_children(html, "port")
+let styled_table = graph_content.lower("<table border='0' cellborder='3' cellpadding='5'><tr><td bgcolor='yellow'>x</td></tr></table>", "html", true)[0]
+let styled_row = model.element_children(model.element_children(styled_table)[0])[0]
+let styled_cell = model.element_children(styled_row)[0]
 
 {
   valid: normalized.valid,
   label: [model.label_source(node), model.label_format(node)],
   table: [model.tag(table), table.align, len(rows)],
+  table_styles: [contains(string(styled_table.style), "border:0px"),
+    contains(string(styled_table.style), "border-collapse:collapse"),
+    contains(string(styled_cell.style), "border:3px"),
+    contains(string(styled_cell.style), "padding:5px"),
+    contains(string(styled_cell.style), "background-color:yellow")],
   row: [rows[0].align, rows[0].valign, rows[0].style],
   cells: [[first_cells[0].align, first_cells[0].valign, first_cells[0].colspan,
       first_cells[0].rowspan, first_cells[0]["data-record-port"], first_cells[0].style,

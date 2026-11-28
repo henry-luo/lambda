@@ -453,7 +453,7 @@ spec 89.0.0). Not implemented yet.
 
 - Only three natives mutate a `var` argument: `push`, `splice` and map `set`
   (`SYSPROC_PUSH`, `SYSPROC_SPLICE`, `SYSPROC_VMAP_SET`). Each one is an enum
-  special case in `build_ast.cpp`, `interp.cpp` and `mvp_mir.cpp`. Each takes
+  special case in `build_ast.cpp`, `interp.cpp` and `mir_lower.cpp`. Each takes
   the owner by value and returns a replacement owner, and the caller writes
   that back (Model A above).
 - `SysFuncInfo` has no parameter list. `resolve_sys_func_value` builds a
@@ -608,7 +608,7 @@ procedure's bound is not covariance (S9.1.3v4).
   `interp_borrow_place_leaf`), then borrows. It passes home addresses in a C
   stack array that is never rooted, and writes back after
   `lambda_var_home_check_kind`.
-- *MVP:* `native_var_call` (`mvp_mir.cpp`) uses `place_path`,
+- *MVP:* `native_var_call` (`mir_lower.cpp`) uses `place_path`,
   `prepare_place_owner`, `cow_path_borrow_keys`, slots of the rooted argument
   span as homes, and `write_place`/`publish_place` for the write-back.
   `jit_import_get_metadata` classifies the `var` positions of a dynamic
@@ -639,8 +639,8 @@ the Jube scans and `register_jube_sys_funcs` in `build_ast.cpp`;
 `resolve_sys_func_value` and the push/splice arm (`build_ast.cpp`); T0
 `eval_call` borrow and publish (`interp.cpp`) and the planner caps
 (`interp_plan.cpp`, Item-only and arity ≤ 5); MVP `direct_call` and
-`mutate_collection` (`mvp_mir.cpp`), plan admission and effects
-(`mvp_plan.cpp`); JIT import metadata (`jit_import_*`).
+`mutate_collection` (`mir_lower.cpp`), plan admission and effects
+(`mir_plan.cpp`); JIT import metadata (`jit_import_*`).
 
 **Formal text as proposed** (entered unchanged into
 `doc/Lambda_Formal_Design.md` §D7.6 on 2026-11-11, with the S9.1.3 citation
@@ -724,7 +724,7 @@ capture is now redundant, and removing it would need a revised ruling.
 **As implemented (2026-11-11).** `lambda/jube/jube.h` (`JUBE_FN_READS_ARGS`),
 `sys_func_registry.h` (`reads_args`), the Jube registration in `build_ast.cpp`,
 `cow_param_retention_scan_node`, and the generic system-call lowering in
-`mvp_mir.cpp`. Flagged: `radiant.paint_present`, `paint_sample`,
+`mir_lower.cpp`. Flagged: `radiant.paint_present`, `paint_sample`,
 `paint_tiles_encode`, `paint_tiles_decode`. Not flagged: `paint_dabs`,
 `paint_wash` and `paint_import`, whose results share the input's tiles, and
 `paint_stroke`. Two refinements landed with it: a final callee keeps a bare

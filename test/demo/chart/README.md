@@ -50,6 +50,9 @@ mkdir -p temp/chart-demo
   --event-file test/demo/chart/tests/interaction.json \
   --event-result temp/chart-demo/interaction.json
 ./lambda.exe view test/demo/chart/normal.ls --headless \
+  --event-file test/demo/chart/tests/animation_pixels.json \
+  --event-result temp/chart-demo/animation_pixels.json
+./lambda.exe view test/demo/chart/normal.ls --headless \
   --event-file test/demo/chart/tests/eager.json \
   --event-result temp/chart-demo/eager.json
 ```

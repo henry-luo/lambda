@@ -1,0 +1,61 @@
+[<latex_document
+    <document source_offset: 0,
+      <paragraph
+        <accent command: "'", source_offset: 16,
+          "%">
+        " hi\n"
+        <curly_group
+          "e">>>>, <latex_document
+    <document source_offset: 0,
+      <paragraph
+        <accent command: "v", source_offset: 16,
+          "%">
+        " hi\n"
+        <curly_group
+          "e">>>>, <latex_document
+    <document source_offset: 0,
+      <paragraph
+        <accent command: "'", source_offset: 16,
+          <accent command: "`", source_offset: 18,
+            "%">>
+        " hi\n"
+        <curly_group
+          "a">>>>, <latex_document
+    <document source_offset: 0,
+      <paragraph
+        <accent command: "'", source_offset: 16,
+          "%">
+        "\n"
+        <curly_group
+          "e">>>>, <latex_document
+    <document source_offset: 0,
+      <paragraph
+        <accent command: "'", source_offset: 16,
+          "%">
+        " hello 123\nX">>>, <latex_document
+    <document source_offset: 0,
+      <paragraph
+        <accent command: "'", source_offset: 16,
+          "%">
+        " hello\n"
+        <textbf source_offset: 26,
+          "X">>>>, <latex_document
+    <document source_offset: 0,
+      <paragraph
+        "é "
+        <accent command: "'", source_offset: 19,
+          "%">
+        " café\n"
+        <curly_group
+          "a">>>>, <latex_document
+    <document source_offset: 0,
+      <paragraph
+        <curly_group
+          <accent command: "'", source_offset: 17,
+            "%">
+          " hi\n"
+          <curly_group
+            "e">>
+        "X">>>]
+[true, true, true, true, true, true, true, true]
+["accent source gap", "accent source gap", "accent source gap", "accent source gap"]

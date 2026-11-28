@@ -1,0 +1,314 @@
+{
+  "cases": [
+    {
+      "source": "\\chardef\\z=65 \\z",
+      "tex": {
+        "text": "A",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\chardef\\z=36 A\\z B",
+      "tex": {
+        "text": "A\\$B ",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\chardef\\z=35 \\begin{document}A\\z B\\end{document}",
+      "tex": {
+        "text": "\\begin{document}A\\#B\\end{document}",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\chardef\\z=65 \\def\\x{\\z}\\begin{document}\\x B\\end{document}",
+      "tex": {
+        "text": "\\def\\x{\\z}\\begin{document}AB\\end{document}",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\chardef\\z=233 \\begin{document}A\\z B\\end{document}",
+      "tex": {
+        "text": "\\begin{document}AéB\\end{document}",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\chardef\\z=0 \\z",
+      "tex": {
+        "text": "\u0000",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\chardef\\z=1 \\z",
+      "tex": {
+        "text": "\u0001",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\chardef\\z=32 A\\z B",
+      "tex": {
+        "text": "A B ",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\chardef\\z=37 A\\z B",
+      "tex": {
+        "text": "A\\%B ",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\chardef\\z=38 A\\z B",
+      "tex": {
+        "text": "A\\&B ",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\chardef\\z=92 A\\z B",
+      "tex": {
+        "text": "A\\textbackslash{}B ",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\chardef\\z=94 A\\z B",
+      "tex": {
+        "text": "A\\textasciicircum{}B ",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\chardef\\z=95 A\\z B",
+      "tex": {
+        "text": "A\\_B ",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\chardef\\z=123 A\\z B",
+      "tex": {
+        "text": "A\\{B ",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\chardef\\z=125 A\\z B",
+      "tex": {
+        "text": "A\\}B ",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\chardef\\z=126 A\\z B",
+      "tex": {
+        "text": "A\\textasciitilde{}B ",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\chardef\\z=10 A\\z B",
+      "tex": {
+        "text": "A\nB ",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\chardef\\z=65 \\let\\x\\z A\\x B",
+      "tex": {
+        "text": "AAB ",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\chardef\\z=65 {\\chardef\\z=66 \\z}\\z",
+      "tex": {
+        "text": "{B}A",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\chardef\\z=65 \\iftrue\\z\\else X\\fi",
+      "tex": {
+        "text": "A",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\chardef\\z=65 \\edef\\x{\\noexpand\\z}\\x",
+      "tex": {
+        "text": "\\edef\\x{\\noexpand\\z}A",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\chardef\\z=65 \\def\\x{\\z\\z}\\x",
+      "tex": {
+        "text": "\\def\\x{\\z\\z}AA",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\chardef\\z=65 \\begin{document}$x\\z y$\\end{document}",
+      "tex": {
+        "text": "\\begin{document}$xAy$\\end{document}",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\ExplSyntaxOn\\c_zero_int\\ExplSyntaxOff",
+      "tex": {
+        "text": "\u0000",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": false
+    },
+    {
+      "source": "\\ExplSyntaxOn\\def\\x{\\c_zero_int}\\x\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\def\\x{\\c_zero_int}\u0000",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": false
+    }
+  ],
+  "kernel_messages": [
+    "\\z@=\\dimen10",
+    "\\p@=\\dimen11",
+    "\\maxdimen=\\dimen12",
+    "\\z@skip=\\skip10",
+    "\\hideskip=\\skip11",
+    "\\@tempdima=\\dimen13",
+    "\\@tempdimb=\\dimen14",
+    "\\@tempdimc=\\dimen15",
+    "\\@tempcnta=\\count23",
+    "\\@tempcntb=\\count24",
+    "\\@tempskipa=\\skip12",
+    "\\@tempskipb=\\skip13",
+    "\\@temptokena=\\toks10",
+    "\\@tempboxa=\\box10",
+    "\\voidb@x=\\box11",
+    "\\textwidth=\\dimen16",
+    "\\textheight=\\dimen17",
+    "\\linewidth=\\dimen18",
+    "\\columnwidth=\\dimen19",
+    "\\columnsep=\\dimen20",
+    "\\columnseprule=\\dimen21",
+    "\\marginparwidth=\\dimen22",
+    "\\marginparsep=\\dimen23",
+    "\\marginparpush=\\dimen24",
+    "\\oddsidemargin=\\dimen25",
+    "\\evensidemargin=\\dimen26",
+    "\\topmargin=\\dimen27",
+    "\\headheight=\\dimen28",
+    "\\headsep=\\dimen29",
+    "\\footskip=\\dimen30",
+    "\\paperwidth=\\dimen31",
+    "\\paperheight=\\dimen32",
+    "\\fboxsep=\\dimen33",
+    "\\fboxrule=\\dimen34",
+    "\\arraycolsep=\\dimen35",
+    "\\tabcolsep=\\dimen36",
+    "\\arrayrulewidth=\\dimen37",
+    "\\doublerulesep=\\dimen38",
+    "\\labelwidth=\\dimen39",
+    "\\labelsep=\\dimen40",
+    "\\itemindent=\\dimen41",
+    "\\listparindent=\\dimen42",
+    "\\leftmargin=\\dimen43",
+    "\\rightmargin=\\dimen44",
+    "\\unitlength=\\dimen45",
+    "\\jot=\\dimen46",
+    "\\abovecaptionskip=\\skip14",
+    "\\belowcaptionskip=\\skip15",
+    "\\smallskipamount=\\skip16",
+    "\\medskipamount=\\skip17",
+    "\\bigskipamount=\\skip18",
+    "\\topsep=\\skip19",
+    "\\itemsep=\\skip20",
+    "\\parsep=\\skip21",
+    "\\partopsep=\\skip22",
+    "\\floatsep=\\skip23",
+    "\\textfloatsep=\\skip24",
+    "\\intextsep=\\skip25"
+  ]
+}

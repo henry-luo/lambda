@@ -1,17 +1,21 @@
 import profile: lambda.doc.latex.tex_engine.profile
 import digest: lambda.doc.latex.tex_engine.digest
+import native_snapshot: ._tex_native_snapshot
 let kernel = input(sys.lambda.home ++ "/package/doc/latex/tex_engine/kernel.tex", "text")^;
-fn check(source) any^ {
+// Preserve native reference trees after the production input route moved to Script.
+let native = input("test/lambda/latex/fixtures/tex_declaration_digest_native.json", "json")^;
+fn check(source, reference) any^ {
     let expanded = profile.expand_with_kernel(source, kernel,
         {resources: {local: {}, bundled: {}}}, 100000)^;
     let result = digest.digest(expanded)^;
-    let native = parse(source, {type: "latex"})^;
-    {issue: result.issue, unsupported: result.unsupported,
-        matches_native: if (result.ast == null) null else result.ast == native,
-        actual: if (result.ast == null or result.ast == native) null else result.ast,
-        native: if (result.ast == null or result.ast == native) null else native}
+    let same = if (result.ast == null) source == reference.source
+        else native_snapshot.tree_matches(result.ast, reference, source)^;
+    {issue: if (source == reference.source) result.issue else "snapshot-source-mismatch", unsupported: result.unsupported,
+        matches_native: if (result.ast == null) null else same,
+        actual: if (result.ast == null or same) null else result.ast,
+        native: if (result.ast == null or same) null else reference.latex}
 }
-[for (source in [
+[for (index, source in [
     "\\documentclass{article}\\begin{document}A\\end{document}",
     "\\documentclass {article}\\begin{document}A\\end{document}",
     "\\documentclass[12pt] {article}\\begin{document}A\\end{document}",
@@ -45,4 +49,4 @@ fn check(source) any^ {
     "\\title[One% a\nTwo]{A}\\begin{document}A\\end{document}",
     "\\title{A}{B} {C}\\begin{document}A\\end{document}",
     "\\title* {A}\\begin{document}A\\end{document}"
-]) check(source)^]
+]) check(source, native.cases[index])^]

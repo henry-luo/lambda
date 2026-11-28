@@ -5,8 +5,12 @@ pub let kernel = input(sys.lambda.home ++ "/package/doc/latex/tex_engine/kernel.
 pub let baseline = parse("", {type:"tex"})^.messages;
 let options = {script_expl3:true, echo_definitions:true, adapters:[], resources:{local:{}, bundled:{}}};
 // Each comparison resumes a fresh document from the same immutable kernel.
-let preload = profile.preload_expl3_kernel(kernel, options, 100000)^;
-pub fn expand(source) any^ => profile.expand_with_kernel(source, kernel, options, 100000, preload)
+pub let preload = profile.preload_expl3_kernel(kernel, options, 100000)^;
+pub fn preload_constructor() any^ => profile.preload_expl3_kernel(kernel,
+    {*:options,constructor_argument_mode:true}, 100000)
+pub fn expand(source, fresh = false, constructor = false, constructor_preload = null) any^ =>
+    profile.expand_with_kernel(source, kernel, {*:options,constructor_argument_mode:constructor},
+        100000, if (fresh) null else if (constructor) constructor_preload else preload)
 pub fn check(source) any^ {
     let result = expand(source)^;
     let native = parse(source, {type:"tex"})^;

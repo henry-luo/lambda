@@ -3,7 +3,7 @@
 #include "js_interp.hpp"
 #include "js_runtime_state.hpp"
 #include "js_source_module.hpp"
-#include "mvp-lmd/mvp_lmd.h"
+#include "mir/js_mir.h"
 #include "../jube/jube_registry.h"
 #include "../jube/jube_interface.h"
 #include "../module/node_core/node_runtime_state.hpp"

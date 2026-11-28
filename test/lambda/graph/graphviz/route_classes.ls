@@ -15,8 +15,11 @@ fn lowered(value) {
 }
 
 fn route_input(mode, use_splines = false) => {
-  nodes: [{id: "a", width: 60, height: 40}, {id: "b", width: 60, height: 40}],
-  edges: [{id: "ab0", from: "a", to: "b"}, {id: "ab1", from: "a", to: "b"}],
+  // A second target offsets b, exercising bends instead of aligned straight edges.
+  nodes: [{id: "a", width: 60, height: 40}, {id: "b", width: 60, height: 40},
+    {id: "c", width: 60, height: 40}],
+  edges: [{id: "ab0", from: "a", to: "b"}, {id: "ab1", from: "a", to: "b"},
+    {id: "ac", from: "a", to: "c"}],
   direction: "LR", route_mode: mode, use_splines: use_splines, edge_sep: 16
 }
 
@@ -44,6 +47,8 @@ let html = transform.to_html(normalized.graph)
 let invalid = normalize.normalize(source_for("zigzag"))
 let legacy = layout.compute(route_input(null, true))
 let explicit = layout.compute(route_input("line", true))
+let marker_layers = paint.layers(layout.compute(route_input("curved")))
+let markers = model.element_children(marker_layers[0].content[0])
 
 {
   lowered: [for (value in ["line", "false", "polyline", "ortho", "curved",
@@ -52,6 +57,7 @@ let explicit = layout.compute(route_input("line", true))
   html: [normalized.graph["route-mode"], html["data-route-mode"],
     html["data-use-splines"], len(model.edges(normalized.graph))],
   compatibility: [legacy.edges[0].route_mode, explicit.edges[0].route_mode],
+  marker_tangents: [for (marker in markers) marker.orient == "auto-start-reverse"],
   routes: [for (mode in ["line", "polyline", "orthogonal", "curved", "none"])
     routed(mode)]
 }

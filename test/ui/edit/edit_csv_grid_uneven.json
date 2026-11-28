@@ -1,17 +1,26 @@
 {
-  "name": "CSV grid displays uneven rows and edits multiline fields",
+  "name": "CSV context actions and multiline editing in an uneven grid",
   "command": "edit",
   "html": "test/ui/edit/sample-single-field.csv",
   "working_copy": "temp/edit-ui/edit_csv_grid_uneven.csv",
   "events": [
     {"type": "assert_count", "target": {"selector": ".property-grid tbody tr"}, "count": 2},
-    {"type": "assert_count", "target": {"selector": ".property-grid tbody td"}, "count": 6},
+    {"type": "assert_count", "target": {"selector": ".property-grid tbody td"}, "count": 4},
+    {"type": "click", "target": {"selector": ".property-grid tbody tr:nth-child(2) [data-grid-column='1']"}, "button": 1},
+    {"type": "assert_count", "target": {"selector": "#property-grid-menu [aria-label='Remove field']"}, "count": 0},
+    {"type": "click", "target": {"selector": "#property-grid-menu [aria-label='Add field to row']"}},
+    {"type": "type", "text": "extra"},
+    {"type": "key_press", "key": "Enter"},
     {"type": "click", "target": {"selector": "#grid-cell-1-0"}},
     {"type": "key_combo", "key": "a", "mods_str": "super"},
     {"type": "type", "text": "long"},
     {"type": "key_press", "key": "Enter"},
     {"type": "type", "text": "value"},
     {"type": "key_combo", "key": "s", "mods_str": "super"},
-    {"type": "assert_file", "path": "temp/edit-ui/edit_csv_grid_uneven.csv", "contains": "\"long\nvalue\""}
+    {"type": "assert_file", "path": "temp/edit-ui/edit_csv_grid_uneven.csv", "contains": "\"long\nvalue\",extra\n"},
+    {"type": "click", "target": {"selector": ".property-grid tbody tr:nth-child(2) th"}, "button": 1},
+    {"type": "click", "target": {"selector": "#property-grid-menu [aria-label='Remove row']"}},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_csv_grid_uneven.csv", "equals": "a,b\n"}
   ]
 }

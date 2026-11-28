@@ -1,0 +1,23 @@
+{
+  "name": "View XLSX directly as an Excel workbook",
+  "html": "test/input/xlsx/basic.xlsx",
+  "viewport": {"width": 1280, "height": 800},
+  "events": [
+    {"type":"assert_count", "target":{"selector":".project-tree"}, "count":0},
+    {"type":"assert_count", "target":{"selector":"#xlsx-preview .xlsx-tab"}, "count":2},
+    {"type":"assert_text", "target":{"selector":".xlsx-tab[aria-selected='true']"}, "equals":"Sales"},
+    {"type":"assert_text", "target":{"selector":".xlsx-column"}, "equals":"A"},
+    {"type":"assert_text", "target":{"selector":".xlsx-row-number"}, "equals":"1"},
+    {"type":"assert_text", "target":{"selector":"[data-cell='A1']"}, "equals":"Product"},
+    {"type":"assert_text", "target":{"selector":"[data-cell='C1']"}, "equals":"00123"},
+    {"type":"assert_text", "target":{"selector":"[data-cell='C2']"}, "equals":"TRUE"},
+    {"type":"assert_text", "target":{"selector":"[data-cell='F2']"}, "equals":"2024-01-01"},
+    {"type":"assert_text", "target":{"selector":"[data-cell='I2']"}, "equals":"99"},
+    {"type":"assert_attribute", "target":{"selector":"[data-cell='D2']"}, "attribute":"title", "equals":"=SUM(B2,2)"},
+    {"type":"click", "target":{"selector":".xlsx-tab[data-sheet='1']"}},
+    {"type":"assert_text", "target":{"selector":".xlsx-tab[aria-selected='true']"}, "equals":"Notes"},
+    {"type":"assert_text", "target":{"selector":"[data-cell='A1']"}, "equals":"Second worksheet"},
+    {"type":"assert_attribute", "target":{"selector":"[data-cell='A1']"}, "attribute":"aria-colspan", "equals":"2"},
+    {"type":"assert_count", "target":{"selector":"[data-cell='B1']"}, "count":0}
+  ]
+}

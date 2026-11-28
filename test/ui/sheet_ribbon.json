@@ -60,6 +60,11 @@
       "key": "Enter"
     },
     {
+      "type": "advance_time",
+      "ms": 16,
+      "steps": 1
+    },
+    {
       "type": "key_press",
       "key": "1"
     },

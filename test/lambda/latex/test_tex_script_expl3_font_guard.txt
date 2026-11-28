@@ -1,0 +1,63 @@
+[[{
+      issue: null,
+      unsupported: null
+    }, {
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 font format"
+    }, {
+      issue: null,
+      unsupported: null
+    }, {
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 font format"
+    }, {
+      issue: null,
+      unsupported: null
+    }, {
+      issue: null,
+      unsupported: null
+    }], [{
+      issue: null,
+      unsupported: null
+    }, {
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 font format"
+    }, {
+      issue: null,
+      unsupported: null
+    }, {
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 font format"
+    }, {
+      issue: null,
+      unsupported: null
+    }, {
+      issue: null,
+      unsupported: null
+    }]]
+[{
+    text: "0.00002pt",
+    messages: [],
+    diagnostics: [],
+    packages: []
+  }, null, {
+    text: "216",
+    messages: [],
+    diagnostics: [],
+    packages: []
+  }, null, {
+    text: "0.0pt",
+    messages: [],
+    diagnostics: [{
+        code: "tex-font-params",
+        message: "Font nullfont has only 7 fontdimen parameters",
+        offset: 28,
+        line: 1
+      }],
+    packages: []
+  }, {
+    text: "0.00002pt",
+    messages: [],
+    diagnostics: [],
+    packages: []
+  }]

@@ -1,0 +1,444 @@
+{
+  "cases": [
+    {
+      "expression": "sin(1e35)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{sin(1e35)}\\ExplSyntaxOff",
+      "expected": "0.9575238006716052"
+    },
+    {
+      "expression": "cos(1e35)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{cos(1e35)}\\ExplSyntaxOff",
+      "expected": "0.2883542459326794"
+    },
+    {
+      "expression": "tan(1e35)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{tan(1e35)}\\ExplSyntaxOff",
+      "expected": "3.320650949926201"
+    },
+    {
+      "expression": "sin(-1e35)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{sin(-1e35)}\\ExplSyntaxOff",
+      "expected": "-0.9575238006716052"
+    },
+    {
+      "expression": "sin(1e60)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{sin(1e60)}\\ExplSyntaxOff",
+      "expected": "0.8303897652193427"
+    },
+    {
+      "expression": "cos(1e70)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{cos(1e70)}\\ExplSyntaxOff",
+      "expected": "0.9889725209969144"
+    },
+    {
+      "expression": "sin(1e90)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{sin(1e90)}\\ExplSyntaxOff",
+      "expected": "-0.9947901652968478"
+    },
+    {
+      "expression": "sin(1e100)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{sin(1e100)}\\ExplSyntaxOff",
+      "expected": "-0.3723761236612767"
+    },
+    {
+      "expression": "sin(1e150)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{sin(1e150)}\\ExplSyntaxOff",
+      "expected": "-0.950743876833046"
+    },
+    {
+      "expression": "cos(1e175)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{cos(1e175)}\\ExplSyntaxOff",
+      "expected": "-0.1204853265478554"
+    },
+    {
+      "expression": "tan(1e190)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{tan(1e190)}\\ExplSyntaxOff",
+      "expected": "0.5245527971220685"
+    },
+    {
+      "expression": "sin(1e200)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{sin(1e200)}\\ExplSyntaxOff",
+      "expected": "0.969171481070263"
+    },
+    {
+      "expression": "cos(1e200)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{cos(1e200)}\\ExplSyntaxOff",
+      "expected": "-0.2463871755592667"
+    },
+    {
+      "expression": "sin(9.999999999999999e200)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{sin(9.999999999999999e200)}\\ExplSyntaxOff",
+      "expected": "0.957958737161304"
+    },
+    {
+      "expression": "sin(-4.812440536865216e20)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{sin(-4.812440536865216e20)}\\ExplSyntaxOff",
+      "expected": "0.4282025860971514"
+    },
+    {
+      "expression": "cos(-4.413238545407108e20)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{cos(-4.413238545407108e20)}\\ExplSyntaxOff",
+      "expected": "-0.4316615062985593"
+    },
+    {
+      "expression": "tan(5.069479157753058e20)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{tan(5.069479157753058e20)}\\ExplSyntaxOff",
+      "expected": "0.5249162750330255"
+    },
+    {
+      "expression": "sin(-3.717452639329293e35)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{sin(-3.717452639329293e35)}\\ExplSyntaxOff",
+      "expected": "0.7300983112959008"
+    },
+    {
+      "expression": "cos(-9.974002418952846e35)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{cos(-9.974002418952846e35)}\\ExplSyntaxOff",
+      "expected": "0.9991435433630532"
+    },
+    {
+      "expression": "tan(3.565896903991806e35)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{tan(3.565896903991806e35)}\\ExplSyntaxOff",
+      "expected": "-1.042169209091743"
+    },
+    {
+      "expression": "sin(8.217880877859840e60)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{sin(8.217880877859840e60)}\\ExplSyntaxOff",
+      "expected": "0.7624025931360196"
+    },
+    {
+      "expression": "cos(6.714316443273955e60)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{cos(6.714316443273955e60)}\\ExplSyntaxOff",
+      "expected": "-0.6005481247084231"
+    },
+    {
+      "expression": "tan(9.042377101357311e60)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{tan(9.042377101357311e60)}\\ExplSyntaxOff",
+      "expected": "0.3475944640157641"
+    },
+    {
+      "expression": "sin(-2.545509392762027e100)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{sin(-2.545509392762027e100)}\\ExplSyntaxOff",
+      "expected": "-0.9359702224663562"
+    },
+    {
+      "expression": "cos(-3.162387922114261e100)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{cos(-3.162387922114261e100)}\\ExplSyntaxOff",
+      "expected": "-0.8301556202580762"
+    },
+    {
+      "expression": "tan(4.433084232633739e100)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{tan(4.433084232633739e100)}\\ExplSyntaxOff",
+      "expected": "31.17342635904263"
+    },
+    {
+      "expression": "sin(7.913707170003142e150)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{sin(7.913707170003142e150)}\\ExplSyntaxOff",
+      "expected": "0.7312767586571986"
+    },
+    {
+      "expression": "cos(-3.016925417257622e150)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{cos(-3.016925417257622e150)}\\ExplSyntaxOff",
+      "expected": "0.6915361814854963"
+    },
+    {
+      "expression": "tan(-6.502255679036597e150)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{tan(-6.502255679036597e150)}\\ExplSyntaxOff",
+      "expected": "0.02640630624294458"
+    },
+    {
+      "expression": "sin(-3.206136398354330e200)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{sin(-3.206136398354330e200)}\\ExplSyntaxOff",
+      "expected": "-0.8353145824017257"
+    },
+    {
+      "expression": "cos(-6.880481883592532e200)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{cos(-6.880481883592532e200)}\\ExplSyntaxOff",
+      "expected": "0.4568836816816149"
+    },
+    {
+      "expression": "tan(8.757792770240502e200)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{tan(8.757792770240502e200)}\\ExplSyntaxOff",
+      "expected": "-0.3746451061833425"
+    },
+    {
+      "expression": "cos(9.158799531648105e175)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{cos(9.158799531648105e175)}\\ExplSyntaxOff",
+      "expected": "0.9770465718746683"
+    },
+    {
+      "expression": "tan(4.353203114379535e200)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{tan(4.353203114379535e200)}\\ExplSyntaxOff",
+      "expected": "-0.6565063514639448"
+    },
+    {
+      "expression": "tan(1.776311989851698e110)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{tan(1.776311989851698e110)}\\ExplSyntaxOff",
+      "expected": "0.3021051825978801"
+    },
+    {
+      "expression": "sin(2.350547904750232e80)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{sin(2.350547904750232e80)}\\ExplSyntaxOff",
+      "expected": "0.9510622454205738"
+    },
+    {
+      "expression": "tan(4.170394349442597e0)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{tan(4.170394349442597e0)}\\ExplSyntaxOff",
+      "expected": "1.660731748563057"
+    },
+    {
+      "expression": "sin(4.170394349442597e0)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{sin(4.170394349442597e0)}\\ExplSyntaxOff",
+      "expected": "-0.8566814642674534"
+    },
+    {
+      "expression": "sin(-6.779695380850156e175)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{sin(-6.779695380850156e175)}\\ExplSyntaxOff",
+      "expected": "-0.9975984327917017"
+    },
+    {
+      "expression": "sin(-2.083269021461939e50)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{sin(-2.083269021461939e50)}\\ExplSyntaxOff",
+      "expected": "-0.6934861071575809"
+    },
+    {
+      "expression": "tan(-6.309727016616331e0)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{tan(-6.309727016616331e0)}\\ExplSyntaxOff",
+      "expected": "-0.02654794373839362"
+    },
+    {
+      "expression": "sin(8.884180837039331e10)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{sin(8.884180837039331e10)}\\ExplSyntaxOff",
+      "expected": "0.7245754001827475"
+    },
+    {
+      "expression": "tan(8.313328236178024e30)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{tan(8.313328236178024e30)}\\ExplSyntaxOff",
+      "expected": "0.5998707401770608"
+    },
+    {
+      "expression": "tan(-4.943339153542474e10)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{tan(-4.943339153542474e10)}\\ExplSyntaxOff",
+      "expected": "-1.573672753084515"
+    },
+    {
+      "expression": "sin(4.447675924192167e200)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{sin(4.447675924192167e200)}\\ExplSyntaxOff",
+      "expected": "0.2651894491516214"
+    },
+    {
+      "expression": "sin(9.972227347360002e50)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{sin(9.972227347360002e50)}\\ExplSyntaxOff",
+      "expected": "0.772052871593088"
+    },
+    {
+      "expression": "cos(-2.083368190926925e80)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{cos(-2.083368190926925e80)}\\ExplSyntaxOff",
+      "expected": "-0.06766046774535403"
+    },
+    {
+      "expression": "tan(-4.324468335105042e10)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{tan(-4.324468335105042e10)}\\ExplSyntaxOff",
+      "expected": "11.79319663703259"
+    },
+    {
+      "expression": "tan(-7.059184506550316e200)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{tan(-7.059184506550316e200)}\\ExplSyntaxOff",
+      "expected": "1.253495032219187"
+    },
+    {
+      "expression": "tan(7.365928295687069e110)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{tan(7.365928295687069e110)}\\ExplSyntaxOff",
+      "expected": "2.369490219073589"
+    },
+    {
+      "expression": "sin(9.665931930096583e200)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{sin(9.665931930096583e200)}\\ExplSyntaxOff",
+      "expected": "-0.4452366919396376"
+    },
+    {
+      "expression": "tan(-3.697210233858395e30)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{tan(-3.697210233858395e30)}\\ExplSyntaxOff",
+      "expected": "-19.08491496599424"
+    },
+    {
+      "expression": "sin(2.667909245580193e20)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{sin(2.667909245580193e20)}\\ExplSyntaxOff",
+      "expected": "-0.9999999916090133"
+    },
+    {
+      "expression": "cos(2.667909245580193e20)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{cos(2.667909245580193e20)}\\ExplSyntaxOff",
+      "expected": "0.000129545256239365"
+    },
+    {
+      "expression": "tan(2.667909245580193e20)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{tan(2.667909245580193e20)}\\ExplSyntaxOff",
+      "expected": "-7719.309997436577"
+    },
+    {
+      "expression": "sin(8.500520580901377e20)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{sin(8.500520580901377e20)}\\ExplSyntaxOff",
+      "expected": "-0.7071528767013992"
+    },
+    {
+      "expression": "cos(8.500520580901377e20)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{cos(8.500520580901377e20)}\\ExplSyntaxOff",
+      "expected": "0.7070606826665839"
+    },
+    {
+      "expression": "tan(8.500520580901377e20)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{tan(8.500520580901377e20)}\\ExplSyntaxOff",
+      "expected": "-1.000130390554977"
+    },
+    {
+      "expression": "sin(3.333045604368131e35)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{sin(3.333045604368131e35)}\\ExplSyntaxOff",
+      "expected": "-0.9999999983038755"
+    },
+    {
+      "expression": "cos(3.333045604368131e35)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{cos(3.333045604368131e35)}\\ExplSyntaxOff",
+      "expected": "-0.0000582430161535817"
+    },
+    {
+      "expression": "tan(3.333045604368131e35)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{tan(3.333045604368131e35)}\\ExplSyntaxOff",
+      "expected": "17169.44046419169"
+    },
+    {
+      "expression": "sin(2.639967769889668e35)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{sin(2.639967769889668e35)}\\ExplSyntaxOff",
+      "expected": "-0.7082915206238988"
+    },
+    {
+      "expression": "cos(2.639967769889668e35)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{cos(2.639967769889668e35)}\\ExplSyntaxOff",
+      "expected": "-0.7059200534141846"
+    },
+    {
+      "expression": "tan(2.639967769889668e35)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{tan(2.639967769889668e35)}\\ExplSyntaxOff",
+      "expected": "1.003359399124936"
+    },
+    {
+      "expression": "sin(5.350352226590282e60)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{sin(5.350352226590282e60)}\\ExplSyntaxOff",
+      "expected": "0.0004567682760721592"
+    },
+    {
+      "expression": "cos(5.350352226590282e60)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{cos(5.350352226590282e60)}\\ExplSyntaxOff",
+      "expected": "0.9999998956813655"
+    },
+    {
+      "expression": "tan(5.350352226590282e60)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{tan(5.350352226590282e60)}\\ExplSyntaxOff",
+      "expected": "0.000456768323721607"
+    },
+    {
+      "expression": "sin(7.452565675588435e60)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{sin(7.452565675588435e60)}\\ExplSyntaxOff",
+      "expected": "-0.7067931192712258"
+    },
+    {
+      "expression": "cos(7.452565675588435e60)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{cos(7.452565675588435e60)}\\ExplSyntaxOff",
+      "expected": "0.7074203040278465"
+    },
+    {
+      "expression": "tan(7.452565675588435e60)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{tan(7.452565675588435e60)}\\ExplSyntaxOff",
+      "expected": "-0.9991134199102715"
+    },
+    {
+      "expression": "sin(3.464388997508521e100)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{sin(3.464388997508521e100)}\\ExplSyntaxOff",
+      "expected": "0.0007393546979555819"
+    },
+    {
+      "expression": "cos(3.464388997508521e100)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{cos(3.464388997508521e100)}\\ExplSyntaxOff",
+      "expected": "0.999999726677278"
+    },
+    {
+      "expression": "tan(3.464388997508521e100)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{tan(3.464388997508521e100)}\\ExplSyntaxOff",
+      "expected": "0.0007393549000380757"
+    },
+    {
+      "expression": "sin(9.918474179694774e100)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{sin(9.918474179694774e100)}\\ExplSyntaxOff",
+      "expected": "0.7072515878771472"
+    },
+    {
+      "expression": "cos(9.918474179694774e100)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{cos(9.918474179694774e100)}\\ExplSyntaxOff",
+      "expected": "-0.7069619448352605"
+    },
+    {
+      "expression": "tan(9.918474179694774e100)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{tan(9.918474179694774e100)}\\ExplSyntaxOff",
+      "expected": "-1.000409701036955"
+    },
+    {
+      "expression": "sin(4.693011006029573e150)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{sin(4.693011006029573e150)}\\ExplSyntaxOff",
+      "expected": "-0.9999999975366413"
+    },
+    {
+      "expression": "cos(4.693011006029573e150)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{cos(4.693011006029573e150)}\\ExplSyntaxOff",
+      "expected": "-0.0000701905796490347"
+    },
+    {
+      "expression": "tan(4.693011006029573e150)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{tan(4.693011006029573e150)}\\ExplSyntaxOff",
+      "expected": "14246.92604815088"
+    },
+    {
+      "expression": "sin(7.223676886518726e150)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{sin(7.223676886518726e150)}\\ExplSyntaxOff",
+      "expected": "-0.7071033574417305"
+    },
+    {
+      "expression": "cos(7.223676886518726e150)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{cos(7.223676886518726e150)}\\ExplSyntaxOff",
+      "expected": "-0.7071102049147872"
+    },
+    {
+      "expression": "tan(7.223676886518726e150)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{tan(7.223676886518726e150)}\\ExplSyntaxOff",
+      "expected": "0.9999903162576227"
+    },
+    {
+      "expression": "sin(6.988792459159720e200)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{sin(6.988792459159720e200)}\\ExplSyntaxOff",
+      "expected": "0.0004610221735645461"
+    },
+    {
+      "expression": "cos(6.988792459159720e200)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{cos(6.988792459159720e200)}\\ExplSyntaxOff",
+      "expected": "-0.9999998937292721"
+    },
+    {
+      "expression": "tan(6.988792459159720e200)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{tan(6.988792459159720e200)}\\ExplSyntaxOff",
+      "expected": "-0.0004610222225577132"
+    },
+    {
+      "expression": "sin(5.911734694982500e200)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{sin(5.911734694982500e200)}\\ExplSyntaxOff",
+      "expected": "-0.7071234997157565"
+    },
+    {
+      "expression": "cos(5.911734694982500e200)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{cos(5.911734694982500e200)}\\ExplSyntaxOff",
+      "expected": "0.7070900622620435"
+    },
+    {
+      "expression": "tan(5.911734694982500e200)",
+      "source": "\\ExplSyntaxOn\\fp_eval:n{tan(5.911734694982500e200)}\\ExplSyntaxOff",
+      "expected": "-1.000047288818635"
+    }
+  ]
+}

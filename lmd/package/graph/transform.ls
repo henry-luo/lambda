@@ -10,20 +10,23 @@ import sequence: lambda.chart.sequence
 
 pub fn layout(parent, children, ctx) {
   let result = graph_layout.from_velmts(parent, children, ctx);
-  let edge_color = if (parent.attrs != null and parent.attrs["data-edge-color"] != null)
-    string(parent.attrs["data-edge-color"]) else "#59636e";
-  let flavor = if (parent.attrs == null) null else parent.attrs["data-graph-flavor"];
+  let attrs = parent.attrs;
+  let color = if (attrs == null) null else attrs["data-edge-color"];
+  let edge_color = if (color == null) "#59636e" else string(color);
+  let flavor = if (attrs == null) null else attrs["data-graph-flavor"];
+  let zoom = if (attrs == null) null else attrs["data-graph-zoom"];
   {
     width: result.width,
     height: result.height,
     placements: result.placements,
-    paint_layers: paint.layers(result, {edge_color: edge_color, flavor: flavor})
+    paint_layers: paint.layers(result, {edge_color: edge_color, flavor: flavor,
+      edge_width_scale: if (zoom == null) 1.0 else float(zoom)})
   }
 }
 
 pub fn to_html(graph, opts = null) any^ {
-  let canonical = normalize.normalize(graph).graph;
-  if (canonical is element and canonical.flavor == "mermaid" and
+  let canonical = normalize.canonicalize(graph);
+  if (canonical is element and canonical.flavor in ["mermaid", "d2"] and
       canonical.kind == "sequence") sequence.to_html(canonical, opts)
   else html.to_html(canonical, opts)
 }

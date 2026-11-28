@@ -1,0 +1,935 @@
+#include "js_mir_runtime.h"
+#include "../js_exec_profile.h"
+#include "../js_regexp_compile.h"
+#include "../js_runtime.h"
+#include "../js_runtime_state.hpp"
+#include "../js_runtime_internal.hpp"
+#include "../js_props.h"
+#include "../js_property_attrs.h"
+#include "../js_builtin_catalog.hpp"
+#include "lambda/core/js_well_known_names.h"
+#include "../js_bt_regex.h"
+#include "../js_regex_wrapper.h"
+#include "../../runtime/lambda-root-frame.hpp"
+#include "../../runtime/runtime-state.h"
+#include "../../runtime/heap_api.h"
+#include "../../runtime/context_capsule.h"
+#include "lib/strbuf.h"
+#include "lib/utf.h"
+#include "lib/mem.h"
+#include <math.h>
+
+struct MvpLmdRegExp : Map {
+    JsBtRegex* compiled;         // immutable AST in the execution pool; contains no Items
+    JsRegExpCompileInfo flags;
+    JsRegexSimpleClass simple_class;
+    bool unicode_matching;      // /u and /v match code points; their public flag getters stay distinct
+    // pool-owned original spellings are independent of public metadata and the compiled AST.
+    const char* original_source;
+    const char* original_flags;
+    uint32_t original_source_len;
+    uint32_t original_flags_len;
+};
+struct MvpLmdRegExpAccessor {
+    const JsBuiltinMethodSpec* spec;
+    NameRef key;
+    ShapeEntry* field;
+};
+
+MvpLmdRegExp* mvp_lmd_regexp_record(Item value, MvpLmdLibraryState* state) {
+    if (!state || get_type_id(value) != LMD_TYPE_MAP) return NULL;
+    TypeNominal* nominal = ((TypeMap*)value.map->type)->nominal;
+    if (nominal == &state->regexp.nominal) return (MvpLmdRegExp*)value.map;
+    MvpLmdClass* cls = state->test262_host ? mvp_lmd_class_record(value) : NULL;
+    MvpLmdLibraryState* owner = cls ? mvp_lmd_program_library(cls->program) : NULL;
+    return owner && nominal == &owner->regexp.nominal ? (MvpLmdRegExp*)value.map : NULL;
+}
+static StrBuf* regexp_buffer(String* source, bool unicode) {
+    StrBuf* buffer = strbuf_new();
+    if (!buffer) return NULL;
+    if (unicode) strbuf_append_str_n(buffer, source->chars, source->len);
+    else {
+        // The shared matcher consumes code points; non-u JS patterns consume UTF-16 units.
+        Utf16Iterator it = {(const unsigned char*)source->chars, source->len, 0, -1};
+        uint16_t unit;
+        while (utf16_iterator_next(&it, &unit)) {
+            char bytes[4]; size_t length = utf8_encode_wtf8(unit, bytes);
+            strbuf_append_str_n(buffer, bytes, length);
+        }
+    }
+    return buffer;
+}
+struct MvpLmdRegExpInput {
+    StrBuf view = {};
+    StrBuf* owned = NULL;
+    size_t units = 0;
+    bool ascii = false;
+    MvpLmdRegExpInput(String* source, bool unicode) {
+        if (!source) return;
+        ascii = source->is_ascii;
+        // strings are rooted by the caller; only non-u surrogate splitting needs a copy.
+        if (ascii || unicode) view = {source->chars, source->len, source->len};
+        else {
+            owned = regexp_buffer(source, false);
+            if (owned) view = *owned;
+        }
+        units = ascii ? view.length : utf8_to_utf16_length(view.str, view.length);
+    }
+    ~MvpLmdRegExpInput() { if (owned) strbuf_free(owned); }
+    size_t byte_offset(size_t unit) const {
+        return ascii ? (unit < view.length ? unit : view.length) :
+            utf16_to_utf8_offset(view.str, view.length, unit);
+    }
+    size_t unit_offset(size_t byte) const {
+        return ascii ? byte : utf8_to_utf16_offset(view.str, view.length, byte);
+    }
+};
+static Item regexp_exec(MvpLmdLibraryState*, Item, Item, bool, const MvpLmdRegExpInput* = NULL);
+static Item regexp_string_native(MvpLmdLibraryState*, Item, Item, Item, int64_t);
+static Item regexp_protocol(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item, Item);
+static Item regexp_create(Item pattern, Item flags);
+
+static NameId regexp_symbol_id(int operation) {
+    switch (operation) {
+        case JS_BUILTIN_REGEXP_SYMBOL_MATCH: return JS_SYMBOL_MATCH;
+        case JS_BUILTIN_REGEXP_SYMBOL_MATCHALL: return JS_SYMBOL_MATCH_ALL;
+        case JS_BUILTIN_REGEXP_SYMBOL_SEARCH: return JS_SYMBOL_SEARCH;
+        case JS_BUILTIN_REGEXP_SYMBOL_REPLACE: return JS_SYMBOL_REPLACE;
+        case JS_BUILTIN_REGEXP_SYMBOL_SPLIT: return JS_SYMBOL_SPLIT;
+        default: return 0;
+    }
+}
+static bool regexp_intrinsic_matches(Item callable, int operation) {
+    if (get_type_id(callable) != LMD_TYPE_FUNC) return false;
+    if (function_has_abi(callable.function, FN_ENTRY_ABI_JS_FUNCTION))
+        return js_fn_code((JsFunction*)callable.function)->catalog_id == operation;
+    return function_has_abi(callable.function, FN_ENTRY_ABI_MVP_LMD) &&
+        callable.function->ptr == (fn_ptr)regexp_protocol &&
+        (intptr_t)((MvpLmdNativeCallable*)callable.function)->state == operation;
+}
+static bool regexp_ordinary(MvpLmdLibraryState* state, Item value, int symbol_operation = 0,
+        bool check_flags = true) {
+    MvpLmdRegExp* object = mvp_lmd_regexp_record(value, state);
+    if (!object) return false;
+    TypeMap* shape = (TypeMap*)object->type;
+    // foreign receivers use their live prototype; local fast-path proofs do not cover it.
+    if (shape->nominal != &state->regexp.nominal) return false;
+    // only the original private slots and lastIndex can be present; no observable own overrides.
+    if (shape->length != 3) return false;
+    ShapeEntry* link = typemap_hash_lookup_key(shape, state->prototype_key);
+    if (link && map_shape_field_to_item(object->data, link).item != state->regexp.values[1].item) return false;
+    Map* prototype = state->regexp.values[1].map;
+    TypeMap* prototype_shape = (TypeMap*)prototype->type;
+    // accessor shapes are private and may mutate in place: prove each getter from raw descriptor storage.
+    for (int i = 0; check_flags && !state->regexp_protocol_unobserved && i < state->regexp_accessor_count; i++) {
+        const MvpLmdRegExpAccessor& accessor = state->regexp_accessors[i];
+        const JsBuiltinMethodSpec* spec = accessor.spec;
+        // match/replace observe flags, but never the pattern's public source getter.
+        if (spec->builtin_id == JS_BUILTIN_REGEXP_GET_SOURCE) continue;
+        // initial entries remain owned by the rooted prototype only while its shape matches.
+        ShapeEntry* field = prototype_shape == state->regexp_accessor_shape ? accessor.field :
+            typemap_hash_lookup_key(prototype_shape, accessor.key);
+        JsAccessorCell* cell = js_shape_entry_accessor_pair(field);
+        if (!cell || (field->flags & JSPD_DELETED) ||
+                !regexp_intrinsic_matches(cell->getter, spec->builtin_id)) return false;
+    }
+    ShapeEntry* exec = typemap_hash_lookup((TypeMap*)prototype->type, "exec", 4);
+    if (!exec || (exec->flags & (JSPD_IS_ACCESSOR | JSPD_DELETED)) ||
+            map_shape_field_to_item(prototype->data, exec).item != state->values[LMD_LIBRARY_REGEXP_EXEC].item) return false;
+    ShapeEntry* last = typemap_hash_lookup(shape, "lastIndex", 9);
+    if (!last || (last->flags & (JSPD_IS_ACCESSOR | JSPD_NON_WRITABLE))) return false;
+    TypeId number = get_type_id(map_shape_field_to_item(object->data, last));
+    if (number != LMD_TYPE_INT && number != LMD_TYPE_FLOAT && number != LMD_TYPE_INT64) return false;
+    if (symbol_operation) {
+        NameRef key = well_known_name_ref(regexp_symbol_id(symbol_operation));
+        ShapeEntry* method = typemap_hash_lookup_key((TypeMap*)prototype->type, key);
+        if (!method || (method->flags & (JSPD_IS_ACCESSOR | JSPD_DELETED))) return false;
+        Item callable = map_shape_field_to_item(prototype->data, method);
+        if (!regexp_intrinsic_matches(callable, symbol_operation)) return false;
+    }
+    return true;
+}
+
+static const JsRegExpOps regexp_ops = {
+    [](Item object, const char* name) {
+        String* key = heap_create_name(name, strlen(name));
+        return key ? mvp_lmd_property_with_receiver(object, Item{.item = s2it(key)}, ItemNull, LMD_PROP_GET, object)
+            : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    },
+    [](Item object, Item value) {
+        String* key = heap_create_name("lastIndex", 9);
+        if (!key) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+        // strict Set is required even in sloppy JS. Keep a resolved writable native data slot direct.
+        MvpLmdRegExp* native = mvp_lmd_regexp_record(object, mvp_lmd_program_library());
+        ShapeEntry* field = native ? typemap_hash_lookup((TypeMap*)native->type, "lastIndex", 9) : NULL;
+        if (field && !(field->flags & (JSPD_IS_ACCESSOR | JSPD_NON_WRITABLE)))
+            return map_shape_set_resolved(native, key, field, value, false) ? ItemNull : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+        return mvp_lmd_property_with_receiver(object, Item{.item = s2it(key)}, value,
+            LMD_PROP_SET | LMD_PROP_STRICT, object);
+    },
+    [](Item value) { return mvp_lmd_primitive_to_string(value); },
+    [](Item value) { return mvp_lmd_primitive_to_number(value); },
+    mvp_lmd_is_object, mvp_lmd_is_callable,
+    [](Item value) { return !!mvp_lmd_truthy(value); }, mvp_lmd_same_value,
+    [](Item function, Item receiver, Item* args, int count) {
+        return mvp_lmd_class_invoke(function, receiver, args, count, Item{.item = ITEM_JS_UNDEFINED});
+    },
+    [](Item object, Item string, bool test) {
+        MvpLmdLibraryState* state = mvp_lmd_program_library();
+        if (mvp_lmd_regexp_record(object, state)) return regexp_exec(state, object, string, test);
+        // only native regex storage may cross to the native matcher; preserve MVP error ownership.
+        if (get_type_id(object) != LMD_TYPE_MAP || js_class_id(object) != JS_CLASS_REGEXP)
+            return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+        return test ? js_regex_test(object, string) : js_regex_exec(object, string);
+    },
+    []() { return mvp_lmd_program_library()->values[LMD_LIBRARY_REGEXP_EXEC]; },
+    [](Item object, int operation) {
+        MvpLmdLibraryState* state = mvp_lmd_program_library();
+        MvpLmdRegExp* native = mvp_lmd_regexp_record(object, state);
+        if (!native) {
+            if (object.item != state->regexp.values[1].item) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+            return operation == JS_BUILTIN_REGEXP_GET_SOURCE ? Item{.item = s2it(heap_strcpy("(?:)", 4))}
+                : Item{.item = ITEM_JS_UNDEFINED};
+        }
+        if (operation == JS_BUILTIN_REGEXP_GET_SOURCE) {
+            ShapeEntry* field = typemap_hash_lookup_key((TypeMap*)native->type, state->regexp_source_key);
+            return map_shape_field_to_item(native->data, field);
+        }
+        bool flag;
+        switch (operation) {
+            case JS_BUILTIN_REGEXP_GET_GLOBAL: flag = native->flags.global; break;
+            case JS_BUILTIN_REGEXP_GET_IGNORECASE: flag = native->flags.ignore_case; break;
+            case JS_BUILTIN_REGEXP_GET_MULTILINE: flag = native->flags.multiline; break;
+            case JS_BUILTIN_REGEXP_GET_DOTALL: flag = native->flags.dot_all; break;
+            case JS_BUILTIN_REGEXP_GET_UNICODE: flag = native->flags.unicode; break;
+            case JS_BUILTIN_REGEXP_GET_UNICODE_SETS: flag = native->flags.unicode_sets; break;
+            case JS_BUILTIN_REGEXP_GET_STICKY: flag = native->flags.sticky; break;
+            case JS_BUILTIN_REGEXP_GET_HASINDICES: flag = native->flags.has_indices; break;
+            default: return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+        }
+        return Item{.item = b2it(flag)};
+    },
+    [](int length) { return mvp_lmd_array_new(length); },
+    [](Item array, Item value) { return mvp_lmd_array_store(array, array.array->length, value); },
+    [](const char*) { return mvp_lmd_fail(LMD_MVP_TYPE, 0); },
+    [](Item object, Item string, bool* admitted) {
+        MvpLmdLibraryState* state = mvp_lmd_program_library();
+        *admitted = regexp_ordinary(state, object);
+        js_opt_trace_regexp_bulk(false, *admitted);
+        return *admitted ? regexp_string_native(state, string, object, ItemNull, 0) : ItemNull;
+    },
+    NULL, NULL,
+    [](Item object, Item key) { return mvp_lmd_property_with_receiver(object, key, ItemNull, LMD_PROP_GET, object); },
+    [](Item value) { return mvp_lmd_box_primitive(value); },
+    mvp_lmd_is_constructor,
+    [](Item constructor, Item* args, int count) {
+        return mvp_lmd_class_invoke(constructor, Item{.item = ITEM_JS_UNDEFINED}, args, count, constructor);
+    },
+    []() { return mvp_lmd_program_library()->regexp.values[0]; },
+    [](Item object, Item string, Item replacement, bool* admitted) {
+        MvpLmdLibraryState* state = mvp_lmd_program_library();
+        *admitted = regexp_ordinary(state, object);
+        js_opt_trace_regexp_bulk(true, *admitted);
+        return *admitted ? regexp_string_native(state, string, object, replacement, 1) : ItemNull;
+    },
+    NULL, // MVP's existing matcher input already represents each non-u UTF-16 unit.
+    [](Item value) { return mvp_lmd_regexp_record(value, mvp_lmd_program_library()) != NULL; },
+    regexp_create
+};
+
+static const JsRegExpConstructorOps regexp_constructor_ops = {
+    &regexp_ops,
+    [](Item value, bool flags) {
+        MvpLmdRegExp* native = mvp_lmd_regexp_record(value, mvp_lmd_program_library());
+        String* text = native ? heap_strcpy(flags ? native->original_flags : native->original_source,
+            flags ? native->original_flags_len : native->original_source_len) : NULL;
+        return text ? Item{.item = s2it(text)} : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    },
+    [](Item target) {
+        return mvp_lmd_constructor_prototype(target, mvp_lmd_program_library()->regexp.values[1]);
+    },
+    [](Item pattern, Item flags, Item prototype) {
+        RootFrame roots(2);
+        if (!roots.valid()) return ItemError;
+        Rooted<Item> base(roots, prototype), result(roots, ItemNull);
+        MvpLmdLibraryState* state = mvp_lmd_program_library();
+        result.set(mvp_lmd_regexp_new(state, pattern, flags));
+        if (item_is_error(result.get())) return result.get();
+        // the canonical prototype is already supplied by the unchanged native shape.
+        if (base.get().item == state->regexp.values[1].item) return result.get();
+        Item linked = mvp_lmd_set_prototype(result.get(), base.get());
+        return item_is_error(linked) ? linked : result.get();
+    },
+    [](Item receiver, Item replacement) {
+        RootFrame roots(2);
+        if (!roots.valid()) return ItemError;
+        Rooted<Item> target(roots, receiver), source(roots, replacement);
+        MvpLmdLibraryState* state = mvp_lmd_program_library();
+        MvpLmdRegExp* object = mvp_lmd_regexp_record(target.get(), state);
+        MvpLmdRegExp* next = mvp_lmd_regexp_record(source.get(), state);
+        if (!object || !next) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+        // native ASTs and original spellings are Input-pool owned; only private Map fields contain GC Items.
+        object->compiled = next->compiled; object->flags = next->flags;
+        object->simple_class = next->simple_class;
+        object->unicode_matching = next->unicode_matching;
+        object->original_source = next->original_source; object->original_source_len = next->original_source_len;
+        object->original_flags = next->original_flags; object->original_flags_len = next->original_flags_len;
+        NameRef keys[] = {state->regexp_source_key, state->regexp_flags_key};
+        for (int i = 0; i < 2; i++) {
+            ShapeEntry* field = typemap_hash_lookup_key((TypeMap*)source.get().map->type, keys[i]);
+            if (!map_shape_set(target.get().map, keys[i], map_shape_field_to_item(source.get().map->data, field)))
+                return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+        }
+        return target.get();
+    }
+};
+static Item regexp_create(Item pattern, Item flags) {
+    return js_regexp_initialize_with_ops(pattern, flags,
+        mvp_lmd_program_library()->regexp.values[1], &regexp_constructor_ops);
+}
+
+static const JsRegExpIteratorOps regexp_iterator_ops = {
+    [](Item regexp, Item string, bool global, bool unicode) {
+        MvpLmdLibraryState* state = mvp_lmd_program_library();
+        if (!state || !state->regexp_iterator) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+        RootFrame roots(3);
+        if (!roots.valid()) return ItemError;
+        Rooted<Item> matcher(roots, regexp), source(roots, string);
+        Rooted<Item> output(roots, mvp_lmd_object_new(&state->regexp_iterator->shape, 0));
+        if (item_is_error(output.get())) return output.get();
+        // ordinary Map transitions preserve the physical nominal brand and trace both retained Items.
+        for (int i = 0; i < 5; i++) {
+            Item value = i == 0 ? matcher.get() : i == 1 ? source.get() : Item{.item = b2it(i == 2 ? global : i == 3 ? unicode : false)};
+            if (!map_shape_set(output.get().map, state->regexp_iterator_keys[i], value))
+                return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+        }
+        return output.get();
+    },
+    [](Item iterator, Item* values, bool* flags) {
+        MvpLmdLibraryState* state = mvp_lmd_program_library();
+        if (!state || !state->regexp_iterator || get_type_id(iterator) != LMD_TYPE_MAP) return false;
+        TypeMap* shape = (TypeMap*)iterator.map->type;
+        if (!shape || shape->nominal != &state->regexp_iterator->nominal) return false;
+        // own private slots and physical nominal identity cannot be forged through a prototype or Proxy.
+        for (int i = 0; i < 5; i++) {
+            ShapeEntry* field = typemap_hash_lookup_key(shape, state->regexp_iterator_keys[i]);
+            if (!field) return false;
+            Item value = map_shape_field_to_item(iterator.map->data, field);
+            if (i < 2) values[i] = value;
+            else flags[i - 2] = value.item == ITEM_TRUE;
+        }
+        return true;
+    },
+    [](Item iterator) {
+        NameRef key = mvp_lmd_program_library()->regexp_iterator_keys[4];
+        ShapeEntry* field = typemap_hash_lookup_key((TypeMap*)iterator.map->type, key);
+        return map_shape_set_resolved(iterator.map, key, field, Item{.item = ITEM_TRUE}, false)
+            ? ItemNull : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    },
+    [](Item value, bool done) { return mvp_lmd_iterator_result(NULL, value, done); }
+};
+
+static Item regexp_protocol(Context*, MvpLmdProgram*, Item* args, uint64_t count, Item self, Item receiver, Item) {
+    int operation = (intptr_t)((MvpLmdNativeCallable*)self.function)->state;
+    MvpLmdLibraryState* state = mvp_lmd_program_library();
+    if (operation == JS_BUILTIN_REGEXP_COMPILE)
+        return js_regexp_compile_with_ops(receiver, count ? args[0] : Item{.item = ITEM_JS_UNDEFINED},
+            count > 1 ? args[1] : Item{.item = ITEM_JS_UNDEFINED}, &regexp_constructor_ops);
+    if (operation == JS_BUILTIN_REGEXP_SYMBOL_MATCHALL)
+        return js_regexp_match_all_with_ops(receiver, count ? args[0] : Item{.item = ITEM_JS_UNDEFINED}, &regexp_ops, &regexp_iterator_ops);
+    if (operation == JS_BUILTIN_REGEXP_MATCHALL_ITER_NEXT)
+        return js_regexp_match_all_next_with_ops(receiver, &regexp_ops, &regexp_iterator_ops);
+    // primitive strings cannot reenter before Get(exec); test reads no public flag getters.
+    if (operation == JS_BUILTIN_REGEXP_TEST && count &&
+            get_type_id(args[0]) == LMD_TYPE_STRING && regexp_ordinary(state, receiver, 0, false))
+        return regexp_exec(state, receiver, args[0], true);
+    return js_regexp_protocol_with_ops(operation, receiver, args, count, &regexp_ops);
+}
+
+bool mvp_lmd_regexp_intrinsic(Item receiver, Item argument, int operation, Item* result, Item second) {
+    MvpLmdClass* cls = mvp_lmd_class_record(receiver);
+    MvpLmdLibraryState* state = cls ? mvp_lmd_program_library(cls->program) : NULL;
+    bool iterator = operation == JS_BUILTIN_REGEXP_MATCHALL_ITER_NEXT;
+    if (!state || (iterator ? cls != state->regexp_iterator : !mvp_lmd_regexp_record(receiver, state))) return false;
+    // a shared native method preserves the compiled receiver's matcher and owning realm.
+    MvpLmdRealmScope realm(cls->program);
+    Item value = iterator ? js_regexp_match_all_next_with_ops(receiver, &regexp_ops, &regexp_iterator_ops)
+        : operation == JS_BUILTIN_REGEXP_COMPILE
+            ? js_regexp_compile_with_ops(receiver, argument, second, &regexp_constructor_ops)
+        : operation == JS_BUILTIN_REGEXP_EXEC || operation == JS_BUILTIN_REGEXP_TEST
+            ? regexp_exec(state, receiver, argument, operation == JS_BUILTIN_REGEXP_TEST)
+        : regexp_ops.intrinsic_get(receiver, operation);
+    *result = realm.complete(value);
+    return true;
+}
+
+extern "C" Item mvp_lmd_regexp_new(MvpLmdLibraryState* state, Item pattern, Item flags) {
+    if (!state) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+    RootFrame roots(4);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> source(roots, pattern), options(roots, flags), owner(roots, ItemNull), text(roots, ItemNull);
+    source.set(source.get().item == ITEM_JS_UNDEFINED ? Item{.item = s2it(heap_strcpy("", 0))} :
+        mvp_lmd_primitive_to_string(source.get()));
+    if (item_is_error(source.get())) return source.get();
+    options.set(options.get().item == ITEM_JS_UNDEFINED ? Item{.item = s2it(heap_strcpy("", 0))} :
+        mvp_lmd_primitive_to_string(options.get()));
+    if (item_is_error(options.get())) return options.get();
+    String* spelling = source.get().get_string();
+    StrBuf* normalized_names = NULL;
+    if (!js_regexp_decode_name_escapes(spelling->chars, spelling->len, &normalized_names))
+        return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    text.set(source.get());
+    if (normalized_names) {
+        // the existing text root owns normalization across allocation; source retains exact public spelling.
+        String* normalized = heap_strcpy(normalized_names->str, normalized_names->length);
+        strbuf_free(normalized_names);
+        if (!normalized) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+        text.set(Item{.item = s2it(normalized)});
+    }
+    JsRegExpCompileInfo info = {};
+    String* compiled_source = text.get().get_string(), *option = options.get().get_string();
+    if (!js_regexp_compile_frontend(compiled_source->chars, compiled_source->len, option->chars, option->len, &info))
+        return mvp_lmd_fail(LMD_MVP_SYNTAX, 0);
+    bool unicode_matching = info.unicode || info.unicode_sets;
+    StrBuf* input = regexp_buffer(compiled_source, unicode_matching);
+    if (!input) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    char* rewritten = NULL;
+    int rewritten_length = 0;
+    if (info.unicode_sets && !js_regex_wrapper_rewrite_v_flag_classes_c(
+            input->str, input->length, &rewritten, &rewritten_length)) {
+        strbuf_free(input);
+        return mvp_lmd_fail(LMD_MVP_SYNTAX, 0);
+    }
+    // the shared /v lowering expands set operations and string properties before matching.
+    JsBtFlags matching = {info.ignore_case, info.multiline, info.dot_all, unicode_matching, info.sticky};
+    JsBtRegex* compiled = js_bt_compile(rewritten ? rewritten : input->str,
+        rewritten ? rewritten_length : input->length, matching, context->pool);
+    if (rewritten) mem_free(rewritten);
+    strbuf_free(input);
+    if (!compiled) return mvp_lmd_fail(LMD_MVP_SYNTAX, 0);
+    // exact original bytes survive moving strings, public overrides, and custom prototypes.
+    spelling = source.get().get_string(); option = options.get().get_string();
+    uint32_t source_len = spelling->len, flags_len = option->len;
+    char* originals = (char*)pool_alloc(context->pool, (size_t)source_len + flags_len + 2);
+    if (!originals) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    memcpy(originals, spelling->chars, source_len); originals[source_len] = 0;
+    memcpy(originals + source_len + 1, option->chars, flags_len); originals[source_len + flags_len + 1] = 0;
+    // Shared Map storage owns the fields; the extra payload contains no GC references.
+    MvpLmdRegExp* object = (MvpLmdRegExp*)heap_calloc(sizeof(MvpLmdRegExp), LMD_TYPE_MAP);
+    if (!object) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    object->type_id = LMD_TYPE_MAP; object->type = &state->regexp.shape;
+    object->compiled = compiled; object->flags = info;
+    js_regex_detect_simple_class(compiled_source->chars, compiled_source->len, &info, &object->simple_class);
+    object->unicode_matching = unicode_matching;
+    object->original_source = originals; object->original_source_len = source_len;
+    object->original_flags = originals + source_len + 1; object->original_flags_len = flags_len;
+    owner.set(Item{.map = object});
+    if (!map_fill_reserve_data(object)) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    StrBuf* escaped = strbuf_new();
+    if (!escaped) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    spelling = source.get().get_string();
+    if (!spelling->len) strbuf_append_str(escaped, "(?:)");
+    for (uint32_t i = 0; i < spelling->len; i++) {
+        char c = spelling->chars[i];
+        if (c == '\\' && i + 1 < spelling->len) {
+            strbuf_append_char(escaped, c); strbuf_append_char(escaped, spelling->chars[++i]);
+        } else if (c == '/') strbuf_append_str(escaped, "\\/");
+        else if (c == '\n') strbuf_append_str(escaped, "\\n");
+        else if (c == '\r') strbuf_append_str(escaped, "\\r");
+        else if ((unsigned char)c == 0xE2 && i + 2 < spelling->len &&
+                (unsigned char)spelling->chars[i+1] == 0x80 &&
+                ((unsigned char)spelling->chars[i+2] == 0xA8 || (unsigned char)spelling->chars[i+2] == 0xA9)) {
+            strbuf_append_str(escaped, (unsigned char)spelling->chars[i+2] == 0xA8 ? "\\u2028" : "\\u2029"); i += 2;
+        } else strbuf_append_char(escaped, c);
+    }
+    text.set(Item{.item = s2it(heap_strcpy(escaped->str, escaped->length))}); strbuf_free(escaped);
+    // private Map fields are traced by the ordinary shape walker; the native payload has no Items.
+    if (!map_shape_set(owner.get().map, state->regexp_source_key, text.get())) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    text.set(Item{.item = s2it(heap_strcpy(info.canonical_flags, info.canonical_flags_len))});
+    if (!map_shape_set(owner.get().map, state->regexp_flags_key, text.get())) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    Item result = mvp_lmd_named_set(owner.get(), "lastIndex", Item{.item = i2it(0)},
+        JSPD_NON_ENUMERABLE | JSPD_NON_CONFIGURABLE);
+    return item_is_error(result) ? result : owner.get();
+}
+
+static const JsRegExpIndicesOps regexp_indices_ops = {
+    &regexp_ops,
+    []() {
+        RootFrame roots(1);
+        if (!roots.valid()) return ItemError;
+        Rooted<Item> object(roots, mvp_lmd_object_new(mvp_lmd_program_library()->object_shape, 0));
+        if (item_is_error(object.get())) return object.get();
+        Item linked = mvp_lmd_set_prototype(object.get(), ItemNull);
+        return item_is_error(linked) ? linked : object.get();
+    },
+    [](Item object, Item key, Item value) {
+        return mvp_lmd_property_with_receiver(object, key, value, LMD_PROP_CREATE_DATA, object);
+    }
+};
+static Item regexp_result(MvpLmdLibraryState* state, Item source, const MvpLmdRegExpInput* input,
+        JsBtRegex* compiled, int* starts, int* ends, int count) {
+    RootFrame roots(4);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> original(roots, source), result(roots, mvp_lmd_array_new(0));
+    Rooted<Item> value(roots, ItemNull), groups(roots, Item{.item = ITEM_JS_UNDEFINED});
+    if (item_is_error(result.get())) return result.get();
+    for (int i = 0; i < count; i++) {
+        value.set(Item{.item = ITEM_JS_UNDEFINED});
+        if (starts[i] >= 0) {
+            size_t a = input->unit_offset(starts[i]);
+            size_t b = input->unit_offset(ends[i]);
+            value.set(mvp_lmd_string_range(original.get(), a, b, 1));
+            if (item_is_error(value.get())) return value.get();
+        }
+        Item stored = mvp_lmd_array_store(result.get(), i, value.get());
+        if (item_is_error(stored)) return stored;
+    }
+    int named = compiled ? js_bt_named_count(compiled) : 0;
+    if (named) {
+        groups.set(mvp_lmd_object_new(state->object_shape, 0));
+        if (item_is_error(groups.get())) return groups.get();
+        Item linked = mvp_lmd_set_prototype(groups.get(), ItemNull);
+        if (item_is_error(linked)) return linked;
+        for (int i = 0; i < named; i++) {
+            int length; const char* key = js_bt_named_name(compiled, i, &length);
+            String* name = heap_create_name(key, length);
+            if (!name) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+            Item stored = mvp_lmd_property_with_receiver(groups.get(), Item{.item = s2it(name)},
+                result.get().array->items[js_bt_named_index(compiled, i)], LMD_PROP_CREATE_DATA, groups.get());
+            if (item_is_error(stored)) return stored;
+        }
+    }
+    Item stored = mvp_lmd_named_set(result.get(), "index", Item{.item = i2it(input->unit_offset(starts[0]))}, state->regexp_protocol_unobserved ? -1 : 0);
+    if (item_is_error(stored)) return stored;
+    stored = mvp_lmd_named_set(result.get(), "input", original.get(), state->regexp_protocol_unobserved ? -1 : 0);
+    if (item_is_error(stored)) return stored;
+    stored = mvp_lmd_named_set(result.get(), "groups", groups.get(), state->regexp_protocol_unobserved ? -1 : 0);
+    return item_is_error(stored) ? stored : result.get();
+}
+// keep /d scratch out of the ordinary native exec frame.
+__attribute__((noinline))
+static Item regexp_indices(Item result, const MvpLmdRegExpInput* input,
+        JsBtRegex* compiled, const int* matches, int count) {
+    // only /d enters this adapter; ordinary native matches reserve no offset scratch.
+    JsRegexScratch<JsRegExpIndexSpan> spans(count);
+    int named = js_bt_named_count(compiled);
+    JsRegexScratch<JsRegExpIndexName> names(named);
+    if (spans.count != count || names.count != named) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    for (int i = 0; i < count; i++) spans.slots[i] = matches[i] < 0 ? JsRegExpIndexSpan{-1, -1} :
+        JsRegExpIndexSpan{(int64_t)input->unit_offset(matches[i]), (int64_t)input->unit_offset(matches[count + i])};
+    for (int i = 0; i < named; i++) {
+        names.slots[i].chars = js_bt_named_name(compiled, i, &names.slots[i].length);
+        names.slots[i].capture = js_bt_named_index(compiled, i);
+    }
+    return js_regexp_attach_indices_with_ops(result, spans.slots, count,
+        names.slots, named, &regexp_indices_ops);
+}
+static Item regexp_exec(MvpLmdLibraryState* state, Item regex, Item string, bool test,
+        const MvpLmdRegExpInput* prepared) {
+    MvpLmdRegExp* object = mvp_lmd_regexp_record(regex, state);
+    if (!object) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    RootFrame roots(3);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> held(roots, regex), source(roots, string), result(roots, ItemNull);
+    source.set(mvp_lmd_primitive_to_string(source.get()));
+    if (item_is_error(source.get())) return source.get();
+    ShapeEntry* field = typemap_hash_lookup((TypeMap*)object->type, "lastIndex", 9);
+    Item number = mvp_lmd_primitive_to_number(map_shape_field_to_item(object->data, field));
+    if (item_is_error(number)) return number;
+    double start = it2d(number);
+    bool stateful = object->flags.global || object->flags.sticky;
+    start = !stateful || isnan(start) || start < 0 ? 0 : floor(start);
+    MvpLmdRegExpInput local(prepared ? NULL : source.get().get_string(), object->unicode_matching);
+    const MvpLmdRegExpInput* input = prepared ? prepared : &local;
+    if (!input->view.str) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    int count = js_bt_group_count(object->compiled) + 1;
+    JsRegexScratch<int> scratch(count * 2);
+    if (scratch.count < count * 2) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    int* matches = scratch.slots;
+    int found = 0;
+    if (start <= input->units) found = js_bt_exec(object->compiled, input->view.str, input->view.length,
+        input->byte_offset((size_t)start), object->flags.sticky,
+        matches, matches + count, count);
+    // preserve the shared engine's resource diagnostic across the formal error boundary.
+    if (found < 0) result.set(mvp_lmd_fail(found == JS_BT_EXEC_ALLOCATION_FAILURE ? LMD_MVP_MEMORY : LMD_MVP_RANGE,
+        0, found == JS_BT_EXEC_ALLOCATION_FAILURE ? NULL : "RegExp match exceeded engine resources"));
+    else {
+        if (stateful) result.set(regexp_ops.set_last_index(held.get(), Item{.item = i2it(found ?
+            input->unit_offset(matches[count]) : 0)}));
+        if (found && state->regexp_last_match && !item_is_error(result.get())) {
+            // the non-u matcher splits pairs; legacy strings retain the original UTF-16 subject.
+            JsRegexScratch<int> offsets(count * 2);
+            if (offsets.count != count * 2) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+            for (int i = 0; i < count * 2; i++)
+                offsets.slots[i] = matches[i] < 0 ? -1 : (int)input->unit_offset(matches[i]);
+            result.set(js_regexp_update_last_match_spans(state->regexp_last_match, source.get(),
+                offsets.slots, offsets.slots + count, count, true));
+        }
+        if (!item_is_error(result.get())) result.set(!found ? (test ? Item{.item = ITEM_FALSE} : ItemNull) :
+            test ? Item{.item = ITEM_TRUE} : regexp_result(state, source.get(), input, object->compiled, matches, matches + count, count));
+        if (!test && found && !item_is_error(result.get()) && object->flags.has_indices)
+            result.set(regexp_indices(result.get(), input, object->compiled, matches, count));
+    }
+    return result.get();
+}
+static Item regexp_construct(Context*, MvpLmdProgram*, Item* args, uint64_t count, Item self, Item, Item target) {
+    Item pattern = count ? args[0] : Item{.item = ITEM_JS_UNDEFINED};
+    Item flags = count > 1 ? args[1] : Item{.item = ITEM_JS_UNDEFINED};
+    return js_regexp_construct_with_ops(pattern, flags, self, target, &regexp_constructor_ops);
+}
+static Item regexp_legacy_accessor(Context*, MvpLmdProgram* program, Item*, uint64_t, Item self, Item receiver, Item) {
+    MvpLmdLibraryState* state = mvp_lmd_program_library(program);
+    if (receiver.item != state->regexp.values[0].item) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    const char* name = (const char*)((MvpLmdNativeCallable*)self.function)->state;
+    Item result = ItemEmptyString;
+    js_regexp_legacy_get(state->regexp_last_match, name, strlen(name), &result);
+    return result;
+}
+static Item regexp_legacy_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state) {
+    if (state->regexp_protocol_unobserved) return ItemNull;
+    if (!mvp_lmd_program_realm_key(program)) {
+        // both entry orders publish matches to the context's canonical realm record.
+        if (!js_runtime_state_init((EvalContext*)context)) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+        state->regexp_last_match = &js_runtime_state.regexp_last_match;
+    } else {
+        auto* legacy = (JsRegexpLastMatch*)mem_calloc(1, sizeof(JsRegexpLastMatch), MEM_CAT_EVAL);
+        if (!legacy) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+        root_vector_init(&legacy->values, context, "MVP RegExp last match");
+        static const ContextCapsuleOps capsule = {"js-mvp-regexp", CONTEXT_CAPSULE_LIFETIME_REALM,
+            sizeof(JsRegexpLastMatch), NULL,
+            [](void* opaque) { root_vector_clear(&((JsRegexpLastMatch*)opaque)->values); },
+            [](void* opaque) { root_vector_destroy(&((JsRegexpLastMatch*)opaque)->values); mem_free(opaque); }};
+        if (!context_capsule_extension_install(context, MVP_LMD_REGEXP_OWNER,
+                mvp_lmd_program_realm_key(program), legacy, &capsule)) {
+            root_vector_destroy(&legacy->values); mem_free(legacy);
+            return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+        }
+        state->regexp_last_match = legacy;
+    }
+    if (state->native_callable_values) return ItemNull;
+    RootFrame roots(1);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> getter(roots, ItemNull);
+    for (int i = 0; js_regexp_legacy_name(i); i++) {
+        const char* name = js_regexp_legacy_name(i);
+        getter.set(mvp_lmd_native_function(program, (void*)name, regexp_legacy_accessor, 0, name));
+        if (item_is_error(getter.get())) return getter.get();
+        Item status = mvp_lmd_define_accessor(state->regexp.values[0],
+            Item{.item = s2it(heap_create_name(name, strlen(name)))}, getter.get(), JSPD_NON_ENUMERABLE << 8);
+        if (item_is_error(status)) return status;
+    }
+    return ItemNull;
+}
+Item mvp_lmd_regexp_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state) {
+    state->regexp_source_key = mvp_lmd_internal_name(LMD_INTERNAL_REGEXP_SOURCE);
+    state->regexp_flags_key = mvp_lmd_internal_name(LMD_INTERNAL_REGEXP_FLAGS);
+    if (!state->regexp_source_key || !state->regexp_flags_key) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    Item result = state->native_callable_values
+        ? mvp_lmd_library_class_adopt(&state->regexp, state->values + LMD_LIBRARY_REGEXP,
+            js_get_constructor(js_name_item("RegExp", 6)))
+        : mvp_lmd_library_class_initialize(program, state, &state->regexp,
+        LMD_LIBRARY_REGEXP, "RegExp", regexp_construct, 2, true);
+    if (item_is_error(result)) return result;
+    if (!state->native_callable_values)
+        ((MvpLmdCallable*)state->regexp.values[0].function)->custom_new_target = true;
+    state->regexp_accessor_count = 0;
+    for (int i = 0; ; i++) {
+        const JsBuiltinMethodSpec* method = js_builtin_method_at(i);
+        if (!method) break;
+        if (method->owner == JS_BUILTIN_OWNER_REGEXP_ACCESSOR_INTERNAL) state->regexp_accessor_count++;
+    }
+    state->regexp_accessors = (MvpLmdRegExpAccessor*)pool_calloc(context->pool,
+        state->regexp_accessor_count * sizeof(MvpLmdRegExpAccessor));
+    if (!state->regexp_accessors) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    if (state->regexp_iterator) {
+        MvpLmdClass* cls = state->regexp_iterator;
+        result = mvp_lmd_iterator_prototype_initialize(program, cls, state->regexp_iterator_values,
+            "RegExp String Iterator", state->native_callable_values ? js_get_regexp_string_iterator_proto() : ItemNull);
+        if (item_is_error(result)) return result;
+        for (int i = 0; i < 5; i++) {
+            state->regexp_iterator_keys[i] = mvp_lmd_internal_name((MvpLmdInternalName)(LMD_INTERNAL_REGEXP_ITERATOR + i));
+            if (!state->regexp_iterator_keys[i]) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+        }
+    }
+    int accessor = 0;
+    RootFrame roots(1);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> function(roots, ItemNull);
+    for (int i = 0; ; i++) {
+        const JsBuiltinMethodSpec* method = js_builtin_method_at(i);
+        if (!method) break;
+        bool symbol = method->owner == JS_BUILTIN_OWNER_REGEXP_SYMBOL_INTERNAL;
+        bool iterator = state->regexp_iterator && method->owner == JS_BUILTIN_OWNER_REGEXP_ITERATOR_INTERNAL;
+        if (method->owner != JS_BUILTIN_OWNER_REGEXP_PROTOTYPE_METHOD &&
+                method->owner != JS_BUILTIN_OWNER_REGEXP_ACCESSOR_INTERNAL && !symbol && !iterator) continue;
+        if (symbol && !regexp_symbol_id(method->builtin_id)) continue;
+        function.set(state->native_callable_values ? js_intrinsic_binding_get(method->owner, method->name, method->len)
+            : mvp_lmd_native_function(program, (void*)(intptr_t)method->builtin_id,
+            regexp_protocol, method->param_count, method->display_name ? method->display_name : method->name));
+        if (item_is_error(function.get())) return function.get();
+        if (method->builtin_id == JS_BUILTIN_REGEXP_EXEC) state->values[LMD_LIBRARY_REGEXP_EXEC] = function.get();
+        if (method->property_kind == JS_BUILTIN_PROPERTY_ACCESSOR) {
+            String* key = heap_create_name(method->name, method->len);
+            if (!key) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+            state->regexp_accessors[accessor++] = {method, key, NULL};
+            if (state->native_callable_values) continue;
+            result = mvp_lmd_define_accessor(state->regexp.values[1], Item{.item = s2it(key)},
+                function.get(), JSPD_NON_ENUMERABLE << 8);
+        } else if (state->native_callable_values) continue;
+        else if (symbol) {
+            JsPropertyDescriptor descriptor = {};
+            descriptor.flags = JS_PD_HAS_VALUE | JS_PD_HAS_WRITABLE | JS_PD_WRITABLE |
+                JS_PD_HAS_ENUMERABLE | JS_PD_HAS_CONFIGURABLE;
+            descriptor.value = function.get(); js_pd_set_configurable(&descriptor, true);
+            result = mvp_lmd_define_own_property(state->regexp.values[1], Item{.item = s2it(well_known_name_ref(
+                regexp_symbol_id(method->builtin_id)))}, &descriptor);
+        } else result = mvp_lmd_named_set(iterator ? state->regexp_iterator_values[1] : state->regexp.values[1],
+            method->name, function.get(), JSPD_NON_ENUMERABLE);
+        if (item_is_error(result)) return result;
+    }
+    if (!state->native_callable_values) {
+        function.set(mvp_lmd_native_function(program, NULL, mvp_lmd_receiver_identity, 0, "get [Symbol.species]"));
+        if (item_is_error(function.get())) return function.get();
+        result = mvp_lmd_define_accessor(state->regexp.values[0], Item{.item = s2it(well_known_name_ref(JS_SYMBOL_SPECIES))},
+            function.get(), JSPD_NON_ENUMERABLE << 8);
+        if (item_is_error(result)) return result;
+    }
+    // pool-owned layout metadata borrows no Map data buffer or getter Item across GC.
+    state->regexp_accessor_shape = (TypeMap*)state->regexp.values[1].map->type;
+    for (int i = 0; i < state->regexp_accessor_count; i++) {
+        MvpLmdRegExpAccessor& entry = state->regexp_accessors[i];
+        entry.field = typemap_hash_lookup_key(state->regexp_accessor_shape, entry.key);
+    }
+    return regexp_legacy_initialize(program, state);
+}
+
+static Item regexp_property(Item owner, const char* key) {
+    TypeMap* type = get_type_id(owner) == LMD_TYPE_ARRAY ? (TypeMap*)owner.array->type : (TypeMap*)owner.map->type;
+    ShapeEntry* field = typemap_hash_lookup(type, key, strlen(key));
+    return field ? map_shape_field_to_item(owner.map->data, field) : Item{.item = ITEM_JS_UNDEFINED};
+}
+static Item regexp_replacement(Item source, Item match, Item replacement) {
+    RootFrame roots(5);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> original(roots, source), record(roots, match), replace(roots, replacement);
+    Rooted<Item> piece(roots, ItemNull), groups(roots, regexp_property(match, "groups"));
+    int count = match.array->length;
+    int64_t start = it2d(regexp_property(match, "index"));
+    String* full = match.array->items[0].get_string();
+    if (mvp_lmd_is_callable(replacement)) {
+        RootSpan arguments(count + 3);
+        if (!arguments.valid()) return ItemError;
+        for (int i = 0; i < count; i++) arguments.items()[i] = record.get().array->items[i];
+        arguments.items()[count] = Item{.item = i2it(start)};
+        arguments.items()[count + 1] = original.get();
+        arguments.items()[count + 2] = groups.get();
+        piece.set(mvp_lmd_class_invoke(replace.get(), Item{.item = ITEM_JS_UNDEFINED}, arguments.items(),
+            count + (groups.get().item == ITEM_JS_UNDEFINED ? 2 : 3), Item{.item = ITEM_JS_UNDEFINED}));
+        return item_is_error(piece.get()) ? piece.get() : mvp_lmd_primitive_to_string(piece.get());
+    }
+    StrBuf* buffer = strbuf_new();
+    if (!buffer) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    String* text = replace.get().get_string();
+    piece.set(js_apply_replacement_from_items(buffer, text->chars, text->len,
+        original.get().get_string()->chars, original.get().get_string()->len, start,
+        full->chars, full->len, record.get().array->items + 1, count - 1, groups.get(),
+        &regexp_ops, original.get(), !original.get().get_string()->is_ascii));
+    if (!item_is_error(piece.get())) {
+        String* value = heap_strcpy(buffer->str, buffer->length);
+        piece.set(value ? Item{.item = s2it(value)} : mvp_lmd_fail(LMD_MVP_MEMORY, 0));
+    }
+    strbuf_free(buffer); return piece.get();
+}
+static Item regexp_string_native(MvpLmdLibraryState* state, Item source, Item pattern,
+        Item replacement, int64_t replace) {
+    RootFrame roots(7);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> original(roots, source), regex(roots, pattern), substitution(roots, replacement);
+    Rooted<Item> records(roots, ItemNull), match(roots, ItemNull), result(roots, ItemNull), piece(roots, ItemNull);
+    if (!replace && !mvp_lmd_regexp_record(regex.get(), state)) {
+        regex.set(regexp_create(regex.get(), Item{.item = ITEM_JS_UNDEFINED}));
+        if (item_is_error(regex.get())) return regex.get();
+    }
+    if (replace && !mvp_lmd_is_callable(substitution.get())) {
+        substitution.set(mvp_lmd_primitive_to_string(substitution.get()));
+        if (item_is_error(substitution.get())) return substitution.get();
+    }
+    MvpLmdRegExp* compiled = mvp_lmd_regexp_record(regex.get(), state);
+    // the shared span kernel avoids match arrays and repeated UTF-16 prefix scans.
+    // coercions ran before admission; overridden exec/flags keep the protocol path.
+    if (replace && compiled && compiled->flags.global && !compiled->flags.has_indices &&
+            get_type_id(substitution.get()) == LMD_TYPE_STRING &&
+            js_bt_group_count(compiled->compiled) == 0 &&
+            (original.get().get_string()->is_ascii ||
+                (compiled->simple_class.kind != JS_REGEX_SIMPLE_CLASS_NONE && compiled->simple_class.one_or_more))) {
+        struct SpanState { MvpLmdRegExp* regexp; JsRegexpLastMatch* legacy; } spans_state = {compiled, state->regexp_last_match};
+        static const JsRegExpReplaceSpanOps spans = {
+            [](void* opaque, const char* input, int length, int position, int* start, int* end) {
+                auto* native = ((SpanState*)opaque)->regexp;
+                if (native->simple_class.kind != JS_REGEX_SIMPLE_CLASS_NONE)
+                    return (int)js_regex_match_simple_class(&native->simple_class, input, length, position,
+                        native->flags.sticky, start, end);
+                return js_bt_exec(native->compiled, input, length, position, native->flags.sticky, start, end, 1);
+            },
+            [](void* opaque, Item input, int start, int end) {
+                return js_regexp_update_last_match_spans(((SpanState*)opaque)->legacy, input, &start, &end, 1, false);
+            },
+            [](int error) { return mvp_lmd_fail(error == JS_BT_EXEC_ALLOCATION_FAILURE ? LMD_MVP_MEMORY : LMD_MVP_RANGE,
+                0, error == JS_BT_EXEC_ALLOCATION_FAILURE ? NULL : "RegExp match exceeded engine resources"); }
+        };
+        return js_regexp_replace_spans(regex.get(), original.get(), substitution.get(), &spans_state, &regexp_ops, &spans);
+    }
+    records.set(mvp_lmd_array_new(0));
+    if (item_is_error(records.get())) return records.get();
+    bool global = compiled ? compiled->flags.global : replace == 2;
+    int64_t search_from = 0;
+    MvpLmdRegExpInput input(original.get().get_string(), compiled && compiled->unicode_matching);
+    if (!input.view.str) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    if (global && compiled) {
+        result.set(regexp_ops.set_last_index(regex.get(), Item{.item = i2it(0)}));
+        if (item_is_error(result.get())) return result.get();
+    }
+    do {
+        if (compiled) match.set(regexp_exec(state, regex.get(), original.get(), false, &input));
+        else {
+            piece.set(mvp_lmd_primitive_to_string(regex.get()));
+            if (item_is_error(piece.get())) return piece.get();
+            String* haystack = original.get().get_string(), *needle = piece.get().get_string();
+            if (replace == 2 && search_from > utf8_to_utf16_length(haystack->chars, haystack->len)) break;
+            int64_t start = utf16_find(haystack->chars, haystack->len, needle->chars, needle->len, search_from);
+            if (start < 0) break;
+            int64_t width = utf8_to_utf16_length(needle->chars, needle->len);
+            int a = input.byte_offset(start);
+            int b = input.byte_offset(start + width);
+            match.set(regexp_result(state, original.get(), &input, NULL, &a, &b, 1));
+            // empty string searches advance one UTF-16 unit, including inside surrogate pairs.
+            search_from = start + (width ? width : 1);
+        }
+        if (item_is_error(match.get())) return match.get();
+        if (match.get().item == ITEM_NULL) break;
+        if (!replace && !global) return match.get();
+        result.set(mvp_lmd_array_store(records.get(), records.get().array->length, match.get()));
+        if (item_is_error(result.get())) return result.get();
+        if (global && compiled && !match.get().array->items[0].get_string()->len) {
+            int64_t cursor = it2d(regexp_property(regex.get(), "lastIndex"));
+            String* string = original.get().get_string();
+            int64_t next = js_regex_advance_string_index_units(string, cursor, compiled->unicode_matching);
+            result.set(regexp_ops.set_last_index(regex.get(), push_d((double)next)));
+            if (item_is_error(result.get())) return result.get();
+        }
+    } while (global);
+    if (!replace) {
+        if (!records.get().array->length) return ItemNull;
+        result.set(mvp_lmd_array_new(0));
+        if (item_is_error(result.get())) return result.get();
+        for (int64_t i = 0; i < records.get().array->length; i++) {
+            Item value = records.get().array->items[i].array->items[0];
+            Item stored = mvp_lmd_array_store(result.get(), i, value);
+            if (item_is_error(stored)) return stored;
+        }
+        return result.get();
+    }
+    StrBuf* buffer = strbuf_new();
+    if (!buffer) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    int64_t cursor = 0;
+    for (int64_t i = 0; i < records.get().array->length; i++) {
+        match.set(records.get().array->items[i]);
+        int64_t start = it2d(regexp_property(match.get(), "index"));
+        piece.set(mvp_lmd_string_range(original.get(), cursor, start, 1));
+        if (item_is_error(piece.get())) break;
+        String* text = piece.get().get_string(); strbuf_append_str_n(buffer, text->chars, text->len);
+        text = match.get().array->items[0].get_string(); cursor = start + utf8_to_utf16_length(text->chars, text->len);
+        piece.set(regexp_replacement(original.get(), match.get(), substitution.get()));
+        if (item_is_error(piece.get())) break;
+        text = piece.get().get_string(); strbuf_append_str_n(buffer, text->chars, text->len);
+    }
+    if (!item_is_error(piece.get())) {
+        piece.set(mvp_lmd_string_range(original.get(), cursor, INFINITY, 1));
+        if (!item_is_error(piece.get())) {
+            String* text = piece.get().get_string(); strbuf_append_str_n(buffer, text->chars, text->len);
+            text = heap_strcpy(buffer->str, buffer->length);
+            piece.set(text ? Item{.item = s2it(text)} : mvp_lmd_fail(LMD_MVP_MEMORY, 0));
+        }
+    }
+    strbuf_free(buffer); return piece.get();
+}
+
+extern "C" Item mvp_lmd_regexp_string_method(MvpLmdLibraryState* state, Item source, Item pattern,
+        Item replacement, int64_t operation) {
+    if (source.item == ITEM_NULL || source.item == ITEM_JS_UNDEFINED) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    if (operation == 4) return js_regexp_string_match_all_with_ops(source, pattern, &regexp_ops);
+    // primitive string separators have no protocol hook or observable coercion;
+    // the shared split kernel roots both strings before allocating its result.
+    if (operation == 3 && get_type_id(source) == LMD_TYPE_STRING &&
+            get_type_id(pattern) == LMD_TYPE_STRING && replacement.item == ITEM_JS_UNDEFINED)
+        return mvp_lmd_string_split(source, pattern, UINT32_MAX);
+    bool replace_all = operation == 5;
+    if (replace_all) operation = 1;
+    const int protocols[] = {JS_BUILTIN_REGEXP_SYMBOL_MATCH, JS_BUILTIN_REGEXP_SYMBOL_REPLACE,
+        JS_BUILTIN_REGEXP_SYMBOL_SEARCH, JS_BUILTIN_REGEXP_SYMBOL_SPLIT};
+    if (operation < 0 || operation >= 4) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+    // already-converted ordinary inputs keep the original bulk loop without observable coercions.
+    if (!replace_all && (operation == 0 || (operation == 1 && get_type_id(replacement) == LMD_TYPE_STRING)) &&
+            get_type_id(source) == LMD_TYPE_STRING && regexp_ordinary(state, pattern, protocols[operation])) {
+        js_opt_trace_regexp_bulk(operation == 1, true);
+        return regexp_string_native(state, source, pattern, replacement, operation);
+    }
+    RootFrame roots(4);
+    if (!roots.valid()) return ItemError;
+    uint64_t source_home = 0, pattern_home = 0, replacement_home = 0;
+    Rooted<Item> string(roots, lambda_item_adopt_scalar_home(source, &source_home));
+    Rooted<Item> regex(roots, lambda_item_adopt_scalar_home(pattern, &pattern_home));
+    Rooted<Item> replace(roots, lambda_item_adopt_scalar_home(replacement, &replacement_home)), method(roots, ItemNull);
+    if (replace_all && mvp_lmd_is_object(regex.get())) {
+        // IsRegExp and the global flag check precede GetMethod and receiver conversion.
+        bool is_regexp = false;
+        Item status = js_regexp_is_regexp_with_ops(regex.get(), &is_regexp, &regexp_ops);
+        if (item_is_error(status)) return status;
+        if (is_regexp) {
+            method.set(regexp_ops.get(regex.get(), "flags"));
+            if (item_is_error(method.get())) return method.get();
+            if (method.get().item == ITEM_NULL || method.get().item == ITEM_JS_UNDEFINED) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+            method.set(mvp_lmd_primitive_to_string(method.get()));
+            if (item_is_error(method.get())) return method.get();
+            String* flags = method.get().get_string();
+            if (!memchr(flags->chars, 'g', flags->len)) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+        }
+    }
+    NameRef key = well_known_name_ref(regexp_symbol_id(protocols[operation]));
+    // String protocol handoff applies only to object patterns, including when primitive prototypes change.
+    if (mvp_lmd_is_object(regex.get())) {
+        method.set(mvp_lmd_property_with_receiver(regex.get(), Item{.item = s2it(key)}, ItemNull, LMD_PROP_GET, regex.get()));
+        if (item_is_error(method.get())) return method.get();
+        if (method.get().item != ITEM_NULL && method.get().item != ITEM_JS_UNDEFINED) {
+            if (!mvp_lmd_is_callable(method.get())) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+            Item arguments[] = {string.get(), replace.get()};
+            return mvp_lmd_class_invoke(method.get(), regex.get(), arguments,
+                operation == 1 || operation == 3 ? 2 : 1, Item{.item = ITEM_JS_UNDEFINED});
+        }
+    }
+    // GetMethod precedes receiver conversion; fallback string operations retain argument order.
+    string.set(mvp_lmd_primitive_to_string(string.get()));
+    if (item_is_error(string.get())) return string.get();
+    if (operation == 1) {
+        regex.set(mvp_lmd_primitive_to_string(regex.get()));
+        return item_is_error(regex.get()) ? regex.get() : regexp_string_native(state, string.get(), regex.get(), replace.get(), replace_all ? 2 : 1);
+    }
+    if (operation == 3) {
+        method.set(replace.get().item == ITEM_JS_UNDEFINED ? Item{.item = i2it(UINT32_MAX)} :
+            mvp_lmd_primitive_to_number(replace.get()));
+        if (item_is_error(method.get())) return method.get();
+        uint32_t limit = (uint32_t)js_to_int32(it2d(method.get()));
+        // separator coercion is observable even when the converted limit is zero.
+        if (regex.get().item != ITEM_JS_UNDEFINED) regex.set(mvp_lmd_primitive_to_string(regex.get()));
+        if (item_is_error(regex.get())) return regex.get();
+        if (!limit) return mvp_lmd_array_new(0);
+        return mvp_lmd_string_split(string.get(), regex.get(), limit);
+    }
+    regex.set(regexp_create(regex.get(), Item{.item = ITEM_JS_UNDEFINED}));
+    if (item_is_error(regex.get())) return regex.get();
+    method.set(mvp_lmd_property_with_receiver(regex.get(), Item{.item = s2it(key)}, ItemNull, LMD_PROP_GET, regex.get()));
+    if (item_is_error(method.get())) return method.get();
+    if (!mvp_lmd_is_callable(method.get())) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    Item argument = string.get();
+    return mvp_lmd_class_invoke(method.get(), regex.get(), &argument, 1, Item{.item = ITEM_JS_UNDEFINED});
+}

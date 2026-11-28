@@ -26,9 +26,9 @@ NON_HELPERS = {
     'js_ast_children.cpp', 'js_c_ast_helpers.cpp', 'js_c_parser.cpp',
     'js_direct_scope.cpp', 'js_early_errors.cpp', 'js_emit_ast_dump.cpp',
     'js_interp.cpp', 'js_module_ast_prebuild.cpp', 'js_scope.cpp',
-    'mvp_lmd_mir.cpp',
+    'js_mir_mir.cpp',
 }
-MIXED_SOURCES = {'js_interp.cpp', 'mvp_lmd_mir.cpp'}
+MIXED_SOURCES = {'js_interp.cpp', 'js_mir_mir.cpp'}
 SOURCE_SUFFIXES = {'.cpp', '.c', '.cc', '.cxx', '.h', '.hpp', '.mm', '.def'}
 LEX = re.compile(r'''"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|//[^\n]*|/\*.*?\*/''', re.S)
 
@@ -244,10 +244,10 @@ def main():
         parser.error('--out must be under the repository temp/ directory')
     out.mkdir(parents=True, exist_ok=True)
     sources = sorted(p for p in JS.glob('*.cpp') if p.name not in NON_HELPERS)
-    sources += sorted(p for p in (JS / 'mvp-lmd').glob('*.cpp') if p.name not in NON_HELPERS)
+    sources += sorted(p for p in (JS / 'mir').glob('*.cpp') if p.name not in NON_HELPERS)
     shared_catalog = project_source_path('lambda/core/js_well_known_names.c')
     sources += [shared_catalog]
-    sources += [JS / 'js_interp.cpp', JS / 'mvp-lmd/mvp_lmd_mir.cpp']
+    sources += [JS / 'js_interp.cpp', JS / 'mir/js_mir_mir.cpp']
     digest = hashlib.sha256()
     digest.update(json.dumps(clang_configuration()).encode())
     for path in sorted(p for p in JS.rglob('*') if p.suffix in SOURCE_SUFFIXES):
@@ -290,13 +290,13 @@ def main():
             node['references'].extend(by_name.get(node['reference_names'][reference], ()))
         node['references'] = sorted(set(node['references']))
     import_inventories = [node for node in nodes.values()
-        if node['kind'] == 'data' and node['file'].endswith('mvp_lmd_mir.cpp')
+        if node['kind'] == 'data' and node['file'].endswith('js_mir_mir.cpp')
         and node['name'] == 'imports']
     for node in import_inventories:
         node['references'] = []
     source_set = {logical_project_path(p, ROOT).as_posix() for p in sources}
     production, tests = defaultdict(set), defaultdict(set)
-    for path in (JS / 'mvp-lmd/mvp_lmd_mir.cpp', JS / 'js_interp.cpp'):
+    for path in (JS / 'mir/js_mir_mir.cpp', JS / 'js_interp.cpp'):
         source = path.read_text()
         for literal in LEX.finditer(source):
             if not literal[0].startswith('"'):

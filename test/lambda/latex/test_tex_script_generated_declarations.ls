@@ -1,22 +1,14 @@
 import profile: lambda.doc.latex.tex_engine.profile
-import digest: lambda.doc.latex.tex_engine.digest
-import reconstruct: lambda.doc.latex.tex_engine.reconstruct
+import native_snapshot: ._tex_native_snapshot
 let kernel = input("lmd/package/doc/latex/tex_engine/kernel.tex", "text")^;
 let resources = {local:{}, bundled:{}};
+// The production parser now uses Script; these references come from the archived native engine.
+let native = input("test/lambda/latex/fixtures/tex_generated_declarations_native.json", "json")^;
 
-fn check(source) any^ {
-    let expanded = profile.expand_with_kernel(source, kernel,
-        {echo_definitions:true, adapters:[], resources:resources}, 100000)^;
-    let result = digest.digest(expanded)^;
-    let text = reconstruct.reconstruct(expanded)^;
-    let native_text = parse(source, {type:"tex"})^;
-    let native_ast = parse(source, {type:"latex"})^;
-    {issue:result.issue, unsupported:result.unsupported,
-        text_match:text.text == native_text.text,
-        ast_match:if (result.ast == null) null else result.ast == native_ast}
-}
+fn check(source, reference) any^ =>
+    native_snapshot.run(source, kernel, {echo_definitions:true, adapters:[], resources:resources}, reference);
 
-[for (source in [
+[for (index, source in [
     "\\def\\n{article}\\documentclass{\\n}\\begin{document}A\\end{document}",
     "\\def\\n{xcolor}\\usepackage{\\n}\\begin{document}A\\end{document}",
     "\\def\\n{xcolor}\\usepackage*[draft]{\\n}\\begin{document}A\\end{document}",
@@ -28,7 +20,7 @@ fn check(source) any^ {
     "\\def\\n{B}\\title{A\\n C}\\begin{document}A\\end{document}",
     "\\def\\n{X}\\author{\\n}\\date{\\n}\\begin{document}A\\end{document}",
     "\\def\\n{xcolor}\\def\\o{draft}\\usepackage[\\o]{\\n}\\begin{document}A\\end{document}"
-]) check(source)^];
+]) check(source, native.cases[index])^];
 
 let root = "test/lambda/latex/fixtures/local_packages/";
 let path = root ++ "script-decl-main.tex";
@@ -36,9 +28,4 @@ let local = {'script-decl-base.cls':{data:input(root ++ "script-decl-base.cls", 
     'script-decl-require.sty':{data:input(root ++ "script-decl-require.sty", "text")^}};
 let expanded = profile.expand_with_kernel(input(path, "text")^, kernel,
     {source_name:path, echo_definitions:true, adapters:[], resources:{local:local,bundled:{}}}, 100000)^;
-let result = digest.digest(expanded)^;
-let text = reconstruct.reconstruct(expanded)^;
-let native_text = input(path, "tex")^;
-let native_ast = input(path, "latex")^;
-{issue:result.issue, unsupported:result.unsupported, text_match:text.text == native_text.text,
-    ast_match:if (result.ast == null) null else result.ast == native_ast}
+native_snapshot.compare(expanded, native.local, path)^

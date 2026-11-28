@@ -20,9 +20,217 @@ observations still require re-verification. Add new Radiant issues here.
 
 ## Open issues
 
+<a id="ri-280"></a>
+
+- [RI-280 — The macOS caret query aborts for a hidden text control](<Radiant_Issue_Ledger (fixed).md#ri-280>).
+
+<a id="ri-279"></a>
+
+- [RI-279 — Native regression fixtures use obsolete output, clipping and sizing inputs](<Radiant_Issue_Ledger (fixed).md#ri-279>).
+
+<a id="ri-278"></a>
+
+- [RI-278 — Textarea family changes lose the user-agent font size](<Radiant_Issue_Ledger (fixed).md#ri-278>).
+
+<a id="ri-277"></a>
+
+- [RI-277 — Table row minimum classifies a substituted length as a percentage](<Radiant_Issue_Ledger (fixed).md#ri-277>).
+
+<a id="ri-276"></a>
+
+- [RI-276 — Flex intrinsic measurement drops the percentage term of mixed margins](<Radiant_Issue_Ledger (fixed).md#ri-276>).
+
+<a id="ri-275"></a>
+
+- [RI-275 — Ruby annotation realignment doubles an atomic child's relative offset](<Radiant_Issue_Ledger (fixed).md#ri-275>).
+
+<a id="ri-274"></a>
+
+- [RI-274 — Provisional flex heights and embedded SVG minimums use incorrect constraints](<Radiant_Issue_Ledger (fixed).md#ri-274>).
+
+<a id="ri-273"></a>
+
+- [RI-273 — Aborted DOM edits leave host and descendant attributes changed](<Radiant_Issue_Ledger (fixed).md#ri-273>).
+
+<a id="ri-272"></a>
+
+- [RI-272 — Detached layout measurement closes an uninitialized counter checkpoint](<Radiant_Issue_Ledger (fixed).md#ri-272>).
+
+<a id="ri-271"></a>
+
+- [RI-271 — Text measurement repeated writing-orientation queries](<Radiant_Issue_Ledger (fixed).md#ri-271>).
+
+<a id="ri-270"></a>
+
+- [RI-270 — The animation mixer scanned all bindings for each sampled track](<Radiant_Issue_Ledger (fixed).md#ri-270>).
+
+<a id="ri-269"></a>
+
+- [RI-269 — Custom-layout paint test uses a stale aggregate initializer](<Radiant_Issue_Ledger (fixed).md#ri-269>).
+
+<a id="ri-268"></a>
+
+- [RI-268 — Scene3D animation repeatedly revalidated live targets](<Radiant_Issue_Ledger (fixed).md#ri-268>).
+
+<a id="ri-267"></a>
+
+- [RI-267 — Flex aspect ratios use the wrong width or wrapping height](<Radiant_Issue_Ledger (fixed).md#ri-267>).
+
+<a id="ri-266"></a>
+
+- [RI-266 — A degenerate SVG ratio produces an infinite layout height](<Radiant_Issue_Ledger (fixed).md#ri-266>).
+
+<a id="ri-265"></a>
+
+### RI-265 — Viewer mode changes retain rebuilt presentation storage
+
+**Open, observed 2026-11-27.** Run `make test-viewer-navigation-memory` to
+replay 14 documents in one release viewer. The replay changes modes, scrolls
+highlighted source, and performs edits. Under the document lifetime and
+incremental presentation rules (D5.5.1–D5.5.3), retired occurrences should
+release their storage once live references are gone. Release allocator
+snapshots between rounds 2 and 4 showed about 29 MiB per round in the
+mixed replay before the validator fix, compared with about 6 MiB per round
+when replaying previews alone. The viewer's layout property pool,
+layout Input pool, and DOM document pool accounted for about 15 MiB per
+round.
+
+**Follow-up, 2026-11-27.** Editing event data now uses GC-owned values
+(D6.3.3). Reactive HTML insertion releases its temporary parse tree after
+publishing the copied occurrences. Copied element types build their field
+index once in the destination owner (D5.2.5). Together with RI-260, these
+changes reduced tracked live storage at the end of mixed round 5 from
+439 MiB to 405 MiB. The revised run still added 71.5 MiB between rounds 2
+and 5 after explicit collection. The active view-property pool gained
+17.2 MiB, the active DOM document pool 12.8 MiB, and the layout Input pool
+12.9 MiB. These are live allocation bytes. Layout retention remains open.
+
+The rich Markdown control traced most of the live view-property growth to
+obsolete editor subtrees pinned by template state. With model-keyed collection
+(S12.1.3v6, D6.3.3), the control adds about 5 KiB of view properties per round,
+down from 4 MiB. The style trace also found old generations referenced only
+by retired synthetic markers. View teardown now drops these bindings and
+releases the marker text. The mixed replay holds four stylesheet pools and
+adds about 0.1 MiB per round in the view-property pool. After the scoped
+Markdown parser change, tracked live growth from rounds 2 through 5 fell from
+25.1 MiB per round to 9.2 MiB, with 334 MiB live at round 5. The layout Input
+pool still adds about 4.3 MiB per round for copied type and field backing, and
+the main document's Input arena adds about 1.7 MiB. Their storage stays with
+the window after its replaced occurrences retire (D5.5.1–D5.5.3).
+The cascade scratch index now uses the subtree being styled instead of the
+window's lifetime allocation count. A focused test retires 512 elements and
+checks that styling the same retained subtree uses the same scratch space.
+The latest full release GTest reached round 21 of 24 before its 900-second
+viewer deadline. Its last process footprint was 202 MiB above the median of
+rounds 4–6. The 64 MiB growth budget remains in effect.
+
+<a id="ri-264"></a>
+
+### RI-264 — Nested row subgrids do not share their parent tracks
+
+**Open, 2026-11-27.** Figma Pricing uses three nested `subgrid` row axes.
+Its original overlap also exposed the independent flexible-track defect
+fixed by RI-263. With that defect repaired, both ordinary captures have
+legible first-row pricing panels and clear high severity (**D10.1.7**).
+The reduced authored structure still lays out as standalone grids in
+Radiant. Chromium shares eight row tracks and sizes the fixture to 580 px.
+The standalone control measures 472 px in both engines. Parser support,
+projection of intrinsic contributions to the parent, and shared used tracks
+belong to Input and Radiant (**D9.1.1v4 / D9.1.3v2**).
+[CSS Grid Level 2 §9](https://www.w3.org/TR/css-grid-2/#subgrids) ·
+[Round 223](../test/online/comparison/repairs.html#round-223).
+
+<a id="ri-263"></a>
+
+- [RI-263 — Indefinite grid tracks collapse or absorb their gutters](<Radiant_Issue_Ledger (fixed).md#ri-263>).
+
+<a id="ri-262"></a>
+
+- [RI-262 — Windowless file export skips native WebGL host acquisition](<Radiant_Issue_Ledger (fixed).md#ri-262>).
+
+<a id="ri-261"></a>
+
+- [RI-261 — A ratio-sized flex badge loses its descendant percentage height](<Radiant_Issue_Ledger (fixed).md#ri-261>).
+
+<a id="ri-260"></a>
+
+### RI-260 — Detached frame documents accumulate during viewer navigation
+
+**Open, observed 2026-11-26.** Repeatedly switch between a local HTML page
+and a text file in `lambda view`. The allocator report retains a separate
+set of document, view and Input pools for each retired frame. The frame
+teardown path transfers ownership to the parent's resources, which preserve
+storage for exposed wrappers and adopted nodes until parent close. Timely
+retirement needs to track those lifetime edges and wait until the relevant
+evaluators are quiescent (D5.5.1, D6.3.3). This affects the mixed-document
+memory gate. Transformed inline previews have a separate lifetime.
+
+**Partial fix, 2026-11-27.** Reclaim detached frames between evaluator turns
+when their storage has no external wrapper, adopted node, or shared script
+owner. Foreign wrappers provide a weakly tracked hold on their native
+document. Renderer-owned child documents no longer receive a second strong
+wrapper root in the parent evaluator. In a release replay of the same HTML
+and EPUB fixtures, the old viewer added two document pools each round. The
+revised viewer held three live document pools across all 24 rounds. A
+detached frame remained readable through a live wrapper, and the iframe
+retirement replay passed under forced garbage collection and freed-storage
+poisoning (D6.3.3).
+
+<a id="ri-259"></a>
+
+- [RI-259 — Cached previews repeat stylesheet, font and layout allocation](<Radiant_Issue_Ledger (fixed).md#ri-259>).
+
+<a id="ri-258"></a>
+
+- [RI-258 — A broad rebuild loses the input measurements of its completed container cascade](<Radiant_Issue_Ledger (fixed).md#ri-258>).
+
+<a id="ri-257"></a>
+
+- [RI-257 — SVG auto-height measurement ignores its resolved width](<Radiant_Issue_Ledger (fixed).md#ri-257>).
+
+<a id="ri-256"></a>
+
+- [RI-256 — Flex layout loses ratio-transferred height](<Radiant_Issue_Ledger (fixed).md#ri-256>).
+
+<a id="ri-255"></a>
+
+- [RI-255 — Shadow stylesheets skip their own host](<Radiant_Issue_Ledger (fixed).md#ri-255>).
+
+<a id="ri-254"></a>
+
+- [RI-254 — Nested flex height queries lose the percentage containing width](<Radiant_Issue_Ledger (fixed).md#ri-254>).
+
+<a id="ri-253"></a>
+
+- [RI-253 — Loading animation frames silently age held CSS effects](<Radiant_Issue_Ledger (fixed).md#ri-253>).
+
+<a id="ri-252"></a>
+
+- [RI-252 — Demo tile hover triggers a full catalog layout](<Radiant_Issue_Ledger (fixed).md#ri-252>).
+
+<a id="ri-251"></a>
+
+- [RI-251 — Widening a window retains narrow flex and grid geometry](<Radiant_Issue_Ledger (fixed).md#ri-251>).
+
+<a id="ri-250"></a>
+
+- [RI-250 — Demo window resizing repeats shadow and cascade work](<Radiant_Issue_Ledger (fixed).md#ri-250>).
+
+<a id="ri-249"></a>
+
+- [RI-249 — macOS clears the visible drawable during native resize](<Radiant_Issue_Ledger (fixed).md#ri-249>).
+
+<a id="ri-248"></a>
+
+- [RI-248 — Native resize presents a stale frame before repaint](<Radiant_Issue_Ledger (fixed).md#ri-248>).
+
+<a id="ri-247"></a>
+
+- [RI-247 — Collapsed table borders spill out of scroll panes](<Radiant_Issue_Ledger (fixed).md#ri-247>).
+
 <a id="ri-246"></a>
 
-- [RI-246 — The macOS caret query aborts for a hidden text control](<Radiant_Issue_Ledger (fixed).md#ri-246>).
+- [RI-246 — Rounded inline backgrounds spill past rectangular scroll clips](<Radiant_Issue_Ledger (fixed).md#ri-246>).
 
 <a id="ri-245"></a>
 
@@ -180,6 +388,12 @@ between input and the preview (**D10.1.2 / S12.1.3v6**).
 Both assertion outcomes reproduce with the original editor source and the
 pre-fix viewer. Evidence is under
 `temp/radiant-ten-under-five/doc-regression-control/`.
+
+**2026-11-28 update.** The markup-formats preview mismatch is fixed. The
+editor preview now renders the top-level Mark `meta.title` before the body,
+and `doc_editor_markup_formats` passes all 8 assertions. The tree-alignment
+replay still points to the input-owned test
+source path and remains open under **D9.1.1v4**.
 
 <a id="ri-214"></a>
 
@@ -859,26 +1073,28 @@ before/final PNGs, and canonical `test/online/snapshots/` logs for these labels.
 
 ### RI-052 — Existing empty-cell table baseline assertion differs by 10px
 
-**Status:** open, qualification limitation, 2026-11-12. Native ownership:
-**D9.1.1v4 / D9.1.3v2**. Cause is **unconfirmed**.
+**Status:** resolved, stale assertion corrected, 2026-11-28. Native ownership:
+**D9.1.1v4 / D9.1.3v2**. The failure was in the integration oracle.
 
 `SecondaryViewTest.TableBaselineUsesFirstNestedLineOrTheEmptyCellContentEdge`
 reports glyph baseline 33 versus empty-cell y 10 + expected 33 = 43, for both fixed
-and auto table layout. It reproduces identically with pagination source from
+and auto table layout. It reproduced identically with pagination source from
 `340ad59` and the current source, with all remaining linked objects and flags
-held constant. The full current Lambda paged inventory passes 504/505 after the
-new nested-width acceptance and owner font lookup correction.
+held constant. At that time, the full Lambda paged inventory passed 504/505
+after the new nested-width acceptance and owner font lookup correction.
 
 Evidence in Lambda-opus: `temp/paged-p7-integration/paged-final.xml`,
 `control/table.xml`, `control/receipt.json` and `updated-focused.xml`.
-This blocks an all-green legacy paged integration claim; it does not block the
-19 focused native fragmentation cases or the 947-pass owner baseline. Leave the
-assertion visible until its layout or coordinate-oracle cause is established.
+At the time of this reproduction, the mismatch blocked an all-green legacy
+paged integration claim; it did not block the 19 focused native fragmentation
+cases or the 947-pass owner baseline. Its layout or coordinate-oracle cause was
+still open then.
 
 Continuation evidence: Lambda-opus `temp/paged-advanced-integration/paged.xml`
 still passes 504/505, with the same failure messages as `paged-final.xml`.
-The expanded Radiant core now passes 60 focused cases, 988 owner-native cases
-(one disabled) and 4,481 layout cases (six skips). RI-052 stays open.
+The expanded Radiant core then passed 60 focused cases, 988 owner-native cases
+(one disabled) and 4,481 layout cases (six skips). RI-052 remained open at
+that checkpoint.
 
 Reservation/nested-row continuation: Lambda-opus
 `temp/paged-reservations-integration-final/paged.xml` remains 504/505 with the
@@ -890,12 +1106,19 @@ nested line and the image at a baseline 23px below the row top for fixed and
 auto table layout. Varying the empty cell's height from 0px to 60px increases
 the row height when needed while leaving that baseline at 23px in Chromium.
 Radiant's existing empty-cell change (`b17a3c0`) captures the content edge
-before the cell's height contributes to the row minimum. The Lambda
-integration assertion still derives its expected baseline from the empty
+before the cell's height contributed to the row minimum. The Lambda
+integration assertion then derived its expected baseline from the empty
 cell's specified 30px height plus its top border and padding. Native
-`EmptyTableCellDoesNotRaiseTextBaselineToSpecifiedHeight` passes.
-The integration assertion remains open under **D9.1.1v4 / D9.1.3v2**.
+`EmptyTableCellDoesNotRaiseTextBaselineToSpecifiedHeight` passed.
+The assertion remained open at this recheck and is resolved below (**D9.1.1v4 / D9.1.3v2**).
 Evidence: `temp/radiant-ledger-continuation/{browser-probes.log,table-native-before.log}`.
+
+**2026-11-28 resolution.** The browser and native evidence above agree that the
+empty cell's specified height does not raise the row baseline above the first
+nested line. The assertion used the empty cell's 30px height to derive a 33px
+offset, although the nested line remains 23px below the row top. The test now
+checks that row-relative baseline, and the fixed and auto cases pass. No layout
+change was needed (**CSS 2.1 §17.5.3**; ownership **D9.1.3v2**).
 
 <a id="ri-051"></a>
 
@@ -1041,28 +1264,54 @@ All 126 owner fragmentation tests pass. See
 
 ### RI-041 — URL-based CSS image masks have no paint consumer
 
-**Status:** OPEN feature gap, 2026-11-12. **Lambda blocker:** no; captures
-complete, but Craft's decorative paper shapes remain substantially different.
-Ownership **D9.1.1v4 / D9.1.3v2**, effects contract **D5.5.1 / CI-18**.
-The existing mask path is limited to radial gradients: MaskProp retains only
-a RadialGradient and resolve_css_mask_image calls resolve_radial_gradient_value;
-URL image masks are not retained or consumed. The support matrix already
-marks URL/linear/multilayer mask consumers open.
+**Status:** PARTIAL, 2026-11-26. Ownership **D9.1.1v4 / D9.1.3v2**.
+Effects contract **D5.5.1 / CI-18**.
 
-Craft's authored CSS uses mask-image:url(/images/decorations/paperSheetMask.svg)
-and paperShredTriangleFrontMask/paperShredBlobMask variants. These masks cut
-the torn edges in Chromium; Radiant paints the unmasked solid paper geometry.
-The inline logo-outline URL mask has the same unsupported image consumer.
-RI-040 restores the heading and product placement, isolating this remaining
-large decoration difference from the repaired flex sizing.
+**2026-11-26.** A single URL image mask now uses the stylesheet’s resource
+base, the existing image cache and computed tile geometry. The renderer
+flattens the subtree, then samples mask alpha or luminance in the owner’s
+coordinate space. An unavailable URL has zero coverage. The paint record
+uses a frame-local image handle, and the existing retained-list check
+rejects live mask payloads. Input shorthand and longhand admission is
+recorded in LI-126 (**D5.5.1 / D9.1.1v4 / D9.1.2v2 / D9.1.3v2**).
 
-Implementing resource-backed mask images, sizing/positioning and SVG mask
-rasterization/composition is outside this round's existing-bug milestone.
-No shape is substituted or hidden. Evidence: Lambda
+The callback fixture covers standalone SVG, WebP, repeat, rotation,
+stylesheet-relative resolution, shorthand priority, a failed request, and
+a live reset. The radial mask UI fixture passes all 30 assertions. Two
+ordinary Craft pairs restore the torn edges at 1.53% mean error. The same
+paint consumer reveals the Acme AE Onboarding panel and photograph in Dock’s
+saved authored DOM. Dock stays high pending a qualifying live frame.
+This iteration covers one URL or radial layer (**D10.1.7 / CI-18**).
+[Regression](../test/online/render_css_image_masks.test.cjs) ·
+[CSS Masking](https://www.w3.org/TR/css-masking-1/#the-mask-image) ·
+[Round 218](../test/online/comparison/repairs.html#round-218).
+
+**2026-11-26, layered image follow-up.** Standalone image and CSS gradient
+layers now use the shared tile and gradient geometry. Each layer computes
+alpha or luminance, and the compositor applies `add`, `subtract`,
+`intersect` or `exclude` from the bottom layer up. A `none` slot supplies
+zero coverage in a list. The layer properties retain their computed
+periods for inheritance (CI-18, **D5.5.1 / D9.1.3v2**).
+
+Both ordinary Draftbit pairs show the gradient confined to its border.
+Mean error falls from 14.36% to 0.75%. Local checks cover the four operators,
+mixed SVG and WebP resources, generated gradients, inheritance, and the
+borrowed display-list and transformed render paths. Chromium omits a leading
+`none` in the reduced intersection and drops an unused inherited mask
+position. Radiant follows the CSS Masking used-value
+rules. Inline and paged clips, and URLs selecting an SVG mask element,
+remain open (**D10.1.7 / CI-18**).
+[CSS Masking](https://www.w3.org/TR/css-masking-1/#layering) ·
+[Round 219](../test/online/comparison/repairs.html#round-219).
+
+**Original report, 2026-11-12.** `MaskProp` retained only a radial gradient.
+Craft's authored CSS used `mask-image:url(/images/decorations/paperSheetMask.svg)`
+and variants for the torn edges. Radiant painted solid paper geometry where
+Chromium used the masks. The inline wordmark outline also used a URL mask.
+RI-040 had restored the heading and product placement, isolating the
+decoration difference from the repaired flex sizing. Evidence includes
 temp/online-visual-round5/craft-static.html, round-six live capture
-temp/online-visual-round6/craft-live.png, and the unchanged browser reference
-test/online/snapshots/saas_landing_436-browser.png. This observation does not
-assign other pages' blank content to masking without their own evidence.
+temp/online-visual-round6/craft-live.png, and the paired browser reference.
 
 **Additional evidence, 2026-11-21:** Dock's `.hero-scene-foreground` repeats
 the full workspace photograph above its product panel (`z-index:1` on the
@@ -1122,6 +1371,17 @@ The current macOS replay and its platform lookup control are recorded at
 <a id="ri-031"></a>
 
 ### RI-031 — Dock captures after redundant work is removed; layout cost remains
+
+**2026-11-26.** The current release still reaches the 150-second native
+deadline. RI-258 fixes a redundant full container-query probe. Stable broad
+rebuilds in the profiling run take about 8.5–8.8 seconds, down from
+14.5–15.5 seconds, while the saved geometry and live stylesheet controls
+retain correct query results. Subsequent startup turns still repeatedly
+reach broad relational fallback. In one sequence each of five CSS custom
+property writes on the same editor container requests a full rebuild.
+The same 1000 ms capture window applies. Dock stays high
+(**D5.5.1 / D9.1.3v2 / D10.1.7**). See
+`temp/online-visual-round244/dock-candidate-profile/`.
 
 **Latest qualification129 — PARTIAL:** LI-089 evaluates the authored relative
 Oklch background; LI-090 reuses the existing all-only cascade cache for absent

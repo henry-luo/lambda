@@ -92,7 +92,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 | `rtf` | `lambda.doc.rtf` | Experimental reader | Parses RTF source into styled document elements; see [RTF support](Markup_Formats_Support.md#33-rtf) | Document viewer RTF preview |
 | `docx` | `lambda.doc.docx` | Library, bounded import and export profiles | Reads DOCX and writes editable Word packages from HTML elements (§15) | `lambda view report.docx`; `--archive` browses package parts |
 | `pptx` | `lambda.doc.pptx` | Library, initial editable import profile | Reads PowerPoint into slide elements, HTML handouts, text, metadata and diagnostics (§28) | `lambda view deck.pptx`; also `layout`, `render`, document-browser preview and Slides Open |
-| `xlsx` | `lambda.doc.xlsx` | Library, bounded workbook import | Reads spreadsheet values, formulas and basic styles into a semantic workbook (§31) | Sheet demo Open |
+| `xlsx` | `lambda.doc.xlsx` | Library, bounded workbook import and preview | Reads spreadsheet values, formulas and basic styles into a semantic workbook (§31) | `lambda view budget.xlsx`, Sheet demo Open |
 | `docbook` | `lambda.doc.docbook` | Library, initial core HTML profile | Native port of xslTNG 2.8.5 for DocBook 5.x HTML/CSS, including chunked publications (§16) | `lambda view file.xml` recognizes DocBook roots; scripts export HTML publications |
 | `pdf` | `lambda.doc.pdf.pdf` | Library, experimental | Renders PDF pages as SVG, and whole documents as HTML | `lambda view`, `layout` and `render` on `.pdf` |
 | `eps` | `lambda.doc.eps.eps` | Library, initial vector profile | Interprets EPS PostScript and produces standalone SVG | `convert -t svg`, `view`, `layout` and `render` on `.eps`/`.epsi` |
@@ -1717,7 +1717,9 @@ centered largest-side wrapping, and top/bottom wrapping at paragraph top.
 Signed column-start and paragraph offsets with square wrapping on both sides
 use CSS float margins (D9.3.4); this remains a flowing approximation of Word.
 No-wrap column/paragraph anchors with explicit offsets retain their extents
-and front/behind-text layer order. Inset raster crops keep their saved frames.
+and front/behind-text layer order. Stretch-filled raster images support signed
+source-rectangle offsets. Insets crop the image and outsets leave transparent
+space within its saved frame.
 Flat DrawingML rectangles support validated solid RGB/theme fills with no
 outline; a supported modern compatibility branch takes precedence over its
 fallback. Decorative rectangles are hidden from accessibility text (S1.8,
@@ -1728,6 +1730,10 @@ table grid widths, cell shading and borders, row heights, and page size/margins.
 Values are converted from OOXML units into CSS; the named font must be
 available to the host font resolver for a matching face. CSS remains a flow
 preview and does not reproduce Word's full layout engine.
+In a single-section document with a known paper size, the viewer places no-wrap
+drawings anchored to the page in the first body paragraph, clipped at the paper
+edges. Anchors that need source pagination retain their placement diagnostics
+(D9.3.4).
 Footnotes, endnotes and comments become numbered links and appended ordered
 sections, with each kind numbered in first-reference order and repeated
 references sharing one entry (D9.3.4). Links in annotations resolve against
@@ -1741,7 +1747,8 @@ markers and no Word pagination guarantee.
 Content controls display their saved `sdtContent` at inline, block, row and
 cell boundaries, preserving surrounding formatting and reading order. Control
 properties are editing metadata; bindings and placeholder definitions are not
-evaluated. Footnote/endnote parts containing only separator definitions do not
+evaluated. Empty header and footer controls do not generate unsupported-story
+warnings. Footnote/endnote parts containing only separator definitions do not
 represent document notes and are excluded from annotation content.
 Simple and complex fields display their saved text and links, including cached
 TOC/page-reference results. Instructions are never executed or refreshed
@@ -1760,8 +1767,8 @@ slots, preserving the alignment of financial tables (D9.3.4).
 Diagnostics have `{severity, code, part, message}`. Unsupported visible
 constructs are reported. Headers/footers, comment ranges/author metadata, custom
 note numbering, revision semantics,
-field execution, other chart types, shapes beyond flat rectangles, equations, page-relative floating
-placement,
+field execution, other chart types, shapes beyond flat rectangles, equations,
+page-relative floating placement beyond the viewer's first-paragraph profile,
 encrypted documents, and `.docm` are outside this profile. External resources
 are never fetched; emitted hyperlink schemes are validated. XML parts use
 strict UTF-8 XML with significant whitespace and reject DTDs and embedded NULs.
@@ -5160,12 +5167,18 @@ workbook.sheets[0].cells
 `convert(source)` and `load(source)` return `{title, date1904, sheets, defined_names,
 metadata, diagnostics}`. Defined names retain their formula and optional worksheet scope. Each sheet has a title, part path, sparse zero-based cells, column
 width ranges, row heights, merged ranges, hidden dimensions, frozen prefixes,
-split-pane geometry and selection, conditional rules and diagnostics. Cells expose their coordinates, XLSX
+split-pane geometry and selection, conditional rules and diagnostics. Hidden
+and very hidden sheets carry `hidden: true`. Cells expose their coordinates, XLSX
 type, typed value, raw value, formula, formula type and range, cached-value presence,
 and the supported style projection. Rich shared/inline text is flattened. The
 reader accepts ordinary non-macro XLSX workbooks and rejects invalid or missing
 package parts. Diagnostics report selected unsupported features; their absence
 does not guarantee a lossless import.
+
+The viewer mounts the visible rows and columns of a read-only worksheet grid
+(**D9.3.4**). It shows visible worksheet tabs, saved formula results, supported
+cell styles, row and column sizes, and merged ranges. The Sheet demo uses the
+same cell formatting helpers.
 
 The [Sheet demo](../test/demo/sheet/README.md) converts that model to its own
 editable workbook and opens it through **Open**. It supports at most 50 sheets,

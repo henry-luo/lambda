@@ -1,5 +1,8 @@
 // Shared edge path and sampling geometry for paint and label placement.
 
+pub let default_edge_width = 1.5
+pub let marker_height = 8.0
+
 fn distance(a, b) => math.sqrt((b.x - a.x) ** 2.0 + (b.y - a.y) ** 2.0)
 
 fn midpoint(a, b) => {x: (a.x + b.x) / 2.0, y: (a.y + b.y) / 2.0}
@@ -62,6 +65,18 @@ pub fn path_data(edge) any^ =>
 
 fn lerp(a, b, t) => {x: a.x + (b.x - a.x) * t,
   y: a.y + (b.y - a.y) * t}
+
+pub fn corner_waypoints(points, radius) any^ {
+  if (len(points) < 3) points else [points[0],
+    // Bound each rounded corner so a smooth curve stays inside its clear lane.
+    for (i in 1 to (len(points) - 2),
+      let before = distance(points[i - 1], points[i]),
+      let after = distance(points[i], points[i + 1]),
+      let in_fraction = min([radius, before / 3.0]) / max([0.001, before]),
+      let out_fraction = min([radius, after / 3.0]) / max([0.001, after]))
+      *[lerp(points[i], points[i - 1], in_fraction), points[i],
+        lerp(points[i], points[i + 1], out_fraction)], points[len(points) - 1]]
+}
 
 fn quadratic(segment, t) any^ {
   let first = lerp(segment.start, segment.control, t);

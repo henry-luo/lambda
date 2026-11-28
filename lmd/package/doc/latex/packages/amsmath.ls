@@ -67,27 +67,29 @@ fn command_letter(ch) {
 }
 
 fn command_end(source, i) any^ {
-    if (i >= len(source) or not command_letter(slice(source, i, i + 1))) i
+    if (i >= len(source) or not command_letter(source[i])) i
     else command_end(source, i + 1)
 }
 
 fn expand_operators(source, definitions, i, result) any^ {
     if (i >= len(source)) result
-    else if (slice(source, i, i + 1) != "\\")
-        expand_operators(source, definitions, i + 1,
-            result ++ slice(source, i, i + 1))
     else {
-        let finish = command_end(source, i + 1)
-        let command = slice(source, i, finish)
-        let declared = util.lookup(definitions, command)
-        let replacement = if (declared != null) "\\operatorname{" ++ declared ++ "}" else command
-        expand_operators(source, definitions, finish, result ++ replacement)
+        let ch = source[i]
+        if (ch != "\\") expand_operators(source, definitions, i + 1, result ++ ch)
+        else {
+            let finish = command_end(source, i + 1)
+            let command = slice(source, i, finish)
+            let declared = util.lookup(definitions, command)
+            let replacement = if (declared != null) "\\operatorname{" ++ declared ++ "}" else command
+            expand_operators(source, definitions, finish, result ++ replacement)
+        }
     }
 }
 
 // Row and cell separators inside nested environments belong to that environment.
 fn environment_delimiter(source, i) any^ {
-    let rest = slice(source, i, len(source));
+    // Only the longer delimiter prefix is needed to classify this control sequence.
+    let rest = slice(source, i, i + 7);
     let opening = starts_with(rest, "\\begin{");
     let closing = starts_with(rest, "\\end{");
     if (not opening and not closing) null
@@ -101,13 +103,12 @@ fn environment_delimiter(source, i) any^ {
 fn split_tex(source, rows, i, depth, escaped, start, acc, environments = 0) any^ {
     if (i >= len(source)) acc ++ [slice(source, start, len(source))]
     else {
-        let ch = slice(source, i, i + 1)
-        let pair = slice(source, i, i + 2)
+        let ch = source[i]
         let environment = if (not escaped and ch == "\\") environment_delimiter(source, i)^ else null;
         if (escaped) split_tex(source, rows, i + 1, depth, false, start, acc, environments)
         else if (environment != null) split_tex(source, rows, environment.end, depth, false, start, acc,
             max(0, environments + environment.change))
-        else if (rows and depth == 0 and environments == 0 and pair == "\\\\")
+        else if (rows and ch == "\\" and depth == 0 and environments == 0 and source[i + 1] == "\\")
             split_tex(source, rows, i + 2, depth, false, i + 2,
                 acc ++ [slice(source, start, i)], environments)
         else if (ch == "\\") split_tex(source, rows, i + 1, depth, true, start, acc, environments)
@@ -120,7 +121,10 @@ fn split_tex(source, rows, i, depth, escaped, start, acc, environments = 0) any^
     }
 }
 
-fn cell_expression(source, operators) any^ => expand_operators(trim(source), operators, 0, "")
+fn cell_expression(source, operators) any^ {
+    let expression = trim(source)
+    if (len(operators) == 0) expression else expand_operators(expression, operators, 0, "")
+}
 
 fn parse_cell(expression) =>
     if (expression == "") null else parse(expression, {type: "math", flavor: "latex"}) ^ { null }
@@ -189,19 +193,19 @@ let ANNOTATIONS = [
     {prefix: "\\nonumber", kind: "suppress", value: false}
 ]
 
-fn annotation_at(source, i, candidate) any^ {
+fn annotation_at(rest, candidate = 0) any^ {
     if (candidate >= len(ANNOTATIONS)) null
     else {
         let annotation = ANNOTATIONS[candidate]
-        if (starts_with(slice(source, i, len(source)), annotation.prefix)) annotation
-        else annotation_at(source, i, candidate + 1)
+        if (starts_with(rest, annotation.prefix)) annotation
+        else annotation_at(rest, candidate + 1)
     }
 }
 
 fn brace_close(source, i, depth, escaped) any^ {
     if (i >= len(source)) null
     else {
-        let ch = slice(source, i, i + 1)
+        let ch = source[i]
         if (escaped) brace_close(source, i + 1, depth, false)
         else if (ch == "\\") brace_close(source, i + 1, depth, true)
         else if (ch == "{") brace_close(source, i + 1, depth + 1, false)
@@ -211,41 +215,41 @@ fn brace_close(source, i, depth, escaped) any^ {
     }
 }
 
-fn strip_annotations(source, i, depth, st, environments = 0) any^ {
-    if (i >= len(source)) {*:st, math: trim(st.math)}
+fn strip_annotations(source, i, depth, st, environments = 0, start = 0) any^ {
+    // Copy whole math spans between annotations instead of rebuilding each row one character at a time.
+    if (i >= len(source)) {*:st, math: trim(st.math ++ slice(source, start, i))}
     else {
-        let ch = slice(source, i, i + 1)
+        let ch = source[i]
         let environment = if (ch == "\\") environment_delimiter(source, i)^ else null;
-        let annotation = if (depth == 0 and environments == 0) annotation_at(source, i, 0) else null
-        let escaped_brace = ch == "\\" and i + 1 < len(source) and
-            (slice(source, i + 1, i + 2) == "{" or slice(source, i + 1, i + 2) == "}")
+        let annotation = if (ch == "\\" and depth == 0 and environments == 0)
+            annotation_at(slice(source, i, len(source))) else null
+        let following = if (ch == "\\") source[i + 1] else null
         if (environment != null)
-            strip_annotations(source, environment.end, depth,
-                {*:st, math:st.math ++ slice(source, i, environment.end)}, max(0, environments + environment.change))
-        else if (annotation == null and (escaped_brace or (ch == "\\" and slice(source, i + 1, i + 2) == "\\")))
-            strip_annotations(source, i + 2, depth,
-                {*:st, math: st.math ++ slice(source, i, i + 2)}, environments)
+            strip_annotations(source, environment.end, depth, st, max(0, environments + environment.change), start)
+        else if (annotation == null and (following == "{" or following == "}" or following == "\\"))
+            strip_annotations(source, i + 2, depth, st, environments, start)
         else if (annotation == null) {
             let next_depth = if (ch == "{") depth + 1
                 else if (ch == "}" and depth > 0) depth - 1 else depth
-            strip_annotations(source, i + 1, next_depth,
-                {*:st, math: st.math ++ ch}, environments)
+            strip_annotations(source, i + 1, next_depth, st, environments, start)
         }
-        else if (not annotation.value)
-            strip_annotations(source, i + len(annotation.prefix), depth, {*:st, suppress: true}, environments)
         else {
+            let prefix = {*:st, math: st.math ++ slice(source, start, i)}
             let value_begin = i + len(annotation.prefix)
-            let closing = brace_close(source, value_begin, 1, false)
-            if (closing == null)
-                {*:st, error: "Unterminated amsmath annotation"}
+            if (not annotation.value)
+                strip_annotations(source, value_begin, depth, {*:prefix, suppress: true}, environments, value_begin)
             else {
-                let value = trim(slice(source, value_begin, closing))
-                let duplicate = if (annotation.kind == "label") st.label != null else st.tag != null
-                let next = if (annotation.kind == "label") {*:st, label: value}
-                    else {*:st, tag: value, bare_tag: annotation.kind == "bare-tag"}
-                strip_annotations(source, closing + 1, depth,
-                    if (duplicate or value == "") {*:next, error: "Duplicate or empty amsmath annotation"}
-                    else next, environments)
+                let closing = brace_close(source, value_begin, 1, false)
+                if (closing == null) {*:prefix, error: "Unterminated amsmath annotation"}
+                else {
+                    let value = trim(slice(source, value_begin, closing))
+                    let duplicate = if (annotation.kind == "label") st.label != null else st.tag != null
+                    let next = if (annotation.kind == "label") {*:prefix, label: value}
+                        else {*:prefix, tag: value, bare_tag: annotation.kind == "bare-tag"}
+                    strip_annotations(source, closing + 1, depth,
+                        if (duplicate or value == "") {*:next, error: "Duplicate or empty amsmath annotation"}
+                        else next, environments, closing + 1)
+                }
             }
         }
     }
@@ -295,7 +299,7 @@ fn alignat_body(source, tag) any^ {
 fn valid_ieee_columns(columns, index) any^ {
     if (index >= len(columns)) index > 0
     else {
-        let ch = slice(columns, index, index + 1)
+        let ch = columns[index]
         if (ch == "l" or ch == "c" or ch == "r")
             valid_ieee_columns(columns, index + 1)
         else false

@@ -13,7 +13,8 @@
     {"type": "click", "target": {"selector": ".property-source"}},
     {"type": "key_combo", "key": "/", "mods_str": "super"},
     {"type": "assert_count", "target": {"selector": ".property-grid .property-value"}, "count": 4},
-    {"type": "click", "target": {"selector": ".property-grid .property-delete", "index": 2}},
+    {"type": "click", "target": {"selector": "#grid-cell-0-1"}, "button": 1},
+    {"type": "click", "target": {"selector": "#property-grid-menu [aria-label='Remove field']"}},
     {"type": "assert_text", "target": {"selector": ".property-status"}, "contains": "change the detected CSV delimiter"},
     {"type": "assert_count", "target": {"selector": ".property-grid .property-value"}, "count": 4},
     {"type": "assert_file", "path": "temp/edit-ui/edit_csv_detected_delimiter.csv", "equals": "\"red, green, blue\"\tsecond\none\ttwo\n"}

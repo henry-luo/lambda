@@ -1,0 +1,222 @@
+[{
+    text: "\\textbackslash{}long macro:\\#1->\\textbackslash{}tex\\_expanded:D \\{\\#1\\}",
+    messages: [],
+    diagnostics: []
+  }, {
+    text: "\\textbackslash{}meaning",
+    messages: [],
+    diagnostics: []
+  }, {
+    text: "\\textbackslash{}detokenize",
+    messages: [],
+    diagnostics: []
+  }, {
+    text: "\\textbackslash{}long macro:\\#1->\\textbackslash{}exp\\_after:wN \\textbackslash{}\\_\\_token\\_if\\_macro\\_p:w \\textbackslash{}token\\_to\\_meaning:N \\#1ma:\\textbackslash{}s\\_\\_token\\_stop \\textbackslash{}exp\\_end: ",
+    messages: [],
+    diagnostics: []
+  }, {
+    text: "\\textbackslash{}long macro:\\#1->\\textbackslash{}exp\\_after:wN \\textbackslash{}\\_\\_token\\_if\\_macro\\_p:w \\textbackslash{}token\\_to\\_meaning:N \\#1ma:\\textbackslash{}s\\_\\_token\\_stop \\textbackslash{}exp\\_end: \\textbackslash{}use:n \\textbackslash{}use\\_none:n ",
+    messages: [],
+    diagnostics: []
+  }, {
+    text: "\\textbackslash{}long macro:\\#1->\\textbackslash{}exp\\_after:wN \\textbackslash{}\\_\\_token\\_if\\_macro\\_p:w \\textbackslash{}token\\_to\\_meaning:N \\#1ma:\\textbackslash{}s\\_\\_token\\_stop \\textbackslash{}exp\\_end: \\{\\}",
+    messages: [],
+    diagnostics: []
+  }, {
+    text: "\\textbackslash{}long macro:\\#1->\\textbackslash{}exp\\_after:wN \\textbackslash{}\\_\\_token\\_if\\_macro\\_p:w \\textbackslash{}token\\_to\\_meaning:N \\#1ma:\\textbackslash{}s\\_\\_token\\_stop \\textbackslash{}exp\\_end: \\textbackslash{}c\\_true\\_bool \\textbackslash{}c\\_false\\_bool ",
+    messages: [],
+    diagnostics: []
+  }, {
+    text: "\\textbackslash{}long macro:\\#1ma\\#2:\\#3\\textbackslash{}s\\_\\_token\\_stop ->\\textbackslash{}str\\_if\\_eq:nnTF \\{\\#2\\}\\{cro\\}\\{\\textbackslash{}prg\\_return\\_true: \\}\\{\\textbackslash{}prg\\_return\\_false: \\}",
+    messages: [],
+    diagnostics: []
+  }, {
+    text: "\\textbackslash{}long macro:\\#1macro:\\#2->\\#3\\textbackslash{}s\\_\\_kernel\\_stop \\#4->\\#4\\{\\#1\\}\\{\\#2\\}\\{\\#3\\}",
+    messages: [],
+    diagnostics: []
+  }, {
+    text: "\\textbackslash{}long macro:\\#1->\\textbackslash{}token\\_if\\_macro:NTF \\#1\\{\\textbackslash{}exp\\_after:wN \\textbackslash{}\\_\\_kernel\\_prefix\\_arg\\_replacement:wN \\textbackslash{}token\\_to\\_meaning:N \\#1\\textbackslash{}s\\_\\_kernel\\_stop \\textbackslash{}use\\_i:nnn \\}\\{\\textbackslash{}scan\\_stop: \\}",
+    messages: [],
+    diagnostics: []
+  }, {
+    text: "\\textbackslash{}long macro:\\#1->\\textbackslash{}token\\_if\\_macro:NTF \\#1\\{\\textbackslash{}exp\\_after:wN \\textbackslash{}\\_\\_kernel\\_prefix\\_arg\\_replacement:wN \\textbackslash{}token\\_to\\_meaning:N \\#1\\textbackslash{}s\\_\\_kernel\\_stop \\textbackslash{}use\\_ii:nnn \\}\\{\\textbackslash{}scan\\_stop: \\}",
+    messages: [],
+    diagnostics: []
+  }, {
+    text: "\\textbackslash{}long macro:\\#1->\\textbackslash{}token\\_if\\_macro:NTF \\#1\\{\\textbackslash{}exp\\_after:wN \\textbackslash{}\\_\\_kernel\\_prefix\\_arg\\_replacement:wN \\textbackslash{}token\\_to\\_meaning:N \\#1\\textbackslash{}s\\_\\_kernel\\_stop \\textbackslash{}use\\_iii:nnn \\}\\{\\textbackslash{}scan\\_stop: \\}",
+    messages: [],
+    diagnostics: []
+  }, {
+    text: "\\textbackslash{}protected\\textbackslash{}long macro:\\#1\\#2->\\textbackslash{}cs\\_if\\_exist:NTF \\#1\\{\\#2\\}\\{\\textbackslash{}msg\\_error:nne \\{kernel\\}\\{variable-not-defined\\}\\{\\textbackslash{}token\\_to\\_str:N \\#1\\}\\}",
+    messages: [],
+    diagnostics: []
+  }, {
+    text: "\\textbackslash{}protected\\textbackslash{}long macro:\\#1\\#2\\#3\\#4->\\textbackslash{}\\_\\_kernel\\_chk\\_defined:NT \\#1\\{\\textbackslash{}exp\\_args:Nf \\textbackslash{}tl\\_if\\_empty:nTF \\{\\textbackslash{}cs\\_prefix\\_spec:N \\#1\\textbackslash{}cs\\_parameter\\_spec:N \\#1\\}\\{\\textbackslash{}tl\\_set:Ne \\textbackslash{}l\\_\\_tl\\_internal\\_a\\_tl \\{\\#3\\}\\textbackslash{}tl\\_if\\_eq:NNTF \\#1\\textbackslash{}l\\_\\_tl\\_internal\\_a\\_tl \\{\\#4\\}\\{\\textbackslash{}msg\\_error:nneeee \\{kernel\\}\\{bad-type\\}\\{\\textbackslash{}token\\_to\\_str:N \\#1\\}\\{\\textbackslash{}tl\\_to\\_str:N \\#1\\}\\{\\#2\\}\\{\\textbackslash{}tl\\_to\\_str:N \\textbackslash{}l\\_\\_tl\\_internal\\_a\\_tl \\}\\}\\}\\{\\textbackslash{}msg\\_error:nneee \\{kernel\\}\\{bad-type\\}\\{\\textbackslash{}token\\_to\\_str:N \\#1\\}\\{\\textbackslash{}token\\_to\\_meaning:N \\#1\\}\\{\\#2\\}\\}\\}",
+    messages: [],
+    diagnostics: []
+  }, {
+    text: "\\textbackslash{}protected\\textbackslash{}long macro:->\\textbackslash{}exp\\_args:NNe \\textbackslash{}tl\\_set:Nn ",
+    messages: [],
+    diagnostics: []
+  }, {
+    text: "macro:->",
+    messages: [],
+    diagnostics: []
+  }, {
+    text: "Y",
+    messages: [],
+    diagnostics: []
+  }, {
+    text: "Y",
+    messages: [],
+    diagnostics: []
+  }, {
+    text: "ab",
+    messages: [],
+    diagnostics: []
+  }, {
+    text: "ABC",
+    messages: [],
+    diagnostics: []
+  }, {
+    text: "\\def\\foo#1A#2B{Z#1#2}/\\#1A\\#2B/Z\\#1\\#2",
+    messages: [],
+    diagnostics: []
+  }, {
+    text: "\\long\\protected\\def\\foo P#1A#2B{Z#1#2}\\textbackslash{}protected\\textbackslash{}long /P\\#1A\\#2B/Z\\#1\\#2",
+    messages: [],
+    diagnostics: []
+  }, {
+    text: "//",
+    messages: [],
+    diagnostics: []
+  }, {
+    text: "N",
+    messages: [],
+    diagnostics: []
+  }, {
+    text: "\\def\\foo{abc}Y",
+    messages: [],
+    diagnostics: []
+  }, {
+    text: "N",
+    messages: [],
+    diagnostics: []
+  }, {
+    text: "\\def\\foo{abc}macro:->\\textbackslash{}c\\_true\\_bool ",
+    messages: [],
+    diagnostics: []
+  }, {
+    text: "\\def\\foo{abc}YESTAIL",
+    messages: [],
+    diagnostics: []
+  }, {
+    text: "\\def\\foo{abc}YESTAIL",
+    messages: [],
+    diagnostics: []
+  }, {
+    text: "\\def\\foo{abc}\\def\\bar{abc}YESTAIL",
+    messages: [],
+    diagnostics: []
+  }, {
+    text: "\\def\\foo{abc}{YES}macro:->",
+    messages: [],
+    diagnostics: []
+  }, {
+    text: "\\def\\foo{A}macro:->AB",
+    messages: [],
+    diagnostics: []
+  }, {
+    text: "\\def\\foo{A}{}macro:->",
+    messages: [],
+    diagnostics: []
+  }, {
+    text: "a b\\textbackslash{}foo \\{é\\}",
+    messages: [],
+    diagnostics: []
+  }, {
+    text: "\\long\\def\\foo#1A{Z#1}long /\\#1A/Z\\#1",
+    messages: [],
+    diagnostics: []
+  }, {
+    text: "\\protected\\def\\foo#1{Z#1}!protected /\\#1/Z\\#1",
+    messages: [],
+    diagnostics: []
+  }, {
+    text: "A\\textbackslash{}ExplSyntaxOff ",
+    messages: [],
+    diagnostics: [{
+        code: "tex-missing-brace",
+        message: "Missing { inserted",
+        offset: 26,
+        line: 1
+      }, {
+        code: "tex-runaway",
+        message: "File ended while scanning a text",
+        offset: 27
+      }]
+  }, {
+    text: "\\textbackslash{}foo \\textbackslash{}ExplSyntaxOff ",
+    messages: [],
+    diagnostics: [{
+        code: "tex-missing-brace",
+        message: "Missing { inserted",
+        offset: 25,
+        line: 1
+      }, {
+        code: "tex-runaway",
+        message: "File ended while scanning a text",
+        offset: 29
+      }]
+  }, {
+    text: "\\textbackslash{}ExplSyntaxOff ",
+    messages: [],
+    diagnostics: [{
+        code: "tex-runaway",
+        message: "File ended while scanning a text",
+        offset: 26
+      }]
+  }, {
+    text: "abc\\textbackslash{}ExplSyntaxOff ",
+    messages: [],
+    diagnostics: [{
+        code: "tex-runaway",
+        message: "File ended while scanning a text",
+        offset: 29
+      }]
+  }, {
+    text: "a\\{b\\}\\textbackslash{}ExplSyntaxOff ",
+    messages: [],
+    diagnostics: [{
+        code: "tex-runaway",
+        message: "File ended while scanning a text",
+        offset: 30
+      }]
+  }, {
+    text: "a",
+    messages: [],
+    diagnostics: [{
+        code: "tex-runaway",
+        message: "File ended while scanning a text",
+        offset: 26
+      }]
+  }, {
+    text: "A\\textbackslash{}ExplSyntaxOff ",
+    messages: [],
+    diagnostics: [{
+        code: "tex-missing-brace",
+        message: "Missing { inserted",
+        offset: 34,
+        line: 1
+      }, {
+        code: "tex-runaway",
+        message: "File ended while scanning a text",
+        offset: 35
+      }]
+  }]
+[true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true]
+["__msg_interrupt:NnnnN", "__msg_interrupt:NnnnN", "__msg_interrupt:NnnnN"]
+{
+  lookahead_guard: "expl3 general text lookahead",
+  custom_text: "CUSTOM/CUSTOM"
+}

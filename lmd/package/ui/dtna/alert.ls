@@ -60,6 +60,6 @@ pub let css = "
 .dtna-alert-with-description{align-items:flex-start;padding:20px 24px}.dtna-alert-with-description>.dtna-alert-icon{margin-inline-end:12px;font-size:var(--dtna-font-size-heading-3)}
 .dtna-alert-with-description .dtna-alert-title{margin-bottom:8px;font-size:calc(var(--dtna-font-size) + 2px)}
 .dtna-alert-description{font-size:var(--dtna-font-size);line-height:var(--dtna-line-height)}.dtna-alert-description>pre{margin:0;padding:0}
-.dtna-alert-actions{margin-inline-start:8px}.dtna-alert-close{display:inline-flex;align-items:center;justify-content:center;flex:none;margin-inline-start:8px;padding:0;border:0;background:transparent;overflow:hidden;font:inherit;font-size:12px;line-height:12px;color:var(--dtna-text-secondary);cursor:pointer}
+.dtna-alert-actions{display:flex;align-items:center;margin-inline-start:8px}.dtna-alert-close{display:inline-flex;align-items:center;justify-content:center;flex:none;margin-inline-start:8px;padding:0;border:0;background:transparent;overflow:hidden;font:inherit;font-size:12px;line-height:12px;color:var(--dtna-text-secondary);cursor:pointer}
 .dtna-alert-close:hover{color:var(--dtna-text)}.dtna-alert-close:focus-visible{outline:2px solid var(--dtna-primary);outline-offset:2px}
 "

@@ -1,6 +1,7 @@
-// Mermaid sequence timeline rendering for the chart-owned diagram family.
+// Sequence timeline rendering for the chart-owned diagram family.
 
 import model: lambda.graph.model
+import text: .text
 
 fn canonical_chart(source) {
   // The input parser uses a source graph envelope; chart rendering consumes
@@ -33,9 +34,47 @@ fn metrics(nodes) {
 
 fn sequence_font() => "Trebuchet MS, Verdana, Arial, sans-serif"
 
+fn d2_metrics(nodes, events) any^ {
+  let font = "Arial, sans-serif";
+  let ids = [for (node in nodes) string(node.id)];
+  let actor_text = text.measure([for (node in nodes) string(model.label_source(node, node.id))],
+    text.style({font_family:font}, "label", 18))^;
+  let message_text = text.measure([for (edge in events) string(model.label_source(edge, ""))],
+    text.style({font_family:font, label_font_style:"italic"}, "label", 17))^;
+  let box_width = max([114, for (metric in actor_text) ceil(metric.width) + 30]);
+  let widths = [for (metric in message_text) ceil(max([metric.width, text.span(metric)]))];
+  let spans = [for (i, edge in events) {
+    let a = index_of(ids, string(edge.from));
+    let b = index_of(ids, string(edge.to));
+    {left:min([a,b]), right:max([a,b]), width:widths[i]}
+  }];
+  // Allocate label space across the gaps a message crosses, in actor order.
+  let gaps = [for (column in 0 to len(nodes) - 2) max([box_width + 124,
+    for (span in spans where span.left <= column and column < span.right)
+      (span.width + 64) / (span.right - span.left),
+    for (span in spans where span.left == column and span.right == column) span.width + 30])];
+  let first_x = box_width / 2 + 19;
+  var centers = if (len(nodes) == 0) [] else [first_x]
+  var x = first_x
+  var i = 0
+  while (i < len(gaps)) {
+    x = x + ceil(gaps[i])
+    centers = [*centers, x]
+    i = i + 1
+  };
+  let loop_right = [for (span in spans where span.left == span.right)
+    centers[span.left] + max([98, span.width + 16]) + 19];
+  {d2:true, centers:centers, widths:widths, first_x:first_x,
+    width:max([box_width + 38, x + box_width / 2 + 19, *loop_right]),
+    box_width:box_width, box_height:76, top_y:55, font_size:17, font:font,
+    line_color:"#1027bf", text_color:"#11172e", label_color:"#5e6579",
+    colors:[{fill:"#ebeffb", stroke:"#1027bf"}]}
+}
+
 fn participant_x(nodes, id, style) any^ {
   let matches = [for (i, node in nodes where ((string(node.id) == string(id)) ^ { false })) i];
-  style.first_x + (if (len(matches) > 0) matches[0] else 0) * style.column_gap
+  let index = matches[0] or 0;
+  if (style.d2) style.centers[index] else style.first_x + index * style.column_gap
 }
 
 fn note_lines(value) => split(replace(replace(string(value), "<br/>", "\n"),
@@ -96,14 +135,17 @@ fn participant_box(node, index, x, y, style) {
   let color = style.colors[index % len(style.colors)];
   let label = string(model.label_source(node, node.id));
   [
-    <rect x: x - style.box_width / 2 + 2, y: y + 3,
+    if (not style.d2) <rect x: x - style.box_width / 2 + 2, y: y + 3,
       width: style.box_width, height: style.box_height, rx: 6,
-      fill: "#d8d8d8", opacity: 0.55>,
+      fill: "#d8d8d8", opacity: 0.55> else null,
     <rect x: x - style.box_width / 2, y: y,
-      width: style.box_width, height: style.box_height, rx: 6,
-      fill: color.fill, stroke: color.stroke, 'stroke-width': 1.7>,
+      width: style.box_width, height: style.box_height, rx: if (style.d2) 0 else 6,
+      fill: if (style.d2) node.fill or color.fill else color.fill,
+      stroke: if (style.d2) node.stroke or color.stroke else color.stroke,
+      'stroke-width': if (style.d2) node["stroke-width"] or 2 else 1.7,
+      'stroke-dasharray': if (style.d2) node["stroke-dasharray"] else null>,
     <text x: x, y: y + style.box_height / 2 + 5, 'text-anchor': "middle",
-      'font-family': sequence_font(), 'font-size': style.font_size + 1,
+      'font-family': style.font or sequence_font(), 'font-size': style.font_size + 1,
       fill: style.text_color, label>
   ]
 }
@@ -112,20 +154,58 @@ fn participant(node, index, nodes, bottom_y, style) {
   let x = participant_x(nodes, node.id, style);
   [
     <line x1: x, y1: style.top_y + style.box_height, x2: x, y2: bottom_y,
-      stroke: style.line_color, 'stroke-width': 1.5>,
+      stroke: if (style.d2) node.stroke or style.line_color else style.line_color,
+      'stroke-width': if (style.d2) node["stroke-width"] or 2 else 1.5,
+      'stroke-dasharray': if (style.d2) node["stroke-dasharray"] or "14 12" else null>,
     *participant_box(node, index, x, style.top_y, style),
-    *participant_box(node, index, x, bottom_y, style)
+    *(if (style.d2) [] else participant_box(node, index, x, bottom_y, style))
   ]
 }
 
-fn message(edge, nodes, y, style) any^ {
+fn arrow(tip, y, wing, color, open_arrow = false) =>
+  <path d: "M " ++ string(tip + wing) ++ " " ++ string(y - 5) ++
+    " L " ++ string(tip) ++ " " ++ string(y) ++
+    " L " ++ string(tip + wing) ++ " " ++ string(y + 5) ++ (if (open_arrow) "" else " z"),
+    fill: if (open_arrow) "none" else color, stroke: if (open_arrow) color else null,
+    'stroke-width': if (open_arrow) 1.2 else null>
+
+fn d2_message(edge, x1, x2, y, label, label_width, style) {
+  let loop = x1 == x2;
+  let direction = if (x2 > x1) 1 else -1;
+  let color = edge.stroke or style.line_color;
+  let line_width = edge["stroke-width"] or 2;
+  let bend = x1 + 98;
+  let label_x = if (loop) x1 + 10 else (x1 + x2 - label_width) / 2;
+  let path = if (loop)
+    "M " ++ string(x1) ++ " " ++ string(y - 25) ++ " H " ++ string(bend - 12) ++
+    " Q " ++ string(bend) ++ " " ++ string(y - 25) ++ " " ++ string(bend) ++ " " ++ string(y - 13) ++
+    " V " ++ string(y + 13) ++ " Q " ++ string(bend) ++ " " ++ string(y + 25) ++
+    " " ++ string(bend - 12) ++ " " ++ string(y + 25) ++ " H " ++ string(x1)
+    else "M " ++ string(x1) ++ " " ++ string(y) ++ " H " ++ string(x2);
+  [
+    <path d:path, fill:"none", stroke:color, 'stroke-width':line_width,
+      'stroke-dasharray':edge["stroke-dasharray"]>,
+    if (edge["arrow-tail"] == "normal")
+      arrow(x1 + (if (loop) 2 else direction * 2), if (loop) y - 25 else y,
+        if (loop) 11 else direction * 11, color) else null,
+    if (edge["arrow-head"] != "none")
+      arrow(x2 - direction * 2, if (loop) y + 25 else y, -direction * 11, color) else null,
+    if (label != "") <rect x:label_x - 4, y:y - 12,
+      width:label_width + 8, height:24, fill:"#fff"> else null,
+    if (label != "") <text x:label_x, y:y + 6, 'font-family':style.font,
+      'font-size':style.font_size, 'font-style':"italic", fill:style.label_color, label> else null
+  ]
+}
+
+fn message(edge, nodes, y, style, index) any^ {
   let x1 = participant_x(nodes, edge.from, style);
   let x2 = participant_x(nodes, edge.to, style);
   let dashed = contains(["-->>", "-->", "--)"], string(edge.relation));
   let open_arrow = contains(["-)", "--)"], string(edge.relation));
   let dash = if (dashed) "3 3" else null;
   let label = string(model.label_source(edge, ""));
-  if (x1 == x2) [
+  if (style.d2) d2_message(edge, x1, x2, y, label, style.widths[index], style)
+  else if (x1 == x2) [
     <path d: "M " ++ string(x1) ++ " " ++ string(y - 11) ++
       " C " ++ string(x1 + 58) ++ " " ++ string(y - 20) ++
       " " ++ string(x1 + 58) ++ " " ++ string(y + 20) ++
@@ -144,13 +224,7 @@ fn message(edge, nodes, y, style) any^ {
       <line x1: x1, y1: y, x2: tip, y2: y,
         stroke: style.line_color, 'stroke-width': 1.5,
         'stroke-dasharray': dash>,
-      <path d: "M " ++ string(tip + wing) ++ " " ++ string(y - 5) ++
-        " L " ++ string(tip) ++ " " ++ string(y) ++
-        " L " ++ string(tip + wing) ++ " " ++ string(y + 5) ++
-        (if (open_arrow) "" else " z"),
-        fill: if (open_arrow) "none" else style.line_color,
-        stroke: if (open_arrow) style.line_color else null,
-        'stroke-width': if (open_arrow) 1.2 else null>,
+      arrow(tip, y, wing, style.line_color, open_arrow),
       <text x: (x1 + x2) / 2, y: y - 11, 'text-anchor': "middle",
         'font-family': sequence_font(), 'font-size': style.font_size,
         fill: style.text_color, label>
@@ -276,7 +350,8 @@ pub fn to_html(graph, opts = null) any^ {
   // Events retain source order even when participants are declared among messages.
   let events = [for (child in ((model.element_children(chart)) ^ { [] })
     where ((contains(["edge", "annotation", "sequence-block"], model.tag(child))) ^ { false })) child];
-  let base_style = metrics(nodes);
+  let d2 = graph.flavor == "d2";
+  let base_style = if (d2) d2_metrics(nodes, events)^ else metrics(nodes);
   let left_notes = [for (event in events
     where ((model.tag(event) == "annotation" and event.kind == "note-left") ^ { false }))
     participant_x(nodes, event["owner-id"], base_style) - note_width(event) - 22];
@@ -285,27 +360,29 @@ pub fn to_html(graph, opts = null) any^ {
   let right_notes = [for (event in events
     where ((model.tag(event) == "annotation" and event.kind == "note-right") ^ { false }))
     participant_x(nodes, event["owner-id"], style) + note_width(event) + 47];
-  let width = max([640, style.first_x + (len(nodes) - 1) * style.column_gap +
+  let width = if (d2) style.width else max([640, style.first_x + (len(nodes) - 1) * style.column_gap +
     style.box_width / 2 + 33,
     *right_notes]);
-  let step = min([46, max([27, 360 / max([1, len(events)])])]);
+  let step = if (d2) 102 else min([46, max([27, 360 / max([1, len(events)])])]);
   let first_over = len(events) > 0 and model.tag(events[0]) == "annotation" and
     events[0].kind == "note-over";
-  let first_y = style.top_y + style.box_height + (if (first_over) 6 else 44);
+  let first_y = style.top_y + style.box_height + (if (d2) 92 else if (first_over) 6 else 44);
   let placed = place_events_at(events, 0, first_y, null, [], step);
   let positions = placed.items;
   let final_event = if (len(positions) > 0) positions[len(positions) - 1] else null;
-  let bottom_y = if (final_event == null) 150
+  let bottom_y = if (d2) (if (final_event == null) first_y else final_event.y + 105)
+    else if (final_event == null) 150
     else if (model.tag(final_event.value) == "edge") final_event.y + 18
     else if (model.tag(final_event.value) == "sequence-block" and
       final_event.value.phase == "end") placed.cursor + 5
     else placed.cursor + 20;
-  let height = bottom_y + style.box_height + 20;
+  let height = bottom_y + (if (d2) 12 else style.box_height + 20);
   <div class: "lambda-sequence", role: "img",
       'aria-label': model.title(chart),
-      style: "display:block;width:" ++ string(width) ++ "px;min-height:" ++
-        string(height) ++ "px;background:#fff;",
+      style: "display:block;width:" ++ string(width) ++ "px;" ++
+        (if (d2) "max-width:100%;" else "min-height:" ++ string(height) ++ "px;") ++ "background:#fff;",
     <svg xmlns: "http://www.w3.org/2000/svg", width: width, height: height,
+        style: if (d2) "display:block;width:100%;height:auto;" else null,
         viewBox: "0 0 " ++ string(width) ++ " " ++ string(height),
       for (i, entry in positions,
         item in ((if (model.tag(entry.value) == "sequence-block" and
@@ -318,9 +395,9 @@ pub fn to_html(graph, opts = null) any^ {
           model.optional(entry.value, "activation") == "start")
           [activation_bar(positions, i, nodes, bottom_y, style)]
           else []) ^ { [] })) item
-      for (entry in positions,
+      for (i, entry in positions,
         item in ((if (model.tag(entry.value) == "edge")
-          message(entry.value, nodes, entry.y, style)
+          message(entry.value, nodes, entry.y, style, i)
           else if (model.tag(entry.value) == "annotation")
             note(entry.value, nodes, entry.y, style)
           else []) ^ { [] })) item

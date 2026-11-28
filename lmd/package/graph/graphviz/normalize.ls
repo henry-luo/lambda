@@ -7,6 +7,7 @@ import labels: .labels
 import markers: .markers
 import records: .records
 import colors: .colors
+import graph_content: lambda.graph.transform.content
 
 let MAX_EXPANDED_EDGES = 100000
 
@@ -39,12 +40,6 @@ fn assignment_entry(value, scope) => {
 
 fn inherited_properties(properties) => [
   for (entry in properties) {*:entry, origin: "inherited"}
-]
-
-fn unique(values) => [
-  for (i, value in values
-    where len([for (j, earlier in values where j < i and earlier == value) earlier]) == 0)
-    value
 ]
 
 fn node_at(nodes, id) {
@@ -103,11 +98,12 @@ fn ensure_node(st, id, source, defaults, direct, owner, explicit) any^ {
     };
     {*:st, nodes: [*st.nodes, value]}
   }
+  else if (not explicit) st
   else {
     // DOT defaults apply only when a node identity is first materialized.
     let value = {*:current,
-      properties: if (explicit) [*current.properties, *direct] else current.properties,
-      owner: if (explicit and owner != null and current.owner == null) owner else current.owner};
+      properties: [*current.properties, *direct],
+      owner: if (owner != null and current.owner == null) owner else current.owner};
     {*:st, nodes: replace_node(st.nodes, value)}
   }
 }
@@ -342,11 +338,13 @@ fn annotation_element(kind, label, format, owner_kind, owner_id, known) {
     'font-color': model.optional(known, "font-color")>
 }
 
-fn node_element(entry, graph_id) {
-  let known = attributes.canonical("node", entry.properties);
+fn node_element(entry, graph_id, direction) {
+  let known = entry.known;
   let label = labels.node(known.label, entry.id, graph_id);
   let record = if (known["graphviz-shape"] == "record" or
-      known["graphviz-shape"] == "mrecord") records.lower(label) else null;
+      known["graphviz-shape"] == "mrecord")
+    // Record axes follow rankdir and their visible table must fill the measured node.
+    records.lower(label, direction == "LR" or direction == "RL", known.width, known.height) else null;
   <node id: entry.id, 'source-kind': entry.source_kind,
     label: label,
     'label-format': known["label-format"], shape: known.shape,
@@ -371,13 +369,16 @@ fn node_element(entry, graph_id) {
     'source-start': entry.source["source-start"], 'source-end': entry.source["source-end"],
     'source-line': entry.source["source-line"], 'source-column': entry.source["source-column"],
     if (record != null) { <content record.content> }
+    else if (known["label-format"] == "html") {
+      <content for (child in ((graph_content.lower(label, "html", true)) ^ { [] })) child>
+    }
     let properties = properties_element(entry.properties)
     if (properties != null) { properties }
   >
 }
 
 fn edge_element(entry, graph_id) {
-  let known = attributes.canonical("edge", entry.properties);
+  let known = entry.known;
   <edge id: entry.id, 'source-id': statement_id(entry.source),
     from: entry.from, to: entry.to, directed: entry.directed,
     'from-port': entry.from_port, 'to-port': entry.to_port,
@@ -518,7 +519,7 @@ fn compound_membership_diagnostics(st) => [
   for (edge in st.edges,
     endpoint in [{name: "lhead", node: edge.to}, {name: "ltail", node: edge.from}],
     let entry = attributes.last_entry(edge.properties, endpoint.name),
-    let node = node_at(st.nodes, endpoint.node)
+    let node = if (entry == null) null else node_at(st.nodes, endpoint.node)
     where ((entry != null and node != null and cluster_exists(st.scopes, string(entry.value)) and
       not owner_in_cluster(st.scopes, node.owner, string(entry.value), [])) ^ { false }))
     diagnostic.for_value(
@@ -552,29 +553,24 @@ fn semantic_diagnostics(source, st) {
 }
 
 fn node_annotations(entry, graph_id) {
-  let known = attributes.canonical("node", entry.properties);
-  let label = if (known["external-label"] != null)
-    labels.node(known["external-label"], entry.id, graph_id) else null;
-  [annotation_element("external", label, known["external-label-format"], "node", entry.id,
-    known)]
+  let known = entry.known;
+  let raw = known["external-label"];
+  if (raw == null) [] else [
+    annotation_element("external", labels.node(raw, entry.id, graph_id),
+      known["external-label-format"], "node", entry.id, known)]
 }
 
 fn edge_annotations(entry, graph_id) {
-  let known = attributes.canonical("edge", entry.properties);
-  [
-    annotation_element("external", labels.edge(known["external-label"], entry.from,
-      entry.to, entry.directed, graph_id), known["external-label-format"], "edge", entry.id,
-      known),
-    annotation_element("head", labels.edge(known["head-label"], entry.from,
-      entry.to, entry.directed, graph_id), known["head-label-format"], "edge", entry.id,
-      known),
-    annotation_element("tail", labels.edge(known["tail-label"], entry.from,
-      entry.to, entry.directed, graph_id), known["tail-label-format"], "edge", entry.id,
-      known)
-  ]
+  let known = entry.known;
+  // An absent label has no annotation and needs no substitution context.
+  [for (kind in ["external", "head", "tail"],
+    let key = kind ++ "-label", let raw = known[key]
+    where ((raw != null) ^ { false }))
+    annotation_element(kind, labels.edge(raw, entry.from, entry.to, entry.directed, graph_id),
+      known[key ++ "-format"], "edge", entry.id, known)]
 }
 
-fn cluster_element(scope, st, graph_id) {
+fn cluster_element(scope, st, graph_id, direction) {
   let known = attributes.canonical("cluster", scope.properties);
   <subgraph id: scope.id, role: scope.role, 'parent-scope': scope.parent_scope,
     label: labels.graph(known.label, graph_id) or "", 'label-format': known["label-format"],
@@ -589,10 +585,10 @@ fn cluster_element(scope, st, graph_id) {
     'source-line': scope.source["source-line"], 'source-column': scope.source["source-column"],
     let properties = properties_element(scope.properties)
     if (properties != null) { properties }
-    for (entry in st.nodes where entry.owner == scope.id) node_element(entry, graph_id)
+    for (entry in st.nodes where entry.owner == scope.id) node_element(entry, graph_id, direction)
     for (nested in st.scopes
       where nested.role == "cluster" and nested.parent_owner == scope.id)
-      cluster_element(nested, st, graph_id)
+      cluster_element(nested, st, graph_id, direction)
     for (id in scope.members) member_element(id)
   >
 }
@@ -607,7 +603,11 @@ fn scope_element(scope) {
   >
 }
 
-fn canonical_graph(source, st) {
+fn canonical_graph(source, raw_state) {
+  // Interactions, labels, and the emitted node or edge share one typed lowering.
+  let st = {*:raw_state,
+    nodes: [for (entry in raw_state.nodes) {*:entry, known: attributes.canonical("node", entry.properties)}],
+    edges: [for (entry in raw_state.edges) {*:entry, known: attributes.canonical("edge", entry.properties)}]};
   let known = attributes.canonical("graph", st.graph_properties);
   <graph id: source.id, flavor: "dot", version: source.version,
     layout: if (known.layout != null) known.layout else "dot",
@@ -629,28 +629,26 @@ fn canonical_graph(source, st) {
     let constraints = constraints_element(st.scopes)
     if (constraints != null) { constraints }
     for (entry in st.nodes,
-      let interaction = interaction_element(entry.id,
-        attributes.canonical("node", entry.properties))
+      let interaction = interaction_element(entry.id, entry.known)
       where ((interaction != null) ^ { false })) interaction
     for (entry in st.edges,
-      let interaction = interaction_element(entry.id,
-        attributes.canonical("edge", entry.properties))
+      let interaction = interaction_element(entry.id, entry.known)
       where ((interaction != null) ^ { false })) interaction
     for (entry in st.nodes, annotation in ((node_annotations(entry, string(source.id))) ^ { [] })
       where annotation != null) annotation
     for (entry in st.edges, annotation in ((edge_annotations(entry, string(source.id))) ^ { [] })
       where annotation != null) annotation
-    for (entry in st.nodes where entry.owner == null) node_element(entry, string(source.id))
+    for (entry in st.nodes where entry.owner == null) node_element(entry, string(source.id), known.direction)
     for (scope in st.scopes
       where scope.role == "cluster" and scope.parent_owner == null)
-      cluster_element(scope, st, string(source.id))
+      cluster_element(scope, st, string(source.id), known.direction)
     for (scope in st.scopes where scope.role == "scope") scope_element(scope)
     for (entry in st.edges) edge_element(entry, string(source.id))
     for (child in model.element_children(source) where ((model.tag(child) == "diagnostics") ^ { false })) child
   >
 }
 
-pub fn normalize(source) {
+pub fn normalize(source, report = true) {
   let initial = {
     nodes: [], edges: [], scopes: [], graph_properties: [], diagnostics: [],
     expansion_count: 0
@@ -659,5 +657,6 @@ pub fn normalize(source) {
   let result = walk_at(model.element_children(source), 0, initial, env, "root", null,
     source.directed != false, source.strict == true, []);
   {graph: canonical_graph(source, result.state),
-    diagnostics: [*result.state.diagnostics, *semantic_diagnostics(source, result.state)]}
+    diagnostics: if (report) [*result.state.diagnostics, *semantic_diagnostics(source, result.state)]
+      else []}
 }

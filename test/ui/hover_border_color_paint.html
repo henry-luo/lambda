@@ -17,12 +17,15 @@
           color: rgb(255, 0, 0); }
   #card:hover { color: rgb(0, 0, 255); box-shadow: 0 0 0 6px rgb(0, 255, 0); }
   #swatch { position: absolute; left: 0; top: 0; width: 20px; height: 40px; border: 5px solid; }
+  #card:hover > #swatch { background-color: rgb(0, 255, 0); }
+  #card:hover .badge { background-color: rgb(255, 0, 0); }
   #hit { position: absolute; left: 120px; top: 0; width: 80px; height: 40px; }
+  .badge { display: block; width: 12px; height: 12px; }
 </style>
 </head>
 <body>
   <div id="box"></div>
   <div id="pair"></div>
-  <div id="card"><div id="swatch"></div><div id="hit"></div></div>
+  <div id="card"><div id="swatch"><span class="badge"></span></div><div id="hit"></div></div>
 </body>
 </html>

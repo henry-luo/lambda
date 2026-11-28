@@ -1,0 +1,19 @@
+["","","Alpha","Alpha and Beta","Alpha, Beta, and Gamma","Alpha, Beta, Gamma, and Delta"]
+["Alpha, Beta and Gamma","Alpha, Beta und Gamma","Alpha, Beta et Gamma","Alpha、Beta、Gamma","Alpha وBeta وGamma","Alpha፣ Betaን Gammaን"]
+["Alpha, Beta, or Gamma","Alpha, Beta, & Gamma","Alpha Beta Gamma"]
+[{"type":"element","value":"Alpha"},{"type":"literal","value":", "},{"type":"element","value":"Beta"},{"type":"literal","value":", and "},{"type":"element","value":"Gamma"}]
+[{"type":"element","value":"A"},{"type":"literal","value":", "},{"type":"element","value":"B"},{"type":"literal","value":", "},{"type":"element","value":"C"},{"type":"literal","value":" rānei"}]
+[{"type":"element","value":""},{"type":"literal","value":" and "},{"type":"element","value":"B"}]
+"A, 😀, and B"
+"A\u0000B and C"
+{"locale":"en-GB","type":"disjunction","style":"narrow"}
+["de-DE","en-GB","en-GB-u-nu-latn"]
+{"locale":"fr-FR","type":"conjunction","style":"long"}
+["localeMatcher","type","coerce","style"]
+["TypeError",1]
+["RangeError",1]
+"X, Y, and Z"
+["TypeError","TypeError","TypeError","RangeError","TypeError","RangeError","TypeError","TypeError","TypeError","TypeError"]
+[true,"X and Y","[object Intl.ListFormat]",0,1,false,[]]
+["cobre y hierro","miel e higos","té, café e Infusión","7 u 8 cajas","10 u 11","perro u hormiga","10 o 110"]
+["א וב","ירושלים ו-London",[{"type":"element","value":"א"},{"type":"literal","value":" ו-"},{"type":"element","value":"A"}]]

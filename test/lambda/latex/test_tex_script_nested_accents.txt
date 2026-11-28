@@ -17,4 +17,3 @@
     issue: null,
     matches: true
   }]
-["latex-digest-unsupported", "accent source gap"]

@@ -40,10 +40,13 @@ static void provider_run_workers(void* (*worker)(void*), unsigned* failures) {
 }
 
 static unsigned graphics_error_count;
+static const RadiantCanvasRadialGradient graphics_test_gradient = {};
 static bool graphics_test_canvas_ensure(void* canvas) { return canvas == &graphics_error_count; }
-static bool graphics_test_canvas_rect(void* canvas, float x, float y, float width, float height) {
+static bool graphics_test_canvas_rect(void* canvas, float x, float y, float width, float height,
+                                      const RadiantCanvasRadialGradient* gradient) {
+    // the provider must forward the synchronous gradient borrow along with the rectangle.
     return graphics_test_canvas_ensure(canvas) && x == 1.0f && y == 2.0f &&
-           width == 3.0f && height == 4.0f;
+           width == 3.0f && height == 4.0f && gradient == &graphics_test_gradient;
 }
 static void graphics_test_webgl_error(uint64_t canvas, unsigned error) {
     if (canvas == 42 && error == 0x0502)
@@ -74,7 +77,7 @@ static bool graphics_registration_round() {
         dom_canvas_engine_ops() == &graphics_test_canvas &&
         dom_webgl_engine_ops() == &graphics_test_webgl &&
         dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::fill_rect,
-            &graphics_error_count, 1, 2.0, 3.0f, 4);
+            &graphics_error_count, 1, 2.0, 3.0f, 4, &graphics_test_gradient);
     dom_provider_call(dom_webgl_engine_ops(), &DomWebGlEngineOps::error, 42, 0x0502);
     return accepted;
 }
@@ -482,10 +485,28 @@ static bool host_test_svg_geometry_dispatch(bool present) {
             nullptr, (RdtLogicalPoint*)&host_svg_source, &host_svg_source);
 }
 
-static void* host_test_web_animation_create(DomElement* element, void* keyframes, double duration,
-        const void* timing, Pool* pool) {
-    return element == host_svg_element() && keyframes == &host_test_node && duration == 45.5 &&
-        timing == &host_test_document && pool == (Pool*)&host_svg_source ? &host_svg_source : nullptr;
+// The provider borrows typed animation inputs and returns an opaque state to later operations.
+static CssWebAnimationState* host_test_web_animation_create(DomElement* element, CssKeyframes* keyframes,
+        const CssWebAnimationTiming* timing, Pool* pool) {
+    return element == host_svg_element() && keyframes == (CssKeyframes*)&host_test_node &&
+        timing == (CssWebAnimationTiming*)&host_test_document && pool == (Pool*)&host_svg_source
+        ? (CssWebAnimationState*)&host_svg_source : nullptr;
+}
+static unsigned host_animation_calls[4];
+static double host_test_web_animation_time(const CssWebAnimationState* state) {
+    return state == (CssWebAnimationState*)&host_svg_source ? 45.5 : 0.0;
+}
+static bool host_test_web_animation_relevant(const CssWebAnimationState* state) {
+    return state == (CssWebAnimationState*)&host_svg_source;
+}
+template<unsigned Index>
+static void host_test_web_animation_action(CssWebAnimationState* state) {
+    if (state == (CssWebAnimationState*)&host_svg_source)
+        __atomic_add_fetch(&host_animation_calls[Index], 1u, __ATOMIC_RELAXED);
+}
+static void host_test_web_animation_seek(CssWebAnimationState* state, double time) {
+    if (state == (CssWebAnimationState*)&host_svg_source && time == 45.5)
+        __atomic_add_fetch(&host_animation_calls[2], 1u, __ATOMIC_RELAXED);
 }
 static unsigned host_range_calls[2];
 static void host_test_range_adopt(DocState* source, DocState* destination, DomNode* subtree) {
@@ -507,6 +528,11 @@ static DomText* host_test_text_split(DocState* state, DomText* text, uint32_t of
         ? (DomText*)&host_svg_source : nullptr;
 }
 static bool host_test_model_dispatch(bool present) {
+    CssWebAnimationState* animation = (CssWebAnimationState*)&host_svg_source;
+    dom_engine_web_animation_play(animation);
+    dom_engine_web_animation_pause(animation);
+    dom_engine_web_animation_seek(animation, 45.5);
+    dom_engine_web_animation_cancel(animation);
     dom_engine_range_adopt_subtree((DocState*)&host_test_document, (DocState*)&host_test_node, (DomNode*)&host_svg_source);
     dom_engine_range_refresh_lifecycle_pins((DomDocument*)&host_test_document);
     const char* exception = "unchanged";
@@ -517,9 +543,12 @@ static bool host_test_model_dispatch(bool present) {
     return dom_engine_text_split_at((DocState*)&host_test_document, (DomText*)&host_test_node, 2) ==
             (present ? (DomText*)&host_svg_source : nullptr) &&
         dom_engine_text_split_at((DocState*)&host_test_document, (DomText*)&host_test_node, 99) == nullptr &&
-        dom_engine_web_animation_create(host_svg_element(), &host_test_node, 45.5, &host_test_document, (Pool*)&host_svg_source) ==
-            (present ? &host_svg_source : nullptr) &&
-        dom_engine_web_animation_create(nullptr, &host_test_node, 45.5, &host_test_document, (Pool*)&host_svg_source) == nullptr;
+        dom_engine_web_animation_create(host_svg_element(), (CssKeyframes*)&host_test_node,
+            (CssWebAnimationTiming*)&host_test_document, (Pool*)&host_svg_source) == (present ? animation : nullptr) &&
+        dom_engine_web_animation_create(nullptr, (CssKeyframes*)&host_test_node,
+            (CssWebAnimationTiming*)&host_test_document, (Pool*)&host_svg_source) == nullptr &&
+        dom_engine_web_animation_current_time(animation) == (present ? 45.5 : 0.0) &&
+        dom_engine_web_animation_is_relevant(animation) == present;
 }
 
 static bool host_test_svg_dispatch(bool present) {
@@ -633,7 +662,9 @@ static const DomHostEngineOps host_test_operations = {
     host_test_foreign_matrix, host_test_visual_bounds,
     host_test_svg_style_parent, host_test_svg_property, host_test_svg_append_shape,
     host_test_svg_text_path, host_test_svg_clip_contains,
-    host_test_web_animation_create, host_test_range_adopt, host_test_range_pins,
+    host_test_web_animation_create, host_test_web_animation_time, host_test_web_animation_relevant,
+    host_test_web_animation_action<0>, host_test_web_animation_action<1>, host_test_web_animation_seek,
+    host_test_web_animation_action<3>, host_test_range_adopt, host_test_range_pins,
     host_test_selection_collapse, host_test_text_split,
     host_test_client_frame, host_test_source_boundary, host_test_selection_rects, host_test_url_attribute,
     host_test_boundary_property, host_test_scroll_property, host_test_position_property, host_test_embed_property,
@@ -724,6 +755,7 @@ TEST(DomHostProviderTest, AbsenceValidationDispatchAndConcurrentPublication) {
     EXPECT_DOUBLE_EQ(host_svg_time, 0.0);
     EXPECT_EQ(host_touch_calls, 0u);
     EXPECT_EQ(host_range_calls[0], 0u); EXPECT_EQ(host_range_calls[1], 0u);
+    for (unsigned calls : host_animation_calls) EXPECT_EQ(calls, 0u);
     EXPECT_FALSE(dom_host_register_engine(nullptr));
 #define DOM_HOST_REJECT_MISSING(result, name, parameters, arguments, absence) { \
     DomHostEngineOps incomplete = host_test_operations; incomplete.name = nullptr; \
@@ -741,6 +773,7 @@ TEST(DomHostProviderTest, AbsenceValidationDispatchAndConcurrentPublication) {
     EXPECT_EQ(host_svg_events, 8001u);
     EXPECT_EQ(host_touch_calls, 8001u);
     EXPECT_EQ(host_range_calls[0], 8001u); EXPECT_EQ(host_range_calls[1], 8001u);
+    for (unsigned calls : host_animation_calls) EXPECT_EQ(calls, 8001u);
     EXPECT_EQ(host_repaint_calls, 8001u); EXPECT_EQ(host_clear_reflow_calls, 8001u);
     EXPECT_EQ(host_scroll_queue_calls, 8001u);
     EXPECT_EQ(host_layout_calls[0], 8001u); EXPECT_EQ(host_layout_calls[1], 8001u);

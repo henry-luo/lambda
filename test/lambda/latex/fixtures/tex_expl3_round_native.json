@@ -1,0 +1,179 @@
+{
+  "cases": [
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{round(2.5,0,0)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "2",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{round(2.5,0,1)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "3",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{round(2.5,0,-1)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "2",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{round(-2.5,0,0)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "-2",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{round(-2.5,0,1)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "-2",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{round(-2.5,0,-1)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "-3",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{round(3.5,0,1)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "4",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{round(3.5,0,-1)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "3",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{round(2.4,0,1)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "2",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{round(2.6,0,-1)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "3",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{round(2.5,0,1.5)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "3",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{round(1.25,1,1)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "1.3",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{round(-1.25,1,1)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "-1.2",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{round(1250,-2,-1)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "1200",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{round(-1250,-2,-1)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "-1300",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{round(0.5,0,-1)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "0",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{round(-0.5,0,1)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "-0",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{round(1.2345,1.5)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "0",
+        "messages": [],
+        "diagnostics": [
+          {
+            "code": "tex-macro-mismatch",
+            "message": "Use of \\??? doesn't match its definition",
+            "offset": 41,
+            "line": 1
+          },
+          {
+            "code": "tex-macro-mismatch",
+            "message": "Use of \\??? doesn't match its definition",
+            "offset": 41,
+            "line": 1
+          }
+        ],
+        "packages": []
+      }
+    }
+  ]
+}

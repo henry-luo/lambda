@@ -64,8 +64,8 @@ TIMED_OUTPUT_CASES = (("beng", "spectralnorm"), ("beng", "fannkuch"), ("beng", "
 
 def compiler_identity():
     """Identify the experiment's sources alongside the measured executable hashes."""
-    paths = list((ROOT / "lambda/runtime/mvp").glob("*.hpp"))
-    paths += list((ROOT / "lambda/runtime/mvp").glob("*.cpp"))
+    paths = list((ROOT / "lambda/runtime/mir").glob("*.hpp"))
+    paths += list((ROOT / "lambda/runtime/mir").glob("*.cpp"))
     # source ownership moved to sibling projects; hash their real sources
     # rather than the retired include-prefix paths (D9.1.1v4).
     paths += [project_source_path(path, ROOT) for path in (

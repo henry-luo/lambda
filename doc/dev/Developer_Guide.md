@@ -370,7 +370,7 @@ the generated Lambda CST is built only for `lambda-cst` verification.
    implemented in `lambda/runtime/parser/lambda_parser.c` and semantic AST
    changes in `lambda/runtime/build_ast.cpp`.
 
-4. **Update the transpiler** — add MIR generation in `lambda/runtime/mvp/mvp_mir.cpp` for the new AST node. The former C2MIR source generator was removed and is not an implementation target.
+4. **Update the transpiler** — add MIR generation in `lambda/runtime/mir/mir_lower.cpp` for the new AST node. The former C2MIR source generator was removed and is not an implementation target.
 
 5. **Build and test**:
    ```bash
@@ -438,7 +438,7 @@ Lambda AST  ──→  MVP planner/lowering  ──→  MIR instructions (MIR_MO
                                            MIR generator  ──→  machine code
 ```
 
-- `lambda/runtime/mvp/mvp_mir.cpp` emits MIR IR instructions directly via the MIR C API.
+- `lambda/runtime/mir/mir_lower.cpp` emits MIR IR instructions directly via the MIR C API.
 - No intermediate C code is involved — instructions like `MIR_MOV`, `MIR_ADD`, `MIR_CALL` are built directly.
 
 The vendored MIR dependency still contains its upstream C2MIR frontend, but
@@ -450,9 +450,9 @@ sources use the shared value layouts and runtime ABI during their own build.
 
 | File | Role |
 |------|------|
-| `lambda/runtime/mvp/mvp_driver.cpp` | Eager/satellite compilation, linking, module layout and image lifetime |
-| `lambda/runtime/mvp/mvp_plan.cpp` | Admission, binding, effect and representation planning |
-| `lambda/runtime/mvp/mvp_mir.cpp` | Lowers planned Lambda operations into MIR |
+| `lambda/runtime/mir/mir_driver.cpp` | Eager/satellite compilation, linking, module layout and image lifetime |
+| `lambda/runtime/mir/mir_plan.cpp` | Admission, binding, effect and representation planning |
+| `lambda/runtime/mir/mir_lower.cpp` | Lowers planned Lambda operations into MIR |
 | `lambda/runtime/mir_emitter_shared.hpp` | Shared MIR emission, roots, calls and ABI helpers |
 | `lambda/runtime/mir.c` | MIR contexts, import resolution and native generation |
 | `lambda/runtime/sys_func_registry.c` | Runtime helper addresses and audited import effects |
@@ -470,7 +470,7 @@ values in precise roots (**D6.3**).
 
 ### MVP Compiler Architecture
 
-`mvp_driver.cpp` runs indexed compiler passes: constant materialization/folding,
+`mir_driver.cpp` runs indexed compiler passes: constant materialization/folding,
 planning, lowering, finalization and linking (**D8.2.5**). The planner owns
 per-function binding, representation and return plans; lowering consumes those
 plans through `MirEmitter`. `const_materialize.cpp` holds compiler-neutral
@@ -803,7 +803,7 @@ Renamed 2026-10-03. Current binaries no longer read the old names.
 |----------|------------------|----------|
 | `LAMBDA_EXEC_BACKEND` | `interp` \| `auto` \| `jit` (`auto`) | `LAMBDA_TIER` |
 | `LAMBDA_MIR_COMPILER` | unset/empty or `mvp`; MVP is the sole compiler for JIT and AUTO promotion. `production` is rejected: Full MIR is retired (D8.3.1–D8.3.4). | — |
-| `LAMBDA_FUNC_JIT_THRESHOLD` | calls before promotion (5) | `LAMBDA_JIT_THRESHOLD` |
+| `LAMBDA_FUNC_JIT_THRESHOLD` | calls before AUTO promotion (5 for scripts, 32 for `view` and `edit`, D8.3.2) | `LAMBDA_JIT_THRESHOLD` |
 | `LAMBDA_LOOP_JIT_THRESHOLD` | loop back edges before handoff compilation (1024, D8.3.2) | `LAMBDA_JIT_BACKEDGE` |
 | `JS_EXEC_BACKEND` | `ast` \| `auto` \| `mir` (`auto`; unset/empty also AUTO, D8.4.2) | `JS_EXECUTION_BACKEND` |
 | `JS_FUNC_JIT_THRESHOLD` | (5) | `JS_JIT_THRESHOLD` |

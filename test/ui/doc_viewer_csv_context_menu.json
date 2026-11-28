@@ -1,0 +1,22 @@
+{
+  "name": "CSV context menu in the project viewer",
+  "html": "temp/view-csv-context-files",
+  "prepare": ["python3", "-c", "from pathlib import Path;import shutil;p=Path('temp/view-csv-context-files');p.mkdir(parents=True,exist_ok=True);shutil.copyfile('test/input/test_tab.csv',p/'test_tab.csv')"],
+  "viewport": {"width": 900, "height": 560},
+  "events": [
+    {"type": "click", "target": {"selector": ".tree-entry[data-tree-path$='/test_tab.csv'] .tree-label"}},
+    {"type": "click", "target": {"selector": ".tab-edit"}},
+    {"type": "assert_count", "target": {"selector": ".property-grid-wrap button"}, "count": 0},
+    {"type": "assert_count", "target": {"selector": ".property-grid thead th"}, "count": 6},
+    {"type": "scroll", "x": 750, "y": 214, "dx": -8, "dy": 0},
+    {"type": "click", "target": {"selector": "#grid-cell-5-4"}, "button": 1},
+    {"type": "assert_count", "target": {"selector": "#property-grid-menu [role='menuitem']"}, "count": 8},
+    {"type": "click", "target": {"selector": "#file-filter"}},
+    {"type": "assert_count", "target": {"selector": "#property-grid-menu"}, "count": 0},
+    {"type": "click", "target": {"selector": "#grid-cell-5-4"}, "button": 1},
+    {"type": "click", "target": {"selector": "#property-grid-menu [aria-label='Remove field']"}},
+    {"type": "assert_count", "target": {"selector": "#grid-cell-5-4"}, "count": 0},
+    {"type": "key_combo", "key": "z", "mods_str": "super"},
+    {"type": "assert_count", "target": {"selector": "#grid-cell-5-4"}, "count": 1}
+  ]
+}

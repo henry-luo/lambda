@@ -12,7 +12,7 @@
 #include <psapi.h>
 #endif
 #include "transpiler.hpp"
-#include "mvp/mvp.hpp"
+#include "mir/mir.hpp"
 #include "lib/host_paths.h"
 #include "doc_context.hpp"
 #include "write_set.hpp"

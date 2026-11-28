@@ -51,7 +51,12 @@
 #include "lib/file.h"
 
 #if defined(__APPLE__) && !defined(LAMBDA_NO_GUI)
+#define Rect MacOSRect
+#include <IOSurface/IOSurface.h>
+#undef Rect
 #include <OpenGL/gl.h>
+#include <objc/message.h>
+#include <objc/runtime.h>
 #endif
 
 extern "C" uint64_t radiant_query_font_build_count(void);
@@ -3409,6 +3414,47 @@ TEST_F(RadiantDocumentTest, OrthogonalFitContentUsesAtomicInlineContributions) {
     }
 }
 
+TEST_F(RadiantDocumentTest, InlineFlexRatioMinimumUsesBorderBoxAndCentersText) {
+    ASSERT_NE(load_script_source(R"HTML(<!doctype html><style>
+        @font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}
+        body{margin:0;font:10px/10px Ahem}
+        .node{display:inline-flex;align-items:center;justify-content:center;
+            box-sizing:border-box;padding:10px 14px;border:1px solid;
+            aspect-ratio:1;min-width:48px;min-height:48px}
+        #height-only{min-width:0}#ratio{aspect-ratio:2/1;min-width:0}
+        #content{box-sizing:content-box}#ellipse{aspect-ratio:auto;width:80px;height:44px;min-height:0}
+        </style><div id="result"><span id="short" class="node">X</span>
+        <span id="long" class="node">XXXXXXXX</span>
+        <span id="height-only" class="node">X</span>
+        <span id="ratio" class="node">X</span><span id="content" class="node">X</span>
+        <span id="ellipse" class="node">X</span></div>)HTML"), nullptr);
+    ui.viewport_width = ui.window_width = 400;
+    ui.viewport_height = ui.window_height = 200;
+    ui.create_surface(ui.window_width, ui.window_height);
+    layout_html_doc(&ui, document, false);
+    const struct { const char* id; float width; float height; } cases[] = {
+        {"short", 48.0f, 48.0f}, {"long", 110.0f, 110.0f},
+        {"height-only", 48.0f, 48.0f}, {"ratio", 96.0f, 48.0f},
+        {"content", 78.0f, 70.0f}, {"ellipse", 80.0f, 44.0f}
+    };
+    for (const auto& entry : cases) {
+        SCOPED_TRACE(entry.id);
+        DomElement* node = dom_find_element_by_id(document->root->as_element(), entry.id);
+        ASSERT_NE(node, nullptr);
+        ASSERT_NE(node->first_child, nullptr);
+        ASSERT_TRUE(node->first_child->is_text());
+        EXPECT_NEAR(node->width, entry.width, 0.05f);
+        EXPECT_NEAR(node->height, entry.height, 0.05f);
+        float x = 0.0f, y = 0.0f, text_x = 0.0f, text_y = 0.0f;
+        float text_width = 0.0f, text_height = 0.0f;
+        view_get_visual_bounds(node, &x, &y, nullptr, nullptr);
+        view_get_visual_bounds(static_cast<View*>(node->first_child), &text_x, &text_y,
+            &text_width, &text_height);
+        EXPECT_NEAR(text_x - x + text_width / 2.0f, node->width / 2.0f, 0.05f);
+        EXPECT_NEAR(text_y - y + text_height / 2.0f, node->height / 2.0f, 0.05f);
+    }
+}
+
 TEST_F(RadiantDocumentTest, AspectRatioDeterminesOrthogonalAutoInlineSize) {
     for (const char* mode : {"vertical-rl", "vertical-lr"})
         for (bool border_box : {false, true}) for (const char* text : {"", "X X X", "XXXXX"}) {
@@ -6333,7 +6379,7 @@ TEST_F(RadiantDocumentTest, FetchPreloadRetainsBytesWithoutImageDecodingOrScript
     NetworkResource* resource = resource_manager_prefetch(document->resource_manager, url, PRIORITY_NORMAL);
     ASSERT_NE(resource, nullptr);
     EXPECT_EQ(resource->type, RESOURCE_PREFETCH);
-    EXPECT_EQ(resource->owner_element, nullptr);
+    EXPECT_EQ(network_resource_owner(resource, document), nullptr);
     EXPECT_EQ(resource->image_surface, nullptr);
     EXPECT_TRUE(resource->processed);
     size_t length = 0;
@@ -7718,7 +7764,7 @@ TEST_F(RadiantDocumentTest, ComputedStyleKeepsAuthoredAncestryAcrossTableRepair)
 }
 
 #if defined(__APPLE__) && !defined(LAMBDA_NO_GUI)
-TEST_F(RadiantDocumentTest, NativeResizeRetainsCompletedFrameUntilRepaint) {
+TEST_F(RadiantDocumentTest, NativeResizePresentsOnlyAfterRepaint) {
     StrBuf* source = strbuf_new();
     strbuf_append_str(source,
         "<!doctype html><style>body{margin:0;background:#204060}</style><div id=result></div>");
@@ -7750,43 +7796,55 @@ TEST_F(RadiantDocumentTest, NativeResizeRetainsCompletedFrameUntilRepaint) {
                 row[x] = x >= 40 && x < 120 && y >= 32 && y < 56 ? marker : background;
         }
     };
-    auto expect_pattern = [&](uint32_t marker, int height) {
-        uint8_t pixels[160 * 96 * 4] = {};
-        glReadBuffer(GL_FRONT);
-        glReadPixels(0, height - 96, 160, 96, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
-        EXPECT_EQ(glGetError(), (GLenum)GL_NO_ERROR);
+    auto send_id = [](id target, const char* selector) {
+        return ((id (*)(id, SEL))objc_msgSend)(target, sel_registerName(selector));
+    };
+    auto displayed_surface = [&]() -> IOSurfaceRef {
+        id window = (id)radiant_platform_native_window(ui.window);
+        id backing = send_id(send_id(window, "contentView"), "layer");
+        id output = send_id(send_id(backing, "sublayers"), "lastObject");
+        return (IOSurfaceRef)send_id(output, "contents");
+    };
+    auto expect_pattern = [&](IOSurfaceRef frame, uint32_t marker) {
+        ASSERT_NE(frame, nullptr);
+        ASSERT_EQ(IOSurfaceLock(frame, kIOSurfaceLockReadOnly, nullptr), KERN_SUCCESS);
+        const auto* pixels = (const uint8_t*)IOSurfaceGetBaseAddress(frame);
+        size_t pitch = IOSurfaceGetBytesPerRow(frame);
         unsigned changed = 0;
         for (int y = 0; y < 96; y++) for (int x = 0; x < 160; x++) {
             uint32_t wanted = x >= 40 && x < 120 && y >= 32 && y < 56 ? marker : background;
-            const uint8_t* pixel = pixels + ((95 - y) * 160 + x) * 4;
-            if (pixel[0] != (wanted & 0xff) || pixel[1] != ((wanted >> 8) & 0xff) ||
-                pixel[2] != ((wanted >> 16) & 0xff)) changed++;
+            const uint8_t* pixel = pixels + (size_t)y * pitch + x * 4;
+            if (pixel[2] != (wanted & 0xff) || pixel[1] != ((wanted >> 8) & 0xff) ||
+                pixel[0] != ((wanted >> 16) & 0xff)) changed++;
         }
+        EXPECT_EQ(IOSurfaceUnlock(frame, kIOSurfaceLockReadOnly, nullptr), KERN_SUCCESS);
         EXPECT_EQ(changed, 0u) << "retained pixels must keep their size and top-left position";
-    };
-    auto expect_pixel = [&](int x, int y, int height, uint32_t wanted) {
-        uint8_t pixel[4] = {};
-        glReadBuffer(GL_FRONT);
-        glReadPixels(x, height - 1 - y, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
-        EXPECT_EQ(glGetError(), (GLenum)GL_NO_ERROR);
-        EXPECT_EQ(pixel[0], wanted & 0xff);
-        EXPECT_EQ(pixel[1], (wanted >> 8) & 0xff);
-        EXPECT_EQ(pixel[2], (wanted >> 16) & 0xff);
     };
     for (unsigned pass = 0; pass < 3; pass++) {
         SCOPED_TRACE(pass);
         uint32_t marker = 0xff60e040 + pass * 0x00060507;
         paint_pattern(marker);
         radiant_platform_present(ui.window, ui.surface.get(), nullptr, false, background, 1, 1);
+        IOSurfaceRef before = displayed_surface();
+        ASSERT_NE(before, nullptr);
+        EXPECT_EQ(IOSurfaceGetWidth(before), (size_t)ui.surface->width);
         ui.present_partial = true;
         radiant_platform_set_window_size(ui.window, sizes[pass][0], sizes[pass][1]);
         radiant_platform_poll_events();
         int width, height;
         radiant_platform_get_framebuffer_size(ui.window, &width, &height);
+        // a draw through the presenter changes GL_VIEWPORT to match its image.
+        // Check the draw state since Cocoa can invalidate the front buffer on resize.
+        const GLint viewport_before[] = {0, 0, 1, 1};
+        glViewport(viewport_before[0], viewport_before[1], viewport_before[2], viewport_before[3]);
         ASSERT_TRUE(ui_context_resize_window_surface(&ui, width, height));
-        // the new CPU target has not been painted; the front buffer must retain the old image.
-        expect_pattern(marker, height);
-        expect_pixel(width - 10, height - 11, height, background);
+        // the layer keeps the original image and its pixels until a new frame is ready.
+        ASSERT_EQ(displayed_surface(), before);
+        expect_pattern(before, marker);
+        GLint viewport_after[4] = {};
+        glGetIntegerv(GL_VIEWPORT, viewport_after);
+        EXPECT_EQ(memcmp(viewport_before, viewport_after, sizeof(viewport_before)), 0)
+            << "surface allocation must not draw the previous frame";
         EXPECT_EQ(ui.surface->width, width);
         EXPECT_EQ(ui.surface->height, height);
         EXPECT_FALSE(ui.present_partial);
@@ -7794,23 +7852,16 @@ TEST_F(RadiantDocumentTest, NativeResizeRetainsCompletedFrameUntilRepaint) {
         radiant_platform_get_window_size(ui.window, &logical_width, &logical_height);
         ui.viewport_width = logical_width;
         ui.viewport_height = logical_height;
-        paint_pattern(marker);
+        uint32_t resized_marker = marker ^ 0x00f08030;
+        paint_pattern(resized_marker);
         radiant_platform_present(ui.window, ui.surface.get(), nullptr, false, background, 1, 1);
-        expect_pattern(marker, height);
+        IOSurfaceRef resized = displayed_surface();
+        ASSERT_NE(resized, nullptr);
+        EXPECT_NE(resized, before);
+        EXPECT_EQ(IOSurfaceGetWidth(resized), (size_t)width);
+        EXPECT_EQ(IOSurfaceGetHeight(resized), (size_t)height);
+        expect_pattern(resized, resized_marker);
     }
-    // a density change must still scale the old pixels while retaining CSS geometry.
-    uint32_t marker = 0xff40d080;
-    paint_pattern(marker);
-    radiant_platform_present(ui.window, ui.surface.get(), nullptr, false, background, 1, 1);
-    ui.present_partial = true;
-    ui_context_set_device_scale(&ui, ui.device_scale_x * 2, ui.device_scale_y * 2);
-    radiant_platform_set_window_size(ui.window, logical_width * 2, logical_height * 2);
-    radiant_platform_poll_events();
-    int width, height;
-    radiant_platform_get_framebuffer_size(ui.window, &width, &height);
-    ASSERT_TRUE(ui_context_resize_window_surface(&ui, width, height));
-    expect_pixel(160, 88, height, marker);
-    expect_pixel(80, 44, height, background);
 }
 #endif
 
@@ -8106,6 +8157,13 @@ TEST_F(RadiantDocumentTest, CompletedFlexContentEnlargesProvisionalAncestorHeigh
         EXPECT_FLOAT_EQ(find("resource-content")->height, 30.0f);
         EXPECT_FLOAT_EQ(find("resource-svg")->height, 10.0f);
     }
+    // a definite flex height supplies the percentage basis; restoring auto removes it.
+    ASSERT_TRUE(dom_cssom_set_inline_property(find("resource-page"), "height", "100px"));
+    ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+    EXPECT_FLOAT_EQ(find("resource-svg")->height, 80.0f);
+    ASSERT_TRUE(dom_cssom_set_inline_property(find("resource-page"), "height", "auto"));
+    ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+    EXPECT_FLOAT_EQ(find("resource-svg")->height, 10.0f);
     ASSERT_TRUE(find("auto-page")->set_attribute("style", "width:20px"));
     ASSERT_TRUE(dom_text_set_content(find("auto-text")->first_child->as_text(), "XX XX XX"));
     layout_html_doc(&ui, document, true);
@@ -8115,6 +8173,29 @@ TEST_F(RadiantDocumentTest, CompletedFlexContentEnlargesProvisionalAncestorHeigh
     EXPECT_FLOAT_EQ(find("auto-sidebar")->height, 100.0f);
     EXPECT_FLOAT_EQ(find("auto-dependent")->height, 100.0f);
     EXPECT_FLOAT_EQ(find("auto-footer")->y - find("auto-article")->y, 80.0f);
+}
+
+TEST_F(RadiantDocumentTest, EmbeddedSvgFlexMinimumFollowsOverflowAndNaturalSize) {
+    StrBuf* source = strbuf_new();
+    strbuf_append_str(source,
+        "<!doctype html><style>body{margin:0}.row{display:flex;width:40px}"
+        ".row>svg{width:300px}</style><div id=result><div class=row>"
+        "<svg id=icon width=100 height=100></svg></div></div>");
+    ASSERT_NE(layout_script_source(source), nullptr);
+    DomElement* svg = dom_find_element_by_id(document->root, "icon");
+    ASSERT_NE(svg, nullptr);
+    ASSERT_NE(svg->scroller, nullptr);
+    EXPECT_EQ(svg->scroll()->overflow_x, CSS_VALUE_HIDDEN);
+    EXPECT_FLOAT_EQ(svg->width, 40.0f);
+    const struct { const char* overflow; float width; } states[] = {
+        {"visible", 100.0f}, {"clip", 100.0f}, {"hidden", 40.0f},
+    };
+    for (const auto& state : states) {
+        SCOPED_TRACE(state.overflow);
+        ASSERT_TRUE(dom_cssom_set_inline_property(svg, "overflow", state.overflow));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        EXPECT_FLOAT_EQ(svg->width, state.width);
+    }
 }
 
 TEST_F(RadiantDocumentTest, FlexShellReservesDescendantHeightConstraintsForItsFooter) {
@@ -9389,6 +9470,36 @@ TEST_F(RadiantDocumentTest, CollapsedTableBordersRetainDashDotDoubleAndColor) {
                     (unsigned)roundf((top+2)*scale),40,100,173);
             } else { EXPECT_GT(ink,20u); EXPECT_GT(gaps,10u); }
         }
+    }
+}
+
+TEST_F(RadiantDocumentTest, TransformedCollapsedTableBordersFollowTheirCells) {
+    ASSERT_NE(load_script_source(R"HTML(<style>
+        body{margin:0;background:white;font:18px sans-serif}
+        .outer{position:absolute;left:200px;display:inline-block;border:2px solid blue;padding:10px}
+        table{border-collapse:collapse;border-spacing:0}td{border:2px solid red;padding:4px 6px}
+        #translated{top:30px;transform:translate(200px,0)}
+        #scaled{top:300px;transform:scale(2);transform-origin:0 0}
+        </style><div id="result"></div><div id="translated" class="outer">
+        <table><tr><td>foo</td><td>x</td><td>bar</td></tr></table></div>
+        <div id="scaled" class="outer"><table><tr><td>foo</td><td>x</td><td>bar</td></tr></table></div>)HTML"), nullptr);
+    for (float scale : {1.0f, 2.0f}) {
+        ui_context_set_device_scale(&ui, scale, scale);
+        ui.viewport_width = 800; ui.viewport_height = 500;
+        ui.window_width = 800 * scale; ui.window_height = 500 * scale;
+        ui.create_surface(ui.window_width, ui.window_height);
+        layout_html_doc(&ui, document, false);
+        render_html_doc(&ui, document->view_tree, nullptr);
+        ASSERT_FALSE(ui.render_failed);
+        // Painted borders must follow translated and scaled content, without ghosts at the old origin.
+        auto pixel = [&](float x, float y, uint8_t red, uint8_t green, uint8_t blue) {
+            test_radiant_expect_surface_pixel(ui.surface, (unsigned)roundf(x * scale),
+                (unsigned)roundf(y * scale), red, green, blue);
+        };
+        pixel(430, 43, 255, 0, 0);
+        pixel(230, 43, 255, 255, 255);
+        pixel(260, 325, 255, 0, 0);
+        pixel(213, 315, 255, 255, 255);
     }
 }
 
@@ -15408,6 +15519,9 @@ TEST_F(RadiantDocumentTest, BoundaryFragmentsAreConsumedOncePerBox) {
     raster.paint_list = lam::up(&paint);
     raster.dl = lam::up(&list);
     raster.raster_scale = 1.0f;
+    // the direct painter uses a local origin, so retain its full viewport of ink.
+    raster.block.clip = {-ui.viewport_width, -ui.viewport_height,
+                         ui.viewport_width, ui.viewport_height};
     struct Case { const char* id; int commands; } cases[] = {{"cell", 4}, {"fragment", 2}};
     for (const auto& entry : cases) {
         SCOPED_TRACE(entry.id);
@@ -15896,7 +16010,8 @@ TEST_F(RadiantDocumentTest, WinningFontFamilyDeterminesTheMonospaceMediumAdjustm
         {"ua", 13.0f}, {"named", 16.0f}, {"generic", 13.0f},
         {"generic-span", 13.0f}, {"named-pre", 16.0f},
         {"sized-named", 20.0f}, {"sized-ua", 20.0f}, {"shorthand", 20.0f},
-        {"textarea", 13.333333f},
+        {"textarea", 13.333333f}, {"textarea-mono", 13.333333f},
+        {"textarea-medium", 13.0f}, {"textarea-inherit", 16.0f},
     };
     for (const Case& entry : cases) {
         DomElement* element = dom_find_element_by_id(document->root->as_element(), entry.id);
@@ -16925,8 +17040,8 @@ TEST_F(RadiantDocumentTest, RubyInlineMarginsContributeToColumnsWithoutEnteringB
             EXPECT_FLOAT_EQ(part(entry, true, unit)->width, column);
             IntrinsicSizes sizes = measure_physical_widths(ruby);
             EXPECT_FLOAT_EQ(sizes.min_content, column); EXPECT_FLOAT_EQ(sizes.max_content, column);
-            IntrinsicSizes row_sizes = measure_physical_widths(row);
-            // preferred intrinsic keywords constrain the parent's contribution as well as its used width.
+            // query the contribution, since content-only widths intentionally ignore the preferred size.
+            IntrinsicSizes row_sizes = measure_physical_widths(row, nullptr, false);
             EXPECT_FLOAT_EQ(row_sizes.min_content, entry.width == CSS_VALUE_MAX_CONTENT ? column + 10.0f : column);
             EXPECT_FLOAT_EQ(row_sizes.max_content, entry.width == CSS_VALUE_MIN_CONTENT ? column : column + 10.0f);
             if (entry.width == CSS_VALUE_MIN_CONTENT) EXPECT_FLOAT_EQ(row->width, column);
@@ -22043,6 +22158,14 @@ protected:
     void use_fake_speech() {
         ASSERT_TRUE(speech_engine.use_fake());
     }
+    AudioSubmixId prepare_offline_device_submix() {
+        // exercise device retirement without opening hardware; headless submixes are independent.
+        bool headless = ui.headless;
+        ui.headless = false;
+        AudioSubmixId mix = radiant_document_submix(document);
+        ui.headless = headless;
+        return mix;
+    }
     uint64_t open_clip(uint32_t frames = 64, int16_t left = 16384, int16_t right = -8192) {
         unsigned char bytes[44 + 1024 * 4];
         size_t length = audio_fixture_wave(bytes, sizeof(bytes), AUDIO_BUS_RATE, 2, frames, left, right);
@@ -22162,7 +22285,8 @@ TEST_F(RadiantAudioCapture, RevocationAndDeviceLossJoinTheProducerAndReleaseItsQ
     ASSERT_TRUE(radiant_capture_info(document, token, &info)); EXPECT_STREQ(info.state, "revoked"); EXPECT_EQ(host.closes, 3u);
 }
 TEST_F(RadiantAudioCapture, OutputLossLeavesRecordingActiveAndMonitoringMustBeReenabled) {
-    prepare(); ASSERT_TRUE(radiant_capture_grant(document, true)); auto token = radiant_capture_open(document);
+    prepare(); ASSERT_NE(prepare_offline_device_submix(), 0u);
+    ASSERT_TRUE(radiant_capture_grant(document, true)); auto token = radiant_capture_open(document);
     ASSERT_TRUE(radiant_capture_monitor(document, token, .5f)); audio_bus_retire_output(); AudioCaptureInfo info;
     ASSERT_TRUE(radiant_capture_info(document, token, &info)); EXPECT_STREQ(info.state, "capturing");
     EXPECT_TRUE(info.monitor_lost); EXPECT_FLOAT_EQ(info.monitor_gain, 0); EXPECT_EQ(host.closes, 0u);
@@ -22269,6 +22393,8 @@ TEST_F(RadiantDecodedAudio, HeadlessAudioStaysOffDeviceAndAdvancesOnDocumentCloc
     double start = 0; ASSERT_TRUE(radiant_document_clock(document, &start));
     uint64_t token = open_clip(960); ASSERT_NE(token, 0u);
     ASSERT_TRUE(radiant_audio_play(document, token, 1));
+    audio_bus_retire_output();
+    EXPECT_STREQ(radiant_audio_state(document, token), "playing");
     float output[16] = {}; audio_bus_mix(output, 8);
     for (float sample : output) EXPECT_FLOAT_EQ(sample, 0);
     EXPECT_DOUBLE_EQ(radiant_audio_clock(document), 0);
@@ -22460,6 +22586,7 @@ TEST_F(RadiantDecodedAudio, ClipAndVoiceLimitsRejectWithoutRetiringAcceptedPeers
 
 TEST_F(RadiantDecodedAudio, DeviceRetirementReleasesReadersBeforeClipsAndAllowsFreshVoices) {
     ASSERT_NE(load("test/lambda/ui/_window_fullscreen.ls"), nullptr);
+    ASSERT_NE(prepare_offline_device_submix(), 0u);
     uint64_t token = open_clip(); ASSERT_NE(token, 0u); ASSERT_TRUE(radiant_audio_play(document, token, 1));
     audio_bus_retire_output(); EXPECT_STREQ(radiant_audio_state(document, token), "error");
     EXPECT_FALSE(radiant_audio_frames_pending(document)); EXPECT_FALSE(radiant_audio_play(document, token, 1));
@@ -22586,6 +22713,7 @@ TEST_F(RadiantDecodedAudio, PausedSharedSourcesRespectTheDocumentPlayerLimitAndR
 
 TEST_F(RadiantDecodedAudio, ASceneSourceCanReplaceItsLostPlayerWithoutReacquiringPcm) {
     ASSERT_NE(load("test/lambda/ui/_window_fullscreen.ls"), nullptr);
+    ASSERT_NE(prepare_offline_device_submix(), 0u);
     uint64_t asset = open_clip(); ASSERT_NE(asset, 0u); auto parameters = rdt_audio_default_parameters();
     uint64_t source = radiant_audio_source_start(document, asset, 0, &parameters, 1); ASSERT_NE(source, 0u);
     audio_bus_retire_output(); EXPECT_STREQ(radiant_audio_state(document, source), "error");
@@ -22953,6 +23081,7 @@ TEST_F(RadiantDecodedAudio, MidiPreparationPauseAndEndRetainTransportWithoutIdle
 }
 TEST_F(RadiantDecodedAudio, MidiReverbTailOutlivesItsEndedVoiceAndDeviceLossClearsIt) {
     auto* owner = load("test/lambda/ui/_window_fullscreen.ls"); ASSERT_NE(owner, nullptr);
+    ASSERT_NE(prepare_offline_device_submix(), 0u);
     uint64_t token = open_midi(owner); ASSERT_NE(token, 0u); ASSERT_TRUE(radiant_midi_command(document, token, "play", 0));
     float output[1536 * 2]; auto mix = radiant_document_submix(document); ASSERT_TRUE(audio_submix_render(mix, output, 480));
     MidiSnapshot snapshot; ASSERT_TRUE(radiant_midi_info(document, token, &snapshot)); EXPECT_EQ(snapshot.state, MIDI_ENDED);

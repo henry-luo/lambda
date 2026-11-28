@@ -1,0 +1,434 @@
+{
+  "cases": [
+    {
+      "source": "\\jobname",
+      "tex": {
+        "text": "texput",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\pdftexrevision",
+      "tex": {
+        "text": "27",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\fontname\\nullfont",
+      "tex": {
+        "text": "nullfont",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\fontname\\font",
+      "tex": {
+        "text": "cmr10",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\font\\my=cmr10 \\fontname\\my",
+      "tex": {
+        "text": "nullfont",
+        "messages": [],
+        "diagnostics": [
+          {
+            "code": "tex-missing-font",
+            "message": "Missing font identifier",
+            "offset": 24,
+            "line": 1
+          }
+        ],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\font\\my=cmr10 at 12pt \\fontname\\my",
+      "tex": {
+        "text": "cmr10 at 12.0pt",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\font\\my=cmr10 at 9pt \\fontname\\my",
+      "tex": {
+        "text": "cmr10 at 9.0pt",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\font\\my=cmr10 scaled 1200 \\fontname\\my",
+      "tex": {
+        "text": "cmr10 at 12.0pt",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\font\\my=cmr10 \\my\\fontname\\font",
+      "tex": {
+        "text": "cmr10",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\font\\my=cmr10 \\let\\alias\\my\\fontname\\alias",
+      "tex": {
+        "text": "cmr10",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\font\\my=cmr10 \\textfont2=\\my \\fontname\\textfont2",
+      "tex": {
+        "text": "cmr10",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\fontname\\textfont2",
+      "tex": {
+        "text": "nullfont",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\edef\\x{\\fontname\\nullfont}\\x",
+      "tex": {
+        "text": "nullfont",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\font\\my=cmr10 at 12pt \\edef\\x{\\fontname\\my}\\x",
+      "tex": {
+        "text": "cmr10 at 12.0pt",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\edef\\x{\\jobname}\\x",
+      "tex": {
+        "text": "texput",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\edef\\x{\\pdftexrevision}\\x",
+      "tex": {
+        "text": "27",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\fontname\\nullfont ABC",
+      "tex": {
+        "text": "nullfontABC ",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\jobname{}\\pdftexrevision",
+      "tex": {
+        "text": "texput{}27",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\font\\my=cmr10 \\meaning\\my",
+      "tex": {
+        "text": "\\textbackslash{}relax",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\font\\my=cmr10 at 12pt \\meaning\\my",
+      "tex": {
+        "text": "select font cmr10 at 12.0pt",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\fontname\\bad X",
+      "tex": {
+        "text": "nullfont\\bad X ",
+        "messages": [],
+        "diagnostics": [
+          {
+            "code": "tex-missing-font",
+            "message": "Missing font identifier",
+            "offset": 9,
+            "line": 1
+          }
+        ],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\fontname A",
+      "tex": {
+        "text": "nullfontA ",
+        "messages": [],
+        "diagnostics": [
+          {
+            "code": "tex-missing-font",
+            "message": "Missing font identifier",
+            "offset": 10,
+            "line": 1
+          }
+        ],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\fontname",
+      "tex": {
+        "text": "nullfont",
+        "messages": [],
+        "diagnostics": [
+          {
+            "code": "tex-missing-font",
+            "message": "Missing font identifier",
+            "offset": 0
+          }
+        ],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\fontname\\relax X",
+      "tex": {
+        "text": "nullfontX ",
+        "messages": [],
+        "diagnostics": [
+          {
+            "code": "tex-missing-font",
+            "message": "Missing font identifier",
+            "offset": 9,
+            "line": 1
+          }
+        ],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\fontname\\iftrue\\nullfont\\else\\bad\\fi",
+      "tex": {
+        "text": "nullfont",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\font\\my=cmr10 \\def\\f{\\my}\\fontname\\f",
+      "tex": {
+        "text": "\\def\\f{\\my}cmr10",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\font\\my=cmr10 \\textfont3=\\my\\fontname\\textfont3",
+      "tex": {
+        "text": "cmr10",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\font\\my=cmr10 at 10pt \\fontname\\my",
+      "tex": {
+        "text": "cmr10",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\font\\my=cmr10 at 10.25pt \\fontname\\my",
+      "tex": {
+        "text": "cmr10 at 10.25pt",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\font\\my=cmr10\\relax \\fontname\\my",
+      "tex": {
+        "text": "cmr10",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\edef\\x{\\fontname\\nullfont}\\edef\\y{\\x}\\y",
+      "tex": {
+        "text": "nullfont",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\jobname\\jobname\\pdftexrevision",
+      "tex": {
+        "text": "texputtexput27",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\def\\x{\\fontname}\\x",
+      "tex": {
+        "text": "\\def\\x{\\fontname}nullfont",
+        "messages": [],
+        "diagnostics": [
+          {
+            "code": "tex-missing-font",
+            "message": "Missing font identifier",
+            "offset": 17
+          }
+        ],
+        "packages": []
+      },
+      "kernel_messages": true
+    }
+  ],
+  "kernel_messages": [
+    "\\z@=\\dimen10",
+    "\\p@=\\dimen11",
+    "\\maxdimen=\\dimen12",
+    "\\z@skip=\\skip10",
+    "\\hideskip=\\skip11",
+    "\\@tempdima=\\dimen13",
+    "\\@tempdimb=\\dimen14",
+    "\\@tempdimc=\\dimen15",
+    "\\@tempcnta=\\count23",
+    "\\@tempcntb=\\count24",
+    "\\@tempskipa=\\skip12",
+    "\\@tempskipb=\\skip13",
+    "\\@temptokena=\\toks10",
+    "\\@tempboxa=\\box10",
+    "\\voidb@x=\\box11",
+    "\\textwidth=\\dimen16",
+    "\\textheight=\\dimen17",
+    "\\linewidth=\\dimen18",
+    "\\columnwidth=\\dimen19",
+    "\\columnsep=\\dimen20",
+    "\\columnseprule=\\dimen21",
+    "\\marginparwidth=\\dimen22",
+    "\\marginparsep=\\dimen23",
+    "\\marginparpush=\\dimen24",
+    "\\oddsidemargin=\\dimen25",
+    "\\evensidemargin=\\dimen26",
+    "\\topmargin=\\dimen27",
+    "\\headheight=\\dimen28",
+    "\\headsep=\\dimen29",
+    "\\footskip=\\dimen30",
+    "\\paperwidth=\\dimen31",
+    "\\paperheight=\\dimen32",
+    "\\fboxsep=\\dimen33",
+    "\\fboxrule=\\dimen34",
+    "\\arraycolsep=\\dimen35",
+    "\\tabcolsep=\\dimen36",
+    "\\arrayrulewidth=\\dimen37",
+    "\\doublerulesep=\\dimen38",
+    "\\labelwidth=\\dimen39",
+    "\\labelsep=\\dimen40",
+    "\\itemindent=\\dimen41",
+    "\\listparindent=\\dimen42",
+    "\\leftmargin=\\dimen43",
+    "\\rightmargin=\\dimen44",
+    "\\unitlength=\\dimen45",
+    "\\jot=\\dimen46",
+    "\\abovecaptionskip=\\skip14",
+    "\\belowcaptionskip=\\skip15",
+    "\\smallskipamount=\\skip16",
+    "\\medskipamount=\\skip17",
+    "\\bigskipamount=\\skip18",
+    "\\topsep=\\skip19",
+    "\\itemsep=\\skip20",
+    "\\parsep=\\skip21",
+    "\\partopsep=\\skip22",
+    "\\floatsep=\\skip23",
+    "\\textfloatsep=\\skip24",
+    "\\intextsep=\\skip25"
+  ]
+}

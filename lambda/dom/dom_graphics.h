@@ -47,14 +47,15 @@ using DomCanvasStateSnapshot = RadiantCanvasStateSnapshot;
     OP(bool, ellipse, (void* canvas_element, float x, float y, float radius_x, float radius_y, double rotation, double start_angle, double end_angle, bool counter_clockwise)) \
     OP(bool, arc_to, (void* canvas_element, float x1, float y1, float x2, float y2, float radius)) \
     OP(bool, clip, (void* canvas_element)) \
-    OP(bool, fill, (void* canvas_element)) \
-    OP(bool, stroke, (void* canvas_element)) \
-    OP(bool, fill_rect, (void* canvas_element, float x, float y, float width, float height)) \
-    OP(bool, stroke_rect, (void* canvas_element, float x, float y, float width, float height)) \
+    OP(bool, fill, (void* canvas_element, const RadiantCanvasRadialGradient* gradient)) \
+    OP(bool, stroke, (void* canvas_element, const RadiantCanvasRadialGradient* gradient)) \
+    OP(bool, fill_rect, (void* canvas_element, float x, float y, float width, float height, const RadiantCanvasRadialGradient* gradient)) \
+    OP(bool, stroke_rect, (void* canvas_element, float x, float y, float width, float height, const RadiantCanvasRadialGradient* gradient)) \
     OP(bool, clear_rect, (void* canvas_element, float x, float y, float width, float height)) \
     OP(bool, draw_image, (void* canvas_element, void* source_element, const float* coordinates, size_t coordinate_count)) \
-    OP(bool, fill_text, (void* canvas_element, void* font_handle, const char* text, int text_len, float x, float y, float max_width)) \
-    OP(bool, read_pixels, (void* canvas_element, int64_t x, int64_t y, uint32_t width, uint32_t height, uint8_t* rgba, size_t bytes))
+    OP(bool, fill_text, (void* canvas_element, void* font_handle, const char* text, int text_len, float x, float y, float max_width, const RadiantCanvasRadialGradient* gradient)) \
+    OP(bool, read_pixels, (void* canvas_element, int64_t x, int64_t y, uint32_t width, uint32_t height, uint8_t* rgba, size_t bytes)) \
+    OP(bool, put_pixels, (void* canvas_element, int64_t x, int64_t y, uint32_t width, uint32_t height, const uint8_t* rgba, size_t row_bytes, size_t bytes))
 
 struct DomCanvasEngineOps {
 #define DOM_GRAPHICS_FIELD(result, name, parameters) result (*name) parameters;
@@ -76,5 +77,5 @@ extern "C" const DomCanvasEngineOps* dom_canvas_engine_ops(void);
 extern "C" const DomWebGlEngineOps* dom_webgl_engine_ops(void);
 
 // Absence returns false, zero or null and leaves output records untouched.
-// Pixel/text/font/command arguments are synchronous borrows. Canvas encoding
+// Pixel/text/font/gradient/command arguments are synchronous borrows. Canvas encoding
 // returns caller-owned StrBuf bytes, released with strbuf_free.

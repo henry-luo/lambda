@@ -165,8 +165,16 @@ before(async () => {
                 </head><body><div id="probe"></div><template>
                 <img src="/inert/image.svg?run=${run}">
                 <div style="background-image:url(/inert/background.svg?run=${run})"></div></template>
-                <script>console.log('TEMPLATE_RESOURCE_CONTROL',globalThis.inertInline===undefined,
-                    document.styleSheets.length===1);</script></body>`);
+                <script>
+                    const template = document.createElement('template');
+                    const content = template.content;
+                    document.body.appendChild(template);
+                    template.innerHTML = '<img src="/inert/runtime.svg?run=${run}">' +
+                        '<link rel="stylesheet" href="/inert/runtime.css?run=${run}">' +
+                        '<script>globalThis.inertInline=true;</scr' + 'ipt>';
+                    console.log('TEMPLATE_RESOURCE_CONTROL',globalThis.inertInline===undefined,
+                        document.styleSheets.length===1,content.childNodes.length===3);
+                </script></body>`);
             return;
         }
         if (url.pathname === '/event.css') {
@@ -331,7 +339,7 @@ for (const xhr of [false, true]) for (const local of [false, true]) {
 
 test('HTML template contents neither activate nor acquire document resources', async () => {
     const {image, log} = await renderHttpFixture('inert-template', '/template-page');
-    assert.match(log, /TEMPLATE_RESOURCE_CONTROL true true/);
+    assert.match(log, /TEMPLATE_RESOURCE_CONTROL true true true/);
     assert.deepEqual(rgb(image, 40, 40), [0, 128, 0]);
     assert(!requests.some(row => row.run === 'inert-template' && row.path.startsWith('/inert/')),
         'inert stylesheet, script, image and inline CSS must not enter resource discovery: ' +

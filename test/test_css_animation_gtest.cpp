@@ -4505,6 +4505,17 @@ protected:
         return ap;
     }
 
+    CssWebAnimationState* createWebAnimation(DomElement* element, CssKeyframes* keyframes,
+            double duration, const TimingFunction* easing = nullptr) {
+        // The web animation API now receives the complete effect timing as one value.
+        CssWebAnimationTiming timing = {};
+        timing.duration_ms = duration;
+        timing.iterations = 1;
+        timing.easing.type = TIMING_LINEAR;
+        if (easing) timing.easing = *easing;
+        return css_web_animation_create(element, keyframes, &timing, pool);
+    }
+
     CssKeyframes* parsedKeyframes(const char* content, const char* name) {
         CssStylesheet sheet;
         CssRule rule;
@@ -4771,10 +4782,10 @@ TEST_F(AnimationTickTest, WebCancellationRestoresAllTransformSlotsBeforeSameTime
     individual.values[1].params.angle = .2f;
     individual.values[2].type = TRANSFORM_SCALE;
     individual.values[2].params.scale = {1.2f, 1.3f};
-    CssWebAnimationState* effect = css_web_animation_create(element,
+    CssWebAnimationState* effect = createWebAnimation(element,
         parsedKeyframes("webTransforms{from{transform:translateX(0px);translate:0px;rotate:0deg;scale:1}"
             "to{transform:translateX(100px);translate:40px;rotate:180deg;scale:3 5}}", "webTransforms"),
-        1000.0, nullptr, pool);
+        1000.0);
     ASSERT_NE(effect, nullptr);
     // the second cycle seeks to the same time after cancel cleared the resolved-time flag.
     for (int cycle = 0; cycle < 2; cycle++) {
@@ -5153,7 +5164,7 @@ TEST_F(AnimationTickTest, ImportantPriorityRefreshesForCssAndWebEffects) {
     animation_scheduler_tick(scheduler, .75, nullptr);
     EXPECT_FLOAT_EQ(mock.in_line.opacity, .8f);
 
-    CssWebAnimationState* web = css_web_animation_create(element, keyframes, 1000.0, nullptr, pool);
+    CssWebAnimationState* web = createWebAnimation(element, keyframes, 1000.0);
     ASSERT_NE(web, nullptr);
     css_web_animation_set_current_time(web, 500.0);
     css_web_animation_resolve(element, &layout);
@@ -5827,9 +5838,9 @@ TEST_F(AnimationTickTest, EqualOffsetsCascadePropertyAndTimingDescriptors) {
 TEST_F(AnimationTickTest, WebEasingPrecedesPropertyIntervalSampling) {
     MockElement mock;
     DomElement* element = createMockElement(&mock);
-    CssWebAnimationState* effect = css_web_animation_create(element,
+    CssWebAnimationState* effect = createWebAnimation(element,
         parsedKeyframes("web{from{opacity:0}50%{opacity:.8}to{opacity:1}}", "web"),
-        1000.0, &TIMING_EASE_IN, pool);
+        1000.0, &TIMING_EASE_IN);
     ASSERT_NE(effect, nullptr);
     css_web_animation_set_current_time(effect, 500.0);
     css_web_animation_resolve(element, &layout);
@@ -5842,10 +5853,10 @@ TEST_F(AnimationTickTest, PiecewiseWebEasingSurvivesParserPoolRetirement) {
     Pool* source = pool_create();
     TimingFunction timing = {};
     ASSERT_TRUE(css_animation_parse_timing_function_text("linear(0,.25,1)", &timing, source));
-    CssWebAnimationState* effect = css_web_animation_create(element,
-        opacityKeyframes(), 1000, &timing, pool);
+    CssWebAnimationState* effect = createWebAnimation(element,
+        opacityKeyframes(), 1000, &timing);
     ASSERT_NE(effect, nullptr);
-    EXPECT_NE(effect->timing.piecewise.points, timing.piecewise.points);
+    EXPECT_NE(effect->timing.easing.piecewise.points, timing.piecewise.points);
     pool_destroy(source);
     css_web_animation_set_current_time(effect, 500);
     css_web_animation_resolve(element, &layout);
@@ -6531,12 +6542,14 @@ TEST_F(AnimationTickTest, WebLengthEffectsInvalidateWithoutDomMutations) {
     };
     CssKeyframes keyframes = {lam::up("web"), lam::own_arr(stops), 2};
     element->set_styles_resolved(true);
-    CssWebAnimationState* state = css_web_animation_create(
-        element, &keyframes, 1000.0, nullptr, pool);
+    CssWebAnimationState* state = createWebAnimation(element, &keyframes, 1000.0);
     ASSERT_NE(state, nullptr);
+    // An idle effect requests sampling when its time first becomes resolved.
+    EXPECT_FALSE(document_state.needs_reflow);
+    EXPECT_TRUE(element->styles_resolved());
+    css_web_animation_set_current_time(state, 500.0);
     EXPECT_TRUE(document_state.needs_reflow);
     EXPECT_FALSE(element->styles_resolved());
-    css_web_animation_set_current_time(state, 500.0);
     css_web_animation_resolve(element, &layout);
     EXPECT_FLOAT_EQ(block.given_width, 60.0f);
 

@@ -2776,6 +2776,7 @@ void gc_collect_with_root_region(gc_heap_t* gc, uint64_t* extra_roots,
     }
 
     gc->mark_top = 0;
+    int initial_ephemeron_count = gc->ephemeron_count;
     gc->compaction_owner_count = 0;
     // With no source buffers to move, marking needs no compaction worklist.
     gc->compaction_owners_valid = gc_data_zone_used(gc->data_zone) != 0 ||
@@ -2837,6 +2838,9 @@ void gc_collect_with_root_region(gc_heap_t* gc, uint64_t* extra_roots,
         // Incomplete reachability must never clear weak edges, move buffers,
         // or reclaim objects. Preserve the heap for a later collection attempt.
         gc->mark_top = 0;
+        // Tracing discovers the same ephemerons on retry. Their native slots
+        // can move before then, so keep only registrations made by the caller.
+        gc->ephemeron_count = initial_ephemeron_count;
         // an abandoned trace must discard its partial compaction worklist too.
         gc->compaction_owner_count = 0;
         gc->compaction_owners_valid = false;

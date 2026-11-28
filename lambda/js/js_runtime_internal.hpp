@@ -18,6 +18,13 @@
 #include "js_builtin_catalog.hpp"
 #include "../lambda-data.hpp"
 #include "lambda/core/name_pool.hpp"
+
+Item js_iterator_close_preserve_exception(Item iterator, Item original);
+
+struct JsIntlServiceMethod { const char* name; JsNativeCallBody body; int arity; bool is_static; };
+Item js_intl_install_service(Item owner, const char* name, const char* tag,
+                              JsNativeConstructBody construct, const JsIntlServiceMethod* methods,
+                              size_t method_count);
 #include "lambda/core/lambda-decimal.hpp"
 #include "../runtime/transpiler.hpp"
 #include "../runtime/module_registry.h"

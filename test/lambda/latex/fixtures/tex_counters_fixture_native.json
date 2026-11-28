@@ -1,0 +1,809 @@
+{
+  "without": {
+    "source": "test/lambda/latex/fixtures/local_packages/document.tex",
+    "source_text": "\\documentclass[11pt]{lmdreport}\n\\usepackage{amsmath}\n\\usepackage[draft]{lmdnotes}\n\\coursecode{MATH 220}\n\\begin{document}\n\\section{Vectors in $\\R^n$}\n\\showcourse: status \\status, started \\started.\nLet $\\vect{v} \\in \\R^3$ and \\hl{highlight} the pair \\pair{a,b}.\n\\note{plain} and \\note[Tip]{optional}.\n\\exercise{} \\exercise{}\n\\begin{remark}\nA remark from the package.\n\\end{remark}\n\\end{document}\n",
+    "adapters": [],
+    "tex": {
+      "text": "\\documentclass{article}\\usepackage{amsmath}\n\\usepackage{xcolor}\n\\begin{document}\n\\section{Vectors in $\\mathbb{R}^n$}\nCourse MATH 220: status DRAFT, started yes.\nLet $\\mathbf{v} \\in\\mathbb{R}^3$ and highlight the pair (a; b).\n\\textbf{Note:} plain and \\textbf{Tip:} optional.\n\\textbf{Exercise 1.}{} \\textbf{Exercise 2.}{}\n\\par\\textit{Remark.}~\nA remark from the package.\n\\par\n\\end{document}\n",
+      "messages": [
+        "\\z@=\\dimen10",
+        "\\p@=\\dimen11",
+        "\\maxdimen=\\dimen12",
+        "\\z@skip=\\skip10",
+        "\\hideskip=\\skip11",
+        "\\@tempdima=\\dimen13",
+        "\\@tempdimb=\\dimen14",
+        "\\@tempdimc=\\dimen15",
+        "\\@tempcnta=\\count23",
+        "\\@tempcntb=\\count24",
+        "\\@tempskipa=\\skip12",
+        "\\@tempskipb=\\skip13",
+        "\\@temptokena=\\toks10",
+        "\\@tempboxa=\\box10",
+        "\\voidb@x=\\box11",
+        "\\textwidth=\\dimen16",
+        "\\textheight=\\dimen17",
+        "\\linewidth=\\dimen18",
+        "\\columnwidth=\\dimen19",
+        "\\columnsep=\\dimen20",
+        "\\columnseprule=\\dimen21",
+        "\\marginparwidth=\\dimen22",
+        "\\marginparsep=\\dimen23",
+        "\\marginparpush=\\dimen24",
+        "\\oddsidemargin=\\dimen25",
+        "\\evensidemargin=\\dimen26",
+        "\\topmargin=\\dimen27",
+        "\\headheight=\\dimen28",
+        "\\headsep=\\dimen29",
+        "\\footskip=\\dimen30",
+        "\\paperwidth=\\dimen31",
+        "\\paperheight=\\dimen32",
+        "\\fboxsep=\\dimen33",
+        "\\fboxrule=\\dimen34",
+        "\\arraycolsep=\\dimen35",
+        "\\tabcolsep=\\dimen36",
+        "\\arrayrulewidth=\\dimen37",
+        "\\doublerulesep=\\dimen38",
+        "\\labelwidth=\\dimen39",
+        "\\labelsep=\\dimen40",
+        "\\itemindent=\\dimen41",
+        "\\listparindent=\\dimen42",
+        "\\leftmargin=\\dimen43",
+        "\\rightmargin=\\dimen44",
+        "\\unitlength=\\dimen45",
+        "\\jot=\\dimen46",
+        "\\abovecaptionskip=\\skip14",
+        "\\belowcaptionskip=\\skip15",
+        "\\smallskipamount=\\skip16",
+        "\\medskipamount=\\skip17",
+        "\\bigskipamount=\\skip18",
+        "\\topsep=\\skip19",
+        "\\itemsep=\\skip20",
+        "\\parsep=\\skip21",
+        "\\partopsep=\\skip22",
+        "\\floatsep=\\skip23",
+        "\\textfloatsep=\\skip24",
+        "\\intextsep=\\skip25"
+      ],
+      "diagnostics": [],
+      "packages": [
+        "lmdreport",
+        "lmdnotes"
+      ]
+    },
+    "latex": {
+      "$": "latex_document",
+      "tex_diagnostics": [],
+      "tex_packages": [
+        "lmdreport",
+        "lmdnotes"
+      ],
+      "_": [
+        {
+          "$": "documentclass",
+          "source_offset": 32,
+          "argument_groups": [
+            {
+              "kind": "required",
+              "raw": "article",
+              "start": 32,
+              "end": 32
+            }
+          ],
+          "_": [
+            "article"
+          ]
+        },
+        {
+          "$": "usepackage",
+          "source_offset": 32,
+          "argument_groups": [
+            {
+              "kind": "required",
+              "raw": "amsmath",
+              "start": 43,
+              "end": 52
+            }
+          ],
+          "_": [
+            "amsmath"
+          ]
+        },
+        {
+          "$": "paragraph",
+          "_": [
+            "\n"
+          ]
+        },
+        {
+          "$": "usepackage",
+          "source_offset": 82,
+          "argument_groups": [
+            {
+              "kind": "required",
+              "raw": "xcolor",
+              "start": 82,
+              "end": 103
+            }
+          ],
+          "_": [
+            "xcolor"
+          ]
+        },
+        {
+          "$": "paragraph",
+          "_": [
+            "\n"
+          ]
+        },
+        {
+          "$": "document",
+          "source_offset": 104,
+          "_": [
+            {
+              "$": "paragraph",
+              "_": [
+                "\n"
+              ]
+            },
+            {
+              "$": "section",
+              "source_offset": 121,
+              "title": {
+                "$": "curly_group",
+                "_": [
+                  "Vectors in ",
+                  {
+                    "$": "inline_math",
+                    "source_offset": 142,
+                    "source": "\\mathbb{R}^n",
+                    "ast": {
+                      "$": "math",
+                      "_": [
+                        {
+                          "$": "subsup",
+                          "base": {
+                            "$": "style_command",
+                            "cmd": "\\mathbb",
+                            "arg": {
+                              "$": "group",
+                              "_": [
+                                "R"
+                              ]
+                            }
+                          },
+                          "sup": "n"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "$": "paragraph",
+              "_": [
+                "\nCourse MATH 220: status DRAFT, started yes.\nLet ",
+                {
+                  "$": "inline_math",
+                  "source_offset": 208,
+                  "source": "\\mathbf{v} \\in\\mathbb{R}^3",
+                  "ast": {
+                    "$": "math",
+                    "_": [
+                      {
+                        "$": "style_command",
+                        "cmd": "\\mathbf",
+                        "arg": {
+                          "$": "group",
+                          "_": [
+                            "v"
+                          ]
+                        }
+                      },
+                      {
+                        "$": "symbol_command",
+                        "name": "in"
+                      },
+                      {
+                        "$": "subsup",
+                        "base": {
+                          "$": "style_command",
+                          "cmd": "\\mathbb",
+                          "arg": {
+                            "$": "group",
+                            "_": [
+                              "R"
+                            ]
+                          }
+                        },
+                        "sup": "3"
+                      }
+                    ]
+                  }
+                },
+                " and highlight the pair (a; b).\n",
+                {
+                  "$": "textbf",
+                  "source_offset": 271,
+                  "_": [
+                    "Note:"
+                  ]
+                },
+                " plain and ",
+                {
+                  "$": "textbf",
+                  "source_offset": 296,
+                  "_": [
+                    "Tip:"
+                  ]
+                },
+                " optional.\n",
+                {
+                  "$": "textbf",
+                  "source_offset": 299,
+                  "_": [
+                    "Exercise 1."
+                  ]
+                },
+                {
+                  "$": "curly_group"
+                },
+                " ",
+                {
+                  "$": "textbf",
+                  "source_offset": 311,
+                  "_": [
+                    "Exercise 2."
+                  ]
+                },
+                {
+                  "$": "curly_group"
+                },
+                "\n"
+              ]
+            },
+            {
+              "$": "paragraph",
+              "_": [
+                {
+                  "$": "textit",
+                  "source_offset": 336,
+                  "_": [
+                    "Remark."
+                  ]
+                },
+                "~\nA remark from the package.\n"
+              ]
+            }
+          ]
+        },
+        {
+          "$": "paragraph",
+          "_": [
+            "\n"
+          ]
+        }
+      ]
+    }
+  },
+  "with": {
+    "source": "test/lambda/latex/fixtures/local_packages/document.tex",
+    "source_text": "\\documentclass[11pt]{lmdreport}\n\\usepackage{amsmath}\n\\usepackage[draft]{lmdnotes}\n\\coursecode{MATH 220}\n\\begin{document}\n\\section{Vectors in $\\R^n$}\n\\showcourse: status \\status, started \\started.\nLet $\\vect{v} \\in \\R^3$ and \\hl{highlight} the pair \\pair{a,b}.\n\\note{plain} and \\note[Tip]{optional}.\n\\exercise{} \\exercise{}\n\\begin{remark}\nA remark from the package.\n\\end{remark}\n\\end{document}\n",
+    "adapters": [
+      "amsmath",
+      "amssymb",
+      "amsthm",
+      "bussproofs",
+      "semantic",
+      "IEEEtrantools",
+      "graphicx",
+      "hyperref",
+      "cleveref",
+      "listings",
+      "tcolorbox",
+      "url",
+      "geometry",
+      "xcolor",
+      "booktabs",
+      "array",
+      "multirow",
+      "makecell",
+      "cellspace",
+      "caption",
+      "subcaption",
+      "slashbox",
+      "diagbox",
+      "longtable",
+      "tabularx",
+      "xltabular",
+      "babel",
+      "polyglossia",
+      "vietnam",
+      "multicol",
+      "fontenc",
+      "inputenc",
+      "lmodern",
+      "cmbright",
+      "helvet",
+      "gfsporson",
+      "eucal",
+      "mathrsfs",
+      "cmap",
+      "enumerate",
+      "fontspec",
+      "unicode-math",
+      "fontawesome5",
+      "times",
+      "mathptmx",
+      "newtxtext",
+      "newtxmath",
+      "txfonts",
+      "newpxtext",
+      "newpxmath",
+      "mathpazo",
+      "palatino",
+      "libertine",
+      "libertinus",
+      "charter",
+      "kpfonts",
+      "fourier",
+      "sourcesanspro",
+      "inconsolata",
+      "beramono",
+      "courier",
+      "psfrag",
+      "ifthen",
+      "cite",
+      "preview",
+      "fancyhdr",
+      "lastpage",
+      "csquotes",
+      "fullpage",
+      "doi",
+      "filecontents",
+      "comment",
+      "verbatim",
+      "upquote",
+      "xparse",
+      "textcomp",
+      "gensymb",
+      "nameref",
+      "epstopdf",
+      "amscd",
+      "cancel",
+      "latexsym",
+      "stmaryrd",
+      "esint",
+      "upgreek",
+      "bbm",
+      "dsfont",
+      "physics",
+      "mathtools",
+      "bm",
+      "xspace",
+      "soul",
+      "setspace",
+      "parskip",
+      "lipsum",
+      "fancyvrb",
+      "minted",
+      "fancybox",
+      "boxedminipage",
+      "framed",
+      "mdframed",
+      "paralist",
+      "blindtext",
+      "ragged2e",
+      "ulem",
+      "footmisc",
+      "colortbl",
+      "hhline",
+      "dcolumn",
+      "threeparttable",
+      "adjustbox",
+      "titlesec",
+      "sectsty",
+      "tocloft",
+      "titling",
+      "authblk",
+      "glossaries",
+      "acronym",
+      "nomencl",
+      "makeidx",
+      "imakeidx",
+      "varioref",
+      "minitoc",
+      "csvsimple",
+      "pdfpages",
+      "appendix",
+      "nicefrac",
+      "xfrac",
+      "mhchem",
+      "float",
+      "algorithm",
+      "algorithm2e",
+      "subfig",
+      "subfigure",
+      "wrapfig",
+      "rotating",
+      "pdflscape",
+      "lscape",
+      "algpseudocode",
+      "algorithmic",
+      "placeins",
+      "indentfirst",
+      "bookmark",
+      "pifont",
+      "marvosym",
+      "todonotes",
+      "biblatex",
+      "biblatex-chicago",
+      "natbib",
+      "enumitem",
+      "microtype",
+      "siunitx",
+      "tikz",
+      "tikzpeople",
+      "pgfplots",
+      "article",
+      "report",
+      "book",
+      "standalone",
+      "extarticle",
+      "extreport",
+      "extbook",
+      "scrartcl",
+      "scrreprt",
+      "scrbook",
+      "amsart",
+      "amsproc",
+      "amsbook",
+      "memoir",
+      "IEEEtran",
+      "llncs",
+      "elsarticle",
+      "revtex4-2",
+      "revtex4-1",
+      "acmart",
+      "letter",
+      "exam",
+      "pgf",
+      "amsfonts",
+      "color"
+    ],
+    "raw": [
+      "AxiomC",
+      "UnaryInfC",
+      "BinaryInfC",
+      "TrinaryInfC",
+      "QuaternaryInfC",
+      "QuinaryInfC",
+      "Axiom",
+      "UnaryInf",
+      "BinaryInf",
+      "TrinaryInf",
+      "RightLabel",
+      "LeftLabel",
+      "inference"
+    ],
+    "chaptered": [
+      "report",
+      "book",
+      "extreport",
+      "extbook",
+      "scrreprt",
+      "scrbook",
+      "amsbook",
+      "memoir"
+    ],
+    "tex": {
+      "text": "\\documentclass{article}\\usepackage{amsmath}\n\\usepackage{xcolor}\n\\begin{document}\n\\section{Vectors in $\\mathbb{R}^n$}\nCourse MATH 220: status DRAFT, started yes.\nLet $\\mathbf{v} \\in\\mathbb{R}^3$ and \\textcolor{red}{highlight} the pair (a; b).\n\\textbf{Note:} plain and \\textbf{Tip:} optional.\n\\textbf{Exercise 1.}{} \\textbf{Exercise 2.}{}\n\\par\\textit{Remark.}~\nA remark from the package.\n\\par\n\\end{document}\n",
+      "messages": [
+        "\\z@=\\dimen10",
+        "\\p@=\\dimen11",
+        "\\maxdimen=\\dimen12",
+        "\\z@skip=\\skip10",
+        "\\hideskip=\\skip11",
+        "\\@tempdima=\\dimen13",
+        "\\@tempdimb=\\dimen14",
+        "\\@tempdimc=\\dimen15",
+        "\\@tempcnta=\\count23",
+        "\\@tempcntb=\\count24",
+        "\\@tempskipa=\\skip12",
+        "\\@tempskipb=\\skip13",
+        "\\@temptokena=\\toks10",
+        "\\@tempboxa=\\box10",
+        "\\voidb@x=\\box11",
+        "\\textwidth=\\dimen16",
+        "\\textheight=\\dimen17",
+        "\\linewidth=\\dimen18",
+        "\\columnwidth=\\dimen19",
+        "\\columnsep=\\dimen20",
+        "\\columnseprule=\\dimen21",
+        "\\marginparwidth=\\dimen22",
+        "\\marginparsep=\\dimen23",
+        "\\marginparpush=\\dimen24",
+        "\\oddsidemargin=\\dimen25",
+        "\\evensidemargin=\\dimen26",
+        "\\topmargin=\\dimen27",
+        "\\headheight=\\dimen28",
+        "\\headsep=\\dimen29",
+        "\\footskip=\\dimen30",
+        "\\paperwidth=\\dimen31",
+        "\\paperheight=\\dimen32",
+        "\\fboxsep=\\dimen33",
+        "\\fboxrule=\\dimen34",
+        "\\arraycolsep=\\dimen35",
+        "\\tabcolsep=\\dimen36",
+        "\\arrayrulewidth=\\dimen37",
+        "\\doublerulesep=\\dimen38",
+        "\\labelwidth=\\dimen39",
+        "\\labelsep=\\dimen40",
+        "\\itemindent=\\dimen41",
+        "\\listparindent=\\dimen42",
+        "\\leftmargin=\\dimen43",
+        "\\rightmargin=\\dimen44",
+        "\\unitlength=\\dimen45",
+        "\\jot=\\dimen46",
+        "\\abovecaptionskip=\\skip14",
+        "\\belowcaptionskip=\\skip15",
+        "\\smallskipamount=\\skip16",
+        "\\medskipamount=\\skip17",
+        "\\bigskipamount=\\skip18",
+        "\\topsep=\\skip19",
+        "\\itemsep=\\skip20",
+        "\\parsep=\\skip21",
+        "\\partopsep=\\skip22",
+        "\\floatsep=\\skip23",
+        "\\textfloatsep=\\skip24",
+        "\\intextsep=\\skip25"
+      ],
+      "diagnostics": [],
+      "packages": [
+        "lmdreport",
+        "lmdnotes"
+      ]
+    },
+    "latex": {
+      "$": "latex_document",
+      "tex_diagnostics": [],
+      "tex_packages": [
+        "lmdreport",
+        "lmdnotes"
+      ],
+      "_": [
+        {
+          "$": "documentclass",
+          "source_offset": 32,
+          "argument_groups": [
+            {
+              "kind": "required",
+              "raw": "article",
+              "start": 32,
+              "end": 32
+            }
+          ],
+          "_": [
+            "article"
+          ]
+        },
+        {
+          "$": "usepackage",
+          "source_offset": 32,
+          "argument_groups": [
+            {
+              "kind": "required",
+              "raw": "amsmath",
+              "start": 43,
+              "end": 52
+            }
+          ],
+          "_": [
+            "amsmath"
+          ]
+        },
+        {
+          "$": "paragraph",
+          "_": [
+            "\n"
+          ]
+        },
+        {
+          "$": "usepackage",
+          "source_offset": 82,
+          "argument_groups": [
+            {
+              "kind": "required",
+              "raw": "xcolor",
+              "start": 82,
+              "end": 103
+            }
+          ],
+          "_": [
+            "xcolor"
+          ]
+        },
+        {
+          "$": "paragraph",
+          "_": [
+            "\n"
+          ]
+        },
+        {
+          "$": "document",
+          "source_offset": 104,
+          "_": [
+            {
+              "$": "paragraph",
+              "_": [
+                "\n"
+              ]
+            },
+            {
+              "$": "section",
+              "source_offset": 121,
+              "title": {
+                "$": "curly_group",
+                "_": [
+                  "Vectors in ",
+                  {
+                    "$": "inline_math",
+                    "source_offset": 142,
+                    "source": "\\mathbb{R}^n",
+                    "ast": {
+                      "$": "math",
+                      "_": [
+                        {
+                          "$": "subsup",
+                          "base": {
+                            "$": "style_command",
+                            "cmd": "\\mathbb",
+                            "arg": {
+                              "$": "group",
+                              "_": [
+                                "R"
+                              ]
+                            }
+                          },
+                          "sup": "n"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "$": "paragraph",
+              "_": [
+                "\nCourse MATH 220: status DRAFT, started yes.\nLet ",
+                {
+                  "$": "inline_math",
+                  "source_offset": 208,
+                  "source": "\\mathbf{v} \\in\\mathbb{R}^3",
+                  "ast": {
+                    "$": "math",
+                    "_": [
+                      {
+                        "$": "style_command",
+                        "cmd": "\\mathbf",
+                        "arg": {
+                          "$": "group",
+                          "_": [
+                            "v"
+                          ]
+                        }
+                      },
+                      {
+                        "$": "symbol_command",
+                        "name": "in"
+                      },
+                      {
+                        "$": "subsup",
+                        "base": {
+                          "$": "style_command",
+                          "cmd": "\\mathbb",
+                          "arg": {
+                            "$": "group",
+                            "_": [
+                              "R"
+                            ]
+                          }
+                        },
+                        "sup": "3"
+                      }
+                    ]
+                  }
+                },
+                " and ",
+                {
+                  "$": "textcolor",
+                  "source_offset": 237,
+                  "argument_groups": [
+                    {
+                      "kind": "required",
+                      "raw": "red",
+                      "start": 237,
+                      "end": 237
+                    },
+                    {
+                      "kind": "required",
+                      "raw": "highlight",
+                      "start": 237,
+                      "end": 238
+                    }
+                  ],
+                  "_": [
+                    [
+                      "red",
+                      "highlight"
+                    ]
+                  ]
+                },
+                " the pair (a; b).\n",
+                {
+                  "$": "textbf",
+                  "source_offset": 271,
+                  "_": [
+                    "Note:"
+                  ]
+                },
+                " plain and ",
+                {
+                  "$": "textbf",
+                  "source_offset": 296,
+                  "_": [
+                    "Tip:"
+                  ]
+                },
+                " optional.\n",
+                {
+                  "$": "textbf",
+                  "source_offset": 299,
+                  "_": [
+                    "Exercise 1."
+                  ]
+                },
+                {
+                  "$": "curly_group"
+                },
+                " ",
+                {
+                  "$": "textbf",
+                  "source_offset": 311,
+                  "_": [
+                    "Exercise 2."
+                  ]
+                },
+                {
+                  "$": "curly_group"
+                },
+                "\n"
+              ]
+            },
+            {
+              "$": "paragraph",
+              "_": [
+                {
+                  "$": "textit",
+                  "source_offset": 336,
+                  "_": [
+                    "Remark."
+                  ]
+                },
+                "~\nA remark from the package.\n"
+              ]
+            }
+          ]
+        },
+        {
+          "$": "paragraph",
+          "_": [
+            "\n"
+          ]
+        }
+      ]
+    }
+  }
+}

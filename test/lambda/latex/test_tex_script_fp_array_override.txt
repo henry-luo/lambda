@@ -1,0 +1,14 @@
+[{
+    issue: "tex-unsupported-primitive",
+    unsupported: "expl3 fp array initialization",
+    preserved: true
+  }, {
+    issue: "tex-unsupported-primitive",
+    unsupported: "expl3 fp array initialization",
+    preserved: true
+  }]
+{
+  issue: null,
+  preserved: true,
+  fonts_unchanged: true
+}

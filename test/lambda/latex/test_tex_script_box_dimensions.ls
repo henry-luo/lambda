@@ -2,6 +2,7 @@ import profile: lambda.doc.latex.tex_engine.profile
 import recovery: ._tex_script_recovery
 import digest: lambda.doc.latex.tex_engine.digest
 import rebuild: lambda.doc.latex.tex_engine.reconstruct
+import snapshot: ._tex_native_snapshot
 let kernel=input(sys.lambda.home ++ "/package/doc/latex/tex_engine/kernel.tex","text")^;
 let options={echo_definitions:true,adapters:[],resources:{local:{},bundled:{}}};
 let cases=["\\the\\wd0/\\the\\ht0/\\the\\dp0",
@@ -44,18 +45,23 @@ let cases=["\\the\\wd0/\\the\\ht0/\\the\\dp0",
  "\\setbox0=\\hbox{A}\\wd0=2pt\\showthe\\wd0\\the\\wd0",
  "\\setbox0=\\hbox{A}\\ht0=16384pt\\dp0=\\ht0\\the\\dp0",
  "\\setbox0=\\vbox{A}\\setbox1=\\copy0\\dp1=-3pt\\the\\dp0/\\the\\dp1"];
-let results=[for(source in cases) recovery.check(source)^];
-{cases:len(results),supported:all([for(r in results) r.issue==null]),text:all([for(r in results) r.text]),
- diagnostics:all([for(r in results) r.diagnostics]),messages:all([for(r in results) r.messages])};
-fn check_ast(body,mode) any^ {
+let references=input("test/lambda/latex/fixtures/tex_box_dimensions_native.json","json")^;
+// retain a fresh first expansion, then reuse the compatible immutable kernel.
+let cached=profile.preload_kernel(kernel,options,100000)^;
+let results=[for(i,source in cases) recovery.check_expansion(source,options,references.cases[i],if(i==0) null else cached)^];
+{cases:len(results),supported:all([for(r in results) r.issue==null]),text:all([for(r in results) r.text_match]),
+ diagnostics:all([for(r in results) r.diagnostics_match]),messages:all([for(r in results) r.messages_match])};
+fn check_ast(body,mode,reference,cached) any^ {
  let source="\\begin{document}" ++ body ++ "\\end{document}";
- let r=profile.expand_with_kernel(source,kernel,{*:options,constructor_argument_mode:mode},100000)^;
- let d=digest.digest(r)^; let n=parse(source,{type:"latex"})^;
- {issue:d.issue,match:d.ast==n}
+ let r=profile.expand_with_kernel(source,kernel,{*:options,constructor_argument_mode:mode},100000,cached)^;
+ let d=digest.digest(r)^;
+ {issue:d.issue,match:snapshot.tree_matches(d.ast,reference,source)^}
 }
 let bodies=["\\setbox0=\\hbox{Hi}\\wd0=2pt\\the\\wd0", "\\the\\wd0",
  "A\\setbox0=\\hbox{Hi}\\the\\wd0 B", "\\textbf{\\the\\wd0}"];
-let trees=[for(body in bodies, mode in [false,true]) check_ast(body,mode)^];
+let constructor_cached=profile.preload_kernel(kernel,{*:options,constructor_argument_mode:true},100000)^;
+let trees=[for(i,body in bodies, mode in [false,true]) check_ast(body,mode,references.trees[i],
+    if(i==0) null else if(mode) constructor_cached else cached)^];
 {ast_cases:len(trees),supported:all([for(t in trees) t.issue==null]),matches:all([for(t in trees) t.match])};
 
 let root="test/lambda/latex/fixtures/local_packages/";
@@ -64,6 +70,7 @@ let child=input(root ++ "script-box-metrics-child.tex","text")^;
 let source=input(root ++ name,"text")^;
 let foreign=profile.expand_with_kernel(source,kernel,{*:options,source_name:root ++ name,
     resources:{local:{'script-box-metrics-child.tex':{data:child}},bundled:{}}},100000)^;
-let native=input(root ++ name,"tex")^;
-{issue:foreign.issue,text:rebuild.reconstruct(foreign)^.text==native.text,
+let native=references.local.tex;
+let local_bound=source==references.local.source and child==references.local.child;
+{issue:foreign.issue,text:local_bound and rebuild.reconstruct(foreign)^.text==native.text,
  diagnostics:foreign.diagnostic_records==native.diagnostics,messages:foreign.messages==native.messages}

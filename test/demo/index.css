@@ -28,15 +28,6 @@ body {
 .lattice { position: absolute; inset: 0; opacity: .55;
            background-image: radial-gradient(circle, rgba(255, 255, 255, .3) 1px, rgba(255, 255, 255, 0) 1.6px);
            background-size: 30px 30px; }
-.glyph { position: absolute; bottom: -60px; color: rgba(30, 64, 175, .22); font-weight: 300;
-         animation-name: rise; animation-duration: 14s; animation-timing-function: linear;
-         animation-iteration-count: infinite; }
-@keyframes rise {
-  from { transform: translateY(0); opacity: 0; }
-  15% { opacity: .9; }
-  80% { opacity: .5; }
-  to { transform: translateY(-1100px); opacity: 0; }
-}
 
 .scroller { position: absolute; inset: 0; overflow-y: auto; }
 .page { max-width: 1260px; margin: 0 auto; padding: 0 40px 56px; }
@@ -113,7 +104,7 @@ h1 .pixel { display: inline-block; width: .19em; height: .19em; margin-left: .05
 .feature, .card {
   display: flex; flex-direction: column; margin: 0; padding: 0; overflow: hidden;
   border: 1px solid #e6eaf2; background: #fff; color: #0b1a40; font: inherit; text-align: left; cursor: pointer;
-  transition-property: border-color, box-shadow; transition-duration: .2s;
+  transition: border-color 90ms ease-out;
 }
 .feature { border-radius: 20px; box-shadow: 0 10px 30px rgba(15, 23, 42, .08); }
 .feature-copy { display: block; padding: 18px 20px 14px; }

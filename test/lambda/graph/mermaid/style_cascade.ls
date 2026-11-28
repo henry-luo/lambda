@@ -15,6 +15,19 @@ let class_graph = (input("test/lambda/graph/mermaid/class_metadata.mmd",
 let class_html = transform.to_html(class_graph)
 let class_nodes = [for (child in ((content(class_html)) ^ { [] })
   where ((string(name(child)) == "node") ^ { false })) child]
+let long_graph = input("test/lambda/graph/upstream/mermaid/labels-long.mmd",
+  {type: "graph", flavor: "mermaid"})
+let long_nodes = [for (child in ((content(transform.to_html(long_graph))) ^ { [] })
+  where ((string(name(child)) == "node") ^ { false })) child]
+
+let shape_html = transform.to_html({nodes:[
+  {id:"plain",label:"Plain"}, {id:"decision",label:"Ready?",shape:"diamond"},
+  {id:"colored",label:"Styled",shape:"diamond",style:"fill:#ffcc00;stroke:#123456;stroke-width:2"}
+],edges:[]})
+let shape_nodes = [for (child in ((content(shape_html)) ^ { [] })
+  where ((string(name(child)) == "node") ^ { false })) child]
+let diamond = shape_nodes[1][0][0]
+let colored_diamond = shape_nodes[2][0][0]
 
 let metadata_graph = (input("test/lambda/graph/mermaid/metadata_styles.mmd",
   {type: "graph", flavor: "mermaid"})) ^ { null }
@@ -52,6 +65,12 @@ let path = svg_kids[len(svg_kids) - 1]
     contains(class_nodes[0].style, "background:#fff4cc;"),
     contains(class_nodes[0].style, "border-color:#8a6500;")
   ],
+  long_node_opaque: contains(long_nodes[0].style, "background:#ffffff;"),
+  default_shapes: [contains(shape_nodes[0].style, "background:transparent;"),
+    diamond.fill == "none", diamond.stroke == "#64748b",
+    colored_diamond.fill == "#ffcc00", colored_diamond.stroke == "#123456",
+    colored_diamond["stroke-width"] == 2,
+    contains(shape_nodes[2][1].style, "z-index:1;"), shape_nodes[2][1][0] == "Styled"],
   edge_cascade: [
     result.edges[0].stroke, result.edges[0].stroke_width,
     path.stroke, path["stroke-width"]

@@ -52,13 +52,13 @@ pub let surface_css = shell_css ++ rich.css ++ dr.css
 // The rich or drawing surface as the edit application's body. The template
 // renders <body> itself, so a key or close request that no element claims (it
 // targets <body>, as in a browser) still reaches it.
-pub fn app(session, editor, status) =>
-  apply(<edit_app session: session, editor: editor, status: status>, {mode: "edit"})
+pub fn app(session, editor, status, embedded = false, modes = null) =>
+  apply(<edit_app session:session, editor:editor, status:status, embedded:embedded, modes:modes>, {mode:"edit"})
 
 // The source view of the document (Radiant_Design_Source_Editor OQ7).
-fn source_view(session, editor) any^ =>
+fn source_view(session, editor, quiet) any^ =>
   src.source_view(session, session.format.export_text(editor.doc, session.envelope),
-                  sess.is_dirty(session, editor.doc))
+                  sess.is_dirty(session, editor.doc), quiet)
 
 // ---------------------------------------------------------------------------
 // Dialogs
@@ -319,14 +319,16 @@ edit <edit_app> state editor: ~.editor, session: ~.session, status: ~.status, di
                       ds: dr.new_state(), table_menu: null {
   let dirty = sess.is_dirty(session, editor.doc);
   let selected_image = if (session.format.id == 'markdown') image.selected(editor) ^ { null } else null;
+  let source_intent = if (session.format.binary == true) null else {event:"edit_cmd", detail:{cmd:"view_source"}};
   <body class: "edit-app edit-format-" ++ string(session.format.id),
-    tools.toolbar(files.file_label(session, dirty), editor, dirty,
+    tools.toolbar(files.file_label(session, dirty, false, ~.modes, source_intent), editor, dirty,
                   if (is_drawing(session)) ds else null, format_groups(session),
-                  if (session.format.binary == true) [] else tools.source_view_group,
+                  if (~.modes != null or session.format.binary == true) [] else tools.source_view_group,
                   not member(session.format.unsupported_input_types, "insertTable"));
+    if (~.embedded) files.status_notice(status) else null;
     if (selected_image != null) apply(<image_size_tools width:attr_get(selected_image.node,'width')>) else null;
     <div class: "edit-main", surface_of(session, editor, ds)>
-    <div class: "edit-status", role: "status", status>
+    if (~.embedded) null else <div class: "edit-status", role: "status", status>
     if (table_menu != null) apply(<table_context x: table_menu.x, y: table_menu.y, keyboard: table_menu.keyboard, editor: editor, dirty: dirty>) else null
     dialog_view(dialog, session)
   >
@@ -427,7 +429,7 @@ on edit_cmd(req) {
   }
   let cmd = req.cmd
   if ((cmd == "view_source" and session.format.binary != true)^) {
-    emit("edit_switch", source_view(session, editor)^)
+    emit("edit_switch", source_view(session, editor, ~.embedded)^)
     return
   }
   if (cmd == "save") {
@@ -501,7 +503,7 @@ on edit_dialog(req) {
     {session: session, doc: editor.doc, status: status, dialog: dialog, after_save: after_save})^
   if ((filed.navigation != null)^) {
     session = filed.session; status = filed.status; dialog = filed.dialog; after_save = filed.after_save
-    emit("viewer_navigation", {entry:filed.navigation, node:req.node})
+    emit("viewer_navigation", files.navigation_result(filed.navigation, req.node, session)^)
     return
   }
   if ((filed.source_text != null)^) {
@@ -578,7 +580,7 @@ on edit_dialog(req) {
 on editor_navigate(evt) {
   if ((dialog != null)^) { return }
   let decision = files.navigation_decision(evt.target, session, editor.doc, evt.detail)^
-  if (decision.navigate) { emit("viewer_navigation", {entry:evt.detail, node:evt.target}); return }
+  if (decision.navigate) { emit("viewer_navigation", files.navigation_result(evt.detail, evt.target, session)^); return }
   dialog = decision.dialog
 }
 on keydown(evt) {
@@ -664,7 +666,7 @@ on keydown(evt) {
   }
   // Cmd/Ctrl+/ switches to the source view (OQ7)
   if ((primary_key(evt) and evt.key == "/" and dialog == null and session.format.binary != true)^) {
-    emit("edit_switch", source_view(session, editor)^)
+    emit("edit_switch", source_view(session, editor, ~.embedded)^)
     return 'prevent-default'
   }
   if ((not is_drawing(session) or dialog != null)^) { return 'pass' }

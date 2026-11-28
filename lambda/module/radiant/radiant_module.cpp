@@ -338,6 +338,7 @@ static RadiantCustomPaintResource* radiant_custom_paint_resource(
         mem_free(resource);
         return nullptr;
     }
+    resource->paint.resource = lam::up(resource);
     context->parent->set_custom_layout_paint_prop(&resource->paint);
     return resource;
 }
@@ -1110,64 +1111,64 @@ static bool lambda_radiant_package_layout_callback(const CustomLayoutContext* co
     DomDocument* layout_doc = context->parent ? context->parent->doc : nullptr;
     Runtime* runtime = layout_document_package_runtime(layout_doc, package_module);
     // Importing the first package installs the native Radiant host API.
-    if (!radiant_host_api || !radiant_host_api->script || !runtime) return false;
+    if (!radiant_host_api || !radiant_host_api->script || !runtime || !runtime_heap(runtime)) return false;
     uint64_t previous_pass_id = g_radiant_velmt_active_pass_id;
     uint64_t pass_id = g_radiant_velmt_next_pass_id++;
     if (g_radiant_velmt_next_pass_id == 0) g_radiant_velmt_next_pass_id = 1;
     g_radiant_velmt_active_pass_id = pass_id;
 
-    EvalContext* callback_context = nullptr;
-    Context* saved_input_context = input_context;
-    // A window's loader runtime serves every document built on it, so it works
-    // on this document's Input only for the duration of the callback; every
-    // exit then hands the document the values the callback rooted.
-    Runtime* loader_runtime = layout_doc ? layout_doc->loader_runtime.get() : nullptr;
-    struct LoaderLayoutBinding {
-        DomDocument* doc;
-        Runtime* loader;
-        ~LoaderLayoutBinding() { loader_runtime_finish_document(doc, loader); }
-    } loader_binding = {layout_doc, nullptr};
-    if (runtime && runtime_heap(runtime)) {
-        callback_context = runtime_get_eval_context(runtime);
-        if (!callback_context) {
+    EvalContext* callback_context = runtime_get_eval_context(runtime);
+    if (!callback_context) {
+        g_radiant_velmt_active_pass_id = previous_pass_id;
+        return false;
+    }
+    if (::context != callback_context) {
+        // The document's own evaluator may hold the thread. Take it only
+        // at a quiescent layout boundary (EO5v2), never under another
+        // evaluator's live frames.
+        if ((::context && ::context->execution_depth != 0) ||
+                !radiant_eval_context_switch(callback_context)) {
             g_radiant_velmt_active_pass_id = previous_pass_id;
-            return false;
-        }
-        if (::context != callback_context) {
-            // The document's own evaluator may hold the thread. Take it only
-            // at a quiescent layout boundary (EO5v2), never under another
-            // evaluator's live frames.
-            if ((::context && ::context->execution_depth != 0) ||
-                    !radiant_eval_context_switch(callback_context)) {
-                g_radiant_velmt_active_pass_id = previous_pass_id;
-                log_error("CUSTOM_LAYOUT_LAMBDA_BUSY: layout='%s' needs the loader runtime",
-                          context->layout_name);
-                return false;
-            }
-        }
-        if (loader_runtime) {
-            runtime_bind_ui_result_input(loader_runtime, layout_doc->input);
-            loader_binding.loader = loader_runtime;
-        }
-        callback_context->heap = runtime_heap(runtime);
-        callback_context->name_pool = runtime_name_pool(runtime);
-        callback_context->pool = runtime_heap(runtime)->pool;
-        callback_context->type_info = type_info;
-        // Retained callbacks borrow their Runtime-owned side stack rather
-        // than fabricating an activation-local context.
-        if (!lambda_side_stack_bind()) {
-            g_radiant_velmt_active_pass_id = previous_pass_id;
-            log_error("CUSTOM_LAYOUT_LAMBDA_SIDE_STACK: layout='%s'", context->layout_name);
-            return false;
-        }
-        input_context = runtime_context_follow_ui_result(runtime, callback_context)
-            ? (Context*)callback_context : nullptr;
-        if (!eval_context_init(callback_context)) {
-            input_context = saved_input_context;
-            g_radiant_velmt_active_pass_id = previous_pass_id;
+            log_error("CUSTOM_LAYOUT_LAMBDA_BUSY: layout='%s' needs the loader runtime",
+                      context->layout_name);
             return false;
         }
     }
+    callback_context->heap = runtime_heap(runtime);
+    callback_context->name_pool = runtime_name_pool(runtime);
+    callback_context->pool = runtime_heap(runtime)->pool;
+    callback_context->type_info = type_info;
+    // Retained callbacks borrow their Runtime-owned side stack rather
+    // than fabricating an activation-local context.
+    if (!lambda_side_stack_bind()) {
+        g_radiant_velmt_active_pass_id = previous_pass_id;
+        log_error("CUSTOM_LAYOUT_LAMBDA_SIDE_STACK: layout='%s'", context->layout_name);
+        return false;
+    }
+    if (!eval_context_init(callback_context)) {
+        g_radiant_velmt_active_pass_id = previous_pass_id;
+        return false;
+    }
+
+    // Layout consumes callback values immediately and roots only the current
+    // paint layers. A document arena would keep every superseded layer alive.
+    struct LayoutResultScope {
+        EvalContext* owner;
+        Context* previous_input = input_context;
+        Arena* previous_arena;
+        bool previous_ui_mode;
+        explicit LayoutResultScope(EvalContext* context)
+            : owner(context), previous_arena(context->arena), previous_ui_mode(context->ui_mode) {
+            input_context = nullptr;
+            owner->arena = nullptr;
+            owner->ui_mode = false;
+        }
+        ~LayoutResultScope() {
+            owner->ui_mode = previous_ui_mode;
+            owner->arena = previous_arena;
+            input_context = previous_input;
+        }
+    } result_scope(callback_context);
 
     bool ok = false;
     {
@@ -1193,7 +1194,6 @@ static bool lambda_radiant_package_layout_callback(const CustomLayoutContext* co
     // and are consumed at this host boundary.
     eval_context_set_last_error(callback_context, nullptr);
     g_radiant_velmt_active_pass_id = previous_pass_id;
-    input_context = saved_input_context;
     return ok;
 }
 
@@ -5832,12 +5832,6 @@ static bool radiant_host_svg_clip_contains(DomElement* element, const void* leng
     return svg_dom_clip_contains_point(element, (const SvgLengthContext*)lengths, (FontContext*)fonts,
         frame, contains, point, (const SvgDomStyleScope*)scope);
 }
-static void* radiant_host_web_animation_create(DomElement* element, void* keyframes,
-        double duration, const void* timing, Pool* pool) {
-    return css_web_animation_create(element, (CssKeyframes*)keyframes, duration,
-        (const TimingFunction*)timing, pool);
-}
-
 static bool radiant_host_element_client_frame(DomNode* node, RdtMatrix* matrix, float* x, float* y) {
     // snapshot the projected frame and its CSS-plane origin together at the engine owner (D9.1.3).
     if (!node || !matrix || !view_get_client_matrix(node, matrix)) return false;
@@ -5918,7 +5912,13 @@ static const DomHostEngineOps radiant_host_operations = {
     radiant_host_svg_append_shape,
     radiant_host_svg_text_path,
     radiant_host_svg_clip_contains,
-    radiant_host_web_animation_create,
+    css_web_animation_create,
+    css_web_animation_current_time,
+    css_web_animation_is_relevant,
+    css_web_animation_play,
+    css_web_animation_pause,
+    css_web_animation_set_current_time,
+    css_web_animation_cancel,
     dom_range_adopt_subtree,
     [](DomDocument*) {}, // required host ABI slot; endpoint setters maintain the holds
     dom_selection_collapse,

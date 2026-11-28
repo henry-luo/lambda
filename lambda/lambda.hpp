@@ -511,6 +511,8 @@ Array* array_spreadable();  // constructs a spreadable empty array
 bool array_widen_inferred_pointer_lane(Array* array);
 void array_push(Array* arr, Item item);  // sequence append: splices a list (D3.3.1)
 void array_push_verbatim(Array* arr, Item item);  // verbatim append: one value, one item (D3.3.1)
+// Transfer a stored slot without invoking element construction rules.
+void array_append_one(Array* arr, Item item);
 // S9.3.1 capturing append for Lambda literals/comprehensions; array_push does not capture.
 void array_push_capture(Array* arr, Item item);
 // S9.3.1 (LR12-47): natives placing their arguments' items into a result.
@@ -878,6 +880,8 @@ extern "C" {
     Item fn_string_ord_at(Item str, int64_t index);
     uint64_t fn_string_char_word(Item str, int64_t index);
     Item map_get(Map* map, Item key);
+    // The caller supplies a canonical NamePool spelling and its typemap hash.
+    Item map_get_canonical_name(Map* map, const String* name, uint32_t name_hash);
     Item elmt_get(Element *elmt, Item key);
     Item object_get(Object* obj, Item key);
     void object_type_set_method(int64_t type_index, const char* method_name,

@@ -609,3 +609,26 @@ lint and `git diff --check` passed. The full Radiant baseline completed with
 earlier run (text/inline/sizing layout and CSS cascade-memory budget). Focused
 results and screenshots are under `temp/word-open/`, with the combined record in
 `enhancement-qualification.json`.
+
+## Viewer diagnostics for covers, raster crops and empty controls (2026-11-26)
+
+The DOCX viewer uses the known paper rectangle for explicit page-relative
+no-wrap offsets in the first body paragraph of a single-section document.
+It clips the artwork at the paper edges and preserves the saved stacking
+order relative to text. Anchors that depend on later page assignment or
+page-relative text wrapping still emit placement diagnostics (D9.3.4).
+
+The DrawingML source rectangle accepts signed offsets for stretch fills.
+An outset enlarges the sampled source rectangle and leaves transparent
+space inside the existing image frame. Header and footer visibility uses
+the same saved content-control reader as the body, so a control with only
+uncached field instructions does not create an unsupported-story warning
+(S1.8, D9.3.4). [OOXML source rectangle](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.drawing.sourcerectangle)
+
+`lambda view` replays opened all 90 original DOCX paths under `test/input`.
+The same 71 rendered documents produced 93 warnings, down from 99.
+`large-doc-f715df1e-d13f-4c88-943d-9b5fe978213b.docx` went from eight
+warnings to six. A native macOS replay checked its cover coordinates and
+signed crop. The portable drawing fixture verifies page-edge clipping and
+crop transparency with pixel assertions. Results are in
+`temp/docx-warning-audit/`.

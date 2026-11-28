@@ -72,6 +72,44 @@ const fixtures=[
         wrapped:new ImageData(4294967297,4294967297).data.length,
         negative:new ImageData(-4294967295,1).width,calls,retained:image.data===data&&image.width===1&&image.data[2]===3};`,
     expected:{nan:'IndexSizeError',infinity:'IndexSizeError',wrapped:4,negative:1,calls:1,retained:true}},
+ {name:'createImageData uses absolute dimensions and clones only the shape',body:`
+    const original=ctx.createImageData(-2,3,{colorSpace:'srgb'});original.data[0]=120;
+    const copy=ctx.createImageData(original);
+    return {size:[original.width,original.height,copy.width,copy.height],fresh:copy.data!==original.data,
+        blank:copy.data.every(channel=>channel===0),type:copy instanceof ImageData,
+        length:ctx.createImageData.length,shared:ctx.createImageData===CanvasRenderingContext2D.prototype.createImageData};`,
+    expected:{size:[2,3,2,3],fresh:true,blank:true,type:true,length:1,shared:true}},
+ {name:'putImageData copies straight-alpha bytes and replaces pixels regardless of draw state',body:`
+    ctx.fillStyle='red';ctx.fillRect(0,0,4,4);ctx.translate(40,40);
+    ctx.beginPath();ctx.rect(0,0,1,1);ctx.clip();ctx.globalAlpha=0;
+    const storage=new Uint8ClampedArray([9,9,9,9, 0,255,0,128, 0,0,0,0, 9,9,9,9]);
+    const image=new ImageData(storage.subarray(4,12),2);
+    ctx.putImageData(image,1,2);image.data.fill(90);
+    return {pixels:[pixel(0,2),pixel(1,2),pixel(2,2),pixel(3,2)],length:ctx.putImageData.length};`,
+    expected:{pixels:[[255,0,0,255],[0,255,0,128],[0,0,0,0],[255,0,0,255]],length:3}},
+ {name:'putImageData normalizes the dirty source rectangle without moving its origin',body:`
+    const image=ctx.createImageData(3,3);
+    for(let i=0;i<9;i++){image.data[4*i]=20+i;image.data[4*i+3]=255}
+    ctx.putImageData(image,1,1,3,3,-2,-2);
+    return {values:[[1,1],[2,2],[3,2],[2,3],[3,3]].map(([x,y])=>pixel(x,y)[0])};`,
+    expected:{values:[0,24,25,27,28]}},
+ {name:'putImageData clips both source and destination with the original row stride',body:`
+    const image=ctx.createImageData(3,3);
+    for(let i=0;i<9;i++){image.data[4*i]=20+i;image.data[4*i+3]=255}
+    ctx.putImageData(image,-1,-1,-1,-1,5,5);
+    ctx.putImageData(image,2147483647,2147483647);
+    return {values:[[0,0],[1,0],[0,1],[1,1],[2,0]].map(([x,y])=>pixel(x,y)[0])};`,
+    expected:{values:[24,25,27,28,0]}},
+ {name:'ImageData pixel methods validate their overloads and reject detached storage at the write',body:`
+    const image=ctx.createImageData(2,1);
+    const check={zero:error(()=>ctx.createImageData(0,2)),missing:error(()=>ctx.createImageData(3)),
+        brand:error(()=>ctx.createImageData.call({},1,1)),finite:error(()=>ctx.putImageData(image,Infinity,0)),
+        invalidImage:error(()=>ctx.putImageData({},0,0)),
+        partial:error(()=>ctx.putImageData(image,0,0,1)),
+        detached:error(()=>ctx.putImageData(image,{valueOf(){image.data.buffer.transfer();return 0}},0))};
+    return check;`,
+    expected:{zero:'IndexSizeError',missing:'TypeError',brand:'TypeError',finite:'TypeError',invalidImage:'TypeError',
+        partial:'TypeError',detached:'InvalidStateError'}},
 ];
 function fixtureHtml(fixture){return scriptResultFixture(`
     const canvas=document.createElement('canvas');canvas.width=4;canvas.height=4;document.body.appendChild(canvas);

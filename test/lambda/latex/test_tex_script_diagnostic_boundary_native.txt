@@ -1,0 +1,10 @@
+{
+  cases: 28,
+  matched: 24,
+  guarded: 4,
+  failures: []
+}
+{
+  public_cases: 2,
+  matches: true
+}

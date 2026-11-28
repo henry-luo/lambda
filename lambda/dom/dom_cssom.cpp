@@ -83,6 +83,7 @@ struct CssomWrapperEntry {
     CssomWrapperEntry* previous;
     CssomWrapperEntry* next;
     DomElement* attribute_owner; // an Attr wrapper also retains its current owner
+    bool holds_foreign_document;
 };
 struct CssomWrapperIndex {
     void* native;
@@ -92,6 +93,7 @@ struct CssomWrapperIndex {
 struct CssomWrapperCache {
     HashMap* index;
     gc_heap* gc;
+    Runtime* runtime;
     CssomWrapperEntry* entries;
     ArrayList* documents;
     CssomWrapperEntry* swept_nodes;
@@ -128,6 +130,7 @@ static void* cssom_wrapper_cache_create(EvalContext* owner) {
             return nullptr;
         }
         cache->gc = owner->heap->gc;
+        cache->runtime = owner->runtime;
     }
     return cache;
 }
@@ -170,9 +173,18 @@ static void cssom_wrapper_attribute_owner(CssomWrapperEntry* entry, DomElement* 
     entry->attribute_owner = owner;
 }
 
+static void cssom_wrapper_document(CssomWrapperEntry* entry, DomDocument* document) {
+    if (entry->holds_foreign_document) dom_document_release_foreign_wrapper(entry->document);
+    entry->document = document;
+    entry->holds_foreign_document = document &&
+        entry->cache->runtime != dom_document_script_runtime(document);
+    if (entry->holds_foreign_document) dom_document_retain_foreign_wrapper(document);
+}
+
 static void cssom_wrapper_cleared(uint64_t*, void* data) {
     CssomWrapperEntry* entry = (CssomWrapperEntry*)data;
     cssom_wrapper_remove(entry);
+    if (entry->holds_foreign_document) dom_document_release_foreign_wrapper(entry->document);
     if (entry->kind == CSSOM_CACHE_NODE) {
         cssom_wrapper_attribute_owner(entry, nullptr);
         dom_node_release_live((DomNode*)entry->native);
@@ -191,7 +203,7 @@ static bool cssom_cache_wrapper(void* native, CssomCacheKind kind,
     CssomWrapperEntry* entry = (CssomWrapperEntry*)mem_calloc(
         1, sizeof(*entry), MEM_CAT_JS_RUNTIME);
     if (!entry) return false;
-    *entry = {native, kind, cache, document, wrapper.item, nullptr, nullptr};
+    *entry = {native, kind, cache, nullptr, wrapper.item, nullptr, nullptr};
     if (kind == CSSOM_CACHE_NODE) {
         dom_node_retain_live((DomNode*)native);
         DomAttr* attribute = ((DomNode*)native)->as_attribute();
@@ -212,6 +224,7 @@ static bool cssom_cache_wrapper(void* native, CssomCacheKind kind,
     entry->next = cache->entries;
     if (entry->next) entry->next->previous = entry;
     cache->entries = entry;
+    cssom_wrapper_document(entry, document);
     gc_register_weak(cache->gc, &entry->item, cssom_wrapper_cleared, entry);
     return true;
 }
@@ -228,6 +241,7 @@ static void cssom_wrapper_detach(CssomWrapperEntry* entry) {
     cssom_wrapper_attribute_owner(entry, nullptr);
     if (entry->kind == CSSOM_CACHE_NODE)
         dom_node_release_live((DomNode*)entry->native);
+    cssom_wrapper_document(entry, nullptr);
     cssom_wrapper_remove(entry);
     mem_free(entry);
 }
@@ -365,7 +379,7 @@ extern "C" bool dom_wrapper_adopt_document(DomDocument* from, DomDocument* to,
         auto* cache = (CssomWrapperCache*)resource->caches->data[i];
         auto* entry = cssom_wrapper_entry(node, CSSOM_CACHE_NODE, cache);
         if (!entry || entry->document != from) continue;
-        if (commit) entry->document = to;
+        if (commit) cssom_wrapper_document(entry, to);
         else if (!cssom_prepare_document_for_cache(to, cache)) return false;
     }
     return true;
@@ -536,6 +550,7 @@ extern "C" bool dom_is_rule_style_decl(Item item) {
 
 extern "C" Item dom_cssom_wrap_stylesheet(void* stylesheet) {
     if (!stylesheet) return ItemNull;
+    ((CssStylesheet*)stylesheet)->cssom_exposed = true;
     Item cached = cssom_cached_wrapper(stylesheet, CSSOM_CACHE_SHEET);
     if (cached.item != ITEM_NULL) return cached;
     DomDocument* document = cssom_sheet_document((CssStylesheet*)stylesheet);

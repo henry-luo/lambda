@@ -30,6 +30,7 @@ fn special_command(name: string) bool => tex_reader.definition_command(name) or 
         "'", "`", "^", "\"", "~", "=", ".", "u", "v", "H", "c", "d", "b", "t", "k", ",", ";", ":", "!"], name))
 
 fn inline_format_command(name) => contains(["textbf", "textit", "emph", "texttt", "textsf", "textrm", "underline"], name)
+fn escaped_literal_control(token) any^ => token.kind == "control" and contains(["$", "%", "#", "&", "_", "{", "}"], token.value)
 // These arguments are stored code, so unmatched environment boundaries are literal.
 fn code_fragment_command(name) => contains(["pretitle", "posttitle", "preauthor", "postauthor", "predate", "postdate"], name)
 
@@ -570,6 +571,21 @@ fn comment_between_text(tokens,sources,index) any^ {
     let raw = if (piece == null) null else piece.gap;
     let gap = if (raw == null) null else source_gap_bytes(binary(raw)^)^;
     if (gap != null and gap.valid and gap.seen) gap.text else null
+}
+
+// Restore source line breaks that TeX discarded between direct tokens.
+fn skipped_text_line_gap(tokens, sources, index) bool^ {
+    let token = tokens[index];
+    let previous = if (index == 0) null else tokens[index - 1];
+    let eligible = previous != null and previous.kind == "char" and previous.cat != 10 and
+        previous.direct == true and previous.seq != null and previous.end != null and token.start != null and
+        token.start > previous.end;
+    let fragment = if (eligible) rebuild.source_fragment(token,sources,true,previous.file,previous.seq,previous.end)^ else null;
+    let raw = if (fragment == null) null else fragment.gap;
+    let checked = if (raw == null or raw == "") null else source_gap_bytes(binary(raw)^)^;
+    let mapped = if (checked == null) null else output_between(previous,token)^;
+    checked != null and checked.valid and not checked.seen and
+        (contains(raw,"\n") or contains(raw,"\r")) and (mapped == null or mapped == raw)
 }
 
 fn skip_par_blanks(chars,index = 0) any^ => if (index < len(chars) and
@@ -2240,6 +2256,8 @@ fn needs_output_mapping(tokens, sources, main_file, constructor_mode, index = 0,
                 (token.direct != true or token.file != main_file)) or
                 token.raw_verb == true or token.raw_inline_kind != null or token.raw_group_kind != null or
                 token.raw_environment != null or escaped_text_name(token) != null) true
+        // Replayed controls need gaps from emitted bytes, not their original box span.
+        else if (token.kind == "control" and token.box_replayed == true) true
         else if (definition_group_index(tokens,index)^ >= 0) true
         else if (control(token,"par") and token.direct != true) true
         else if (dollar(token) or control(token,"(") or control(token,"[")) {
@@ -2626,6 +2644,62 @@ fn generic_arguments(tokens, sources, index, previous_end, source_file, groups =
     }
 }
 
+// Generic command parsing is shared by inline text and accent arguments.
+fn generic_command_node(tokens, sources, index) any^ {
+    let token = tokens[index];
+    // Synthetic commands use their verified reconstructed spelling and emission origin.
+    let mapped_command = (token.box_replayed == true and reconstructed_token(token)^) or token.read_offset != null or (token.output_synthetic_verified == true and token.direct != true and token.emit_origin != null and
+        reconstructed_token(token)^) or (token.output_start != null and
+        expanded_argument_sources(tokens,index + 1,token.file,sources)^);
+    let offset = if (mapped_command) rebuild.map_offset(token.output_segments,token.output_start)^ else token.start;
+    let next_token = if (index + 1 < len(tokens)) tokens[index + 1] else null;
+    let star = next_token != null and next_token.kind == "char" and next_token.value == "*";
+    let mapped = star and (if (mapped_command) reconstructed_literal(next_token)^
+        else next_token.direct == true and token.file == next_token.file);
+    let star_gap = if (mapped_command and star) output_between(token,next_token)^ else "";
+    let starred = mapped and (if (mapped_command) star_gap == "" else token.end == next_token.start);
+    let tag = if (token.value == "newtheorem" and starred) "newtheorem*" else token.value;
+    let at = index + if (starred) 2 else 1;
+    let next = if (at < len(tokens)) tokens[at] else null;
+    let anchor = tokens[at - 1];
+    let gap = if (mapped_command and next != null) output_between(anchor,next)^
+        else if (next != null and anchor.direct == true and next.direct == true and
+            anchor.file == next.file and next.start > anchor.end)
+        source_span({direct: true, file: anchor.file, start: anchor.end, end: next.start}, sources)^ else "";
+    let spaced_group = next != null and (opening(next) or
+        (next.kind == "char" and (next.value == "[" or next.value == "("))) and gap != "";
+    let joined = if (spaced_group) comment_gap(gap)^ else false;
+    if (mapped_command and next != null and gap == null) unsupported(index, "command source mapping")
+    else if (star and (not mapped or star_gap == null)) unsupported(index, "command star source mapping")
+    else if (spaced_group and not joined and (gap == null or (trim(gap) ^ { null }) != ""))
+        unsupported(index, "command argument source gap")
+    else if (spaced_group and not joined) {
+        let attrs = {source_offset: offset, *:if (starred) {starred: true} else {}, argument_groups: []};
+        {index:at, node:<[tag] *:attrs>, tail:gap, issue:null}
+    }
+    else if (at < len(tokens) and (opening(tokens[at]) or
+            (tokens[at].kind == "char" and (tokens[at].value == "[" or tokens[at].value == "(")))) {
+        let args = generic_arguments(tokens, sources, at, anchor.end, token.file, [], [], true, false, false,
+            anchor.output_end, mapped_command, if (code_fragment_command(token.value)) "raw" else "")^;
+        if (args.issue != null) args
+        else {
+            let following = if (args.index < len(tokens)) tokens[args.index] else null;
+            let tail_gap = if (mapped_command and following != null)
+                output_gap_text(output_between(tokens[args.index - 1],following)^)^ else "";
+            let attrs = {source_offset: offset, *:if (starred) {starred: true} else {}, argument_groups: args.groups};
+            let content = pack_arguments(args.items)^;
+            if (tail_gap == null) unsupported(index, "command argument source mapping")
+            else {index:args.index, node:<[tag] *:attrs, *content>, tail:tail_gap, issue:null}
+        }
+    }
+    else {
+        let text_gap = if (mapped_command) output_gap_text(gap)^ else if (starred) "" else control_gap(tokens, sources, index)^.text;
+        let attrs = {source_offset: offset, *:if (starred) {starred: true} else {}, argument_groups: []};
+        if (text_gap == null) unsupported(index, "command source gap")
+        else {index:at, node:<[tag] *:attrs>, tail:text_gap, issue:null}
+    }
+}
+
 fn accent_next(tokens, index) any^ =>
     if (index < len(tokens) and tokens[index].kind == "char" and tokens[index].cat == 10)
         accent_next(tokens, index + 1) else index
@@ -2645,17 +2719,52 @@ fn accent_gap_safe(tokens, sources, index) any^ {
     }
 }
 
+fn accent_comment_space(bytes, index = 0) any^ =>
+    if (index < len(bytes) and (bytes[index] == 32 or bytes[index] == 9))
+        accent_comment_space(bytes,index + 1) else index
+
+// The native parser consumes the percent as the argument before scanning its line as text.
+fn accent_comment(tokens, sources, index, offset) any^ {
+    let token = tokens[index];
+    let at = accent_next(tokens,index + 1)^;
+    let next = if (at < len(tokens)) tokens[at] else null;
+    let prior = if (at > index + 1) tokens[at - 1] else token;
+    let direct = offset != null and token.direct == true and token.read_offset == null and
+        token.output_start == null and next != null and next.direct == true and next.output_start == null and
+        token.file == next.file and next.start >= token.end and prior.seq != null and next.seq == prior.seq + 1;
+    if (not direct or next.start == token.end or control(next,"par") or paragraph_space(next,sources)^) null
+    else {
+        let gap = source_span({direct:true,file:token.file,start:token.end,end:next.start},sources)^;
+        let bytes = if (gap == null) binary("")^ else binary(gap)^;
+        let marker = accent_comment_space(bytes)^;
+        let body = if (marker < len(bytes) and bytes[marker] == 37) slice(bytes,marker + 1,len(bytes)) else null;
+        // Control syntax and paragraph boundaries need the full native inline parser.
+        let plain = body != null and len(body) > 0 and body[len(body) - 1] == 10 and
+            all([for (b in slice(body,0,len(body) - 1)^) (b == 9 or b >= 32) and
+                not contains([36, 37, 38, 92, 123, 125],b)]);
+        if (not plain) null else {index:at, node:<accent command:token.value, source_offset:offset, "%">,
+            // The recovered comment has already contributed its text to the inline stream.
+            tokens:[*slice(tokens,0,at),{*:next,paragraph_gap_seen:true},*slice(tokens,at + 1,len(tokens))],
+            tail:utf8.decode(body)^, issue:null}
+    }
+}
+
 fn accent_name(name) => contains(["'", "`", "^", "\"", "~", "=", ".", "u", "v", "H", "c", "d", "b", "t", "k"], name)
 fn accent_node(tokens, sources, index) any^ {
     let token = tokens[index];
     let offset = if (token.emit_origin != null) token.emit_origin
         else if (token.read_offset != null) token.read_offset
         else if (token.direct == true) token.start else null;
-    let arg = accent_argument(tokens, sources, index + 1)^;
+    let comment = accent_comment(tokens,sources,index,offset)^;
     if (offset == null) unsupported(index, "accent source mapping")
+    else if (comment != null) comment
     else if (not accent_gap_safe(tokens, sources, index)^) unsupported(index, "accent source gap")
-    else if (arg.issue != null) arg
-    else {index: arg.index, node: <accent command: token.value, source_offset: offset, *arg.items>, issue: null}
+    else {
+        let arg = accent_argument(tokens, sources, index + 1)^;
+        if (arg.issue != null) arg
+        else {index: arg.index, node: <accent command: token.value, source_offset: offset, *arg.items>,
+            tail: if (arg.tail == null) "" else arg.tail, tokens:arg.tokens, issue: null}
+    }
 }
 
 fn accent_argument(tokens, sources, index) any^ {
@@ -2679,7 +2788,90 @@ fn accent_argument(tokens, sources, index) any^ {
         {index: index + 1, items: [tokens[index].value], issue: null}
     else if (tokens[index].kind == "control" and accent_name(tokens[index].value)) {
         let nested = accent_node(tokens, sources, index)^;
-        if (nested.issue != null) nested else {index: nested.index, items: [nested.node], issue: null}
+        if (nested.issue != null) nested else {index: nested.index, items: [nested.node],
+            tail:nested.tail, tokens:nested.tokens, issue: null}
+    }
+    // the native document scanner may join source letters that TeX tokenized separately.
+    else if (tokens[index].kind == "control" and tokens[index].direct == true and
+            tokens[index].read_offset == null and index + 1 < len(tokens) and
+            (native_name_letter(tokens[index + 1])^ or tokens[index + 1].kind == "active") and
+            source_span(tokens[index],sources)^ == "\\" ++ tokens[index].value and
+            native_word_end(split(tokens[index].value, "")^)^ == len(tokens[index].value) and
+            native_join_end(tokens,sources,index + 1,tokens[index].end,tokens[index].file)^ > index + 1) {
+        let token = tokens[index];
+        let end = native_join_end(tokens,sources,index + 1,token.end,token.file)^;
+        let word = token.value ++ join([for (part in slice(tokens,index + 1,end)) part.value], "")^;
+        // a mapped stream must also prove that the emitted spelling stayed adjacent.
+        let mapped = token.output_start != null;
+        let verified = not mapped or (reconstructed_token(token)^ and token.output_end != null and
+            native_join_end(tokens,sources,index + 1,token.output_end)^ == end);
+        if (len(word) >= 95 or not verified) unsupported(index,"accent command lexical source mapping")
+        else {
+            let joined = {*:token,value:word,end:tokens[end - 1].end,seq:tokens[end - 1].seq,
+                *:if (token.output_start != null) {output_end:tokens[end - 1].output_end} else {}};
+            let normalized = [*slice(tokens,0,index),joined,*slice(tokens,end,len(tokens))];
+            let parsed = accent_argument(normalized,sources,index)^;
+            if (parsed.issue != null) parsed else {*:parsed,tokens:if (parsed.tokens == null) normalized else parsed.tokens}
+        }
+    }
+    else if (tokens[index].kind == "control") {
+        let token = tokens[index];
+        let next = if (index + 1 < len(tokens)) tokens[index + 1] else null;
+        let gap = if (next == null or next.paragraph_normalized == true) "" else if (token.output_end != null and next.output_start != null)
+            output_between(token,next)^ else if (token.direct == true and next.direct == true and
+                token.file == next.file and next.start >= token.end)
+            source_span({direct:true, file:token.file, start:token.end, end:next.start},sources)^ else null;
+        let grouped = next != null and (opening(next) or (next.kind == "char" and
+            contains(["[", "("], next.value)));
+        let star = next != null and next.kind == "char" and next.value == "*";
+        // Direct adjacent arguments use the same scanner as ordinary inline commands.
+        let direct_group = grouped and gap == "" and token.direct == true and token.read_offset == null and
+            token.output_start == null and next.direct == true and token.file == next.file;
+        let args = if (direct_group) generic_arguments(tokens,sources,index + 1,token.end,token.file,
+            [],[],true,false,false,null,false,if (code_fragment_command(token.value)) "raw" else "")^ else null;
+        let end = if (args != null and args.issue == null) args.index else index + 1;
+        let ending = tokens[end - 1];
+        let following = if (end < len(tokens)) tokens[end] else null;
+        let tail = if (following == null) "" else if (ending.direct == true and following.direct == true and
+                ending.file == following.file and following.start >= ending.end)
+            source_span({direct:true,file:ending.file,start:ending.end,end:following.start},sources)^ else null;
+        // TeX discards control-word whitespace that the native tree retains.
+        let gap_bytes = if (gap == null) binary("")^ else binary(gap)^;
+        let safe_gap = gap != null and all([for (b in gap_bytes) contains([9, 10, 13, 32], b)]) and
+            len([for (b in gap_bytes where b == 10 or b == 13) b]) <= 1 and
+            not ((contains(gap,"\n") or contains(gap,"\r")) and
+                (control(next,"par") or paragraph_space(next,sources)^));
+        // the generic parser already preserves the adjacent star and its argument spans.
+        let direct_star = star and token.direct == true and token.read_offset == null and
+            token.output_start == null and next.direct == true and token.file == next.file and token.end == next.start;
+        if (direct_star and not block(token)^ and not special_command(token.value)) {
+            let command = generic_command_node(tokens,sources,index)^;
+            // specialized inline commands must retain their own native node shape.
+            let parsed = if (command.issue == null) inline(slice(tokens,index,command.index), sources, 0, "", [], false)^ else null;
+            if (command.issue != null or parsed.issue != null or len(parsed.items) != 1 or parsed.items[0] != command.node)
+                unsupported(index,"accent argument")
+            else {index:command.index, items:[command.node], tail:command.tail, issue:null}
+        }
+        else if (star or not safe_gap or (grouped and (not direct_group or args.issue != null or tail != "")) or
+                block(token)^ or (special_command(token.value) and not escaped_literal_control(token)^))
+            unsupported(index, "accent argument")
+        // Inside an accent, native parsing treats an explicit \par as a command.
+        else if (control(token,"par") and token.direct == true and token.read_offset == null and
+                token.output_start == null and source_span(token,sources)^ == "\\par") {
+            let command = generic_command_node(tokens,sources,index)^;
+            if (command.issue != null or command.index != end) unsupported(index,"accent argument")
+            else {index:command.index, items:[command.node], tail:command.tail, issue:null}
+        }
+        else {
+            // Reuse the ordinary inline parser so command offsets and escaping agree.
+            let parsed = inline(slice(tokens,index,end), sources, 0, "", [], false)^;
+            let item = if (parsed.issue == null and len(parsed.items) == 1) parsed.items[0] else null;
+            // Inline-only symbols such as \par do not have the native accent shape.
+            let matches = if (item is element) string(name(item)) == token.value
+                else if (item is string) escaped_literal_control(token)^ and item == token.value else false;
+            if (parsed.issue != null or not matches) unsupported(index, "accent argument")
+            else {index:end, items:parsed.items, tail:gap, issue:null}
+        }
     }
     else unsupported(index, "accent argument")
 }
@@ -2716,10 +2908,22 @@ fn generated_rule(tokens, index) any^ {
             if (width.issue != null) width
             else if (height.issue != null) height
             else {
+                let token = tokens[index];
+                let ending = tokens[second.end - 1];
+                let replay = token.box_replayed == true;
+                let positions = if (replay) slice(tokens,index,second.end)^ else [];
+                // A replay's last endpoint can map to the following source segment.
+                let valid = not replay or (token.output_start != null and token.output_segments != null and
+                    ending.output_end != null and all([for (i in (0 to len(positions) - 1)^)
+                        positions[i].output_start != null and positions[i].output_end != null and
+                        reconstructed_token(positions[i])^ and (i == 0 or positions[i].output_start == positions[i - 1].output_end)]) and
+                    rebuild.map_offset(token.output_segments,token.output_start)^ == origin);
+                let final_end = if (valid and replay) rebuild.map_offset(token.output_segments,ending.output_end)^ else origin;
                 let groups = [{kind: "required", raw: width.raw, start: origin, end: origin},
-                    {kind: "required", raw: height.raw, start: origin, end: origin}];
+                    {kind: "required", raw: height.raw, start: origin, end: final_end}];
                 let content = pack_arguments([*width.items, *height.items])^;
-                {issue: null, index: second.end, node: <rule source_offset: origin, argument_groups: groups, *content>}
+                if (not valid) unsupported(index,"box rule source mapping")
+                else {issue: null, index: second.end, node: <rule source_offset: origin, argument_groups: groups, *content>}
             }
         }
     }
@@ -3122,6 +3326,10 @@ fn inline(tokens, sources, index = 0, text = "", items = [], stop_blocks = true,
             let updated = [*slice(tokens,0,index),{*:token,paragraph_gap_seen:true},*slice(tokens,index + 1,len(tokens))];
             inline(updated,sources,index,text ++ pending_comment,items,stop_blocks,table_mode)
         }
+        else if (skipped_text_line_gap(tokens,sources,index)^) {
+            let restored = restore_control_gap(tokens,sources,index - 1)^;
+            inline(restored,sources,index,text,items,stop_blocks,table_mode)
+        }
         else if (paragraph_space(token,sources)^) {
             let run = paragraph_run(tokens,sources,index)^;
             if (run.issue != null) run
@@ -3332,7 +3540,7 @@ fn inline(tokens, sources, index = 0, text = "", items = [], stop_blocks = true,
             if (gap == null) unsupported(index, "control-space source gap")
             else inline(tokens, sources, index + 1, text ++ " " ++ gap, items, stop_blocks, table_mode)
         }
-        else if (token.kind == "control" and contains(["$", "%", "#", "&", "_", "{", "}"], token.value))
+        else if (escaped_literal_control(token)^)
             inline(tokens, sources, index + 1, text ++ token.value, items, stop_blocks, table_mode)
         else if (token.kind == "control" and contains(["\\", "quad", "qquad", ",", ";", ":", "!"], token.value)) {
             let gap = if (contains(["quad", "qquad"], token.value))
@@ -3350,14 +3558,12 @@ fn inline(tokens, sources, index = 0, text = "", items = [], stop_blocks = true,
         else if (token.kind == "control" and accent_name(token.value)) {
             let accent = accent_node(tokens, sources, index)^;
             if (accent.issue != null) accent
-            else inline(tokens, sources, accent.index, "", [*append_text(items, text), accent.node], stop_blocks, table_mode)
+            else inline(if (accent.tokens == null) tokens else accent.tokens, sources,
+                accent.index, accent.tail, [*append_text(items, text), accent.node], stop_blocks, table_mode)
         }
         else if (token.kind == "control" and contains(["hrule", "vrule"], token.value) and token.echo_span != null and
             rule_span_needs_reparse(token, sources)^)
             unsupported(index, "rule comment source gap")
-        // a replayed synthetic rule's last argument follows the later source cursor.
-        else if (control(token, "rule") and token.emit_origin != null and token.box_replayed == true)
-            unsupported(index, "box rule source mapping")
         else if (control(token, "rule") and token.emit_origin != null) {
             let rule = generated_rule(tokens, index)^;
             if (rule.issue != null) rule
@@ -3455,61 +3661,10 @@ fn inline(tokens, sources, index = 0, text = "", items = [], stop_blocks = true,
                         (token.direct == true and token.file == token.read_file)))))
             unsupported(index, "command source mapping")
         else if (token.kind == "control") {
-            // native commands consume a star only when it immediately follows the control word.
-            // Synthetic commands use their verified reconstructed spelling and emission origin.
-            let mapped_command = token.read_offset != null or (token.output_synthetic_verified == true and token.direct != true and token.emit_origin != null and
-                reconstructed_token(token)^) or (token.output_start != null and
-                expanded_argument_sources(tokens,index + 1,token.file,sources)^);
-            let offset = if (mapped_command) rebuild.map_offset(token.output_segments,token.output_start)^ else token.start;
-            let next_token = if (index + 1 < len(tokens)) tokens[index + 1] else null;
-            let star = next_token != null and next_token.kind == "char" and next_token.value == "*";
-            let mapped = star and (if (mapped_command) reconstructed_literal(next_token)^
-                else next_token.direct == true and token.file == next_token.file);
-            let star_gap = if (mapped_command and star) output_between(token,next_token)^ else "";
-            let starred = mapped and (if (mapped_command) star_gap == "" else token.end == next_token.start);
-            let tag = if (token.value == "newtheorem" and starred) "newtheorem*" else token.value;
-            let at = index + if (starred) 2 else 1;
-            let next = if (at < len(tokens)) tokens[at] else null;
-            let anchor = tokens[at - 1];
-            let gap = if (mapped_command and next != null) output_between(anchor,next)^
-                else if (next != null and anchor.direct == true and next.direct == true and
-                    anchor.file == next.file and next.start > anchor.end)
-                source_span({direct: true, file: anchor.file, start: anchor.end, end: next.start}, sources)^ else "";
-            let spaced_group = next != null and (opening(next) or
-                (next.kind == "char" and (next.value == "[" or next.value == "("))) and gap != "";
-            let joined = if (spaced_group) comment_gap(gap)^ else false;
-            if (mapped_command and next != null and gap == null) unsupported(index, "command source mapping")
-            else if (star and (not mapped or star_gap == null)) unsupported(index, "command star source mapping")
-            else if (spaced_group and not joined and (gap == null or (trim(gap) ^ { null }) != ""))
-                unsupported(index, "command argument source gap")
-            else if (spaced_group and not joined) {
-                let attrs = {source_offset: offset, *:if (starred) {starred: true} else {}, argument_groups: []};
-                let node = <[tag] *:attrs>;
-                inline(tokens, sources, at, gap, [*append_text(items, text), node], stop_blocks, table_mode)
-            }
-            else if (at < len(tokens) and (opening(tokens[at]) or
-                    (tokens[at].kind == "char" and (tokens[at].value == "[" or tokens[at].value == "(")))) {
-                let args = generic_arguments(tokens, sources, at, anchor.end, token.file, [], [], true, false, false,
-                    anchor.output_end, mapped_command, if (code_fragment_command(token.value)) "raw" else "")^;
-                if (args.issue != null) args
-                else {
-                    let following = if (args.index < len(tokens)) tokens[args.index] else null;
-                    let tail_gap = if (mapped_command and following != null)
-                        output_gap_text(output_between(tokens[args.index - 1],following)^)^ else "";
-                    let attrs = {source_offset: offset, *:if (starred) {starred: true} else {}, argument_groups: args.groups};
-                    let content = pack_arguments(args.items)^;
-                    let node = <[tag] *:attrs, *content>;
-                    if (tail_gap == null) unsupported(index, "command argument source mapping")
-                    else inline(tokens, sources, args.index, tail_gap, [*append_text(items, text), node], stop_blocks, table_mode)
-                }
-            }
-            else {
-                let gap = if (mapped_command) {text: output_gap_text(gap)^} else if (starred) {text: ""} else control_gap(tokens, sources, index)^;
-                let attrs = {source_offset: offset, *:if (starred) {starred: true} else {}, argument_groups: []};
-                let node = <[tag] *:attrs>;
-                if (gap.text == null) unsupported(index, "command source gap")
-                else inline(tokens, sources, at, gap.text, [*append_text(items, text), node], stop_blocks, table_mode)
-            }
+            let command = generic_command_node(tokens,sources,index)^;
+            if (command.issue != null) command
+            else inline(tokens,sources,command.index,command.tail,
+                [*append_text(items,text),command.node],stop_blocks,table_mode)
         }
         else unsupported(index, "token")
     }
@@ -4111,6 +4266,9 @@ pub fn digest(expanded: map) Digested^ {
     // Legacy argument expansion consumes font commands that native constructors retain.
     else if (expanded.font_token_seen == true and not expanded.constructor_argument_mode)
         {ast: null, issue: "latex-digest-unsupported", unsupported: "font token source mapping"}
+    // Legacy argument expansion cannot retain font commands around their diagnostics.
+    else if (expanded.font_parameter_error_seen == true and not expanded.constructor_argument_mode)
+        {ast: null, issue: "latex-digest-unsupported", unsupported: "font parameter diagnostic source mapping"}
     else if (expanded.mathchardef_emission_seen == true)
         {ast: null, issue: "latex-digest-unsupported", unsupported: "math character source mapping"}
     else if (expanded.expl3_regex_seen == true)
@@ -4142,6 +4300,9 @@ pub fn digest(expanded: map) Digested^ {
         {ast: null, issue: "latex-digest-unsupported", unsupported: "expl3 value argument source mapping"}
     else if (expanded.expl3_int_math_seen == true)
         {ast: null, issue: "latex-digest-unsupported", unsupported: "expl3 integer source mapping"}
+    // Legacy constructor expansion executes allocations that native argument scanning retains.
+    else if (expanded.expl3_int_new_seen == true and not expanded.constructor_argument_mode)
+        {ast: null, issue: "latex-digest-unsupported", unsupported: "expl3 register allocation source mapping"}
     else if (expanded.expl3_keyval_seen == true)
         {ast: null, issue: "latex-digest-unsupported", unsupported: "expl3 key-value source mapping"}
     else if (expanded.expl3_keys_seen == true)

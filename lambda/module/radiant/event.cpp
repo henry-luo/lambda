@@ -1221,15 +1221,13 @@ static DomBoundary pointer_boundary_within_target(DomBoundary boundary, View* ta
     return boundary;
 }
 
-// F17/ES24: legacy Lambda payload fields now project through the same event
-// wrapper JS receives. Nested Mark values still use the document Input arena;
-// only the outer event carrier moved from a one-shot Mark map to the record.
+// F17/ES24: Lambda payload fields use the same event wrapper JS receives.
 class DomEventPayloadBuilder {
 public:
     explicit DomEventPayloadBuilder(Item event) : event_(event) {}
 
     void put(const char* name, const char* value) {
-        set(name, value ? js_name_item(value) : ItemNull);
+        set(name, value ? Item{.item = s2it(heap_strcpy(value, strlen(value)))} : ItemNull);
     }
     void put(const char* name, int64_t value) {
         set(name, (Item){.item = i2it(value)});
@@ -1455,7 +1453,6 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
         return event_root.get();
     }
 
-    MarkBuilder builder(doc->input);
     DomEventPayloadBuilder mb(event_root.get());
     mb.put("type", event_name);
     if (event_name && strcmp(event_name, "scrollkey") == 0) {
@@ -1559,11 +1556,22 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
 
     if (intent && intent->type != INPUT_INTENT_NONE) {
         const char* input_type = input_intent_type_name(intent->type);
-        // Both package payloads share a length-delimited snapshot of the text.
-        Item data = intent->data
-            ? Item{.item = s2it(builder.createString(intent->data, intent->text_length()))} : ItemNull;
+        // Publish one GC-owned snapshot so a handler can retain the event
+        // while old edits and clipboard payloads remain collectable (D6.3.3).
+        RootFrame snapshot_roots(2);
+        Rooted<Item> data(snapshot_roots, intent->data
+            ? Item{.item = s2it(heap_strcpy(intent->data, intent->text_length()))} : ItemNull);
+        Rooted<Item> html(snapshot_roots, ItemNull);
+        if (intent->html_data) {
+            Arena* temporary = arena_create_default();
+            if (temporary) {
+                char* sanitized = clipboard_store_sanitize(temporary, "text/html", intent->html_data);
+                if (sanitized) html.set({.item = s2it(heap_strcpy(sanitized, strlen(sanitized)))});
+                arena_destroy(temporary);
+            }
+        }
         mb.put("input_type", input_type);
-        mb.put("data", data);
+        mb.put("data", data.get());
         if (intent->data_mime) mb.put("mime", intent->data_mime);
         else mb.putNull("mime");
         // ES17: an undo/redo hands the template the entry to install — the
@@ -1573,34 +1581,21 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
             mb.put("history_sel_start", (int64_t)intent->history_sel_start);
             mb.put("history_sel_end", (int64_t)intent->history_sel_end);
         }
-        if (intent->html_data) {
-            char* sanitized = clipboard_store_sanitize(builder.arena(), "text/html", intent->html_data);
-            if (sanitized) mb.put("html", sanitized);
-            else mb.putNull("html");
-        } else {
-            mb.putNull("html");
-        }
+        mb.put("html", html.get());
 
-        MapBuilder im = builder.map();
-        im.put("input_type", input_type);
-        im.put("data", data);
-        if (intent->data_mime) im.put("mime", intent->data_mime);
-        else im.putNull("mime");
-        if (intent->html_data) {
-            char* sanitized = clipboard_store_sanitize(builder.arena(), "text/html", intent->html_data);
-            if (sanitized) im.put("html", sanitized);
-            else im.putNull("html");
-        } else {
-            im.putNull("html");
-        }
-        im.put("key", key_code_to_name(intent->key));
-        im.put("shift", (intent->mods & RDT_MOD_SHIFT) != 0);
-        im.put("ctrl",  (intent->mods & RDT_MOD_CTRL)  != 0);
-        im.put("alt",   (intent->mods & RDT_MOD_ALT)   != 0);
-        im.put("meta",  (intent->mods & RDT_MOD_SUPER) != 0);
-        im.put("is_composing", intent->is_composing);
-        im.put("composition_caret", (int64_t)intent->composition_caret);
-        mb.put("input_intent", im.final());
+        RootedValueBuilder im(RootedValueBuilder::DATA_MAP);
+        im.put("input_type", js_name_item(input_type));
+        im.put("data", data.get());
+        im.put("mime", intent->data_mime ? js_name_item(intent->data_mime) : ItemNull);
+        im.put("html", html.get());
+        im.put("key", js_name_item(key_code_to_name(intent->key)));
+        im.put("shift", {.item = b2it((intent->mods & RDT_MOD_SHIFT) != 0)});
+        im.put("ctrl",  {.item = b2it((intent->mods & RDT_MOD_CTRL)  != 0)});
+        im.put("alt",   {.item = b2it((intent->mods & RDT_MOD_ALT)   != 0)});
+        im.put("meta",  {.item = b2it((intent->mods & RDT_MOD_SUPER) != 0)});
+        im.put("is_composing", {.item = b2it(intent->is_composing)});
+        im.put("composition_caret", {.item = i2it(intent->composition_caret)});
+        mb.put("input_intent", im.value.get());
         mb.put("is_composing", intent->is_composing);
         mb.put("composition_caret", (int64_t)intent->composition_caret);
     }
@@ -2446,25 +2441,22 @@ static AuthorTemplateCascade* author_template_cascade_current(EventContext* evco
     return cascade->evcon == evcon ? cascade : nullptr;
 }
 
-struct TemplateUiAllocationScope {
+struct TemplateAllocationScope {
     EvalContext* owner;
     bool previous_ui_mode;
     Arena* previous_arena;
     Context* previous_input;
 
-    TemplateUiAllocationScope(EvalContext* target, bool ui_mode)
+    explicit TemplateAllocationScope(EvalContext* target)
         : owner(target), previous_ui_mode(target && target->ui_mode),
           previous_arena(target ? target->arena : nullptr), previous_input(input_context) {
         if (owner) {
-            if (ui_mode) runtime_context_follow_ui_result(owner->runtime, owner);
-            else {
-                owner->ui_mode = false;
-                owner->arena = nullptr;
-            }
+            owner->ui_mode = false;
+            owner->arena = nullptr;
         }
-        input_context = owner && owner->ui_mode ? (Context*)owner : nullptr;
+        input_context = nullptr;
     }
-    ~TemplateUiAllocationScope() {
+    ~TemplateAllocationScope() {
         if (owner) {
             owner->ui_mode = previous_ui_mode;
             owner->arena = previous_arena;
@@ -2491,12 +2483,13 @@ static bool settle_template_retransform(EventContext* evcon,
         return false;
     }
     RetransformResult results[16];
+    RootSpan result_roots(16 * 3);
     int count = 0;
     uint64_t transform_start = time_now_ns();
     {
-        // only published render results follow the runtime's canonical result Input.
-        TemplateUiAllocationScope render_scope(context, true);
-        count = render_map_retransform_with_results(results, 16);
+        // Stage evaluator results independently of the DOM occurrence arena.
+        TemplateAllocationScope render_scope(context);
+        count = render_map_retransform_with_results(results, 16, result_roots.items());
     }
     if (shell_getenv("RADIANT_TEMPLATE_PROFILE")) log_notice("[TEMPLATE_PROFILE] transform_ms=%.3f",
         time_elapsed_ms_f(transform_start, time_now_ns()));
@@ -2521,7 +2514,10 @@ static bool settle_template_retransform(EventContext* evcon,
     }
     // The render map already published new source identities, even for equal values.
     // Commit their DOM ownership together or the next redraw cannot find its old result.
-    if (!reported) return false;
+    if (!reported) {
+        render_map_prune_unpublished();
+        return false;
+    }
     if (evcon) {
         DocState* state = event_context_target_state(evcon);
         bool had_hover = state && state->hover_target;
@@ -2544,6 +2540,7 @@ static bool settle_template_retransform(EventContext* evcon,
         }
         evcon->need_repaint = true;
     }
+    render_map_prune_unpublished();
     if (out_model_reconciled) *out_model_reconciled = true;
     return true;
 }
@@ -2706,8 +2703,8 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
             return true;
         }
     }
-    // handler temporaries are runtime values; rendering opts into arena ownership separately.
-    TemplateUiAllocationScope handler_scope(handler_ctx, false);
+    // Evaluation uses runtime values before presentation copies its DOM occurrences.
+    TemplateAllocationScope handler_scope(handler_ctx);
 
     // F17: author/UA handlers receive the in-flight host record. When no JS
     // stage created it (a Lambda-only document), create the same record shape
@@ -3529,7 +3526,7 @@ public:
         model.set(radiant_dom_wrap_node(evcon->target));
         EmitHandlerScope emit_scope(event_context_target_document(evcon), evcon->target,
             model.get(), nullptr, evcon, &nested_selection);
-        TemplateUiAllocationScope handler_scope(context, false);
+        TemplateAllocationScope handler_scope(context);
         Item argument = {.item = b2it(canceled)};
         // cold T0 callbacks need interpreter admission; compiled entries have no AST module.
         result.set(function_has_abi(completion.get().function, FN_ENTRY_ABI_LAMBDA_INTERPRETED)
@@ -6346,13 +6343,20 @@ static bool dom_js_transform_keeps_containing_block(DomElement* element, const C
         transform_has_functions(element->transform_prop());
 }
 
+static bool dom_js_property_can_commit_without_layout(CssPropertyCode property) {
+    return property == CSS_PROPERTY_STROKE_DASHOFFSET || property == CSS_PROPERTY_OPACITY ||
+        property == CSS_PROPERTY_VISIBILITY || property == CSS_PROPERTY_FILTER ||
+        property == CSS_PROPERTY_BACKGROUND_POSITION_X || property == CSS_PROPERTY_BACKGROUND_POSITION_Y ||
+        property == CSS_PROPERTY_TRANSFORM || css_individual_transform_index(property) >= 0;
+}
+
 struct AttributeValueDependency {
     const char* name;
     const char* before = nullptr;
     const char* after = nullptr;
     bool compare_values = false;
     bool case_sensitive = true;
-    bool preserves_container_size = false;
+    bool handles_size_queries = false;
 };
 
 static bool dom_js_selector_mentions_attribute(CssSelector* selector, void* data) {
@@ -6380,11 +6384,10 @@ static bool dom_js_rule_has_attribute_value_dependency(CssRule* rule, void* data
         pool_destroy(scratch);
         return dependency;
     }
-    // retained opacity/transform paint does not change a size-query input.
     auto* dependency = (AttributeValueDependency*)data;
     if (rule->type == CSS_RULE_SCOPE) return true;
     if (rule->type == CSS_RULE_CONTAINER)
-        return !dependency->preserves_container_size ||
+        return !dependency->handles_size_queries ||
             !css_container_query_is_size_only(rule->data.conditional_rule.condition);
     if (radiant_css_rule_selector_has_match(rule, dom_js_selector_mentions_attribute, data)) return true;
     if (rule->type != CSS_RULE_STYLE && rule->type != CSS_RULE_NESTING && rule->type != CSS_RULE_NESTED_DECLARATIONS)
@@ -6426,20 +6429,24 @@ extern "C" bool dom_engine_inline_style_has_css_dependency(DomDocument* doc, Dom
     if (!doc || !element) return true;
     AttributeValueDependency dependency = {"style", old_value, element->get_attribute("style"),
         true, !dom_element_uses_quirks_css(element)};
+    // ordinary inline layout already settles size-only queries; their presence
+    // does not make a declaration write a selector-affecting attribute edit.
+    dependency.handles_size_queries = !dom_js_property_can_commit_without_layout((CssPropertyCode)property);
     if (property == CSS_PROPERTY_OPACITY) {
         // opacity can flatten a preserve-3d subtree; retain its existing layout path.
-        dependency.preserves_container_size = element->transformp()->transform_style != CSS_VALUE_PRESERVE_3D;
+        dependency.handles_size_queries = element->transformp()->transform_style != CSS_VALUE_PRESERVE_3D;
     } else if (property == CSS_PROPERTY_TRANSFORM) {
         CssRule* block = dom_element_inline_declaration_block(element);
         for (size_t i = block ? block->data.style_rule.declaration_count : 0; i > 0; i--) {
             CssDeclaration* declaration = block->data.style_rule.declarations[i - 1];
             if (declaration && declaration->property_code == CSS_PROPERTY_TRANSFORM) {
-                dependency.preserves_container_size = dom_js_transform_keeps_containing_block(element, declaration->value);
+                dependency.handles_size_queries = dom_js_transform_keeps_containing_block(element, declaration->value);
                 break;
             }
         }
     }
-    return attribute_value_has_css_dependency(doc, element, &dependency);
+    return attribute_value_has_css_dependency(doc, element, &dependency) ||
+        radiant_css_shadow_rule_tree_has_match(doc, dom_js_rule_has_attribute_value_dependency, &dependency);
 }
 
 struct CursorAttributeDependency { const char* name; bool found = false; };
@@ -6909,6 +6916,11 @@ static bool dom_js_mutation_can_incremental(DomDocument* doc,
             // the notifier proved no relational attribute match can change.
             // a later stylesheet mutation still forces the broad path.
             continue;
+        }
+        if (record->kind == DOM_JS_MUTATION_ATTRIBUTE &&
+                record->attribute == DOM_JS_MUTATION_ATTRIBUTE_SHADOW_SELECTOR) {
+            if (reason) *reason = "shadow-style-selector";
+            return false;
         }
         if (record->kind == DOM_JS_MUTATION_ATTRIBUTE &&
             record->attribute == DOM_JS_MUTATION_ATTRIBUTE_CLASS) {
@@ -7417,13 +7429,11 @@ static DomElement* dom_js_svg_paint_only_target(DomDocument* doc, const DomJsMut
 
 static DomElement* dom_js_paint_only_target(DomDocument* doc, const DomJsMutationRecord* record) {
     CssPropertyCode property = record->presentation_property;
+    if (!dom_js_property_can_commit_without_layout(property)) return nullptr;
     if (property == CSS_PROPERTY_STROKE_DASHOFFSET) return dom_js_svg_paint_only_target(doc, record);
     bool background_position = property == CSS_PROPERTY_BACKGROUND_POSITION_X ||
         property == CSS_PROPERTY_BACKGROUND_POSITION_Y;
-    bool transform_property = property == CSS_PROPERTY_TRANSFORM || css_individual_transform_index(property) >= 0;
     bool color_filter = property == CSS_PROPERTY_FILTER;
-    if (property != CSS_PROPERTY_OPACITY && !transform_property &&
-        property != CSS_PROPERTY_VISIBILITY && !background_position && !color_filter) return nullptr;
     if (!record->target || !record->target->is_element() || !record->was_connected) return nullptr;
     DomElement* element = record->target->as_element();
     if (element->doc != doc || element->is_synthetic() || element->view_type == RDT_VIEW_NONE ||
@@ -7719,21 +7729,9 @@ static void post_html_handler_rebuild_impl(EventContext* evcon,
 
     DocState* state = (DocState*)doc->state;
 
-    // the fallback drops layout resources; transient owners survive until the
-    // post-layout prune checks their DOM identity (D5.5.1).
-
-    // Broad DOM fallback is a layout-resource epoch change, not a DOM/view-node
-    // identity change; keep the ViewTree shell and retained nodes for StateStore.
-    if (!doc->view_tree) {
-        doc->view_tree = view_tree_shell_create(doc);
-        view_pool_reset_retained(doc->view_tree);
-    } else {
-        view_pool_reset_retained(doc->view_tree);
-    }
-
     DomDocument* saved_doc = evcon->ui_context ? evcon->ui_context->document : nullptr;
     if (evcon->ui_context) evcon->ui_context->document = lam::up(doc);
-    layout_html_doc(evcon->ui_context, doc, true);
+    layout_rebuild_document(evcon->ui_context, doc);
     if (evcon->ui_context) evcon->ui_context->document = lam::up(saved_doc);
 
     int state_pruned = 0;
@@ -9847,10 +9845,10 @@ static bool css_selector_uses_hover(CssSelector* selector) {
     return css_selector_uses_pseudo_state(selector, PSEUDO_STATE_HOVER);
 }
 
-// A state condition in an ancestor or nested selector can affect other
-// elements, so a subject-only update requires a direct pseudo-class.
-static bool css_selector_tests_subject_state(CssSelector* selector,
-        uint32_t state, CssSelectorType selector_type) {
+// A direct pseudo-class can affect the subject or reach it through child and
+// descendant combinators. Sibling and functional dependencies need full restyle.
+static bool css_selector_tests_local_state(CssSelector* selector,
+        uint32_t state, CssSelectorType selector_type, bool* descendant = nullptr) {
     if (!selector || !css_selector_uses_pseudo_state(selector, state) ||
         selector->compound_selector_count == 0) return false;
 
@@ -9869,8 +9867,15 @@ static bool css_selector_tests_subject_state(CssSelector* selector,
                 return false;
             }
             if (!css_simple_selector_uses_pseudo_state(simple, state)) continue;
-            if (c != final_index || simple->type != selector_type) {
-                return false;
+            if (simple->type != selector_type) return false;
+            if (c != final_index) {
+                if (!descendant || !selector->combinators) return false;
+                for (size_t i = c; i < final_index; i++) {
+                    CssCombinator relation = selector->combinators[i];
+                    if (relation != CSS_COMBINATOR_CHILD &&
+                        relation != CSS_COMBINATOR_DESCENDANT) return false;
+                }
+                *descendant = true;
             }
             found_hover = true;
         }
@@ -9950,23 +9955,26 @@ static bool css_rule_uses_hover(CssRule* rule) {
     return css_rule_uses_pseudo_state(rule, PSEUDO_STATE_HOVER);
 }
 
-static bool css_rule_is_self_color_background_state(CssRule* rule,
-        uint32_t state, CssSelectorType selector_type, bool* found_hover) {
+static bool css_rule_is_local_paint_state(CssRule* rule, uint32_t state,
+        CssSelectorType selector_type, bool* found_hover,
+        lam::ArrayList<CssSelector*>* descendants = nullptr) {
     if (!rule || !found_hover) return true;
     if (rule->type == CSS_RULE_STYLE || rule->type == CSS_RULE_NESTING) {
         bool rule_uses_hover = false;
         CssSelectorGroup* group = rule->data.style_rule.selector_group;
-        if (group) {
-            for (size_t i = 0; i < group->selector_count; i++) {
-                CssSelector* selector = group->selectors ? group->selectors[i] : NULL;
-                if (!selector || !css_selector_uses_pseudo_state(selector, state)) continue;
-                rule_uses_hover = true;
-                if (!css_selector_tests_subject_state(selector, state, selector_type)) return false;
-            }
-        } else if (css_selector_uses_pseudo_state(rule->data.style_rule.selector, state)) {
+        size_t selector_count = group ? group->selector_count : 1;
+        for (size_t i = 0; i < selector_count; i++) {
+            CssSelector* selector = group
+                ? (group->selectors ? group->selectors[i] : nullptr)
+                : rule->data.style_rule.selector;
+            if (!css_selector_uses_pseudo_state(selector, state)) continue;
             rule_uses_hover = true;
-            if (!css_selector_tests_subject_state(
-                    rule->data.style_rule.selector, state, selector_type)) return false;
+            bool descendant = false;
+            if (!css_selector_tests_local_state(selector, state, selector_type,
+                    descendants ? &descendant : nullptr)) return false;
+            if (descendant && (rule->type != CSS_RULE_STYLE ||
+                    rule->data.style_rule.nested_rule_count ||
+                    !descendants->push_back(selector))) return false;
         }
         if (rule_uses_hover) {
             *found_hover = true;
@@ -9977,7 +9985,7 @@ static bool css_rule_is_self_color_background_state(CssRule* rule,
             }
         }
         for (size_t i = 0; i < rule->data.style_rule.nested_rule_count; i++) {
-            if (!css_rule_is_self_color_background_state(
+            if (!css_rule_is_local_paint_state(
                     rule->data.style_rule.nested_rules
                         ? rule->data.style_rule.nested_rules[i] : NULL,
                     state, selector_type, found_hover)) return false;
@@ -9985,10 +9993,10 @@ static bool css_rule_is_self_color_background_state(CssRule* rule,
     } else if (rule->type == CSS_RULE_MEDIA || rule->type == CSS_RULE_SUPPORTS ||
                rule->type == CSS_RULE_CONTAINER || rule->type == CSS_RULE_LAYER) {
         for (size_t i = 0; i < rule->data.conditional_rule.rule_count; i++) {
-            if (!css_rule_is_self_color_background_state(
+            if (!css_rule_is_local_paint_state(
                     rule->data.conditional_rule.rules
                         ? rule->data.conditional_rule.rules[i] : NULL,
-                    state, selector_type, found_hover)) return false;
+                    state, selector_type, found_hover, descendants)) return false;
         }
     }
     return true;
@@ -10019,7 +10027,7 @@ static bool active_rule_requires_layout(CssRule* rule, void* context) {
         ((rule->type == CSS_RULE_STYLE || rule->type == CSS_RULE_NESTING) &&
          rule->data.style_rule.nested_rule_count &&
          css_rule_uses_pseudo_state(rule, PSEUDO_STATE_ACTIVE))) return true;
-    return !css_rule_is_self_color_background_state(rule, PSEUDO_STATE_ACTIVE,
+    return !css_rule_is_local_paint_state(rule, PSEUDO_STATE_ACTIVE,
         CSS_SELECTOR_PSEUDO_ACTIVE, (bool*)context);
 }
 
@@ -10113,7 +10121,8 @@ static bool document_has_matched_hover_rules(DomDocument* doc, DocState* state) 
 // Unmatched hover rules cannot affect this document's cascade. In particular,
 // UA controls may define geometry-changing :hover styles while a file tree
 // pointer is over an unrelated row with paint-only author styles.
-static bool document_has_matched_layout_hover_rules(DomDocument* doc, DocState* state) {
+static bool document_has_matched_layout_hover_rules(DomDocument* doc, DocState* state,
+        lam::ArrayList<CssSelector*>* descendants) {
     if (!doc || !state || !doc->root || !doc->document_pool || !document_has_hover_rules(doc)) {
         return false;
     }
@@ -10126,8 +10135,13 @@ static bool document_has_matched_layout_hover_rules(DomDocument* doc, DocState* 
             CssRule* rule = stylesheet->rules ? stylesheet->rules[r] : NULL;
             if (!css_rule_uses_hover(rule)) continue;
             bool found_hover = false;
-            if (css_rule_is_self_color_background_state(rule, PSEUDO_STATE_HOVER,
-                    CSS_SELECTOR_PSEUDO_HOVER, &found_hover)) continue;
+            size_t previous_count = descendants ? descendants->size() : 0;
+            if (css_rule_is_local_paint_state(rule, PSEUDO_STATE_HOVER,
+                    CSS_SELECTOR_PSEUDO_HOVER, &found_hover,
+                    descendants)) continue;
+            if (descendants) {
+                descendants->remove_range(previous_count, descendants->size() - previous_count);
+            }
             if (css_rule_matches_hover_in_tree(rule, matcher,
                                                static_cast<DomNode*>(doc->root))) {
                 return true;
@@ -10135,6 +10149,14 @@ static bool document_has_matched_layout_hover_rules(DomDocument* doc, DocState* 
         }
     }
     return false;
+}
+
+static bool hover_rule_requires_full_context(CssRule* rule, void*) {
+    // Scoped roots, imported sheets and nesting can add conditions outside
+    // the selector tested by the descendant paint refresh.
+    return rule->type == CSS_RULE_SCOPE || rule->type == CSS_RULE_IMPORT ||
+        (rule->type == CSS_RULE_STYLE && rule->data.style_rule.nested_rule_count &&
+         css_rule_uses_hover(rule));
 }
 
 static bool document_has_matched_hover_rule_on_path(DomDocument* doc, DocState* state,
@@ -10371,7 +10393,7 @@ static bool refresh_hover_color_background_element(DocState* state,
         if (snapshot_pool) pool_destroy(snapshot_pool);
         return false;
     }
-    // Direct self-hover rules can only change this element's cascade.
+    // Update the cascade winner before resolving its retained paint values.
     radiant_cascade_styles_for_element_with_matcher(element, state->hover_matcher);
     bool unchanged = css_declaration_winner_equal(before,
         style_tree_get_declaration(element->specified_style, CSS_PROPERTY_COLOR));
@@ -10396,11 +10418,51 @@ static bool refresh_hover_color_background_path(DocState* state,
     return refreshed;
 }
 
+struct HoverPaintMatch {
+    DocState* state;
+    View* previous;
+};
+
+static bool resolve_hover_paint_match(void* context, DomElement* element, uint32_t pseudo_state) {
+    HoverPaintMatch* match = static_cast<HoverPaintMatch*>(context);
+    if (state_resolve_selector_pseudo_state(match->state, element, pseudo_state)) return true;
+    if (pseudo_state != PSEUDO_STATE_HOVER) return false;
+    // Include the previous hover path so leaving a tile also clears its
+    // descendant styles. The final cascade uses the current hover state only.
+    for (DomNode* node = match->previous; node; node = node->parent) {
+        if (node == element) return true;
+    }
+    return false;
+}
+
+static bool refresh_hover_paint_descendants(DocState* state, DomDocument* doc,
+        LayoutContext* lycon, View* previous, const lam::ArrayList<CssSelector*>& selectors) {
+    SelectorMatcher matcher;
+    selector_matcher_init(&matcher, doc->document_pool);
+    HoverPaintMatch match = {state, previous};
+    selector_matcher_set_pseudo_state_resolver(&matcher, resolve_hover_paint_match, &match);
+    DomNode* root = doc->root;
+    for (DomNode* node = root; node; node = dom_source_next_in_tree(root, node)) {
+        DomElement* element = node->as_element();
+        if (!element || element->is_synthetic()) continue;
+        for (size_t i = 0; i < selectors.size(); i++) {
+            if (!selector_matcher_matches(&matcher, selectors[i], element, nullptr)) continue;
+            if (!refresh_hover_color_background_element(state, doc, lycon, static_cast<View*>(node))) {
+                return false;
+            }
+            dirty_mark_element(state, node);
+            break;
+        }
+    }
+    return true;
+}
+
 // False when the paint-only refresh could not finish; the caller restyles in full.
 static bool refresh_hover_color_background_paths(DocState* state,
                                                  DomDocument* doc,
                                                  View* prev_hover,
-                                                 View* new_target) {
+                                                 View* new_target,
+                                                 const lam::ArrayList<CssSelector*>* descendants = nullptr) {
     UiContext* uicon = doc ? static_cast<UiContext*>(doc->js.host_ui_context) : nullptr;
     if (!state || !state->hover_matcher || !doc || !uicon || !doc->view_tree ||
         !doc->view_tree->prop_pool) return false;
@@ -10416,7 +10478,9 @@ static bool refresh_hover_color_background_paths(DocState* state,
     setup_font(uicon, &lycon.font, &uicon->default_font);
 
     return refresh_hover_color_background_path(state, doc, &lycon, prev_hover) &&
-        refresh_hover_color_background_path(state, doc, &lycon, new_target);
+        refresh_hover_color_background_path(state, doc, &lycon, new_target) &&
+        (!descendants || descendants->empty() ||
+         refresh_hover_paint_descendants(state, doc, &lycon, prev_hover, *descendants));
 }
 
 static void apply_document_condition_restyle(DomDocument* doc, DocState* state, uint32_t reason) {
@@ -10500,7 +10564,7 @@ static bool focus_selector_requires_document_cascade(CssSelector* selector, void
     };
     for (const auto& state : states) {
         if (!(query->flags & state.flag) || !css_selector_uses_pseudo_state(selector, state.flag)) continue;
-        if (!css_selector_tests_subject_state(selector, state.flag, state.type)) return true;
+        if (!css_selector_tests_local_state(selector, state.flag, state.type)) return true;
         CssCompoundSelector* subject = selector->compound_selectors[selector->compound_selector_count - 1];
         for (size_t i = 0; subject && i < 2; ++i) {
             // The pseudo-state itself changed. Check only the subject's
@@ -10597,7 +10661,14 @@ static void sync_hover_pseudo_state_after_transition(DocState* state,
     if (!doc) doc = hover_resolve_document(prev_hover);
     if (!doc) return;
 
-    bool layout_hover_active = document_has_matched_layout_hover_rules(doc, state);
+    lam::ArrayList<CssSelector*> descendants(MEM_CAT_LAYOUT, 0);
+    bool layout_hover_active = document_has_matched_layout_hover_rules(doc, state,
+        doc->js.has_shadow_roots ? nullptr : &descendants);
+    if (!layout_hover_active && !descendants.empty() &&
+        radiant_css_document_rule_tree_has_match(doc, hover_rule_requires_full_context, nullptr)) {
+        descendants.clear();
+        layout_hover_active = document_has_matched_layout_hover_rules(doc, state, nullptr);
+    }
     bool paint_only_hover = !layout_hover_active && !state->hover_styles_require_layout;
     // Direct paint-only selectors can only match the changed hover path; avoid
     // walking the complete document before repainting the affected elements.
@@ -10609,9 +10680,9 @@ static void sync_hover_pseudo_state_after_transition(DocState* state,
         // A matcher allocation failure must keep the existing complete path.
         paint_only_hover = false;
     }
-    if (hover_styles_active || state->hover_styles_active) {
+    if (hover_styles_active || state->hover_styles_active || !descendants.empty()) {
         if (!paint_only_hover ||
-            !refresh_hover_color_background_paths(state, doc, prev_hover, new_target)) {
+            !refresh_hover_color_background_paths(state, doc, prev_hover, new_target, &descendants)) {
             radiant_recascade_document(doc);
             if (doc->root) {
                 reflow_schedule(state, doc->root, REFLOW_SUBTREE, CHANGE_PSEUDO_STATE);
@@ -11796,7 +11867,13 @@ struct FocusDispatchScope {
         DomNode* node = dom_node_ref_validate(document, ref);
         return node && dom_node_is_connected(node) ? static_cast<View*>(node) : nullptr;
     }
+    View* resolve_retained(DomNodeRef ref) {
+        DomNode* node = dom_node_ref_validate(document, ref);
+        return node ? static_cast<View*>(node) : nullptr;
+    }
     View* before() { return resolve(from); }
+    // retain the pinned identity when a focus listener detaches its target (D5.5.1).
+    View* before_retained() { return resolve_retained(from); }
     View* after() { return resolve(to); }
 };
 
@@ -11844,16 +11921,16 @@ static void dispatch_focus_change_observed(EventContext* evcon, View* target) {
 }
 
 static void dispatch_focus_blur_observed(EventContext* evcon,
+                                         DocState* owner_state,
                                          View* target,
                                          View* related_target) {
-    if (!evcon || !target) return;
-    DocState* state = event_context_target_state(evcon);
-    if (!state) return;
-    FocusDispatchScope sequence(state, target, related_target);
-    radiant_dispatch_focus_event(evcon, sequence.before(), "blur", sequence.after());
-    sm_observe_action(event_context_target_state(evcon),
-                      SM_ACT_DISPATCH_BLUR);
-    if (sequence.before()) radiant_dispatch_focus_event(evcon, sequence.before(), "focusout", sequence.after());
+    if (!evcon || !owner_state || !target) return;
+    FocusDispatchScope sequence(owner_state, target, related_target);
+    View* blur_target = sequence.before_retained();
+    radiant_dispatch_focus_event(evcon, blur_target, "blur", sequence.after());
+    sm_observe_action(owner_state, SM_ACT_DISPATCH_BLUR);
+    blur_target = sequence.before_retained();
+    if (blur_target) radiant_dispatch_focus_event(evcon, blur_target, "focusout", sequence.after());
 }
 
 /**
@@ -11908,7 +11985,7 @@ void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard
             if (should_dispatch_change) {
                 dispatch_focus_change_observed(evcon, sequence.before());
             }
-            dispatch_focus_blur_observed(evcon, sequence.before(), sequence.after());
+            dispatch_focus_blur_observed(evcon, state, sequence.before_retained(), sequence.after());
             sm_guard.commit();
         } else {
             focus_set_programmatic(state, new_focus, from_keyboard);
@@ -11957,7 +12034,7 @@ void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard
             if (should_dispatch_change) {
                 dispatch_focus_change_observed(evcon, sequence.before());
             }
-            dispatch_focus_blur_observed(evcon, sequence.before(), nullptr);
+            dispatch_focus_blur_observed(evcon, state, sequence.before_retained(), nullptr);
             sm_guard.commit();
         } else {
             focus_clear(state);
@@ -12540,7 +12617,7 @@ static bool navigation_async_commit(AsyncScriptNavigation* job) {
         if (same_target) {
             DocumentJsHostConfig host_config = document_js_host_config_inherit(uicon, source);
             document_apply_js_host_config(loaded, &host_config);
-            complete_deferred_html_scripts(loaded);
+            same_target = complete_deferred_html_scripts(loaded);
         }
         if (same_target && navigation_async_follow_redirect(job, iframe)) {
             navigated = true;
@@ -12567,10 +12644,10 @@ static bool navigation_async_commit(AsyncScriptNavigation* job) {
     } else if (live) {
         DocumentJsHostConfig host_config = document_js_host_config_inherit(uicon, source);
         document_apply_js_host_config(loaded, &host_config);
-        complete_deferred_html_scripts(loaded);
-        if (navigation_async_follow_redirect(job, nullptr)) {
+        bool scripts_ready = complete_deferred_html_scripts(loaded);
+        if (scripts_ready && navigation_async_follow_redirect(job, nullptr)) {
             navigated = true;
-        } else {
+        } else if (scripts_ready) {
             BrowsingSession* session = uicon->browsing_session;
             navigation_save_session_scroll(session, source);
             if (session) {

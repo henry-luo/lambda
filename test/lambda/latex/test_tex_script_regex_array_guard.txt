@@ -1,0 +1,42 @@
+[[{
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 font format"
+    }, {
+      issue: null,
+      unsupported: null
+    }, {
+      issue: null,
+      unsupported: null
+    }, {
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 font format"
+    }, {
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 font format"
+    }], [{
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 font format"
+    }, {
+      issue: null,
+      unsupported: null
+    }, {
+      issue: null,
+      unsupported: null
+    }, {
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 font format"
+    }, {
+      issue: "tex-unsupported-primitive",
+      unsupported: "expl3 font format"
+    }]]
+[null, {
+    text: "65536",
+    messages: [],
+    diagnostics: [],
+    packages: []
+  }, {
+    text: "1",
+    messages: [],
+    diagnostics: [],
+    packages: []
+  }, null, null]

@@ -58,6 +58,44 @@ with one file per format and five runs per file took 495 ms before and
 layout and rendering path (D9.5.6v2). Raw samples and qualification logs
 are under `temp/graph-parser-tuning/`.
 
+### DOT gallery startup
+
+The 30-source gallery uses the ordinary source Mark, rich child measurement,
+and pure graph layout path under S2.5.8 and D9.5.6v2. DOT scanning rejects
+nonkeyword prefixes before decoding. DOT lowering shares typed attributes
+between canonical elements, labels, and interactions, reuses defaults for
+empty property lists, and expands only authored annotations. Rendering skips
+the diagnostic work owned by the public validation result. The Velmt adapter
+shares attribute snapshots and measures only record nodes with port metadata.
+
+Dagre computes longest paths in one topological walk after rejecting cycles in
+source order. It stops rank propagation and crossing reduction at a fixed
+point, reuses routing bounds, and tests label candidates until one fits. The
+runtime resolves the pooled name once and defers the leading map spread until
+a lookup needs it, preserving last-writer behavior under D3.4.4, D5.6.1,
+and S2.3.1v2.
+
+The viewer waits for 80 function calls before promotion so background MIR
+compilation competes less with layout during navigation (D8.3.2). In five
+alternating headless macOS arm64 runs at 1280 × 800, opening the DOT link from
+the graph index and fitting all 30 previews took 0.964 s median, down from
+2.700 s. The tuned runs ranged from 0.952 s to 1.216 s. The baseline used the
+prior release-profile executable and the tuned run used the release host.
+See `temp/graphviz-subsecond/verify-selected.log` for sample timings and
+`test/ui/graph_gallery_viewport.json` for the navigation regression.
+
+Fresh process startup took 1.101 s median in AUTO, down from 2.764 s, and
+1.429 s in strict T0, down from 4.799 s (D8.3.1v3). The viewport regression
+passed all 16 assertions in both tiers. The scroll trace shows one initial
+fit commit with zero layout time. The nine-scroll replay took 0.419 s median
+on the tuned release host and 0.373 s on the prior release-profile host.
+On the same tuned host and package sources, changing the promotion threshold
+from 32 to 80 calls measured 0.432 s and 0.426 s respectively for the replay.
+The fitted viewport screenshot and 111
+upstream SVGs match the baseline byte for byte. All 30 DOT sources and seven
+spelling and recovery controls yield identical source Mark. One graph golden
+and four interpreter tests fail on both builds.
+
 ## Completion record
 
 - The migration covers the five source parsers. Layout, normalization and rendering continue to consume their existing Mark contracts (D9.5.6v2). The worktree is `master` at `8880b89318` and `lambda-input` at `91d88f1`, with implementation edits in both and independent LaTeX work in the main checkout.

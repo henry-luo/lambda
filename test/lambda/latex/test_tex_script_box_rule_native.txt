@@ -1,0 +1,162 @@
+[<latex_document
+    <document source_offset: 0,
+      <paragraph
+        <rule source_offset: 56, argument_groups: [{
+              kind: "required",
+              raw: "1.0pt",
+              start: 56,
+              end: 56
+            }, {
+              kind: "required",
+              raw: "2.0pt",
+              start: 56,
+              end: 63
+            }],
+          ["1.0pt", "2.0pt"]>>>>, <latex_document
+    <document source_offset: 0,
+      <paragraph
+        <rule source_offset: 56, argument_groups: [{
+              kind: "required",
+              raw: "1.0pt",
+              start: 56,
+              end: 56
+            }, {
+              kind: "required",
+              raw: "2.0pt",
+              start: 56,
+              end: 62
+            }],
+          ["1.0pt", "2.0pt"]>>>>, <latex_document
+    <document source_offset: 0,
+      <paragraph
+        "A"
+        <rule source_offset: 58, argument_groups: [{
+              kind: "required",
+              raw: "1.0pt",
+              start: 58,
+              end: 58
+            }, {
+              kind: "required",
+              raw: "2.0pt",
+              start: 58,
+              end: 58
+            }],
+          ["1.0pt", "2.0pt"]>
+        "B">>>, <latex_document
+    <document source_offset: 0,
+      <paragraph
+        <rule source_offset: 46, argument_groups: [{
+              kind: "required",
+              raw: "2.0pt",
+              start: 46,
+              end: 46
+            }, {
+              kind: "required",
+              raw: "1em",
+              start: 46,
+              end: 46
+            }],
+          ["2.0pt", "1em"]>
+        <rule source_offset: 46, argument_groups: [{
+              kind: "required",
+              raw: "2.0pt",
+              start: 46,
+              end: 46
+            }, {
+              kind: "required",
+              raw: "1em",
+              start: 46,
+              end: 59
+            }],
+          ["2.0pt", "1em"]>>>>, <latex_document
+    <document source_offset: 0,
+      <paragraph
+        "A"
+        <rule source_offset: 48, argument_groups: [{
+              kind: "required",
+              raw: "1.0pt",
+              start: 48,
+              end: 48
+            }, {
+              kind: "required",
+              raw: "1em",
+              start: 48,
+              end: 48
+            }],
+          ["1.0pt", "1em"]>
+        "BZ">>>, <latex_document
+    <document source_offset: 0,
+      <paragraph
+        "é"
+        <rule source_offset: 59, argument_groups: [{
+              kind: "required",
+              raw: "\\linewidth",
+              start: 59,
+              end: 59
+            }, {
+              kind: "required",
+              raw: "3.0pt",
+              start: 59,
+              end: 59
+            }],
+          <linewidth source_offset: 59, argument_groups: []>
+          "3.0pt">
+        "Ω">>>, <latex_document
+    <document source_offset: 0,
+      <paragraph
+        <rule source_offset: 46, argument_groups: [{
+              kind: "required",
+              raw: "1.0pt",
+              start: 46,
+              end: 46
+            }, {
+              kind: "required",
+              raw: "0.4pt",
+              start: 46,
+              end: 53
+            }],
+          ["1.0pt", "0.4pt"]>
+        "/"
+        <rule source_offset: 46, argument_groups: [{
+              kind: "required",
+              raw: "1.0pt",
+              start: 46,
+              end: 46
+            }, {
+              kind: "required",
+              raw: "0.4pt",
+              start: 46,
+              end: 60
+            }],
+          ["1.0pt", "0.4pt"]>>>>, <latex_document
+    <document source_offset: 0,
+      <paragraph
+        <rule source_offset: 67, argument_groups: [{
+              kind: "required",
+              raw: "2.5pt",
+              start: 67,
+              end: 67
+            }, {
+              kind: "required",
+              raw: "2.0pt",
+              start: 67,
+              end: 74
+            }],
+          ["2.5pt", "2.0pt"]>>>>, <latex_document
+    <document source_offset: 0,
+      <paragraph
+        <hrule source_offset: 31, argument_groups: []>
+        " Z">>>, <latex_document
+    <document source_offset: 0,
+      <paragraph
+        <vrule source_offset: 31, argument_groups: []>
+        " Z">>>, <latex_document
+    <document source_offset: 0,
+      <paragraph
+        <hrule source_offset: 31, argument_groups: []>
+        " Z">>>, <latex_document
+    <document source_offset: 0,
+      <paragraph
+        <vrule source_offset: 31, argument_groups: []>
+        " Z">>>]
+[true, true, true, true, true, true, true, true, true, true, true, true]

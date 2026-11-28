@@ -20,14 +20,13 @@
       "text": "\"Draft\""
     },
     {
-      "type": "key_press",
-      "key": "Enter"
+      "type": "key_combo",
+      "key": "F10",
+      "mods_str": "shift"
     },
     {
-      "type": "click",
-      "target": {
-        "selector": ".property-toolbar_add"
-      }
+      "type": "key_press",
+      "key": "Enter"
     },
     {
       "type": "type",

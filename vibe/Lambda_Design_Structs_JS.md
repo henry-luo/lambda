@@ -2622,7 +2622,7 @@ recovery of every field from the canonical owner under D8.2.4–D8.2.6.
 MVP runtime, its focused runtime test, CLI selector, and active benchmark-engine
 hooks. Its benchmark artifacts and design records remain historical evidence;
 the source snapshot is available at commit `f6e11aa3342f855205a8f3135c1f2df9cc584073`.
-The independent `mvp-lmd` runtime remains active and is a separate subsystem.
+The independent JavaScript MIR runtime, originally `mvp-lmd`, remains active as a separate subsystem (**D8.4.2**).
 
 No bridge, cast or byte-copy translation was introduced. D1.2/D1.3 permit
 a language-private ABI when needed; they do not make it interchangeable with

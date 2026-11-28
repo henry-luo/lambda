@@ -69,8 +69,7 @@
     },
     {
       "type": "assert_pixel",
-      "x": 400,
-      "y": 825,
+      "target": {"selector": ".src-text .edit-doc > div:last-child", "offset_x": 44, "offset_y": 10},
       "search_radius": 14,
       "max_r": 140,
       "max_g": 140,
@@ -140,8 +139,7 @@
     },
     {
       "type": "assert_pixel",
-      "x": 400,
-      "y": 825,
+      "target": {"selector": ".src-text .edit-doc > div:last-child", "offset_x": 44, "offset_y": 10},
       "search_radius": 14,
       "max_r": 140,
       "max_g": 140,

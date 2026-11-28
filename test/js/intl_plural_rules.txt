@@ -1,0 +1,24 @@
+en cardinal one/other one/other/other/one/one/other/other/other
+en ordinal one/two/few/other one/two/few/other/other/other/other/one/two
+ru cardinal one/few/many/other one/few/many/many/one/few/other/many
+ar cardinal zero/one/two/few/many/other zero/one/two/few/many/other/other
+pt-PT cardinal one/many/other other/one/other/many
+sk cardinal one/few/many/other one/few/other/many
+en cardinal one/other other/other
+en cardinal one/other one/other
+en cardinal one/other other/one/other
+en cardinal one/other one/one/other/other
+en cardinal one/other other/other/other
+en-US-x-ui/ru/pt-PT
+pl
+one/other/few
+TypeError
+TypeError
+RangeError
+TypeError
+TypeError
+TypeError
+RangeError
+RangeError
+[object Intl.PluralRules]
+0 1 1 2

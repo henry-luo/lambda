@@ -65,11 +65,21 @@ fn nested_entries(container, wanted_tag, parent_group, prefix) {
       else []) ^ { [] })) entry]
 }
 
-fn metadata_entries(container, wanted_tag) {
+fn metadata_entries(container, wanted_tags) {
   [for (child in element_children(container),
-    entry in ((if (tag(child) == wanted_tag) [child]
-      else if (tag(child) == "subgraph") metadata_entries(child, wanted_tag)
-      else []) ^ { [] })) entry]
+    entry in (({
+      let child_tag = tag(child);
+      if (child_tag == "subgraph") metadata_entries(child, wanted_tags)
+      else if (child_tag in wanted_tags) [child] else []
+    } ^ { [] }))) entry]
+}
+
+// Flatten only the shared presentation records in traversal order. Per-item
+// queries can then reuse these records without revisiting nodes and edges.
+pub fn presentation_metadata(graph) {
+  let entries = metadata_entries(graph,
+    ["style-rule", "style-assignment", "class-assignment", "interaction", "edge-property"]);
+  if (len(entries) == 0) null else <graph *entries>
 }
 
 pub fn node_entries(graph) => nested_entries(graph, "node", null, "g")
@@ -99,13 +109,15 @@ pub fn annotations(value) => [
   for (child in element_children(value) where ((tag(child) == "annotation") ^ { false })) child
 ]
 
-pub fn port_entries(graph) => [
-  for (entry in node_entries(graph), port in ((ports(entry.value)) ^ { [] })) {
+pub fn ports_for_nodes(entries) => [
+  for (entry in entries, port in ((ports(entry.value)) ^ { [] })) {
     value: port,
     node: string(entry.value.id),
     group: entry.group
   }
 ]
+
+pub fn port_entries(graph) => ports_for_nodes(node_entries(graph))
 
 pub fn nodes(graph) => [for (entry in node_entries(graph)) entry.value]
 
@@ -113,19 +125,20 @@ pub fn edges(graph) => [for (entry in edge_entries(graph)) entry.value]
 
 pub fn subgraphs(graph) => [for (entry in subgraph_entries(graph)) entry.value]
 
-pub fn style_rules(graph) => metadata_entries(graph, "style-rule")
+pub fn style_rules(graph) => metadata_entries(graph, ["style-rule"])
 
-pub fn class_assignments(graph) => metadata_entries(graph, "class-assignment")
+pub fn class_assignments(graph) => metadata_entries(graph, ["class-assignment"])
 
-pub fn style_assignments(graph) => metadata_entries(graph, "style-assignment")
+pub fn style_assignments(graph) => metadata_entries(graph, ["style-assignment"])
 
-pub fn interactions(graph) => metadata_entries(graph, "interaction")
+pub fn interactions(graph) => metadata_entries(graph, ["interaction"])
 
-pub fn edge_properties(graph) => metadata_entries(graph, "edge-property")
+pub fn edge_properties(graph) => metadata_entries(graph, ["edge-property"])
 
 pub fn constraints(graph) => [
-  for (group in element_children(graph), value in ((element_children(group)) ^ { [] })
-    where ((tag(group) == "constraints" and tag(value) == "constraint") ^ { false })) value
+  for (group in element_children(graph),
+    value in ((if (tag(group) == "constraints") element_children(group) else []) ^ { [] })
+    where ((tag(value) == "constraint") ^ { false })) value
 ]
 
 fn meta_values(graph, wanted_tag) {
@@ -219,6 +232,7 @@ pub fn interaction_for(graph, target_id) {
 }
 
 pub fn edge_property(graph, edge_id, source_id, key, fallback = null) {
+  if (graph == null) { return fallback }
   let target_ids = [edge_id,
     for (value in [source_id] where value != null and value != edge_id) value];
   let matches = [for (property in edge_properties(graph)

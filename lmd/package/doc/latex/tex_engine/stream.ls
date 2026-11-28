@@ -123,7 +123,7 @@ fn captured_tokens(trace: Trace, index: int, limit_value: int, out: map[] = []) 
     else {
         let token = trace.captured[string(index)];
         if (token == null) null
-        else captured_tokens(trace, index + 1, limit_value, [*out, token])^
+        else captured_tokens(trace, index + 1, limit_value, out ++ [token])^
     }
 }
 
@@ -143,9 +143,9 @@ pub fn end_trace(stream: Stream) TraceResult^ {
 }
 
 // only fresh main-file reads advance the origin; pushed-back tokens do not.
-fn record_main_read(stream: Stream, token: EngineToken?) Stream =>
+fn main_read_offset(stream: Stream, token: EngineToken?) int =>
     if (token != null and token.direct == true and token.file == stream.reader.file_id)
-        {*:stream, last_main_offset: token.start} else stream
+        (token.start or 0) else stream.last_main_offset
 
 pub fn next(stream: Stream) StreamStep^ {
     let depth = len(stream.levels);
@@ -153,8 +153,8 @@ pub fn next(stream: Stream) StreamStep^ {
         let result = read_source(stream.reader)^^;
         // preserve the root reader for source data, while recording that it is exhausted.
         let updated = {*:stream, reader: if (result == null) stream.reader else result.reader,
-            root_eof: result == null};
-        trace_read(record_main_read(updated, result.token), result.token)^
+            root_eof: result == null, last_main_offset: main_read_offset(stream, result.token)};
+        trace_read(updated, result.token)^
     } else {
         let top = stream.levels[depth - 1];
         if (top.reader != null) {
@@ -163,8 +163,9 @@ pub fn next(stream: Stream) StreamStep^ {
             if (result == null)
                 next(push({*:stream, levels: rest}, stream.everyeof))^
             else {
-                let updated = {*:stream, levels: [*rest, {*:top, reader: result.reader}]};
-                trace_read(record_main_read(updated, result.token), result.token)^
+                let updated = {*:stream, levels: [*rest, {*:top, reader: result.reader}],
+                    last_main_offset: main_read_offset(stream, result.token)};
+                trace_read(updated, result.token)^
             }
         }
         else if (top.index >= len(top.tokens))
@@ -202,9 +203,10 @@ fn read_group(stream: Stream, depth: int, tokens: map[], long_ok: bool) Argument
     else if (paragraph(t) and not long_ok)
         finish(push(result.stream, [t]), tokens, "tex-runaway-argument", "paragraph")
     else if (is_character(t, 2) and depth == 1) finish(result.stream, tokens)
+    // Concatenation can grow the token array without copying its collected prefix.
     else read_group(result.stream,
         depth + if (is_character(t, 1)) 1 else if (is_character(t, 2)) -1 else 0,
-        [*tokens, t], long_ok)^
+        tokens ++ [t], long_ok)^
 }
 
 // TeX ignores leading spaces and removes one balanced outer group.
@@ -259,7 +261,7 @@ fn delimited_scan(input: Stream, delimiter: map[], depth: int, tokens: map[], to
         finish(read.stream, strip_outer(slice(tokens, 0, len(tokens) - len(delimiter)))^)
     else {
         let next_depth = depth + if (is_character(t, 1)) 1 else if (is_character(t, 2)) -1 else 0;
-        let all_tokens = [*tokens, t];
+        let all_tokens = tokens ++ [t];
         let all_top = [*top, next_depth == 0 and not is_character(t, 2)];
         if (not brace_delim and next_depth == 0 and len(all_tokens) >= len(delimiter) and
             matches_tail(all_tokens, all_top, delimiter)^)
@@ -277,9 +279,9 @@ fn raw_group(input: Stream, depth: int, inner: map[], raw: map[]) RawArgument^ {
     let t = read.token;
     if (t == null) {stream: read.stream, tokens: inner, raw: raw, error: "tex-runaway-argument"}
     else if (is_character(t, 2) and depth == 1)
-        {stream: read.stream, tokens: inner, raw: [*raw, t], error: null}
+        {stream: read.stream, tokens: inner, raw: raw ++ [t], error: null}
     else raw_group(read.stream, depth + if (is_character(t, 1)) 1 else if (is_character(t, 2)) -1 else 0,
-        [*inner, t], [*raw, t])^
+        inner ++ [t], raw ++ [t])^
 }
 
 pub fn raw_argument(input: Stream) RawArgument^ {
@@ -309,11 +311,11 @@ fn bracket_tail(input: Stream, depth: int, tokens: map[], raw: map[]) OptionalAr
     let t = read.token;
     if (t == null) {stream: read.stream, tokens: tokens, raw: raw, present: true, error: "tex-runaway-argument"}
     else if (t.kind == "char" and t.cat == 12 and t.value == "]" and depth == 0)
-        {stream: read.stream, tokens: strip_outer(tokens)^, raw: [*raw, t], present: true, error: null}
+        {stream: read.stream, tokens: strip_outer(tokens)^, raw: raw ++ [t], present: true, error: null}
     else if (is_character(t, 2) and depth == 0)
         {stream: push(read.stream, [t]), tokens: tokens, raw: raw, present: true, error: "tex-extra-brace"}
     else bracket_tail(read.stream, depth + if (is_character(t, 1)) 1 else if (is_character(t, 2)) -1 else 0,
-        [*tokens, t], [*raw, t])^
+        tokens ++ [t], raw ++ [t])^
 }
 
 pub fn optional_argument(input: Stream) OptionalArgument^ {

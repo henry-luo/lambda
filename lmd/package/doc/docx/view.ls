@@ -26,11 +26,12 @@ fn viewer_document(result, streaming = false) element {
         <body class:"docx-viewer", <main id:"docx-preview", class:"docx-preview", preview(result)>>>
 }
 
-pub fn render_document_file(source, options = null) element^ {
-    let result = reader.convert(source, {include_empty_paragraphs:true,presentation:"source",
-        *:if (options == null) {} else options}, false)^;
-    viewer_document(result)
-}
+pub fn convert_preview(source, options = null, serialized = false) map^ =>
+    reader.convert(source, {include_empty_paragraphs:true,presentation:"source",
+        *:if (options == null) {} else options}, serialized, true)^
+
+pub fn render_document_file(source, options = null) element^ =>
+    viewer_document(convert_preview(source,options)^)
 
 pub fn preview_setup(source, options = null) map^ => reader.preview_setup(source)^
 

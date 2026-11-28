@@ -4,6 +4,8 @@
 [11, 11]
 "superscript notation:"
 [["char", "A", 11], ["char", "B", 11], ["char", " ", 10]]
+"superscript in a control word:"
+["abç", 0, 8]
 "control symbols and spaces:"
 [["control", "!", null], ["char", " ", 10], ["char", "A", 11], ["control", " ", null], ["char", "B", 11], ["char", " ", 10]]
 "CRLF and trimmed spaces:"

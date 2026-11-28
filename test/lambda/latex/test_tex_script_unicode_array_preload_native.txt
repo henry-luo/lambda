@@ -1,0 +1,10 @@
+{
+  preload: null,
+  issue: null,
+  text: "Y/17408/1",
+  diagnostics: []
+}
+{
+  issue: "tex-unsupported-primitive",
+  unsupported: "expl3 fp array font initialization"
+}

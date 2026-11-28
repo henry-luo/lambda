@@ -684,6 +684,43 @@
         "selector": "#fuzzy-panel"
       },
       "visible": false
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('fuzzy-panel').style.height='60px';Object.assign(document.getElementById('fuzzy-control').style,{position:'fixed',top:'400px',left:'20px'})"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fuzzy-options"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const p=document.getElementById('fuzzy-panel').getBoundingClientRect(),a=document.getElementById('fuzzy-options').getBoundingClientRect();return p.height===60 && p.top>=0 && Math.abs(p.bottom-a.top+6)<1})()"
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "resize",
+      "width": 1200,
+      "height": 850
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fuzzy-options"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const p=document.getElementById('fuzzy-panel').getBoundingClientRect(),a=document.getElementById('fuzzy-options').getBoundingClientRect();return p.height===60 && p.bottom<=850 && Math.abs(p.top-a.bottom-6)<1})()"
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
     }
   ]
 }

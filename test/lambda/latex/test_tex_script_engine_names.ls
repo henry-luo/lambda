@@ -2,15 +2,18 @@ import reader: lambda.doc.latex.tex_engine.reader
 import stream: lambda.doc.latex.tex_engine.stream
 import profile: lambda.doc.latex.tex_engine.profile
 import digest: lambda.doc.latex.tex_engine.digest
+import compare: ._tex_script_recovery
 let kernel = input(sys.lambda.home ++ "/package/doc/latex/tex_engine/kernel.tex", "text")^;
 import reconstruct: lambda.doc.latex.tex_engine.reconstruct
-fn matches(source) any^ {
-    let result = profile.expand_with_kernel(source, kernel,
-        {script_expl3: true, echo_definitions: true, adapters: [], resources: {local: {}, bundled: {}}}, 100000)^;
-    let rebuilt = reconstruct.reconstruct(result)^;
-    let native = parse(source, {type: "tex"})^;
-    {issue: result.issue, reconstruct_issue: rebuilt.issue, matches: rebuilt.text == native.text,
-        diagnostics_match: result.diagnostic_records == native.diagnostics, messages_match: result.messages == native.messages}
+// Compare against source-bound native captures, retaining the kernel's messages.
+let native=input("test/lambda/latex/fixtures/tex_engine_names_native.json","json")^;
+let cached=compare.preload_expl3()^;
+fn matches(source,index) any^ {
+    let entry=native.cases[index];
+    let reference={*:entry,tex:{*:entry.tex,messages:if(entry.kernel_messages) native.kernel_messages else entry.tex.messages}};
+    let result=compare.check_expansion(source,{script_expl3:true},reference,if(index==0)null else cached)^;
+    {issue:result.issue,reconstruct_issue:result.reconstruct_issue,matches:result.text_match,
+        diagnostics_match:result.diagnostics_match,messages_match:result.messages_match}
 }
 let sources = [
  "\\jobname",
@@ -47,7 +50,7 @@ let sources = [
  "\\jobname\\jobname\\pdftexrevision",
  "\\def\\x{\\fontname}\\x"
 ];
-[for (source in sources) matches(source)^]
+[for (index,source in sources) matches(source,index)^]
 let fixture_root="test/lambda/latex/fixtures/local_packages/";
 let fixture_resources={local:{'script_jobchild.tex':{data:input(fixture_root ++ "script_jobchild.tex","text")^}},bundled:{}};
 fn file_case(name) any^ {

@@ -1,0 +1,274 @@
+{
+  "cases": [
+    {
+      "source": "\\begin{document}A\\shipout\\hbox{B}C\\end{document}",
+      "tex": {
+        "text": "\\begin{document}AC\\end{document}",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\begin{document}A\\shipout\\vbox{B}C\\end{document}",
+      "tex": {
+        "text": "\\begin{document}AC\\end{document}",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\begin{document}A\\shipout\\vtop{B}C\\end{document}",
+      "tex": {
+        "text": "\\begin{document}AC\\end{document}",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\begin{document}\\shipout\\hbox{}Z\\end{document}",
+      "tex": {
+        "text": "\\begin{document}Z\\end{document}",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\count0=1\\begin{document}A\\shipout\\hbox{\\global\\count0=2 B}\\the\\count0\\end{document}",
+      "tex": {
+        "text": "\\begin{document}A2\\end{document}",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\count0=1\\begin{document}A\\shipout\\hbox{\\count0=2 B}\\the\\count0\\end{document}",
+      "tex": {
+        "text": "\\begin{document}A1\\end{document}",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\everyhbox{X}\\begin{document}\\shipout\\hbox{B}C\\end{document}",
+      "tex": {
+        "text": "\\begin{document}C\\end{document}",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\everyvbox{X}\\begin{document}\\shipout\\vbox{B}C\\end{document}",
+      "tex": {
+        "text": "\\begin{document}C\\end{document}",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\begin{document}\\shipout\\hbox{\\aftergroup X A}B\\end{document}",
+      "tex": {
+        "text": "\\begin{document}XB\\end{document}",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\begin{document}\\shipout\\hbox{A\\hbox{B}C}D\\end{document}",
+      "tex": {
+        "text": "\\begin{document}D\\end{document}",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\begin{document}\\shipout\\hbox to 10pt{B}C\\end{document}",
+      "tex": {
+        "text": "\\begin{document}C\\end{document}",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\begin{document}\\shipout\\hbox spread 10pt{B}C\\end{document}",
+      "tex": {
+        "text": "\\begin{document}C\\end{document}",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\let\\s=\\shipout\\begin{document}\\s\\hbox{B}C\\end{document}",
+      "tex": {
+        "text": "\\begin{document}C\\end{document}",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\begin{document}\\shipout\\relax\\hbox{B}C\\end{document}",
+      "tex": {
+        "text": "\\begin{document}C\\end{document}",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\begin{document}\\shipout\\hbox{\\verb|}%|}Z\\end{document}",
+      "tex": {
+        "text": "\\begin{document}Z\\end{document}",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\begin{document}\\shipout\\hbox{\\raise1pt\\hbox{B}}Z\\end{document}",
+      "tex": {
+        "text": "\\begin{document}Z\\end{document}",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\begin{document}\\hbox{A\\shipout\\hbox{B}C}Z\\end{document}",
+      "tex": {
+        "text": "\\begin{document}\\mbox{AC}Z\\end{document}",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\begin{document}$x\\shipout\\hbox{A}y$\\end{document}",
+      "tex": {
+        "text": "\\begin{document}$xy$\\end{document}",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\begin{document}\\shipout\\hbox{é漢}Z\\end{document}",
+      "tex": {
+        "text": "\\begin{document}Z\\end{document}",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\begin{document}A\\shipout\\hbox{X \\unskip Y}B\\end{document}",
+      "tex": {
+        "text": "\\begin{document}AB\\end{document}",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    },
+    {
+      "source": "\\begin{document}A\\shipout\\hbox{\\global\\def\\x{X}}\\x\\end{document}",
+      "tex": {
+        "text": "\\begin{document}AX\\end{document}",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      },
+      "kernel_messages": true
+    }
+  ],
+  "kernel_messages": [
+    "\\z@=\\dimen10",
+    "\\p@=\\dimen11",
+    "\\maxdimen=\\dimen12",
+    "\\z@skip=\\skip10",
+    "\\hideskip=\\skip11",
+    "\\@tempdima=\\dimen13",
+    "\\@tempdimb=\\dimen14",
+    "\\@tempdimc=\\dimen15",
+    "\\@tempcnta=\\count23",
+    "\\@tempcntb=\\count24",
+    "\\@tempskipa=\\skip12",
+    "\\@tempskipb=\\skip13",
+    "\\@temptokena=\\toks10",
+    "\\@tempboxa=\\box10",
+    "\\voidb@x=\\box11",
+    "\\textwidth=\\dimen16",
+    "\\textheight=\\dimen17",
+    "\\linewidth=\\dimen18",
+    "\\columnwidth=\\dimen19",
+    "\\columnsep=\\dimen20",
+    "\\columnseprule=\\dimen21",
+    "\\marginparwidth=\\dimen22",
+    "\\marginparsep=\\dimen23",
+    "\\marginparpush=\\dimen24",
+    "\\oddsidemargin=\\dimen25",
+    "\\evensidemargin=\\dimen26",
+    "\\topmargin=\\dimen27",
+    "\\headheight=\\dimen28",
+    "\\headsep=\\dimen29",
+    "\\footskip=\\dimen30",
+    "\\paperwidth=\\dimen31",
+    "\\paperheight=\\dimen32",
+    "\\fboxsep=\\dimen33",
+    "\\fboxrule=\\dimen34",
+    "\\arraycolsep=\\dimen35",
+    "\\tabcolsep=\\dimen36",
+    "\\arrayrulewidth=\\dimen37",
+    "\\doublerulesep=\\dimen38",
+    "\\labelwidth=\\dimen39",
+    "\\labelsep=\\dimen40",
+    "\\itemindent=\\dimen41",
+    "\\listparindent=\\dimen42",
+    "\\leftmargin=\\dimen43",
+    "\\rightmargin=\\dimen44",
+    "\\unitlength=\\dimen45",
+    "\\jot=\\dimen46",
+    "\\abovecaptionskip=\\skip14",
+    "\\belowcaptionskip=\\skip15",
+    "\\smallskipamount=\\skip16",
+    "\\medskipamount=\\skip17",
+    "\\bigskipamount=\\skip18",
+    "\\topsep=\\skip19",
+    "\\itemsep=\\skip20",
+    "\\parsep=\\skip21",
+    "\\partopsep=\\skip22",
+    "\\floatsep=\\skip23",
+    "\\textfloatsep=\\skip24",
+    "\\intextsep=\\skip25"
+  ]
+}

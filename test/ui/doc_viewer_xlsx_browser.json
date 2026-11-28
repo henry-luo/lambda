@@ -1,0 +1,30 @@
+{
+  "name": "Browse XLSX files, including a workbook inside ZIP",
+  "html": "temp/viewer-xlsx-files",
+  "prepare": ["python3", "test/ui/gen_viewer_xlsx_browser.py"],
+  "viewport": {"width": 1120, "height": 720},
+  "events": [
+    {"type":"assert_count", "target":{"selector":".tree-entry[data-tree-path$='/basic.xlsx'] .tree-toggle"}, "count":0},
+    {"type":"click", "target":{"selector":".tree-entry[data-tree-path$='/basic.xlsx'] .tree-label"}},
+    {"type":"click", "target":{"selector":".xlsx-tab[data-sheet='1']"}},
+    {"type":"assert_text", "target":{"selector":"[data-cell='A1']"}, "equals":"Second worksheet"},
+    {"type":"click", "target":{"selector":".tree-entry[data-tree-path$='/layout-hidden-anchor.xlsx'] .tree-label"}},
+    {"type":"assert_text", "target":{"selector":"[data-cell='A1']"}, "equals":"Layout title"},
+    {"type":"assert_count", "target":{"selector":"[data-cell='A4']"}, "count":0},
+    {"type":"assert_count", "target":{"selector":"[data-cell='B5']"}, "count":0},
+    {"type":"click", "target":{"selector":".tree-entry[data-tree-path$='/bad-case-relationship.xlsx'] .tree-label"}},
+    {"type":"assert_text", "target":{"selector":"#xlsx-preview [role='alert']"}, "contains":"Missing package part"},
+    {"type":"click", "target":{"selector":".tree-entry[data-tree-path$='/bundle.zip'] > .tree-row .tree-label"}},
+    {"type":"assert_count", "target":{"selector":".tree-entry[data-tree-path$='/Inside.XLSX'] > .tree-row .tree-toggle"}, "count":0},
+    {"type":"click", "target":{"selector":".tree-entry[data-tree-path$='/Inside.XLSX'] .tree-label"}},
+    {"type":"assert_text", "target":{"selector":"[data-cell='A1']"}, "equals":"Product"},
+    {"type":"click", "target":{"selector":".tree-entry[data-tree-path$='/large.xlsx'] .tree-label"}},
+    {"type":"assert_count", "target":{"selector":"[data-cell='A1001']"}, "count":0},
+    {"type":"scroll", "target":{"selector":".xlsx-sheet-scroll"}, "dx":0, "dy":-1500},
+    {"type":"assert_text", "target":{"selector":"[data-cell='A1001']"}, "equals":"1000"},
+    {"type":"assert_count", "target":{"selector":"[data-cell='A1']"}, "count":0},
+    {"type":"scroll", "target":{"selector":".xlsx-sheet-scroll"}, "dx":-100, "dy":0},
+    {"type":"assert_script", "js":"document.querySelector('.xlsx-sheet-scroll').scrollLeft > 300"},
+    {"type":"assert_count", "target":{"selector":"[data-cell='L1001']"}, "count":1}
+  ]
+}

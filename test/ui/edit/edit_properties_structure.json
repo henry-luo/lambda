@@ -11,7 +11,14 @@
     {
       "type": "click",
       "target": {
-        "selector": ".property-toolbar_add"
+        "selector": "#property-row-0"
+      },
+      "button": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".property-menu .property-add"
       }
     },
     {

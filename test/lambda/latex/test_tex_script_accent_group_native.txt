@@ -1,0 +1,143 @@
+[<latex_document
+    <document source_offset: 0,
+      <paragraph
+        <accent command: "'", source_offset: 16,
+          <i source_offset: 18, argument_groups: [{
+                kind: "required",
+                raw: "x",
+                start: 20,
+                end: 23
+              }],
+            "x">>
+        "Z">>>, <latex_document
+    <document source_offset: 0,
+      <paragraph
+        <accent command: "'", source_offset: 16,
+          <foo source_offset: 18, argument_groups: [{
+                kind: "required",
+                raw: "x",
+                start: 22,
+                end: 25
+              }],
+            "x">>
+        "Z">>>, <latex_document
+    <document source_offset: 0,
+      <paragraph
+        <accent command: "'", source_offset: 16,
+          <textbf source_offset: 18,
+            "x">>
+        "Z">>>, <latex_document
+    <document source_offset: 0,
+      <paragraph
+        <accent command: "v", source_offset: 16,
+          <foo source_offset: 18, argument_groups: [{
+                kind: "optional",
+                raw: "x",
+                start: 22,
+                end: 25
+              }, {
+                kind: "required",
+                raw: "y",
+                start: 25,
+                end: 28
+              }],
+            <brack_group
+              "x">
+            "y">>
+        "Z">>>, <latex_document
+    <document source_offset: 0,
+      <paragraph
+        <accent command: "'", source_offset: 16,
+          <foo source_offset: 18, argument_groups: [{
+                kind: "required",
+                raw: "x",
+                start: 22,
+                end: 25
+              }, {
+                kind: "required",
+                raw: "y",
+                start: 25,
+                end: 28
+              }],
+            ["x", "y"]>>
+        "Z">>>, <latex_document
+    <document source_offset: 0,
+      <paragraph
+        <accent command: "'", source_offset: 16,
+          <foo source_offset: 18, argument_groups: [{
+                kind: "required",
+                raw: "\\textbf{x}",
+                start: 22,
+                end: 34
+              }],
+            <textbf source_offset: 23,
+              "x">>>
+        "Z">>>, <latex_document
+    <document source_offset: 0,
+      <paragraph
+        "é "
+        <accent command: "'", source_offset: 19,
+          <i source_offset: 21, argument_groups: [{
+                kind: "required",
+                raw: "x",
+                start: 23,
+                end: 26
+              }],
+            "x">>
+        "!">>>, <latex_document
+    <document source_offset: 0,
+      <paragraph
+        <curly_group
+          <accent command: "'", source_offset: 17,
+            <i source_offset: 19, argument_groups: [{
+                  kind: "required",
+                  raw: "x",
+                  start: 21,
+                  end: 24
+                }],
+              "x">>
+          "!">>>>, <latex_document
+    <document source_offset: 0,
+      <paragraph
+        <accent command: "'", source_offset: 16,
+          <accent command: "`", source_offset: 18,
+            <i source_offset: 20, argument_groups: [{
+                  kind: "required",
+                  raw: "x",
+                  start: 22,
+                  end: 25
+                }],
+              "x">>>
+        "!">>>, <latex_document
+    <document source_offset: 0,
+      <paragraph
+        <accent command: "'", source_offset: 16,
+          <foo source_offset: 18, argument_groups: [{
+                kind: "required",
+                raw: "",
+                start: 22,
+                end: 24
+              }],
+            <curly_group>>>
+        "!">>>, <latex_document
+    <document source_offset: 0,
+      <paragraph
+        <accent command: "'", source_offset: 16,
+          <foo source_offset: 18, argument_groups: []>>
+        "(a)!">>>, <latex_document
+    <document source_offset: 0,
+      <paragraph
+        <accent command: "'", source_offset: 16,
+          <foo source_offset: 18, argument_groups: [{
+                kind: "required",
+                raw: "x",
+                start: 22,
+                end: 25
+              }],
+            "x">>
+        " "
+        <curly_group
+          "y">
+        "!">>>]
+[true, true, true, true, true, true, true, true, true, true, true, true]
+["accent argument"]

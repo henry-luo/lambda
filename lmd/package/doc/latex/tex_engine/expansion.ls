@@ -2,6 +2,7 @@
 import stream: .stream
 import reader: .reader
 import primitives: .primitives
+import alias_catalog: .primitive_alias_catalog
 import expl3: .expl3
 import regex: .regex
 import fp: .fp
@@ -10,8 +11,12 @@ import glue: .glue
 import pdfstrings: .pdfstrings
 import md5: .md5
 import message_catalog: .message_catalog
+import intarray_catalog: .intarray_catalog
+import format_count_catalog: .format_count_catalog
+import unicode_array_catalog: .unicode_array_catalog
 import utf8: lambda.io.utf8
 import path: lambda.io.path
+let EXPL_LET_MAPPING_GUARD = "tl_eq"
 
 // Core state fields are common to every expansion outcome; package-specific fields remain open.
 pub type State = {input: map, definitions: map, groups: array, output: map[],
@@ -43,13 +48,13 @@ fn result(input: map, definitions: map, groups: array, output: map[], count: int
         current_package: null, current_options: null, current_is_class: false, option_decls: [], pass_options: [],
         math_depth: 0, display_math: false, main_file: input.reader.file_id,
         echo_definitions: options.echo_definitions == true, echo_incomplete: false,
-        conditions: [], counts: {}, dimens: {}, skips: {}, muskips: {}, boxes: {}, box_serial: 0, box_metrics: {}, box_metrics_reported: false, toks: {}, lowercase: {}, uppercase: {}, code_tables: {sfcode: {}, mathcode: {}, delcode: {}},
+        conditions: [], counts: {}, unknown_counts: {}, dimens: {}, skips: {}, muskips: {}, boxes: {}, box_serial: 0, box_metrics: {}, box_metrics_reported: false, toks: {}, lowercase: {}, uppercase: {}, code_tables: {sfcode: {}, mathcode: {}, delcode: {}},
         expression_arithmetic_error: false,
         parameters: {endlinechar: input.reader.endline, escapechar: 92, mag: 1000, tolerance: 10000,
             newlinechar: if (options.latex == true) -1 else 0}, after_assignment: null, token_text_scan: false,
         resources: options.resources, resource_requests: options.resource_requests == true,
         host_no_base: options.host_no_base == true,
-        resources_seen: {}, resource_ids: {}, resource_count: 0, resource_bytes: 0,
+        resources_seen: {}, resource_ids: {}, resource_count: 0, resource_bytes: 0, resource_lookups: 0,
         sources: [{id: input.reader.file_id, name: if (options.source_name == null) "<input>" else options.source_name,
             origin: if (input.reader.origin == "bundled") "bundled" else "local", data: input.reader.source}],
         fonts: [{name: "nullfont", size: 0, param_base: 0, param_count: 7, params: {}, hyphen_char: 45, skew_char: -1,
@@ -68,10 +73,15 @@ fn conditional_name(name) => contains(["if", "ifcat", "ifnum", "ifdim", "ifodd",
 fn builtin(st, name) => primitives.exists(name) or (st.latex and primitives.latex_exists(name)) or
     (st.script_expl3 and expl3.exists(name))
 fn meaning(st, t) any^ => if (not is_control(t)) {kind: "char", value: t.value, cat: t.cat}
-    else if (st.definitions[key(t)] != null) st.definitions[key(t)]
-    else if (t.kind == "control" and builtin(st, t.value)) {kind: "primitive", name: t.value}
-    else {kind: "undefined"}
-fn primitive(st, t) any^ => if (is_control(t) and meaning(st, t).kind == "primitive") meaning(st, t).name else null
+    else {
+        let resolved = st.definitions[key(t)];
+        if (resolved != null) resolved
+        else if (t.kind == "control" and st.expl3_aliases[t.value] != null) st.expl3_aliases[t.value]
+        else if (t.kind == "control" and builtin(st, t.value)) {kind: "primitive", name: t.value}
+        else {kind: "undefined"}
+    }
+fn primitive_name(resolved) => if (resolved.kind == "primitive") resolved.name else null
+fn primitive(st, t) any^ => if (is_control(t)) primitive_name(meaning(st, t)) else null
 fn nonspace(input: map) StreamStep^ {
     let read = stream.next(input)^;
     if (charcat(read.token, 10)) nonspace(read.stream)^ else read
@@ -87,23 +97,23 @@ fn body_params(tokens, count, index = 0, output = [], mode = null, errors = []) 
         let t = tokens[index];
         // token lists inserted into an expanded definition bypass parameter parsing.
         if (t.definition_literal_parameter == true)
-            body_params(tokens, count, index + 1, [*output, {*:t, definition_literal_parameter:false}], mode, errors)
-        else if (not charcat(t, 6)) body_params(tokens, count, index + 1, [*output, t], mode, errors)
+            body_params(tokens, count, index + 1, output ++ [{*:t, definition_literal_parameter:false}], mode, errors)
+        else if (not charcat(t, 6)) body_params(tokens, count, index + 1, output ++ [t], mode, errors)
         else if (index + 1 >= len(tokens)) {
             if (mode == null) {tokens: output, issue: "tex-illegal-param"}
-            else body_params(tokens, count, index + 1, [*output, t], mode,
+            else body_params(tokens, count, index + 1, output ++ [t], mode,
                 if (mode == "tex") [*errors, {next:null}] else errors)
         }
         else {
             let n = tokens[index + 1];
             let digit = if (n.kind == "char" and (mode == "latex" or n.cat == 12)) index_of("123456789", n.value) else null;
-            if (charcat(n, 6)) body_params(tokens, count, index + 2, [*output, t], mode, errors)
+            if (charcat(n, 6)) body_params(tokens, count, index + 2, output ++ [t], mode, errors)
             else if (digit == null or digit >= count) {
                 if (mode == null) {tokens: output, issue: "tex-illegal-param"}
-                else body_params(tokens, count, index + 1, [*output, t], mode, [*errors, {next:n}])
+                else body_params(tokens, count, index + 1, output ++ [t], mode, [*errors, {next:n}])
             }
             else body_params(tokens, count, index + 2,
-                [*output, parameter_token(digit, t.start, n.end)], mode, errors)
+                output ++ [parameter_token(digit, t.start, n.end)], mode, errors)
         }
     }
 }
@@ -115,10 +125,14 @@ fn append_delimiter(delimiters, token) any^ {
 
 fn set_definition(definitions, name, value) => {*:definitions, *:map([name, value])}
 
+// Global definitions must also replace each saved group value.
+fn assign_global_meanings(st: State, values: map) State =>
+    if (len(values)==0) st else {*:st,definitions:{*:st.definitions,*:values},groups:[for (scope in st.groups)
+        {*:scope,definitions:{*:scope.definitions,*:values}}]}
+
 fn assign_meaning(st: State, name, value, global) State^ =>
-    {*:st, definitions: set_definition(st.definitions, name, value),
-        groups: if (global) [for (scope in st.groups)
-            {*:scope, definitions: set_definition(scope.definitions, name, value)}] else st.groups}
+    if (global) assign_global_meanings(st, map([name,value]))
+    else {*:st,definitions:set_definition(st.definitions,name,value)}
 
 // native keeps the scanned signature when input ends before the body.
 fn unfinished_signature(input, count, prefix, delimiters, diagnostics) =>
@@ -180,7 +194,7 @@ fn definition_tokens_inner(st, budget, depth = 1, output = [], parameter_count =
         else {state:record_diagnostic(read.state,"tex-runaway","File ended while scanning a text")^,tokens:output}
     else if (xpand and t.direct_toks == true) {
         let stored = {*:t, noexpand: false, direct_toks: false, trace_internal: false};
-        definition_tokens_inner(read.state, budget, depth, [*output, stored], parameter_count, xpand, recover_eof)
+        definition_tokens_inner(read.state, budget, depth, output ++ [stored], parameter_count, xpand, recover_eof)
     }
     else if (charcat(t, 2) and depth == 1) {state: read.state, tokens: output}
     else if (parameter_count != null and charcat(t, 6)) {
@@ -193,15 +207,15 @@ fn definition_tokens_inner(st, budget, depth = 1, output = [], parameter_count =
         if (current.issue != null) {state:current,tokens:output}
         // end of input during parameter lookahead stops before appending #.
         else if (n == null) {state:current,tokens:output}
-        else if (charcat(n,6)) definition_tokens_inner(current,budget,depth,[*output,literal],parameter_count,xpand,recover_eof)
+        else if (charcat(n,6)) definition_tokens_inner(current,budget,depth,output ++ [literal],parameter_count,xpand,recover_eof)
         else if (digit != null and digit < parameter_count)
-            definition_tokens_inner(current,budget,depth,[*output,parameter_token(digit,t.start,n.end)],parameter_count,xpand,recover_eof)
+            definition_tokens_inner(current,budget,depth,output ++ [parameter_token(digit,t.start,n.end)],parameter_count,xpand,recover_eof)
         else {
             // buffered argument tokens use the current reader position for errors.
             let origin = if (not xpand and n.direct == true and
                 stream.raw_reader(read.state.input,n)^ != null) n else null;
             let diagnosed=record_diagnostic(current,"tex-illegal-param","Illegal parameter number in definition",origin)^;
-            definition_tokens_inner(put_back(diagnosed,n),budget,depth,[*output,literal],parameter_count,xpand,recover_eof)
+            definition_tokens_inner(put_back(diagnosed,n),budget,depth,output ++ [literal],parameter_count,xpand,recover_eof)
         }
     }
     else {
@@ -209,7 +223,7 @@ fn definition_tokens_inner(st, budget, depth = 1, output = [], parameter_count =
         let stored = if (xpand) {*:t, noexpand:false, trace_internal:false} else t;
         definition_tokens_inner(read.state, budget,
             depth + if (charcat(t, 1)) 1 else if (charcat(t, 2)) -1 else 0,
-            [*output, stored], parameter_count, xpand, recover_eof)
+            output ++ [stored], parameter_count, xpand, recover_eof)
     }
 }
 
@@ -365,16 +379,27 @@ fn collect_document_args(st, input, specs, index = 0, args = [], missing = []) a
 fn substitute(body, args) => [for (t in body)
     *(if (t.kind == "parameter") args[t.value] else [t])]
 
+// native C strings stop at the first NUL, before any enclosing buffer limit.
+fn native_c_prefix(bytes, limit) any^ {
+    let prefix = slice(bytes,0,min(len(bytes),limit))^;
+    let zeros = [for (i,b in prefix where b == 0) i];
+    slice(prefix,0,if (len(zeros)==0) len(prefix) else zeros[0])
+}
+
+// terminal lines retain bytes while buffering, then native exposes each as a C string.
+fn native_terminal_line(value) any^ {
+    let bytes = binary(value)^;
+    if (not any([for (byte in bytes) byte == 0])) value
+    else utf8.decode(native_c_prefix(bytes,len(bytes))^)
+}
+
 // native formats control names in a 128-byte C buffer, including slash and terminator.
 fn macro_diagnostic_name(call) any^ {
     if (call == null) null
     else if (call.kind == "active") call.value
     else {
-        let bytes = binary(call.value)^;
-        let prefix = slice(bytes,0,min(len(bytes),126))^;
-        let zeros = [for (i,b in prefix where b == 0) i];
-        let end = if (len(zeros) == 0) len(prefix) else zeros[0];
-        "\\" ++ parse(slice(prefix,0,end)^,{type:"text"})^
+        let prefix = native_c_prefix(binary(call.value)^,126)^;
+        "\\" ++ parse(prefix,{type:"text"})^
     }
 }
 
@@ -462,7 +487,7 @@ fn assign_futurelet(st: State, global) State^ {
 }
 
 // aliased expl3 lets require the assignment source-mapping guard.
-fn guarded_expl_let(st: State, token) State^ => if (meaning(st, token).source_mapping_guard == "tl_eq")
+fn guarded_expl_let(st: State, token) State^ => if (meaning(st, token).source_mapping_guard == EXPL_LET_MAPPING_GUARD)
     {*:st, expl3_tl_put_seen: true} else st
 
 fn prefixed(st: State, global, long_ok, protected_flag, budget) State^ {
@@ -564,18 +589,26 @@ fn noexpand(st: State, budget, argument_mode = false) State^ {
     }
 }
 
-fn expandable(st, t) any^ => is_control(t) and t.noexpand != true and
-    (meaning(st, t).kind == "macro" or (primitive(st, t) != null and (primitives.expandable(primitive(st, t)) or (st.latex and primitives.latex_expandable(primitive(st, t))) or
-        (st.script_expl3 and expl3.expandable(primitive(st, t))))))
+fn expandable_meaning(st, t, resolved) any^ {
+    let cmd = primitive_name(resolved);
+    t.noexpand != true and (resolved.kind == "macro" or (cmd != null and
+        (primitives.expandable(cmd) or (st.latex and primitives.latex_expandable(cmd)) or
+            (st.script_expl3 and expl3.expandable(cmd)))))
+}
 
-fn expand_one(st: State, t, budget) State^ {
+fn expandable(st, t) any^ => is_control(t) and expandable_meaning(st, t, meaning(st, t))
+
+fn expand_one(st: State, t, budget, meaning_hint = null) State^ {
+    // reuse the caller's resolution while dispatching the same token.
+    let resolved = if (meaning_hint != null) meaning_hint else if (is_control(t)) meaning(st, t) else null;
+    let cmd = primitive_name(resolved);
     let pending = len(st.conditions) > 0 and st.conditions[len(st.conditions) - 1].kind == "scanning";
-    if (not expandable(st, t)) {*:st, input: stream.push(st.input, [t])}
+    if (meaning_hint == null and not expandable_meaning(st, t, resolved)) {*:st, input: stream.push(st.input, [t])}
     // TeX inserts a relax before a delimiter encountered during an if test.
-    else if (pending and contains(["else", "fi", "or"], primitive(st, t)))
+    else if (pending and contains(["else", "fi", "or"], cmd))
         {*:st, input: stream.push(st.input, [control_token("relax"), t])}
-    else if (meaning(st, t).kind == "macro") {
-        let macro = meaning(st, t)^;
+    else if (resolved.kind == "macro") {
+        let macro = resolved;
         if (st.expansions >= budget) fail(st, "tex-budget")
         else if (macro.source_mapping_guard == "replicate_negative")
             unsupported(st, "expl3 negative replication diagnostic")
@@ -599,72 +632,73 @@ fn expand_one(st: State, t, budget) State^ {
                 else if (macro.source_mapping_guard == "seq_map") {*:st, expl3_seq_map_seen:true}
                 else if (macro.source_mapping_guard == "tl_map") {*:st, expl3_tl_map_seen:true}
                 else if (macro.source_mapping_guard == "replicate") {*:st, expl3_replicate_seen:true}
+                else if (macro.source_mapping_guard == "int_new") {*:st, expl3_int_new_seen:true}
                 else if (macro.source_mapping_guard == "int_math") {*:st, expl3_int_math_seen: true} else st;
             expand_macro(marked, macro, budget, t)
         }
     }
-    else if (primitive(st, t) == "noexpand") noexpand(st, budget)
-    else if (primitive(st, t) == "expandafter") expand_after(st, budget)
-    else if (primitive(st, t) == "csname") csname(st, budget)
-    else if (primitive(st, t) == "the") expand_the(st, budget)
-    else if (contains(["string", "number", "romannumeral", "meaning"], primitive(st, t)))
-        string_primitive(st, primitive(st, t), budget)
-    else if (primitive(st, t) == "detokenize" or primitive(st, t) == "unexpanded" or primitive(st, t) == "scantokens")
-        token_primitive(st, primitive(st, t), budget)
-    else if (primitive(st, t) == "expanded") expanded_primitive(st, budget)
-    else if (primitive(st, t) == "pdfstrcmp") strcmp_primitive(st, budget)
-    else if (contains(["pdfescapestring", "pdfescapename", "pdfescapehex", "pdfunescapehex", "pdfmdfivesum"], primitive(st, t)))
-        pdf_string_primitive(st, primitive(st, t), budget)
-    else if (primitives.engine_revision(primitive(st, t)) != null)
-        constant_primitive(st, budget, primitives.engine_revision(primitive(st, t)))
-    else if (primitive(st, t) == "pdfuniformdeviate") random_deviate(st, budget)
-    else if (primitive(st, t) == "pdfnormaldeviate")
+    else if (cmd == "noexpand") noexpand(st, budget)
+    else if (cmd == "expandafter") expand_after(st, budget)
+    else if (cmd == "csname") csname(st, budget)
+    else if (cmd == "the") expand_the(st, budget)
+    else if (contains(["string", "number", "romannumeral", "meaning"], cmd))
+        string_primitive(st, cmd, budget)
+    else if (cmd == "detokenize" or cmd == "unexpanded" or cmd == "scantokens")
+        token_primitive(st, cmd, budget)
+    else if (cmd == "expanded") expanded_primitive(st, budget)
+    else if (cmd == "pdfstrcmp") strcmp_primitive(st, budget)
+    else if (contains(["pdfescapestring", "pdfescapename", "pdfescapehex", "pdfunescapehex", "pdfmdfivesum"], cmd))
+        pdf_string_primitive(st, cmd, budget)
+    else if (primitives.engine_revision(cmd) != null)
+        constant_primitive(st, budget, primitives.engine_revision(cmd))
+    else if (cmd == "pdfuniformdeviate") random_deviate(st, budget)
+    else if (cmd == "pdfnormaldeviate")
         constant_primitive({*:st, pdf_random_seen: true}, budget, "0")
-    else if (primitive(st, t) == "jobname") constant_primitive(st, budget, job_name(st.base_path)^)
-    else if (primitive(st, t) == "fontname") font_name_primitive(st, budget)
-    else if (primitive(st, t) == "input") input_primitive(st, budget)
-    else if (primitive(st, t) == "endinput") endinput_primitive(st, budget)
+    else if (cmd == "jobname") constant_primitive(st, budget, job_name(st.base_path)^)
+    else if (cmd == "fontname") font_name_primitive(st, budget)
+    else if (cmd == "input") input_primitive(st, budget)
+    else if (cmd == "endinput") endinput_primitive(st, budget)
     else if (contains(["topmark", "firstmark", "botmark", "splitfirstmark", "splitbotmark",
-        "topmarks", "firstmarks", "botmarks", "splitfirstmarks", "splitbotmarks"], primitive(st, t)))
-        empty_mark_query(st, primitive(st, t), budget)
-    else if (primitive(st, t) == "pdfcreationdate") constant_primitive(st, budget, "D:20000101120000Z")
-    else if (primitive(st, t) == "pdffilesize" or primitive(st, t) == "pdffilemoddate")
-        pdf_file_primitive(st, primitive(st, t), budget)
-    else if (st.latex and contains(["arabic", "roman", "Roman", "alph", "Alph", "fnsymbol", "value"], primitive(st, t)))
-        latex_counter_format(st, t, primitive(st, t), budget)
-    else if (st.script_expl3 and primitive(st, t) == "tl_use:N") expl3_tl_use(st, budget)
-    else if (st.script_expl3 and expl3.keyval_parse(primitive(st, t))) expl3_keyval_parse(st, budget)
-    else if (st.script_expl3 and primitive(st, t) == "__keys_choice_find:n") expl3_key_choice(st, budget)
-    else if (st.script_expl3 and expl3.ior_eof(primitive(st, t))) expl3_ior_eof(st, primitive(st, t))
-    else if (st.script_expl3 and expl3.token_empty(primitive(st, t))) expl3_tl_empty(st, primitive(st, t), budget)
-    else if (st.script_expl3 and expl3.token_equal(primitive(st, t))) expl3_tl_equal(st, primitive(st, t), budget)
-    else if (st.script_expl3 and expl3.token_string(primitive(st, t))) expl3_tl_string(st, primitive(st, t), budget)
-    else if (st.script_expl3 and expl3.token_count(primitive(st, t))) expl3_tl_count(st, primitive(st, t), budget)
-    else if (st.script_expl3 and primitive(st, t) == "int_eval:n") expl3_int_eval(st, budget)
-    else if (st.script_expl3 and expl3.int_math(primitive(st, t))) expl3_int_math(st, primitive(st, t), budget)
-    else if (st.script_expl3 and expl3.int_compare(primitive(st, t))) expl3_int_compare(st, primitive(st, t), budget)
-    else if (st.script_expl3 and expl3.int_compare_expr(primitive(st, t))) expl3_int_compare_expr(st, primitive(st, t), budget)
-    else if (st.script_expl3 and expl3.int_test(primitive(st, t))) expl3_int_test(st, primitive(st, t), budget)
-    else if (st.script_expl3 and primitive(st, t) == "fp_eval:n") expl3_fp_eval(st, budget)
-    else if (st.script_expl3 and contains(["seq_use:Nn", "seq_count:N", "seq_item:Nn"], primitive(st, t)))
-        expl3_seq_expand(st, primitive(st, t), budget)
-    else if (st.script_expl3 and expl3.string_compare(primitive(st, t)))
-        expl3_str_compare(st, primitive(st, t), budget)
-    else if (st.script_expl3 and expl3.token_expandable(primitive(st, t)))
-        expl3_token_expandable(st, primitive(st, t), budget)
-    else if (st.script_expl3 and expl3.text_case(primitive(st, t)))
-        expl3_text_case(st, primitive(st, t), budget)
+        "topmarks", "firstmarks", "botmarks", "splitfirstmarks", "splitbotmarks"], cmd))
+        empty_mark_query(st, cmd, budget)
+    else if (cmd == "pdfcreationdate") constant_primitive(st, budget, "D:20000101120000Z")
+    else if (cmd == "pdffilesize" or cmd == "pdffilemoddate")
+        pdf_file_primitive(st, cmd, budget)
+    else if (st.latex and contains(["arabic", "roman", "Roman", "alph", "Alph", "fnsymbol", "value"], cmd))
+        latex_counter_format(st, t, cmd, budget)
+    else if (st.script_expl3 and cmd == "tl_use:N") expl3_tl_use(st, budget)
+    else if (st.script_expl3 and expl3.keyval_parse(cmd)) expl3_keyval_parse(st, budget)
+    else if (st.script_expl3 and cmd == "__keys_choice_find:n") expl3_key_choice(st, budget)
+    else if (st.script_expl3 and expl3.ior_eof(cmd)) expl3_ior_eof(st, cmd)
+    else if (st.script_expl3 and expl3.token_empty(cmd)) expl3_tl_empty(st, cmd, budget)
+    else if (st.script_expl3 and expl3.token_equal(cmd)) expl3_tl_equal(st, cmd, budget)
+    else if (st.script_expl3 and expl3.token_string(cmd)) expl3_tl_string(st, cmd, budget)
+    else if (st.script_expl3 and expl3.token_count(cmd)) expl3_tl_count(st, cmd, budget)
+    else if (st.script_expl3 and cmd == "int_eval:n") expl3_int_eval(st, budget)
+    else if (st.script_expl3 and expl3.int_math(cmd)) expl3_int_math(st, cmd, budget)
+    else if (st.script_expl3 and expl3.int_compare(cmd)) expl3_int_compare(st, cmd, budget)
+    else if (st.script_expl3 and expl3.int_compare_expr(cmd)) expl3_int_compare_expr(st, cmd, budget)
+    else if (st.script_expl3 and expl3.int_test(cmd)) expl3_int_test(st, cmd, budget)
+    else if (st.script_expl3 and cmd == "fp_eval:n") expl3_fp_eval(st, budget)
+    else if (st.script_expl3 and contains(["seq_use:Nn", "seq_count:N", "seq_item:Nn"], cmd))
+        expl3_seq_expand(st, cmd, budget)
+    else if (st.script_expl3 and expl3.string_compare(cmd))
+        expl3_str_compare(st, cmd, budget)
+    else if (st.script_expl3 and expl3.token_expandable(cmd))
+        expl3_token_expandable(st, cmd, budget)
+    else if (st.script_expl3 and expl3.text_case(cmd))
+        expl3_text_case(st, cmd, budget)
     else if (st.latex and contains(["IfBooleanTF","IfBooleanT","IfBooleanF", "IfNoValueTF","IfNoValueT",
-            "IfNoValueF","IfValueTF","IfValueT","IfValueF"],primitive(st,t)))
-        latex_xparse_conditional(st,primitive(st,t),budget)
-    else if (st.latex and primitive(st, t) == "lambda@xspace") latex_xspace(st, budget)
-    else if (st.latex and (primitive(st, t) == "@ifpackagewith" or primitive(st, t) == "@ifclasswith"))
+            "IfNoValueF","IfValueTF","IfValueT","IfValueF"],cmd))
+        latex_xparse_conditional(st,cmd,budget)
+    else if (st.latex and cmd == "lambda@xspace") latex_xspace(st, budget)
+    else if (st.latex and (cmd == "@ifpackagewith" or cmd == "@ifclasswith"))
         if (st.expansions >= budget) fail(st, "tex-budget") else
-            latex_if_package_with({*:st, expansions: st.expansions + 1}, primitive(st, t) == "@ifclasswith", budget)
-    else if (primitive(st, t) == "unless") unless_conditional(st, budget)
-    else if (conditional_name(primitive(st, t)) or contains(["fi", "else", "or"], primitive(st, t)))
-        condition(st, primitive(st, t), budget)
-    else unsupported(st, primitive(st, t))
+            latex_if_package_with({*:st, expansions: st.expansions + 1}, cmd == "@ifclasswith", budget)
+    else if (cmd == "unless") unless_conditional(st, budget)
+    else if (conditional_name(cmd) or contains(["fi", "else", "or"], cmd))
+        condition(st, cmd, budget)
+    else unsupported(st, cmd)
 }
 
 // an already attempted package cannot replace a self-recursive bootstrap.
@@ -748,24 +782,23 @@ fn expand_after(st: State, budget) State^ {
 }
 
 // document length and counter calls stay visible after package redefinition.
-fn redefined_document_command(st, token) any^ => st.latex and st.math_mode != true and
+fn redefined_document_command(st, token, resolved) any^ => st.latex and st.math_mode != true and
     token != null and token.kind == "control" and token.noexpand != true and
     token.direct == true and token.file == st.main_file and
     contains(["setlength", "addtolength", "setcounter", "addtocounter", "stepcounter"], token.value) and
-    meaning(st, token).kind == "macro"
+    resolved.kind == "macro"
 
 fn expanded_next(st, budget, protect = false, argument_mode = false) any^ {
     let read = stream.next(st.input)^;
     let current = {*:st, input: read.stream};
-    if (read.token == null or (protect and is_control(read.token) and
-        meaning(current, read.token).kind == "macro" and meaning(current, read.token).protected_flag) or
-        (argument_mode and redefined_document_command(current, read.token)^) or
-        (argument_mode and read.token.noexpand != true and is_control(read.token) and
-            meaning(current, read.token).expl3_argument_unqualified == true) or
-        not expandable(current, read.token)) {state: current, token: read.token}
+    let resolved = if (is_control(read.token)) meaning(current, read.token) else null;
+    if (resolved == null or (protect and resolved.kind == "macro" and resolved.protected_flag) or
+        (argument_mode and redefined_document_command(current, read.token, resolved)^) or
+        (argument_mode and read.token.noexpand != true and resolved.expl3_argument_unqualified == true) or
+        not expandable_meaning(current, read.token, resolved)) {state: current, token: read.token}
     else {
-        let expanded = if (argument_mode and primitive(current, read.token) == "noexpand")
-            noexpand(current, budget, true)^ else expand_one(current, read.token, budget);
+        let expanded = if (argument_mode and primitive_name(resolved) == "noexpand")
+            noexpand(current, budget, true)^ else expand_one(current, read.token, budget, resolved);
         if (expanded.issue != null) {state: expanded, token: null} else expanded_next(expanded, budget, protect, argument_mode)
     }
 }
@@ -798,8 +831,7 @@ fn csname(st: State, budget) State^ {
             let token = {kind: "control", value: scanned.name, cat: null, start: -1, end: -1};
             let k = key(token);
             {*:scanned.state, input: stream.push(scanned.state.input, [token]),
-                definitions: if ((scanned.state.definitions[k] == null and not builtin(scanned.state, scanned.name)) or
-                    scanned.state.definitions[k].kind == "undefined")
+                definitions: if (meaning(scanned.state, token).kind == "undefined")
                     set_definition(scanned.state.definitions, k, {kind: "primitive", name: "relax"})
                     else scanned.state.definitions}
         }
@@ -877,8 +909,8 @@ fn scan_number(st, budget) NumberScan^ {
     else if (primitive(start.state, t) == "count" or (is_control(t) and meaning(start.state, t).kind == "register")) {
         let index = if (primitive(start.state, t) == "count") scan_register(start.state, budget)^
             else {state: start.state, value: meaning(start.state, t).index};
-        let value = count_value(index.state, index.value);
-        {state: index.state, value: if (start.negative) -value else value}
+        let value = read_count(index.state, index.value)^;
+        {state: value.state, value: if (start.negative) -value.value else value.value}
     }
     else if (primitive(start.state, t) == "dimen" or (is_control(t) and meaning(start.state, t).kind == "dimension-register")) {
         let index = if (primitive(start.state, t) == "dimen") scan_register(start.state, budget)^
@@ -1112,10 +1144,25 @@ fn scan_expression(st, budget, level = "int") any^ {
 
 fn count_value(st, index) => if (st.counts[string(index)] == null) 0 else st.counts[string(index)]
 fn set_count(counts, index, value) => {*:counts, *:map([string(index), value])}
-fn save_count(st: State, index, value, global) State^ =>
+// Track register values that depend on format initialization we have not reproduced.
+fn read_count(st: State, index) any^ => if (st.issue != null) {state:st, value:0}
+    else if (st.unknown_counts[string(index)] == true)
+        {state:unsupported(st, "expl3 register initialization"), value:0}
+    else {state:st, value:count_value(st, index)}
+fn invalidate_count(st: State, index) State^ =>
+    {*:st, unknown_counts:set_count(st.unknown_counts, index, true),
+        groups:[for (scope in st.groups) {*:scope, unknown_counts:set_count(scope.unknown_counts, index, true)}]}
+// These kernel count slots track the register classes not yet bootstrapped.
+fn invalidate_format_allocators(st: State, index = 11) State^ => if (index == 20)
+    invalidate_count(st, 21) else invalidate_format_allocators(invalidate_count(st, index)^, index + 1)
+fn save_count(st: State, index, value, global, preserve_unknown = false) State^ =>
     {*:st, counts: set_count(st.counts, index, value),
+        unknown_counts:if (preserve_unknown or st.unknown_counts[string(index)] != true) st.unknown_counts
+            else set_count(st.unknown_counts,index,false),
         groups: if (global) [for (scope in st.groups)
-            {*:scope, counts: set_count(scope.counts, index, value)}] else st.groups}
+            {*:scope, counts: set_count(scope.counts, index, value),
+                unknown_counts:if (preserve_unknown or scope.unknown_counts[string(index)] != true) scope.unknown_counts
+                    else set_count(scope.unknown_counts,index,false)}] else st.groups}
 fn save_box(st: State, index, box, global) State^ {
     let depth = len(st.groups);
     {*:st, boxes: set_count(st.boxes, index, box),
@@ -1593,6 +1640,25 @@ fn font_family_slot(st, budget, name) any^ {
     {state: family.state, key: name ++ ":" ++ string(slot)}
 }
 
+// Only initialized format arrays have qualified font data; mutations remain guarded.
+fn initialized_expl3_array_font(st: State, index) bool^ =>
+    st.expl3_format_array_fonts is array and contains(st.expl3_format_array_fonts, index)
+fn dirty_expl3_regex_array_font(st: State, index) bool^ => st.expl3_regex_seen == true and
+    st.expl3_regex_array_fonts is array and contains(st.expl3_regex_array_fonts, index)
+fn incomplete_expl3_font(st: State, index, writing = false) bool^ => st.script_expl3 and
+    st.expl3_format_array_bootstrapped == true and
+    st.expl3_array_initializing != true and index > 0 and st.fonts[index].name == "cmr10" and
+    (writing or not initialized_expl3_array_font(st, index)^)
+
+fn save_font_character(st: State, index, name, value) State^ =>
+    {*:st, fonts: [for (i, font in st.fonts)
+        if (i != index) font else if (name == "hyphenchar") {*:font, hyphen_char: value}
+        else {*:font, skew_char: value}]}
+
+fn save_font_parameters(st: State, index, values) State^ =>
+    {*:st, fonts: [for (i, font in st.fonts)
+        if (i != index) font else {*:font, params:{*:font.params, *:values}}]}
+
 // native input stores math font families on the engine, outside group saves.
 fn assign_font_family(st: State, budget, name) State^ {
     let family = font_family_slot({*:st, font_family_assignment_seen: true}, budget, name)^;
@@ -1607,33 +1673,44 @@ fn assign_font_family(st: State, budget, name) State^ {
 fn font_character(st, budget, name) any^ {
     let selected = scan_font_ident({*:st, font_character_quantity_seen: true}, budget)^;
     let font = selected.state.fonts[selected.value];
-    {state: selected.state, value: if (name == "hyphenchar") font.hyphen_char else font.skew_char}
+    if (incomplete_expl3_font(selected.state, selected.value)^)
+        {state:unsupported(selected.state, "expl3 font format"), value:0}
+    else {state: selected.state, value: if (name == "hyphenchar") font.hyphen_char else font.skew_char}
 }
 
 // font properties belong to the shared font object, independently of grouping.
 fn assign_font_character(st: State, budget, name) State^ {
     let selected = scan_font_ident({*:st, font_character_assignment_seen: true}, budget)^;
     if (selected.state.issue != null) selected.state
+    else if (incomplete_expl3_font(selected.state, selected.value, true)^) unsupported(selected.state, "expl3 font format")
     else {
         let value = scan_number(optional_equals(selected.state, budget), budget)^;
         if (value.state.issue != null) value.state
-        else {*:value.state, fonts: [for (i, font in value.state.fonts)
-            if (i != selected.value) font else if (name == "hyphenchar") {*:font, hyphen_char: value.value}
-            else {*:font, skew_char: value.value}]}
+        else save_font_character(value.state, selected.value, name, value.value)
     }
 }
 
-fn font_dimen_index(st, budget) any^ {
+fn font_dimen_index(st, budget, writing = false) any^ {
     let n = scan_number(st, budget)^;
     let selected = if (n.state.issue == null) scan_font_ident(n.state, budget)^ else {state: n.state, value: 0};
     if (selected.state.issue != null) {state: selected.state, font_index: 0, param: n.value, valid: false}
     else {
         let entry = selected.state.fonts[selected.value];
         let grow = n.value > entry.param_count and n.value > 0 and selected.value == len(selected.state.fonts) - 1;
-        if (grow and entry.param_base + n.value > 8000000)
+        // Native array fonts also prevent nullfont from growing after format load.
+        if (incomplete_expl3_font(selected.state, selected.value, writing)^ or
+            dirty_expl3_regex_array_font(selected.state, selected.value)^ or
+            (selected.state.expl3_array_initializing != true and
+                initialized_expl3_array_font(selected.state, selected.value)^ and n.value > entry.param_count) or
+            (selected.state.script_expl3 and selected.state.expl3_format_array_bootstrapped == true and
+                selected.value == 0 and grow))
+            {state:unsupported(selected.state, "expl3 font format"), font_index:selected.value, param:n.value, valid:false}
+        else if (grow and entry.param_base + n.value > 8000000)
             {state: fail(selected.state, "tex-capacity"), font_index: selected.value, param: n.value, valid: false}
         else if (n.value <= 0 or (n.value > entry.param_count and not grow))
-            {state: {*:selected.state, diagnostics: [*selected.state.diagnostics, "tex-font-params"]},
+            // Invalid parameters still produce a public diagnostic at the scanned font.
+            {state: record_diagnostic({*:selected.state, font_parameter_error_seen:true}, "tex-font-params", "Font " ++ entry.name ++
+                " has only " ++ string(entry.param_count) ++ " fontdimen parameters")^,
                 font_index: selected.value, param: n.value, valid: false}
         else {
             let current = if (grow) {*:selected.state,
@@ -1647,18 +1724,75 @@ fn font_dimen_index(st, budget) any^ {
 fn font_dimen(st, budget) any^ {
     let target = font_dimen_index(st, budget)^;
     let entry = target.state.fonts[target.font_index];
-    let value = if (target.valid) entry.params[string(target.param)] else null;
+    // Dense format tables avoid constructing a separate map entry for each codepoint block.
+    let packed = if (target.valid and entry.format_values is array and target.param <= len(entry.format_values)) entry.format_values[target.param - 1] else null;
+    let value = if (packed is int) packed else if (target.valid) entry.params[string(target.param)] else null;
     {state: target.state, value: if (value == null) 0 else value}
 }
 
 fn assign_font_dimen(st: State, budget) State^ {
-    let target = font_dimen_index(st, budget)^;
+    let target = font_dimen_index(st, budget, true)^;
     if (target.state.issue != null) target.state
     else {
         let value = scan_dimen(optional_equals(target.state, budget), budget)^;
         if (value.state.issue != null or not target.valid) value.state
-        else {*:value.state, fonts: [for (i, entry in value.state.fonts)
-            if (i == target.font_index) {*:entry, params: set_count(entry.params, target.param, value.value)} else entry]}
+        else save_font_parameters(value.state, target.font_index, map([string(target.param), value.value]))
+    }
+}
+
+// The upstream initex tables start from TeX's standard catcodes and endline.
+fn expl3_cctab_array_entries() any^ {
+    let init = [for (i in 0 to 255) reader.catcode(chr(i), {})];
+    let endline = reader.reader("", -1).endline;
+    let other_code = reader.catcode("!", {});
+    let other = [for (i in 0 to 255) if (i <= 127) other_code else init[i]];
+    let string_codes = [for (i in 0 to 255) if (i == 32) reader.catcode(" ", {}) else other[i]];
+    [{name:"c_initex_cctab", values:[*init, endline]},
+     {name:"c_other_cctab", values:[*other, -1]},
+     {name:"c_str_cctab", values:[*string_codes, -1]},
+     {name:"g_tmpa_cctab", values:[*init, endline]},
+     {name:"g_tmpb_cctab", values:[*init, endline]}]
+}
+
+// Initialize source-derived format arrays through TeX's shared font allocator.
+fn enable_expl_format_array_fonts(st: State, entries, index = 0) State^ {
+    if (st.issue != null) st
+    else if (index >= len(entries)) {*:st, expl3_format_array_bootstrapped:true}
+    else {
+        let entry = entries[index];
+        let array_length = if (entry.length is int) entry.length else len(entry.values);
+        let key_name = "control:" ++ entry.name;
+        if (st.definitions[key_name] != null) enable_expl_format_array_fonts(st, entries, index + 1)
+        else {
+            // The upstream integer-array allocator increments its font size in scaled points.
+            let tokens = [control_token(entry.name), *text_tokens("=cmr10 at " ++ string(index + 1) ++ "sp"), control_token("relax")];
+            let defined = define_font({*:st, input:stream.push(st.input, tokens)}, true, 20000000)^;
+            let font = defined.definitions[key_name];
+            if (defined.issue != null) {*:defined, input:st.input}
+            else if (font.kind != "font") unsupported({*:defined, input:st.input}, "expl3 fp array font")
+            // A reused non-last font cannot acquire the array's additional parameters.
+            else if (font.index != len(defined.fonts) - 1 and
+                array_length > defined.fonts[font.index].param_count)
+                unsupported({*:defined, input:st.input}, "expl3 fp array font initialization")
+            else {
+                let target = font_dimen_index({*:defined, expl3_array_initializing:true,
+                    input:stream.push(st.input, [*text_tokens(string(array_length)), control_token(entry.name)])}, 20000000)^;
+                let restored = {*:target.state, input:st.input, expl3_array_initializing:false};
+                if (restored.issue != null) restored
+                else if (not target.valid) unsupported(restored, "expl3 fp array font initialization")
+                else {
+                    let values = if (entry.dense == true) {} else map([for (i, value in entry.values, part in [string(i + 1), value]) part]);
+                    let stored = if (entry.dense == true) {*:restored, fonts:[for (i, f in restored.fonts) if (i == font.index) {*:f, format_values:entry.values} else f]} else save_font_parameters(restored, font.index, values)^;
+                    let counted = save_font_character(stored, font.index, "hyphenchar", array_length)^;
+                    let prior = if (counted.expl3_format_array_fonts is array) counted.expl3_format_array_fonts else [];
+                    let regex_fonts = if (counted.expl3_regex_array_fonts is array) counted.expl3_regex_array_fonts else [];
+                    let renamed_fonts = if (counted.expl3_renamed_array_fonts is array) counted.expl3_renamed_array_fonts else [];
+                    enable_expl_format_array_fonts({*:counted, expl3_format_array_fonts:[*prior, font.index],
+                        expl3_regex_array_fonts:if (entry.regex == true) [*regex_fonts, font.index] else regex_fonts,
+                        expl3_renamed_array_fonts:if (entry.source_name is string) [*renamed_fonts, font.index] else renamed_fonts}, entries, index + 1)
+                }
+            }
+        }
     }
 }
 
@@ -1722,9 +1856,10 @@ fn arithmetic(st: State, global, budget, operation) State^ {
     else {
         let index = if (cmd == "count" or cmd == "dimen") scan_register(target.state, budget)^
             else {state: target.state, value: if (kind == "dimen") "param:" ++ cmd else resolved.index};
-        if (index.state.issue != null) index.state
+        let previous_count = if (kind == "int" or is_dimen) {state:index.state} else read_count(index.state, index.value)^;
+        if (previous_count.state.issue != null) previous_count.state
         else {
-            let before = optional_by(index.state, budget)^;
+            let before = optional_by(previous_count.state, budget)^;
             let operand = if (is_dimen and operation == "advance") scan_dimen(before, budget)^ else scan_number(before, budget)^;
             let previous = if (kind == "int") parameter_value(operand.state, cmd)
                 else if (is_dimen) dimen_value(operand.state, index.value) else count_value(operand.state, index.value);
@@ -1839,12 +1974,16 @@ fn expand_the(st: State, budget, count_expansion = true, capture = false) State^
         if (primitive(read.state, read.token) == "count" or m.kind == "register") {
             let index = if (m.kind == "register") {state: read.state, value: m.index}
                 else scan_register(read.state, budget)^;
-            if (index.state.issue != null) index.state
-            else {*:index.state, input: the_push(index.state.input, internal_text_tokens(st, string(count_value(index.state, index.value))), capture)}
+            let value = read_count(index.state, index.value)^;
+            if (value.state.issue != null) value.state
+            else {*:value.state, input: the_push(value.state.input, internal_text_tokens(st, string(value.value)), capture)}
         }
         else if (m.kind == "font" or contains(["font", "nullfont", "textfont", "scriptfont", "scriptscriptfont"], primitive(read.state, read.token))) {
             let selected = scan_font_ident(put_back(read.state, read.token), budget)^;
             if (selected.state.issue != null) selected.state
+            // Upstream undefines the original control after aliasing Unicode array fonts.
+            else if (selected.state.expl3_renamed_array_fonts is array and contains(selected.state.expl3_renamed_array_fonts, selected.value))
+                unsupported(selected.state, "expl3 codepoint font identity")
             else {
                 let token = selected.state.fonts[selected.value].ident;
                 let result = if (selected.state.token_text_scan) {*:token, noexpand: true, direct_toks: true, trace_internal: true} else token;
@@ -2048,12 +2187,20 @@ fn general_text(st, budget, xpand) any^ {
     else {
         let m = if (is_control(opening.token)) meaning(opening.state, opening.token) else null;
         let valid = charcat(opening.token, 1) or (m.kind == "char" and m.cat == 1);
-        // Native inserts a missing opening brace and scans the returned token as text.
-        // Native expanded lookahead supplies a relax token when it reaches EOF.
-        let returned = if (opening.token == null) control_token("relax") else opening.token;
-        let current = if (valid) opening.state else record_diagnostic(
-            put_back(opening.state, returned), "tex-missing-brace", "Missing { inserted")^;
-        definition_tokens(current, budget, null, xpand, true)
+        // script-only expl3 primitives can stand for macros that native lookahead expands.
+        let command = if (is_control(opening.token)) primitive(opening.state,opening.token)^ else null;
+        let synthetic = not valid and command != null and opening.token.noexpand != true and
+            opening.state.script_expl3 and expl3.exists(command) and not primitives.exists(command) and
+            not primitives.latex_exists(command);
+        if (synthetic) {state:unsupported(opening.state,"expl3 general text lookahead"),tokens:[]}
+        else {
+            // Native inserts a missing opening brace and scans the returned token as text.
+            // Native expanded lookahead supplies a relax token when it reaches EOF.
+            let returned = if (opening.token == null) control_token("relax") else opening.token;
+            let current = if (valid) opening.state else record_diagnostic(
+                put_back(opening.state, returned), "tex-missing-brace", "Missing { inserted")^;
+            definition_tokens(current, budget, null, xpand, true)
+        }
     }
 }
 
@@ -2201,45 +2348,47 @@ fn pdf_string_primitive(st: State, name, budget) State^ {
 fn next_source_id(st) any^ => max(len(st.sources) + abs(st.input.reader.file_id) + 1,
     max([0, *[for (source in st.sources) source.id]]) + 1)
 
-// A host may capture one missing resource and restart from the original source.
+// A host may capture one missing resource and replay the requesting step.
 fn request_resource(st, scope, name) State =>
     {*:st, issue:"tex-resource-needed", resource_request:{scope:scope, name:name}}
 
 // The caller supplies captured, authorized bytes; this module does not open paths.
 pub fn captured_resource(st, name, requested_scope = null) any^ {
+    // even a missing lookup can affect a reusable kernel's state.
+    let current = {*:st,resource_lookups:st.resource_lookups + 1};
     let cleaned = replace(name, "\"", "")^;
-    let active = stream.active_reader(st.input)^;
+    let active = stream.active_reader(current.input)^;
     let scope = if (requested_scope != null) requested_scope else if (active.origin == "bundled") "bundled" else "local";
-    if (st.resources == null) {state: st, available: false, found: false, data: null}
-    else if (not (st.resources is map) or (st.resources[scope] != null and not (st.resources[scope] is map)))
-        {state: fail(st, "tex-resource-invalid"), available: true, found: false, data: null}
-    else if (st.resources[scope] == null) {state: st, available: false, found: false, data: null}
+    if (current.resources == null) {state: current, available: false, found: false, data: null}
+    else if (not (current.resources is map) or (current.resources[scope] != null and not (current.resources[scope] is map)))
+        {state: fail(current, "tex-resource-invalid"), available: true, found: false, data: null}
+    else if (current.resources[scope] == null) {state: current, available: false, found: false, data: null}
     else if (cleaned == "" or starts_with(cleaned, "/") or contains(cleaned, ".."))
-        {state: st, available: true, found: false, data: null}
+        {state: current, available: true, found: false, data: null}
     else {
-        let entry = st.resources[scope][cleaned];
-        if (entry == null and st.resource_requests)
-            {state: request_resource(st, scope, cleaned), available: false, found: false, data: null}
+        let entry = current.resources[scope][cleaned];
+        if (entry == null and current.resource_requests)
+            {state: request_resource(current, scope, cleaned), available: false, found: false, data: null}
         else if (entry == null or entry.missing == true or entry.no_base == true)
-            {state: st, available: true, found: false, data: null, no_base:entry.no_base == true}
+            {state: current, available: true, found: false, data: null, no_base:entry.no_base == true}
         else if (not (entry.data is string or entry.data is binary))
-            {state: fail(st, "tex-resource-invalid"), available: true, found: false, data: null}
+            {state: fail(current, "tex-resource-invalid"), available: true, found: false, data: null}
         else {
             // S2.2.2v2 represents empty binary as null; retain an empty resource as text.
             let bytes = if (len(entry.data) == 0) "" else binary(entry.data)^;
             let resource_key = scope ++ ":" ++ cleaned;
-            let seen = st.resources_seen[resource_key] != null;
-            let next_count = st.resource_count + if (seen or scope == "bundled") 0 else 1;
-            let next_bytes = st.resource_bytes + if (seen or scope == "bundled") 0 else len(bytes);
+            let seen = current.resources_seen[resource_key] != null;
+            let next_count = current.resource_count + if (seen or scope == "bundled") 0 else 1;
+            let next_bytes = current.resource_bytes + if (seen or scope == "bundled") 0 else len(bytes);
             if (next_count > 128 or next_bytes > 16777216 or (scope == "bundled" and len(bytes) > 16777216))
-                {state: fail(st, "tex-budget"), available: true, found: false, data: null}
+                {state: fail(current, "tex-budget"), available: true, found: false, data: null}
             else {
-                let existing = st.resource_ids[resource_key];
-                let id = if (existing != null) existing else next_source_id(st)^;
-                let sources = if (existing != null) st.sources else [*st.sources,
+                let existing = current.resource_ids[resource_key];
+                let id = if (existing != null) existing else next_source_id(current)^;
+                let sources = if (existing != null) current.sources else [*current.sources,
                     {id: id, name: cleaned, origin: scope, data: bytes}];
-                {state: {*:st, resources_seen: {*:st.resources_seen, *:map([resource_key, true])},
-                    resource_ids: {*:st.resource_ids, *:map([resource_key, id])}, sources: sources,
+                {state: {*:current, resources_seen: {*:current.resources_seen, *:map([resource_key, true])},
+                    resource_ids: {*:current.resource_ids, *:map([resource_key, id])}, sources: sources,
                     resource_count: next_count, resource_bytes: next_bytes},
                     available: true, found: true, data: bytes, id: id, origin: scope}
             }
@@ -2445,7 +2594,8 @@ fn ior_open(st: State, target, budget) State^ {
                 else {
                     let global = effective_global(closed, true)^;
                     let allocated = if (len(free) > 0) save_ior_slots(closed, slice(free, 1, len(free)), global)^
-                        else save_count(closed, 16, slot, global)^;
+                        // A stream slot derived from an unknown format allocator stays unknown.
+                        else save_count(closed, 16, slot, global, true)^;
                     let opened = {*:allocated, input_stream_state_seen:true,
                         input_streams:{*:allocated.input_streams,
                             *:map([string(slot), {open:true, data:resource.data, position:0, id:resource.id}])}};
@@ -2679,7 +2829,7 @@ fn job_name(base) any^ {
 fn print_meaning(st, t) any^ {
     let m = meaning(st, t)^;
     if (m.kind == "undefined") "undefined"
-    else if (m.kind == "primitive") escape(st) ++ m.name
+    else if (m.kind == "primitive") escape(st) ++ primitives.meaning_name(m.name)
     else if (m.kind == "constructor") escape(st) ++ "protected macro:->" ++
         write_token(st, {kind: "control", value: m.name})^
     else if (m.kind == "register") escape(st) ++ "count" ++ string(m.index)
@@ -2707,15 +2857,18 @@ fn print_meaning(st, t) any^ {
 
 // terminal output is buffered until a line break or a flushing TeX command.
 fn terminal_flush(st: State) State^ => if (st.terminal_line == "") st
-    else {*:st, messages: [*st.messages, st.terminal_line], terminal_line: ""}
+    else {*:st, messages: [*st.messages, native_terminal_line(st.terminal_line)^], terminal_line: ""}
 fn terminal_print(st: State, text) State^ {
     let newline = parameter_value(st, "newlinechar")^;
     if (newline < 0 or newline >= 128) {*:st, terminal_line: st.terminal_line ++ text}
     else {
         let parts = split(text, chr(newline))^;
         if (len(parts) <= 1) {*:st, terminal_line: st.terminal_line ++ text}
-        else {*:st, messages: [*st.messages, st.terminal_line ++ parts[0], *slice(parts, 1, len(parts) - 1)^],
-            terminal_line: parts[len(parts) - 1]}
+        else {
+            let lines = [st.terminal_line ++ parts[0], *slice(parts, 1, len(parts) - 1)^];
+            {*:st, messages: [*st.messages, *[for (line in lines) native_terminal_line(line)^]],
+                terminal_line: parts[len(parts) - 1]}
+        }
     }
 }
 // preserve native diagnostic locations when the active source is known.
@@ -2726,8 +2879,12 @@ fn record_diagnostic(st: State, code, message, origin = null) State^ {
     let main = file != null and file == st.main_file;
     let foreign = file != null and not main and len(found) > 0;
     let bytes = binary(message)^;
-    // native diagnostic formatting truncates long or NUL-containing messages.
-    let exact_message = len(bytes) <= 511 and not any([for (byte in bytes) byte == 0]);
+    // native's 512-byte diagnostic buffer retains at most 511 bytes plus its terminator.
+    let has_zero = any([for (byte in bytes) byte == 0]);
+    let prefix = if (len(bytes) <= 511 and not has_zero) message
+        else utf8.decode(native_c_prefix(bytes,511)^) ^ {null};
+    // other formatted diagnostics can append text after a NUL-bearing argument.
+    let exact_message = prefix != null and (not has_zero or code == "tex-errmessage");
     let exhausted = active == null and st.input.root_eof == true;
     let known = ((file != null and (main or foreign)) or exhausted) and exact_message;
     let bytes_before = if (origin != null and len(found) > 0)
@@ -2735,7 +2892,7 @@ fn record_diagnostic(st: State, code, message, origin = null) State^ {
     let line = if (bytes_before != null) 1 + len([for (i,b in bytes_before where
         b == 13 or (b == 10 and (i == 0 or bytes_before[i - 1] != 13))) b])
         else if (active != null) active.line_no else 0;
-    let record = {code: code, message: message,
+    let record = {code: code, message: if (prefix == null) message else prefix,
         offset: if (origin != null and main) origin.start else st.input.last_main_offset,
         *:if (foreign) {file: found[0].name} else {},
         *:if (line > 0) {line: line} else {}};
@@ -3195,12 +3352,14 @@ fn expl3_keys_begin(st: State, name) State^ {
             let saved = [for (variable in KEYS_SCRATCH)
                 {name:variable, value:current.definitions["control:" ++ variable]}];
             let choice = meaning(current, control_token("l_keys_choice_int"))^;
+            let choice_value = if (choice.kind == "register") read_count(current, choice.index)^ else {state:current, value:null};
             let frames = if (current.expl3_key_frames is array) current.expl3_key_frames else [];
             let frame = {module:expl3_key_path(token_text(current, module.tokens)^)^,
                 entries:entries, index:0, defining:name == "keys_define:nn", saved:saved,
-                choice:if (choice.kind == "register") count_value(current, choice.index) else null};
-            {*:current, expl3_key_frames:[*frames, frame],
-                input:stream.push(current.input, [expl3_keys_next_token()])}
+                choice:choice_value.value};
+            if (choice_value.state.issue != null) choice_value.state
+            else {*:choice_value.state, expl3_key_frames:[*frames, frame],
+                input:stream.push(choice_value.state.input, [expl3_keys_next_token()])}
         }
     }
 }
@@ -3421,14 +3580,18 @@ fn expl3_clist_map(st: State, name) State^ {
                 if (parsed.issue != null) fail(saved, parsed.issue)
                 else if (counter.kind != "register") unsupported(saved, "expl3 map counter")
                 else {
-                    let depth = count_value(saved, counter.index) + 1;
-                    let counted = save_count(saved, counter.index, depth, effective_global(saved, true)^)^;
-                    let callback = control_token("__clist_map_" ++ string(depth) ++ ":w");
-                    let installed = assign_meaning(counted, key(callback),
-                        latex_macro(1, false, true, false, [], parsed.tokens)^, effective_global(counted, true)^)^;
-                    let end = [control_token("prg_break_point:Nn"), control_token("clist_map_break:"),
-                        brace_token(true), control_token("int_gdecr:N"), control_token("g__kernel_prg_map_int"), brace_token(false)];
-                    {*:installed, input:stream.push(installed.input, [*expl3_clist_calls(items, callback)^, *end])}
+                    let previous = read_count(saved, counter.index)^;
+                    if (previous.state.issue != null) previous.state
+                    else {
+                        let depth = previous.value + 1;
+                        let counted = save_count(previous.state, counter.index, depth, effective_global(saved, true)^)^;
+                        let callback = control_token("__clist_map_" ++ string(depth) ++ ":w");
+                        let installed = assign_meaning(counted, key(callback),
+                            latex_macro(1, false, true, false, [], parsed.tokens)^, effective_global(counted, true)^)^;
+                        let end = [control_token("prg_break_point:Nn"), control_token("clist_map_break:"),
+                            brace_token(true), control_token("int_gdecr:N"), control_token("g__kernel_prg_map_int"), brace_token(false)];
+                        {*:installed, input:stream.push(installed.input, [*expl3_clist_calls(items, callback)^, *end])}
+                    }
                 }
             }
         }
@@ -4555,7 +4718,7 @@ fn save_after_assignment(st: State) State^ {
 }
 
 fn begin_group(st: State, token, explicit) State^ =>
-    {*:st, groups: [*st.groups, {definitions: st.definitions, counts: st.counts, dimens: st.dimens, skips: st.skips, muskips: st.muskips, boxes: st.boxes, box_written: {}, toks: st.toks,
+    {*:st, groups: [*st.groups, {definitions: st.definitions, counts: st.counts, unknown_counts:st.unknown_counts, dimens: st.dimens, skips: st.skips, muskips: st.muskips, boxes: st.boxes, box_written: {}, toks: st.toks,
         lowercase: st.lowercase, uppercase: st.uppercase, code_tables: st.code_tables, current_font: st.current_font, parameters: st.parameters,
         catcodes: st.input.reader.catcodes, expl_syntax: st.expl_syntax, explicit: explicit, aftergroup: []}],
         output: if (token == null) st.output else st.output ++ [token]}
@@ -4735,7 +4898,7 @@ fn end_group(st: State, token, explicit, environment = false, math = false, reco
             everyeof: if (scope.toks["-1"] == null) [] else scope.toks["-1"]};
         let captured = if (scope.box_target != null) slice(st.output,scope.box_start,len(st.output))^ else null;
         let scoped = if (scope.ior_pool_saved is array) {*:st, ior_free_slots:scope.ior_pool_saved} else st;
-        let returned = {*:scoped, expl_syntax: scope.expl_syntax, definitions: scope.definitions, counts: scope.counts, dimens: scope.dimens, skips: scope.skips, muskips: scope.muskips, boxes: scope.boxes, toks: scope.toks,
+        let returned = {*:scoped, expl_syntax: scope.expl_syntax, definitions: scope.definitions, counts: scope.counts, unknown_counts:scope.unknown_counts, dimens: scope.dimens, skips: scope.skips, muskips: scope.muskips, boxes: scope.boxes, toks: scope.toks,
             lowercase: scope.lowercase, uppercase: scope.uppercase, code_tables: scope.code_tables, current_font: scope.current_font, parameters: scope.parameters,
             input: stream.push(restored, scope.aftergroup), groups: slice(st.groups, 0, depth - 1),
             output: if (scope.box_target != null) slice(st.output,0,scope.box_start)^
@@ -5092,11 +5255,13 @@ fn counter_command_tokens(name, command, value = null) any^ {
 }
 // TeX allocates counts, dimensions and skips through adjacent counter slots.
 fn latex_allocate_register(st: State, tracker) any^ {
-    let next = count_value(st,tracker) + 1;
-    let exhausted = next >= count_value(st,20);
+    let current = read_count(st, tracker)^;
+    let next = current.value + 1;
+    let exhausted = next >= count_value(current.state,20);
     let index = if (exhausted) COUNT_REGISTER_LIMIT - 1 else next;
-    let allocated = if (not exhausted) save_count(st,tracker,index,true)^
-        else record_diagnostic(st,"tex-no-room","No room for a new register")^;
+    let allocated = if (current.state.issue != null) current.state
+        else if (not exhausted) save_count(current.state,tracker,index,true)^
+        else record_diagnostic(current.state,"tex-no-room","No room for a new register")^;
     {state:allocated,index:index}
 }
 
@@ -5251,11 +5416,12 @@ fn latex_counter_command(st: State, original, command, budget) State^ {
         let found = counter_meaning(closed.state, named.name)^;
         let value = if (found.kind == "register" and has_value) latex_counter_value(closed.state, arg.tokens, budget)^
             else {state: closed.state, value: 0};
-        let previous = if (found.kind == "register") count_value(value.state, found.index) else 0;
-        let next = if (command == "setcounter") value.value else if (command == "addtocounter") previous + value.value else previous + 1;
-        let updated = if (value.state.issue != null or found.kind != "register") value.state
-            else if (next > 2147483647 or next < -2147483647) fail(value.state, "tex-arith-overflow")
-            else save_count(value.state, found.index, next, true)^;
+        let previous = if (found.kind == "register" and command != "setcounter") read_count(value.state, found.index)^
+            else {state:value.state, value:0};
+        let next = if (command == "setcounter") value.value else if (command == "addtocounter") previous.value + value.value else previous.value + 1;
+        let updated = if (previous.state.issue != null or found.kind != "register") previous.state
+            else if (next > 2147483647 or next < -2147483647) fail(previous.state, "tex-arith-overflow")
+            else save_count(previous.state, found.index, next, true)^;
         let stepped = if (found.kind == "register" and (command == "stepcounter" or command == "refstepcounter"))
             reset_counter_children(updated, named.name)^ else updated;
         let raw = [*named.raw, *arg.raw];
@@ -5284,15 +5450,17 @@ fn latex_counter_format(st: State, original, command, budget) State^ {
             else if (command == "value") {*:named.state, input: stream.push(named.state.input,
                 [control_token("c@" ++ named.name)])}
             else {
-                let value = count_value(named.state, found.index);
+                let read = read_count(named.state, found.index)^;
+                let value = read.value;
                 let valid = if (command == "alph" or command == "Alph") value >= 1 and value <= 26
                     else if (command == "fnsymbol") value >= 1 and value <= 9 else true;
                 let text = if (command == "arabic") string(value) else if (command == "roman") roman(value)^
                     else if (command == "Roman") upper(roman(value)^)
                     else if (command == "alph") if (valid) chr(96 + value) else ""
                     else if (command == "Alph") if (valid) chr(64 + value) else "" else "";
-                let checked = if (valid) named.state else record_diagnostic(named.state, "latex-counter-too-large", "LaTeX Error: Counter too large")^;
-                if (command != "fnsymbol") {*:checked, input: stream.push(checked.input, text_tokens(text))}
+                let checked = if (read.state.issue != null or valid) read.state else record_diagnostic(read.state, "latex-counter-too-large", "LaTeX Error: Counter too large")^;
+                if (checked.issue != null) checked
+                else if (command != "fnsymbol") {*:checked, input: stream.push(checked.input, text_tokens(text))}
                 else if (not valid) checked
                 else if (len(checked.input.levels) >= 6000) fail(checked, "tex-capacity")
                 else {
@@ -6218,12 +6386,12 @@ fn echo_prefixed(st: State, token, cmd, budget) State^ {
     finish_definition_echo(st, after, tracing, after.prefixed_definition == true)
 }
 
-fn direct_package_token(st, token) any^ => token.direct == true and
+fn direct_package_token(st, token) any^ => token.direct == true and token.file != st.main_file and
     any([for (source in st.sources) source.id == token.file and source.package == true])
 
-// generated argument delimiters need the same origin as other emitted tokens.
-fn emission_token(st, input, raw) any^ => if (raw != null and contains(["char", "control", "active"], raw.kind) and
-        (raw.direct != true or raw.file != st.main_file))
+// generated argument delimiters need an origin; direct main-file tokens already have one.
+fn emission_token(st, input, raw) any^ => if (raw != null and
+        (raw.direct != true or raw.file != st.main_file) and contains(["char", "control", "active"], raw.kind))
     {*:raw, read_offset: input.last_main_offset, read_file: st.main_file} else raw
 
 // passthrough environments preserve the original name tokens inside arguments.
@@ -6392,36 +6560,98 @@ fn finish_conditionals(st: State, index) State^ {
     }
 }
 
+// The output serializer needs the reader position at emission, including lookahead.
+fn emit_ordinary(st: State, t) State {
+    var current = st
+    current.output = current.output ++ [{*:t, emit_origin:current.input.last_main_offset}]
+    current
+}
+
+fn unhandled_token(st: State, t, resolved, budget) State^ {
+    if (st.latex and t.kind == "control" and resolved.kind == "undefined" and
+        contains(["directlua", "luaexec"], t.value)) latex_raw_group(st, t)
+    else if (st.script_expl3 and is_control(t) and index_of(t.value, ":") != null)
+        unsupported(st, t.value)
+    else if (st.constructor_argument_mode and st.latex and st.math_mode != true and
+            is_control(t) and resolved.kind == "undefined")
+        constructor_arguments({*:st, output: st.output ++ [t]}, budget)
+    else emit_ordinary(st, t)
+}
+
 fn step(st: State, budget) State^ {
     let read = stream.next(st.input)^;
-    let raw = read.token;
-    let t = emission_token(st, read.stream, raw)^;
-    let current = {*:st, input: read.stream};
-    let cmd = primitive(st, t);
+    let input = read.stream;
+    let t = emission_token(st, input, read.token)^;
+    if (ordinary_character(st, t)^) step_characters(st, input, t, budget)
+    else step_token(st, input, t, budget)
+}
+
+fn ordinary_character(st: State, t) bool^ =>
+    t.kind == "char" and t.noexpand != true and t.cat != 1 and t.cat != 2 and t.cat != 3 and
+    (t.cat != 10 or not direct_package_token(st, t)^)
+
+fn step_characters(st: State, input, first, budget) State^ {
+    // Ordinary text changes only the cursor and emitted tokens. Join a run
+    // once, before handing the first control/structural token its live state.
+    var cursor = input, t = first, tokens = [];
+    while (true) {
+        tokens = tokens ++ [{*:t, emit_origin:cursor.last_main_offset}];
+        let read = stream.next(cursor)^;
+        cursor = read.stream;
+        t = emission_token(st, cursor, read.token)^;
+        if (not ordinary_character(st, t)^) { break }
+    }
+    var current = st
+    current.output = current.output ++ tokens
+    step_token(current, cursor, t, budget)
+}
+
+fn step_token(st: State, input, t, budget) State^ {
+    // Update the cursor through a local snapshot to keep the state shape.
+    var current = st
+    current.input = input
+    if (t.kind != "char") step_control(current, t, budget)
+    else if (t.cat == 10 and direct_package_token(current, t)^) current
+    else if (t.noexpand == true) {*:current, output: st.output ++ [{*:t, noexpand: false}]}
+    else if (t.cat == 3) math_shift(current, t)
+    else if (t.cat == 1) begin_group(current, t, false)
+    else if (t.cat == 2) end_group(current, t, false, false, false, true)
+    else emit_ordinary(current, t)
+}
+
+fn step_control(st: State, t, budget) State^ {
     let resolved = if (is_control(t)) meaning(st, t) else null;
-    let assignment_global = effective_global(st, false)^;
-    if (t == null) if (len(st.conditions) > 0) finish_conditionals(current,len(st.conditions) - 1) else {*:current, finished: true}
-    else if ((charcat(t, 10) or (is_control(t) and t.value == "par")) and direct_package_token(st, t)) current
-    else if (t.kind == "expl3-sort-end") {*:current, expl_sort_done: true}
-    else if (t.kind == "expl3-keys-next") expl3_keys_next(current)
-    else if (t.kind == "counter-value-end") current
-    else if (t.kind == "env-close") end_group(current, null, true, true)
-    else if (t.kind == "package-load") start_package(current, t, budget)
-    else if (t.kind == "package-end") finish_package_hook(current)
-    else if (t.kind == "package-pop") finish_package(current)
+    let cmd = primitive_name(resolved);
+    if (t == null) if (len(st.conditions) > 0) finish_conditionals(st,len(st.conditions) - 1) else {*:st, finished: true}
+    else if (is_control(t) and t.value == "par" and direct_package_token(st, t)) st
+    else if (t.kind == "expl3-sort-end") {*:st, expl_sort_done: true}
+    else if (t.kind == "expl3-keys-next") expl3_keys_next(st)
+    else if (t.kind == "counter-value-end") st
+    else if (t.kind == "env-close") end_group(st, null, true, true)
+    else if (t.kind == "package-load") start_package(st, t, budget)
+    else if (t.kind == "package-end") finish_package_hook(st)
+    else if (t.kind == "package-pop") finish_package(st)
     else if (t.kind == "document-close") {
-        let emitted = environment_output(current, t.original, t.raw, "document", "end", t.echo, t.span)^;
-        {*:current, output: current.output ++ emitted,
-            trailing_source: if (t.root_tail) stream.root_tail(current.input) else null, finished: true}
+        let emitted = environment_output(st, t.original, t.raw, "document", "end", t.echo, t.span)^;
+        {*:st, output: st.output ++ emitted,
+            trailing_source: if (t.root_tail) stream.root_tail(st.input) else null, finished: true}
     }
     // Concatenation preserves the output array's verified element contract.
-    else if (t.noexpand == true) {*:current, output: st.output ++ [{*:t, noexpand: false}]}
-    else if (redefined_document_command(current, t)^) echo_redefined_command(current, t)
+    else if (t.noexpand == true) {*:st, output: st.output ++ [{*:t, noexpand: false}]}
+    else if (redefined_document_command(st, t, resolved)^) echo_redefined_command(st, t)
     else if (st.math_mode and t.kind == "control" and reader.math_raw_group_command(t.value) and resolved.kind != "macro")
-        latex_math_raw_group(current, t)
-    else if (expandable(current, t)) expand_one(current, t, budget)
+        latex_math_raw_group(st, t)
+    else if (expandable_meaning(st, t, resolved)) expand_one(st, t, budget, resolved)
+    // unbound controls cannot dispatch any assignment or primitive.
+    else if (resolved.kind == "undefined") unhandled_token(st, t, resolved, budget)
+    else execute_token(st, t, resolved, cmd, budget)
+}
+
+fn execute_token(current: State, t, resolved, cmd, budget) State^ {
+    let st = current;
+    let assignment_global = effective_global(st, false)^;
     // these native TeX commands remain tokens for the document adapters.
-    else if (contains([" ", "underline", "overline", "indent", "noindent", "hfil", "hfill", "hss", "hfilneg",
+    if (contains([" ", "underline", "overline", "indent", "noindent", "hfil", "hfill", "hss", "hfilneg",
         "vfil", "vfill", "vss", "vfilneg", "noalign", "omit", "span", "cr", "crcr", "-", "/", "noboundary",
         "mathord", "mathop", "mathbin", "mathrel", "mathopen", "mathclose", "mathpunct", "mathinner",
         "displaystyle", "textstyle", "scriptstyle", "scriptscriptstyle", "limits", "nolimits", "displaylimits",
@@ -6550,8 +6780,6 @@ fn step(st: State, budget) State^ {
     else if (st.latex and cmd == "verb") latex_verb(current, t)
     else if (st.latex and raw_inline_command(cmd))
         latex_raw_group(current,t,cmd)
-    else if (st.latex and t.kind == "control" and resolved.kind == "undefined" and
-            contains(["directlua", "luaexec"], t.value)) latex_raw_group(current, t)
     else if (st.latex and cmd == "begin") latex_begin(current, t, budget)
     else if (st.latex and cmd == "end") latex_end(current, t, budget)
     else if (cmd == "newif" and st.latex) latex_newif(current)
@@ -6630,18 +6858,7 @@ fn step(st: State, budget) State^ {
             current.mathchardef_emission_seen == true or mathchardef_name_needs_mapping(t)^}
     else if (cmd == "par") {*:current, output: st.output ++ [t]}
     else if (cmd != null) unsupported(current, cmd)
-    else if (st.script_expl3 and is_control(t) and index_of(t.value, ":") != null)
-        unsupported(current, t.value)
-    else if (current.constructor_argument_mode and current.latex and current.math_mode != true and
-            is_control(t) and resolved.kind == "undefined") {
-        let emitted = {*:current, output: st.output ++ [t]};
-        constructor_arguments(emitted, budget)
-    }
-    else if (charcat(t, 3)) math_shift(current, t)
-    else if (charcat(t, 1)) begin_group(current, t, false)
-    else if (charcat(t, 2)) end_group(current, t, false, false, false, true)
-    // the output serializer needs the reader position at emission, including lookahead.
-    else {*:current, output: st.output ++ [{*:t, emit_origin: current.input.last_main_offset}]}
+    else unhandled_token(current, t, resolved, budget)
 }
 
 // the native LaTeX scanner splits control words at non-letter characters.
@@ -6657,27 +6874,97 @@ fn mathchardef_name_needs_mapping(t) any^ {
     }
 }
 
-fn run(st: State, budget) State^ {
+fn run(st: State, budget, capture_checkpoint: bool = false) State^ {
     // keep document-length stepping off the native call stack.
     var current = st
     while (current.issue == null and current.finished != true) {
-        current = step(current, budget)^
+        let next = step(current, budget)^
+        // retry the whole step so token reads, groups, diagnostics and budgets
+        // are restored together before the host binds this capture.
+        if (capture_checkpoint and next.issue == "tex-resource-needed") {
+            return {*:terminal_flush(next)^, resource_checkpoint:current}
+        }
+        current = next
     }
     return terminal_flush(current)^
 }
 
-pub fn expand(input: map, budget: int = 20000000, options: any ! error = null) State^ {
+pub fn expand(input: map, budget: int = 20000000, options: any ! error = null,
+        capture_checkpoint: bool = false) State^ {
     // Normalize optional external configuration before constructing engine state.
     let normalized = options_map(options);
-    run(result(input, {}, [], [], 0, null, normalized), budget)
+    run(result(input, {}, [], [], 0, null, normalized), budget, capture_checkpoint)
+}
+
+pub fn resume_resource(st: State, resources: map, budget: int) State^ =>
+    run({*:st, resources:resources}, budget, true)
+
+// Compare the live allocator with the bundled kernel definitions, ignoring token locations.
+fn kernel_allocator_macro_matches(st: State, entry) bool^ {
+    let source = {*:reader.reader(entry.body ++ "%", -1),
+        catcodes:{'{':1, '}':2, '$':3, '&':4, '#':6, '^':7, '_':8, '\t':10, '~':13, '@':11}};
+    let parsed = body_params(expl3_definition_tokens(source)^, entry.count)^;
+    let expected = latex_macro(entry.count, true, false, false, [], parsed.tokens)^;
+    parsed.issue == null and meanings_equal(st.definitions["control:" ++ entry.name], expected)^
+}
+
+fn kernel_allocator_matches(st: State) bool^ {
+    let primitive_names = ["global", "advance", "count", "countdef", "ifnum", "else", "fi",
+        "errmessage", "immediate", "write", "string", "the"];
+    let unit = st.definitions["control:@ne"];
+    all([for (entry in format_count_catalog.allocator_macros()) kernel_allocator_macro_matches(st, entry)^]) and
+        all([for (name in primitive_names) primitive(st, control_token(name)) == name]) and
+        unit.kind == "chardef" and unit.value == 1 and count_value(st, 22) == -1
 }
 
 // The opt-in script profile replaces the kernel's full-package bootstrap.
-pub fn enable_script_expl3(st: State) State^ {
+fn bootstrap_script_expl3(st: State) State^ {
     let enabled = {*:st, script_expl3: true};
     let names = ["ExplSyntaxOn", "ExplSyntaxOff", "ProvidesExplPackage", "ProvidesExplClass", "ProvidesExplFile"];
     let primitives = enable_expl_primitives(enabled, names)^;
-    let constants = enable_expl_values(primitives, [
+    let array_entries = [*intarray_catalog.prepared(), *expl3_cctab_array_entries()^, *intarray_catalog.regex_prepared(), *unicode_array_catalog.prepared()];
+    let prefix_counts = [
+        {name:"c_max_int", initial:2147483647},
+        {name:"l_tmpa_int"}, {name:"l_tmpb_int"}, {name:"g_tmpa_int"}, {name:"g_tmpb_int"},
+        {name:"l__seq_internal_a_int"}, {name:"l__seq_internal_b_int"},
+        {name:"g__kernel_prg_map_int"}, {name:"g__prop_prefix_int"},
+        {name:"c__ior_term_noprompt_ior", initial:-1}, {name:"c_log_iow", initial:-1},
+        {name:"l_iow_line_count_int", initial:78}, {name:"l__iow_line_target_int"},
+        {name:"l__iow_one_indent_int", initial:4}, {name:"l__iow_indent_int"},
+        {name:"l_keys_choice_int"}];
+    let generated_counts = format_count_catalog.prepared();
+    let pending_prefix = len([for (entry in prefix_counts where primitives.definitions["control:" ++ entry.name] == null) entry]);
+    let count_conflicts = any([for (entry in generated_counts) primitives.definitions["control:" ++ entry.name] != null]);
+    let font_counter_index = count_value(primitives, 10) + pending_prefix + 2;
+    let foreign_font_counter = count_value(primitives, font_counter_index) != 0;
+    let required_slots = pending_prefix + len([for (entry in generated_counts where entry.kind == "count") entry]);
+    let insufficient_slots = count_value(primitives, 10) + required_slots >= count_value(primitives, 20);
+    // These controls name the kernel's reserved allocator and write-stream counts.
+    let allocation_control = primitives.definitions["control:allocationnumber"];
+    let limit_control = primitives.definitions["control:insc@unt"];
+    let log_control = primitives.definitions["control:m@ne"];
+    let incompatible_kernel = if (primitives.expl3_count_bootstrapped == true) false else
+        allocation_control.kind != "register" or allocation_control.index != 21 or
+        limit_control.kind != "register" or limit_control.index != 20 or
+        log_control.kind != "register" or log_control.index != 22 or count_value(primitives, 10) < log_control.index or
+        not kernel_allocator_matches(primitives)^;
+    // Reject incompatible caller state before the format changes fonts or counters.
+    let count_conflict = primitives.expl3_count_bootstrapped != true and
+        (count_conflicts or foreign_font_counter or insufficient_slots or incompatible_kernel);
+    // Caller-owned allocator state and assignment hooks need the full native initialization path.
+    let alternative_engine = any([for (name in ["__intarray_gset_count:Nw", "tex_luatexversion:D",
+        "tex_omathchardef:D", "tex_XeTeXversion:D"]) primitives.definitions["control:" ++ name] != null]);
+    let conflicting_arrays = alternative_engine or primitives.definitions["control:g__intarray_font_int"] != null or
+        any([for (entry in array_entries) primitives.definitions["control:" ++ entry.name] != null or
+            (entry.source_name is string and primitives.definitions["control:" ++ entry.source_name] != null)]) or
+        parameter_value(primitives, "globaldefs") != 0 or primitives.after_assignment != null;
+    let font_arrays = if (primitives.expl3_format_array_bootstrapped != true and conflicting_arrays)
+        unsupported(primitives, "expl3 fp array initialization")
+        else if (count_conflict) unsupported(primitives, "expl3 register initialization")
+        else if (primitives.expl3_format_array_bootstrapped == true) primitives
+        else enable_expl_format_array_fonts(primitives, array_entries)^;
+    if (font_arrays.issue != null) font_arrays else {
+    let constants = enable_expl_values(font_arrays, [
         {name: "c_zero_int", kind: "chardef", value: 0},
         {name: "c_one_int", kind: "mathchardef", value: 1}])^;
     let empty_sequence = if (constants.definitions["control:c_empty_seq"] != null) constants else
@@ -6698,12 +6985,33 @@ pub fn enable_script_expl3(st: State) State^ {
     // expl3 predefines four empty scratch sequences alongside its token lists.
     let sequences = enable_expl_scratch(global_tl, ["l_tmpa_seq", "l_tmpb_seq", "g_tmpa_seq", "g_tmpb_seq"], expl3_seq_value([])^)^;
     let scratch = enable_expl_scratch(sequences, ["l_tmpa_tl", "l_tmpb_tl", "g_tmpa_tl", "g_tmpb_tl",
-        "l__seq_internal_a_tl", "l__seq_internal_b_tl", "l__exp_internal_tl", "l__clist_internal_clist",
+        "l__seq_internal_a_tl", "l__seq_internal_b_tl", "l__exp_internal_tl", "l__clist_internal_clist", "l__tl_internal_a_tl",
+        "l__msg_class_tl", "l__msg_current_class_tl", "c_empty_tl",
         *KEYS_SCRATCH], expl3.token_list([]))^;
-    // Expl3's choice and mapping counters share TeX's ordinary count allocator.
-    let counts = enable_expl_counts(scratch, ["l_keys_choice_int", "g__kernel_prg_map_int"])^;
-    let support = enable_expl_values(counts, [
-        {name: "tex_let:D", kind: "primitive", value: "let", source_mapping_guard: "tl_eq"},
+    // Preserve expl3's declaration order in TeX's shared count allocator.
+    let counts = enable_expl_counts(scratch, prefix_counts)^;
+    let later_counts = if (counts.expl3_count_bootstrapped == true) counts
+        else enable_expl_format_counts(counts, generated_counts, array_entries)^;
+    let qualified_counts = if (later_counts.issue != null or later_counts.expl3_count_bootstrapped == true) later_counts
+        else {*:invalidate_format_allocators(later_counts)^, expl3_count_bootstrapped:true};
+    if (qualified_counts.issue != null) qualified_counts else {
+    let support = enable_expl_values(qualified_counts, [
+        {name:"c_max_char_int", kind:"mathchardef", value:255},
+        {name:"c__prop_basis_int", kind:"mathchardef", value:255 - 33},
+        {name:"c_term_iow", kind:"mathchardef", value:16},
+        // expl3 error help uses the existing TeX token-list parameter.
+        {name:"tex_errhelp:D", kind:"primitive", value:"errhelp"},
+        // the message machinery addresses these TeX primitives through aliases.
+        {name:"tex_escapechar:D", kind:"primitive", value:"escapechar"},
+        {name:"tex_inputlineno:D", kind:"primitive", value:"inputlineno"},
+        {name:"tex_errmessage:D", kind:"primitive", value:"errmessage"},
+        {name:"tex_newlinechar:D", kind:"primitive", value:"newlinechar"},
+        {name:"tex_immediate:D", kind:"primitive", value:"immediate"},
+        {name:"tex_write:D", kind:"primitive", value:"write"},
+        // expl3 retains primitive identities even if their public names are redefined.
+        {name:"tex_ifx:D", kind:"primitive", value:"ifx"},
+        {name:"tex_def:D", kind:"primitive", value:"def"},
+        {name: "tex_let:D", kind: "primitive", value: "let", source_mapping_guard: EXPL_LET_MAPPING_GUARD},
         {name: "tex_global:D", kind: "primitive", value: "global"},
         {name: "tex_chardef:D", kind: "primitive", value: "chardef"},
         {name: "tex_advance:D", kind: "primitive", value: "advance"},
@@ -6759,6 +7067,15 @@ pub fn enable_script_expl3(st: State) State^ {
         {name: "s__prop_mark", kind: "primitive", value: "relax"},
         {name: "s__prop_stop", kind: "primitive", value: "relax"},
         {name: "s__msg_stop", kind: "primitive", value: "relax"},
+        {name: "s__msg_mark", kind: "primitive", value: "relax"},
+        {name: "tex_protected:D", kind: "primitive", value: "protected"},
+        {name: "tex_long:D", kind: "primitive", value: "long"},
+        {name: "tex_edef:D", kind: "primitive", value: "edef"},
+        {name: "tex_xdef:D", kind: "primitive", value: "xdef"},
+        {name: "s__token_stop", kind: "primitive", value: "relax"},
+        {name: "s__kernel_stop", kind: "primitive", value: "relax"},
+        {name: "token_to_meaning:N", kind: "primitive", value: "meaning"},
+        {name: "tl_to_str:n", kind: "primitive", value: "detokenize"},
         {name: "tex_romannumeral:D", kind: "primitive", value: "romannumeral"},
         {name: "token_to_str:N", kind: "primitive", value: "string"},
         {name: "__str_if_eq:nn", kind: "primitive", value: "pdfstrcmp"},
@@ -6779,6 +7096,52 @@ pub fn enable_script_expl3(st: State) State^ {
             (if(suffix=="T") "\\use:n\\use_none:n" else if(suffix=="F") "{}" else "") ++ "}",protected_flag:true}];
     let pop_variants=[for(shape in pop_shapes, suffix in ["","TF","T","F"]) {
         source:"\\" ++ shape.name ++ ":cN" ++ suffix ++ "{\\exp_args:Nc\\" ++ shape.name ++ ":NN" ++ suffix ++ "}",protected_flag:true}];
+    // the token conditional variants share the upstream delimiter and return convention.
+    let macro_test_variants = [for (variant in [
+        {name:"token_if_macro:NTF",tail:""}, {name:"token_if_macro:NT",tail:"\\use:n\\use_none:n"},
+        {name:"token_if_macro:NF",tail:"{}"}, {name:"token_if_macro_p:N",tail:"\\c_true_bool\\c_false_bool"}]) {
+        source:"\\" ++ variant.name ++ "#1{\\exp_after:wN\\__token_if_macro_p:w\\token_to_meaning:N#1\\__other_suffix\\s__token_stop\\exp_end:" ++ variant.tail ++ "}",
+        protected_flag:false,other_literals:{'__other_suffix':"ma:"}}];
+    // the three inspection functions select from the same native meaning parser.
+    let cs_spec_variants = [for (variant in [
+        {name:"cs_prefix_spec:N",selector:"use_i:nnn"}, {name:"cs_parameter_spec:N",selector:"use_ii:nnn"},
+        {name:"cs_replacement_spec:N",selector:"use_iii:nnn"}]) {
+        source:"\\" ++ variant.name ++ "#1{\\token_if_macro:NTF#1{\\exp_after:wN\\__kernel_prefix_arg_replacement:wN\\token_to_meaning:N#1\\s__kernel_stop\\" ++ variant.selector ++ "}{\\scan_stop:}}",protected_flag:false}];
+    // property emptiness conditionals share the native flat/linked comparison.
+    let prop_empty_variants = [for (suffix in ["TF","T","F","p"]) {
+        let name = if (suffix == "p") "prop_if_empty_p:N" else "prop_if_empty:N" ++ suffix;
+        let tail = if (suffix == "T") "\\use:n\\use_none:n" else if (suffix == "F") "{}"
+            else if (suffix == "p") "\\c_true_bool\\c_false_bool" else "";
+        {source:"\\" ++ name ++ "#1{\\if_meaning:w#1\\c_empty_prop\\prg_return_true:\\else:\\exp_after:wN\\__prop_if_empty_return:w#1\\__prop_flatten:w2\\s__prop34\\s__prop_stop\\fi:\\exp_end:" ++ tail ++ "}",protected_flag:false}}];
+    let prop_empty_c_variants = [for (suffix in ["TF","T","F","p"]) {
+        let name = if (suffix == "p") "prop_if_empty_p:c" else "prop_if_empty:c" ++ suffix;
+        let base = if (suffix == "p") "prop_if_empty_p:N" else "prop_if_empty:N" ++ suffix;
+        {source:"\\" ++ name ++ "{\\exp_args:Nc\\" ++ base ++ "}",protected_flag:false}}];
+    // the class codes and argument wrappers follow expl3's shared class generator.
+    let msg_code_shapes = [
+        {name:"fatal",body:"\\__msg_interrupt:NnnnN\\msg_fatal_text:n{#1}{#2}{{#3}{#4}{#5}{#6}}\\c__msg_fatal_text_tl\\__msg_fatal_exit:"},
+        {name:"critical",body:"\\__msg_interrupt:NnnnN\\msg_critical_text:n{#1}{#2}{{#3}{#4}{#5}{#6}}\\c__msg_critical_text_tl\\tex_endinput:D"},
+        {name:"error",body:"\\__msg_interrupt:NnnnN\\msg_error_text:n{#1}{#2}{{#3}{#4}{#5}{#6}}\\c_empty_tl"},
+        {name:"warning",body:"\\__msg_info_aux:NNnnnnnn\\iow_term:n\\msg_warning_text:n{#1}{#2}{#3}{#4}{#5}{#6}"},
+        {name:"note",body:"\\__msg_info_aux:NNnnnnnn\\iow_term:n\\msg_info_text:n{#1}{#2}{#3}{#4}{#5}{#6}"},
+        {name:"info",body:"\\__msg_info_aux:NNnnnnnn\\iow_log:n\\msg_info_text:n{#1}{#2}{#3}{#4}{#5}{#6}"},
+        {name:"log",body:"\\iow_wrap:nnnN{\\use:c{\\c__msg_text_prefix_tl#1/#2}{#3}{#4}{#5}{#6}}{}{}\\iow_log:n"},
+        {name:"term",body:"\\iow_wrap:nnnN{\\use:c{\\c__msg_text_prefix_tl#1/#2}{#3}{#4}{#5}{#6}}{}{}\\iow_term:n"},
+        {name:"none",body:""},
+        {name:"show",body:"\\iow_wrap:nnnN{\\use:c{\\c__msg_text_prefix_tl#1/#2}{#3}{#4}{#5}{#6}}{}{}\\__msg_show:n"}];
+    let msg_codes = [for (shape in msg_code_shapes) {source:"\\__msg_" ++ shape.name ++ "_code:nnnnnn#1#2#3#4#5#6{" ++ shape.body ++ "}",protected_flag:true}];
+    let msg_error_short = [for (arity in [2,3,4,5]) {
+        source:"\\msg_error:" ++ repeated("n",arity)^ ++ join([for (i in 1 to arity) "#" ++ string(i)],"")^ ++
+            "{\\msg_error:nnnnnn" ++ join([for (i in 1 to 6) if(i <= arity) "{#" ++ string(i) ++ "}" else "{}"],"")^ ++ "}",protected_flag:true}];
+    let msg_error_expansions = [for (arity in [1,2,3,4]) {
+        let modes = "nn" ++ repeated("e",arity)^;
+        let base = "msg_error:" ++ repeated("n",arity + 2)^;
+        let plan = expl3.variant_plan(base,modes)^;
+        {source:plan.source,protected_flag:false}}];
+    let msg_error_variants = [for (arity in [1,2,3,4]) {
+        let modes = "nn" ++ repeated("e",arity)^;
+        let base = "msg_error:" ++ repeated("n",arity + 2)^;
+        {source:"\\msg_error:" ++ modes ++ "{\\exp_args:N" ++ modes ++ "\\" ++ base ++ "}",protected_flag:true}}];
     // Preserve upstream macro expansion order so TeX lookahead and aliases behave normally.
     let property_in_body="\\__prop_if_flat:NTF#1{\\exp_after:wN\\prop_map_tokens:Nn\\exp_after:wN#1{\\exp_after:wN\\__prop_if_in_flat:nnn\\exp_after:wN{\\tl_to_str:n{#2}}}\\prg_return_false:}{\\exp_after:wN\\__prop_get_linked:w#1{#2}\\use_none:n\\prg_return_true:\\prg_return_false:}\\exp_end:";
     let prop_map_terminator="\\__prop_pair:wn\\fi:\\prop_map_break:\\s__prop{}";
@@ -6788,8 +7151,14 @@ pub fn enable_script_expl3(st: State) State^ {
     // Preserve definitions supplied by the caller's kernel during bootstrap.
     let property_support=if(support.definitions["control:c_empty_prop"]!=null) support else
         assign_meaning(support,"control:c_empty_prop",expl3.token_list([control_token("s__prop"),control_token("__prop_chk:w")])^,true)^;
-    let msg_names=if(property_support.definitions["control:g_msg_module_name_prop"]!=null) property_support else
-        assign_meaning(property_support,"control:g_msg_module_name_prop",msg_module_property(message_catalog.name_properties())^,true)^;
+    // message redirects are ordinary scoped property lists.
+    let msg_classes = ["fatal","critical","error","warning","note","info","log","term","none","show"];
+    let msg_properties = enable_expl_scratch(property_support,
+        ["l__msg_redirect_prop", *[for (name in msg_classes) "l__msg_redirect_" ++ name ++ "_prop"]],
+        property_support.definitions["control:c_empty_prop"])^;
+    let msg_sequences = enable_expl_scratch(msg_properties,["l__msg_hierarchy_seq","l__msg_class_loop_seq"],expl3_seq_value([])^)^;
+    let msg_names=if(msg_sequences.definitions["control:g_msg_module_name_prop"]!=null) msg_sequences else
+        assign_meaning(msg_sequences,"control:g_msg_module_name_prop",msg_module_property(message_catalog.name_properties())^,true)^;
     let msg_support=if(msg_names.definitions["control:g_msg_module_type_prop"]!=null) msg_names else
         assign_meaning(msg_names,"control:g_msg_module_type_prop",msg_module_property(message_catalog.type_properties())^,true)^;
     // Native lookup variants share one splitter and conditional expansion order.
@@ -6838,6 +7207,17 @@ pub fn enable_script_expl3(st: State) State^ {
         source:"\\int_" ++ scope ++ op ++ (if (op == "set") ":cn" else ":c") ++
             "{\\exp_args:Nc\\int_" ++ scope ++ op ++ (if (op == "set") ":Nn" else ":N") ++ "}",
         protected_flag:true}];
+    // String assignments detokenize after the selected argument expansion.
+    let string_sets = [for (scope in ["", "g"], form in ["n", "e", "x"]) {
+        source:"\\str_" ++ scope ++ "set:N" ++ form ++ (if (form == "n")
+            "#1#2{\\__kernel_tl_" ++ scope ++ "set:Nx#1{\\__kernel_tl_to_str:w{#2}}}"
+            else "{\\exp_args:NN" ++ form ++ "\\str_" ++ scope ++ "set:Nn}"), protected_flag:true}];
+    // The generated stream variants share the native argument-expansion helpers.
+    let iow_variants = [for (variant in [
+        {form:"NV", helper:"NNV"}, {form:"cn", helper:"Nc"},
+        {form:"cV", helper:"NcV"}, {form:"ce", helper:"Nce"}, {form:"cx", helper:"Ncx"}]) {
+        source:"\\iow_now:" ++ variant.form ++ "{\\exp_args:" ++ variant.helper ++ "\\iow_now:Nn}",
+        protected_flag:true}];
     let token_dynamic = [for (scope in ["", "g"], form in ["n", "x"]) {
         source:"\\tl_" ++ scope ++ "set:c" ++ form ++ "{\\exp_args:Nc\\tl_" ++ scope ++ "set:N" ++ form ++ "}",
         protected_flag:true, source_mapping_guard:"dynamic_assignment", argument_unqualified:true}];
@@ -6879,13 +7259,55 @@ pub fn enable_script_expl3(st: State) State^ {
         source:"\\" ++ loop.name ++ ":nn#1#2{" ++ (if (loop.first) "#2" else "") ++
             "\\bool_if:n" ++ loop.test ++ "{#1}{" ++ (if (loop.first) "" else "#2") ++
             "\\" ++ loop.name ++ ":nn{#1}{#2}}}", protected_flag:false}];
-    let macros = enable_expl_macro_sources(msg_support, [*variants,*pop_base,*pop_conditionals,*pop_variants,*prop_get_conditionals,*prop_get_variants,*prop_exp_helpers,*prop_pop_bases,*prop_remove_bases,*prop_pop_conditionals,*prop_pop_variants,*prop_remove_variants,*integer_ops,*integer_dynamic,*token_dynamic,*roman_letters,*replicate_digits,*value_puts,*token_removals,*bool_returns,*bool_gates,*bool_selectors,*bool_loops,
+    let macros = enable_expl_macro_sources(msg_support, [*variants,*macro_test_variants,*cs_spec_variants,*prop_empty_variants,*prop_empty_c_variants,*msg_codes,*msg_error_short,*msg_error_expansions,*msg_error_variants,*pop_base,*pop_conditionals,*pop_variants,*prop_get_conditionals,*prop_get_variants,*prop_exp_helpers,*prop_pop_bases,*prop_remove_bases,*prop_pop_conditionals,*prop_pop_variants,*prop_remove_variants,*integer_ops,*integer_dynamic,*string_sets,*iow_variants,*token_dynamic,*roman_letters,*replicate_digits,*value_puts,*token_removals,*bool_returns,*bool_gates,*bool_selectors,*bool_loops,
+        // Preserve expl3's expansion and assignment order when temporarily setting an integer.
+        {source:"\\__kernel_iow_with:Nnn#1#2{\\int_compare:nNnTF{#1}={#2}{\\use:n}{\\__iow_with:oNnn{\\int_use:N#1}#1{#2}}}",protected_flag:true},
+        {source:"\\__iow_with:nNnn#1#2#3#4{\\int_set:Nn#2{#3}#4\\int_set:Nn#2{#1}}",protected_flag:true},
+        {source:"\\__iow_with:oNnn{\\exp_args:No\\__iow_with:nNnn}",protected_flag:true},
+        // Writes temporarily set newlinechar using the same nested TeX assignments as expl3.
+        {source:"\\iow_now:Nn#1#2{\\__kernel_iow_with:Nnn\\tex_newlinechar:D{`\\^^J}{\\tex_immediate:D\\tex_write:D#1{\\exp_not:n{#2}}}}",protected_flag:true},
+        {source:"\\iow_now:Ne{\\exp_args:NNe\\iow_now:Nn}",protected_flag:true},
+        {source:"\\iow_now:Nx{\\exp_args:NNx\\iow_now:Nn}",protected_flag:true},
+        {source:"\\iow_log:n{\\iow_now:Nn\\c_log_iow}",protected_flag:true},
+        {source:"\\iow_log:e{\\iow_now:Ne\\c_log_iow}",protected_flag:true},
+        {source:"\\iow_log:x{\\exp_args:Nx\\iow_log:n}",protected_flag:true},
+        {source:"\\iow_term:n{\\iow_now:Nn\\c_term_iow}",protected_flag:true},
+        {source:"\\iow_term:e{\\iow_now:Ne\\c_term_iow}",protected_flag:true},
+        {source:"\\iow_term:x{\\exp_args:Nx\\iow_term:n}",protected_flag:true},
+        {source:"\\iow_newline:{^^J}",protected_flag:false},
+        // Native string counting keeps spaces in a separate delimited scan.
+        {source:"\\__str_use_none_delimit_by_s_stop:w#1\\s__str_stop{}",protected_flag:false},
+        {source:"\\__str_use_i_delimit_by_s_stop:nw#1#2\\s__str_stop{#1}",protected_flag:false},
+        {source:"\\str_count_spaces:N{\\exp_args:No\\str_count_spaces:n}",protected_flag:false},
+        {source:"\\str_count_spaces:c{\\exp_args:Nc\\str_count_spaces:N}",protected_flag:false},
+        {source:"\\str_count_spaces:n#1{\\int_eval:n{\\exp_after:wN\\__str_count_spaces_loop:w\\tl_to_str:n{#1}~X7~X6~X5~X4~X3~X2~X1~X0~X-1~\\s__str_stop}}",protected_flag:false},
+        {source:"\\__str_count_spaces_loop:w#1~#2~#3~#4~#5~#6~#7~#8~#9~{\\if_meaning:w X#9\\__str_use_i_delimit_by_s_stop:nw\\fi:9+\\__str_count_spaces_loop:w}",protected_flag:false},
+        {source:"\\str_count:N{\\exp_args:No\\str_count:n}",protected_flag:false},
+        {source:"\\str_count:c{\\exp_args:Nc\\str_count:N}",protected_flag:false},
+        {source:"\\str_count:n#1{\\__str_count_aux:n{\\str_count_spaces:n{#1}+\\exp_after:wN\\__str_count_loop:NNNNNNNNN\\tl_to_str:n{#1}}}",protected_flag:false},
+        {source:"\\__str_count:n#1{\\__str_count_aux:n{\\__str_count_loop:NNNNNNNNN#1}}",protected_flag:false},
+        {source:"\\str_count_ignore_spaces:n#1{\\__str_count_aux:n{\\exp_after:wN\\__str_count_loop:NNNNNNNNN\\tl_to_str:n{#1}}}",protected_flag:false},
+        {source:"\\__str_count_aux:n#1{\\int_eval:n{#1{X8}{X7}{X6}{X5}{X4}{X3}{X2}{X1}{X0}\\s__str_stop}}",protected_flag:false},
+        {source:"\\__str_count_loop:NNNNNNNNN#1#2#3#4#5#6#7#8#9{\\if_meaning:w X#9\\exp_after:wN\\__str_use_none_delimit_by_s_stop:w\\fi:9+\\__str_count_loop:NNNNNNNNN}",protected_flag:false},
         {source:"\\ior_new:N#1{\\cs_new_eq:NN#1\\c__ior_term_ior}",protected_flag:true},
         {source:"\\ior_new:c{\\exp_args:Nc\\ior_new:N}",protected_flag:true},
         {source:"\\ior_open:cn{\\exp_args:Nc\\ior_open:Nn}",protected_flag:true},
         {source:"\\ior_close:c{\\exp_args:Nc\\ior_close:N}",protected_flag:true},
-        {source:"\\int_new:N#1{\\__kernel_chk_if_free_cs:N#1\\cs:w newcount\\cs_end:#1}",protected_flag:true},
+        {source:"\\int_new:N#1{\\__kernel_chk_if_free_cs:N#1\\cs:w newcount\\cs_end:#1}",protected_flag:true,source_mapping_guard:"int_new"},
         {source:"\\int_new:c{\\exp_args:Nc\\int_new:N}",protected_flag:true},
+        // Integer steps share the upstream expansion loop and its nested-map cleanup.
+        {source:"\\int_step_function:nnnN#1#2#3{\\exp_after:wN\\__int_step:w\\int_value:w\\__int_eval:w#1\\exp_after:wN\\__int_sep:\\int_value:w\\__int_eval:w#2\\exp_after:wN\\__int_sep:\\int_value:w\\__int_eval:w#3\\__int_sep:}",protected_flag:false,source_mapping_guard:"int_math"},
+        {source:"\\int_step_function:nN{\\int_step_function:nnnN\\c_one_int\\c_one_int}",protected_flag:false},
+        {source:"\\int_step_function:nnN#1{\\int_step_function:nnnN{#1}\\c_one_int}",protected_flag:false},
+        {source:"\\__int_step:w#1\\__int_sep:#2\\__int_sep:#3\\__int_sep:#4{\\int_compare:nNnTF{#2}>\\c_zero_int{\\__int_step:Nw>}{\\if_meaning:w0#2\\exp_after:wN\\use_ii:nn\\fi:\\use_none:n{\\msg_expandable_error:nnn{kernel}{zero-step}{#4}\\prg_break:}\\__int_step:Nw<}#1\\__int_sep:{#2}{#3}{#4}\\prg_break_point:}",protected_flag:false},
+        {source:"\\__int_step:Nw#1#2\\__int_sep:#3#4#5{\\if_int_compare:w#2#1#4\\exp_stop_f:\\prg_break:n\\fi:#5{#2}\\exp_after:wN\\__int_step:Nw\\exp_after:wN#1\\int_value:w\\__int_eval:w#2+#3\\__int_sep:{#3}{#4}{#5}}",protected_flag:false},
+        {source:"\\int_step_inline:nn{\\int_step_inline:nnnn{1}{1}}",protected_flag:true,source_mapping_guard:"int_math",argument_unqualified:true},
+        {source:"\\int_step_inline:nnn#1{\\int_step_inline:nnnn{#1}{1}}",protected_flag:true,source_mapping_guard:"int_math",argument_unqualified:true},
+        {source:"\\int_step_inline:nnnn{\\int_gincr:N\\g__kernel_prg_map_int\\exp_args:NNc\\__int_step:NNnnnn\\cs_gset_protected:Npn{__int_map_\\int_use:N\\g__kernel_prg_map_int :w}}",protected_flag:true,source_mapping_guard:"int_math",argument_unqualified:true},
+        {source:"\\int_step_variable:nNn{\\int_step_variable:nnnNn{1}{1}}",protected_flag:true,source_mapping_guard:"int_math",argument_unqualified:true},
+        {source:"\\int_step_variable:nnNn#1{\\int_step_variable:nnnNn{#1}{1}}",protected_flag:true,source_mapping_guard:"int_math",argument_unqualified:true},
+        {source:"\\int_step_variable:nnnNn#1#2#3#4#5{\\int_gincr:N\\g__kernel_prg_map_int\\exp_args:NNc\\__int_step:NNnnnn\\cs_gset_protected:Npe{__int_map_\\int_use:N\\g__kernel_prg_map_int :w}{#1}{#2}{#3}{\\tl_set:Nn\\exp_not:N#4{##1}\\exp_not:n{#5}}}",protected_flag:true,source_mapping_guard:"int_math",argument_unqualified:true},
+        {source:"\\__int_step:NNnnnn#1#2#3#4#5#6{#1#2##1{#6}\\int_step_function:nnnN{#3}{#4}{#5}#2\\prg_break_point:Nn\\scan_stop:{\\int_gdecr:N\\g__kernel_prg_map_int}}",protected_flag:true},
         {source:"\\int_to_roman:n#1{\\exp_after:wN\\__int_to_roman:N\\__int_to_roman:w\\int_eval:n{#1}Q}",protected_flag:false,source_mapping_guard:"int_math"},
         {source:"\\__int_to_roman:N#1{\\use:c{__int_to_roman_#1:w}\\__int_to_roman:N}",protected_flag:false},
         {source:"\\__int_to_roman_Q:w#1{}",protected_flag:false},
@@ -6935,6 +7357,35 @@ pub fn enable_script_expl3(st: State) State^ {
         {source:"\\__seq_pop_right:NNN#1#2#3{\\cs_set_eq:NN\\__seq_tmp:w\\__seq_item:n\\cs_set_eq:NN\\__seq_item:n\\scan_stop:#1#2{\\if_false:}\\fi:\\s__seq\\exp_after:wN\\use_i:nnn\\exp_after:wN\\__seq_pop_right_loop:nn#2{\\if_false:{\\fi:}\\__kernel_tl_set:Nx#3}{}\\use_none:nn\\cs_set_eq:NN\\__seq_item:n\\__seq_tmp:w}",protected_flag:true},
         {source:"\\__seq_pop_right_loop:nn#1#2{#2{\\exp_not:n{#1}}\\__seq_pop_right_loop:nn}",protected_flag:false},
         {source:"\\use_none:nn#1#2{}",protected_flag:false},
+        {source:"\\use:e#1{\\tex_expanded:D{#1}}",protected_flag:false},
+        {source:"\\cs_if_exist_use:N#1{\\cs_if_exist:NT#1#1}",protected_flag:false},
+        {source:"\\cs_set_protected:Npe{\\tex_protected:D\\tex_long:D\\tex_edef:D}",protected_flag:true},
+        {source:"\\cs_gset_protected:Npe{\\tex_protected:D\\tex_long:D\\tex_xdef:D}",protected_flag:true},
+        {source:"\\tl_to_str:N#1{\\__kernel_tl_to_str:w\\exp_after:wN{#1}}",protected_flag:false},
+        {source:"\\msg_error:nnnnnn#1#2#3#4#5#6{\\use:e{\\exp_not:n{\\__msg_use:nnnnnnn{error}{#1}{#2}}{\\tl_to_str:n{#3}}{\\tl_to_str:n{#4}}{\\tl_to_str:n{#5}}{\\tl_to_str:n{#6}}}}",protected_flag:true},
+        {source:"\\__msg_class_chk_exist:nT#1{\\cs_if_free:cTF{__msg_#1_code:nnnnnn}{\\msg_error:nnn{msg}{class-unknown}{#1}}}",protected_flag:false},
+        {source:"\\__msg_use:nnnnnnn#1#2#3#4#5#6#7{\\cs_if_exist_use:N\\conditionally@traceoff\\msg_if_exist:nnTF{#2}{#3}{\\__msg_class_chk_exist:nT{#1}{\\tl_set:Nn\\l__msg_current_class_tl{#1}\\cs_set_protected:Npe\\__msg_use_code:{\\exp_not:n{\\use:c{__msg_\\l__msg_class_tl _code:nnnnnn}{#2}{#3}{#4}{#5}{#6}{#7}}}\\__msg_use_redirect_name:n{#2/#3}}}{\\msg_error:nnnn{msg}{unknown}{#2}{#3}}\\cs_if_exist_use:N\\conditionally@traceon}",protected_flag:true,at_letters:true},
+        {source:"\\__msg_use_code:{}",protected_flag:true},
+        {source:"\\__msg_use_redirect_name:n#1{\\prop_get:NnNTF\\l__msg_redirect_prop{/#1}\\l__msg_class_tl{\\__msg_use_code:}{\\seq_clear:N\\l__msg_hierarchy_seq\\__msg_use_hierarchy:nwwN{}#1\\s__msg_mark\\__msg_use_hierarchy:nwwN/\\s__msg_mark\\__msg_use_none_delimit_by_s_stop:w\\s__msg_stop\\__msg_use_redirect_module:n{}}}",protected_flag:true},
+        {source:"\\__msg_use_hierarchy:nwwN#1#2/#3\\s__msg_mark#4{\\seq_put_left:Nn\\l__msg_hierarchy_seq{#1}#4{#1/#2}#3\\s__msg_mark#4}",protected_flag:true},
+        {source:"\\__msg_use_redirect_module:n#1{\\seq_map_inline:Nn\\l__msg_hierarchy_seq{\\prop_get:cnNTF{l__msg_redirect_\\l__msg_current_class_tl _prop}{##1}\\l__msg_class_tl{\\seq_map_break:n{\\tl_if_eq:NNTF\\l__msg_current_class_tl\\l__msg_class_tl{\\__msg_use_code:}{\\tl_set_eq:NN\\l__msg_current_class_tl\\l__msg_class_tl\\__msg_use_redirect_module:n{##1}}}}{\\str_if_eq:nnT{##1}{#1}{\\tl_set_eq:NN\\l__msg_class_tl\\l__msg_current_class_tl\\seq_map_break:n{\\__msg_use_code:}}}}}",protected_flag:true},
+        {source:"\\msg_redirect_name:nnn#1#2#3{\\tl_if_empty:nTF{#3}{\\prop_remove:Nn\\l__msg_redirect_prop{/#1/#2}}{\\__msg_class_chk_exist:nT{#3}{\\prop_put:Nnn\\l__msg_redirect_prop{/#1/#2}{#3}}}}",protected_flag:true},
+        {source:"\\prop_put:cnn{\\exp_args:Nc\\prop_put:Nnn}",protected_flag:true},
+        {source:"\\msg_redirect_class:nn{\\__msg_redirect:nnn{}}",protected_flag:true},
+        {source:"\\msg_redirect_module:nnn#1{\\__msg_redirect:nnn{/#1}}",protected_flag:true},
+        {source:"\\__msg_redirect:nnn#1#2#3{\\__msg_class_chk_exist:nT{#2}{\\tl_if_empty:nTF{#3}{\\prop_remove:cn{l__msg_redirect_#2_prop}{#1}}{\\__msg_class_chk_exist:nT{#3}{\\prop_put:cnn{l__msg_redirect_#2_prop}{#1}{#3}\\tl_set:Nn\\l__msg_current_class_tl{#2}\\seq_clear:N\\l__msg_class_loop_seq\\__msg_redirect_loop_chk:nnn{#2}{#3}{#1}}}}}",protected_flag:true},
+        {source:"\\__msg_redirect_loop_chk:nnn#1#2#3{\\seq_put_right:Nn\\l__msg_class_loop_seq{#1}\\prop_get:cnNT{l__msg_redirect_#1_prop}{#3}\\l__msg_class_tl{\\str_if_eq:VnF\\l__msg_class_tl{#1}{\\tl_if_eq:NNTF\\l__msg_class_tl\\l__msg_current_class_tl{\\prop_put:cnn{l__msg_redirect_#2_prop}{#3}{#2}\\msg_warning:nneeee{msg}{redirect-loop}{\\seq_item:Nn\\l__msg_class_loop_seq{1}}{\\seq_item:Nn\\l__msg_class_loop_seq{2}}{#3}{\\seq_map_function:NN\\l__msg_class_loop_seq\\__msg_redirect_loop_list:n{\\seq_item:Nn\\l__msg_class_loop_seq{1}}}}{\\__msg_redirect_loop_chk:onn\\l__msg_class_tl{#2}{#3}}}}}",protected_flag:true},
+        {source:"\\__msg_redirect_loop_chk:onn{\\exp_args:No\\__msg_redirect_loop_chk:nnn}",protected_flag:true},
+        {source:"\\__msg_redirect_loop_list:n#1{{#1}~=>~}",protected_flag:false},
+        {source:"\\__prop_if_empty_return:w#1\\__prop_flatten:w#2\\s__prop#3#4#5\\s__prop_stop{\\if_meaning:w#2#4\\prg_return_true:\\else:\\prg_return_false:\\fi:}",protected_flag:false},
+        {source:"\\__prop_split_wrong:Nw#1#2\\s__prop_stop#3#4{\\prop_show:N#1\\cs_gset_eq:NN#1\\c_empty_prop#3}",protected_flag:true},
+        {source:"\\prop_show:N{\\__prop_show:NN\\msg_show:nneeee}",protected_flag:true},
+        {source:"\\__prop_show:NN#1#2{\\__kernel_chk_tl_type:NnnT#2{prop}{\\__prop_if_flat:NTF#2{\\s__prop\\__prop_chk:w\\exp_after:wN\\__prop_show_flat:w#2\\s__prop{}\\__prop_pair:wn\\q__prop_recursion_tail\\s__prop{}\\q__prop_recursion_stop}{\\exp_after:wN\\__prop_show_linked:w#2\\s__prop!?\\s__prop_stop}}{\\__prop_if_flat:NTF#2{\\__prop_show_finally:NNn#1#2{flat}}{\\tl_set:Nn\\l__prop_internal_tl{#1#2}\\exp_after:wN\\__prop_show_prepare:w#2#2}}}",protected_flag:true},
+        {source:"\\__token_if_macro_p:w#1\\__other_ma#2\\__other_colon#3\\s__token_stop{\\str_if_eq:nnTF{#2}{cro}{\\prg_return_true:}{\\prg_return_false:}}",protected_flag:false,other_literals:{'__other_ma':"ma",'__other_colon':":"}},
+        {source:"\\__kernel_prefix_arg_replacement:wN#1\\__other_macro#2->#3\\s__kernel_stop#4{#4{#1}{#2}{#3}}",protected_flag:false,other_literals:{'__other_macro':"macro:"}},
+        {source:"\\__kernel_chk_defined:NT#1#2{\\cs_if_exist:NTF#1{#2}{\\msg_error:nne{kernel}{variable-not-defined}{\\token_to_str:N#1}}}",protected_flag:true},
+        {source:"\\tl_set:Ne{\\exp_args:NNe\\tl_set:Nn}",protected_flag:true},
+        {source:"\\__kernel_chk_tl_type:NnnT#1#2#3#4{\\__kernel_chk_defined:NT#1{\\exp_args:Nf\\tl_if_empty:nTF{\\cs_prefix_spec:N#1\\cs_parameter_spec:N#1}{\\tl_set:Ne\\l__tl_internal_a_tl{#3}\\tl_if_eq:NNTF#1\\l__tl_internal_a_tl{#4}{\\msg_error:nneeee{kernel}{bad-type}{\\token_to_str:N#1}{\\tl_to_str:N#1}{#2}{\\tl_to_str:N\\l__tl_internal_a_tl}}}{\\msg_error:nneee{kernel}{bad-type}{\\token_to_str:N#1}{\\token_to_meaning:N#1}{#2}}}}",protected_flag:true},
         {source:"\\c__msg_text_prefix_tl{msg~text~>~}",protected_flag:false},
         {source:"\\c__msg_more_text_prefix_tl{msg~extra~text~>~}",protected_flag:false},
         {source:"\\cs_gset:cpn{\\exp_args:Nc\\cs_gset:Npn}",protected_flag:true,long_ok:false},
@@ -7017,6 +7468,9 @@ pub fn enable_script_expl3(st: State) State^ {
         {source: "\\__int_maxmin:wwN#1\\__int_sep:#2\\__int_sep:#3{\\if_int_compare:w#1#3#2~#1\\else:#2\\fi:}", protected_flag: false},
         {source: "\\int_div_round:nn#1#2{\\int_value:w\\__int_eval:w(#1)/(#2)\\__int_eval_end:}", protected_flag: false, source_mapping_guard: "int_math"},
         {source: "\\use:x#1{\\cs_set_nopar:Npx\\l__exp_internal_tl{#1}\\l__exp_internal_tl}", protected_flag: true},
+        // The e form remains expandable; the x form uses the protected assignment path.
+        {source: "\\exp_args:Ne#1#2{\\exp_after:wN#1\\tex_expanded:D{{#2}}}", protected_flag: false},
+        {source: "\\exp_args:Nx#1#2{\\use:x{\\exp_not:N#1{#2}}}", protected_flag: true},
         {source: "\\exp_args:NNx#1#2#3{\\use:x{\\exp_not:N#1\\exp_not:N#2{#3}}}", protected_flag: true},
         {source: "\\cs_set_eq:NN#1{\\tex_let:D#1=~}", protected_flag: true},
         {source: "\\bool_new:N#1{\\cs_new_eq:NN#1\\c_false_bool}", protected_flag: true},
@@ -7236,7 +7690,11 @@ pub fn enable_script_expl3(st: State) State^ {
         suffix in [":NTF", ":NT", ":NF", "_p:N", ":cTF", ":cT", ":cF", "_p:c"])
             {name: family ++ "_if_exist" ++ suffix, kind: "alias", value: "cs_if_exist" ++ suffix}];
     let early_existence=enable_expl_values(with_more,existence_aliases)^;
-    let with_iow=enable_expl_values(early_existence,[{name:"iow_char:N",kind:"alias",value:"cs_to_str:N"}])^;
+    let step_aliases = [for (form in [{alias:"nn",base:"nN"},{alias:"nnn",base:"nnN"},{alias:"nnnn",base:"nnnN"}])
+        {name:"int_step_tokens:" ++ form.alias,kind:"alias",value:"int_step_function:" ++ form.base}];
+    let with_iow=enable_expl_values(early_existence,[{name:"iow_char:N",kind:"alias",value:"cs_to_str:N"},
+        {name:"cs_set_protected:Npx",kind:"alias",value:"cs_set_protected:Npe"},
+        {name:"cs_gset_protected:Npx",kind:"alias",value:"cs_gset_protected:Npe"},*step_aliases])^;
     let prefix_scan=csname_tokens({*:with_iow,input:stream.push(with_iow.input,[control_token("c__msg_text_prefix_tl"),control_token("endcsname")])},20000000)^;
     let more_scan=if(prefix_scan.state.issue!=null) prefix_scan else
         csname_tokens({*:prefix_scan.state,input:stream.push(prefix_scan.state.input,[control_token("c__msg_more_text_prefix_tl"),control_token("endcsname")])},20000000)^;
@@ -7265,6 +7723,84 @@ pub fn enable_script_expl3(st: State) State^ {
         assign_meaning(ready, "control:group_align_safe_begin:", begin, true)^;
     if (with_begin.definitions["control:group_align_safe_end:"] != null) with_begin else
         assign_meaning(with_begin, "control:group_align_safe_end:", ending, true)
+    }
+    }
+}
+
+// Preserve the existing source-mapping guard when the primitive is captured.
+fn capture_expl_alias(st: State, entry) any^ {
+    let value = meaning(st, control_token(entry.source))^;
+    if (entry.alias == "tex_let:D" and value.kind == "primitive" and value.name == "let")
+        {*:value,source_mapping_guard:EXPL_LET_MAPPING_GUARD} else value
+}
+
+fn clock_alias_redefined(st: State, entry) bool^ {
+    let value = meaning(st, control_token(entry.source))^;
+    value.kind != "primitive" or primitives.meaning_name(value.name) != entry.source
+}
+
+// expl3's shipout probe keeps the final control printing as the original primitive.
+fn shipout_override(st: State) map^ {
+    if ((meaning(st, control_token("@@hyph"))^).kind == "undefined") {local:{},global:{}}
+    else {
+        let current = print_meaning(st, control_token("shipout"))^;
+        let original = (escape(st)^) ++ "shipout";
+        let matches = if (current == original) [] else
+            [for (name in alias_catalog.shipout_candidates()
+                where (print_meaning(st, control_token(name))^) == original) name];
+        let fallback = if ((meaning(st, control_token("@@shipout"))^).kind != "undefined") "@@shipout" else null;
+        let chosen = if (len(matches) > 0) matches[len(matches) - 1] else fallback;
+        let values = if (chosen == null) {} else map(["control:tex_shipout:D", meaning(st, control_token(chosen))^]);
+        if (len(matches) > 0) {local:{},global:values} else {local:values,global:{}}
+    }
+}
+
+// expl3 selects the live PDF tracing parameter or its undefined-control fallback.
+fn font_tracing_override(st: State) map^ {
+    if ((meaning(st, control_token("@@hyph"))^).kind == "undefined") {}
+    else {
+        let source = if ((meaning(st, control_token("pdftracingfonts"))^).kind != "undefined")
+            "pdftracingfonts" else "tex_undefined:D";
+        map(["control:tex_tracingfonts:D", meaning(st, control_token(source))^])
+    }
+}
+
+// Capture source meanings once, before documents can redefine them.
+pub fn enable_script_expl3(st: State) State^ {
+    let previous = st.expl3_aliases;
+    // Optional declarations copy only defined sources, in the format's order.
+    let entries = if (previous is map) [] else [for (entry in alias_catalog.prepared()
+        where entry.optional != true or (meaning(st, control_token(entry.source))^).kind != "undefined") entry];
+    let aliases = if (previous is map) previous else map([for (entry in entries)
+        *[entry.alias, capture_expl_alias(st, entry)^]]);
+    // The initial global lets replace prior destination definitions only once.
+    let conflicts = if (previous is map) {} else map([for (entry in entries
+        where st.definitions["control:" ++ entry.alias] != null)
+        *["control:" ++ entry.alias, aliases[entry.alias]]]);
+    let prepared = assign_global_meanings(st,conflicts);
+    let alias_state = {*:prepared, expl3_aliases:aliases};
+    // A non-pdfTeX, non-LuaTeX format copies its undefined control into PDF map aliases.
+    let no_pdf_engine = (meaning(alias_state, control_token("tex_pdftexversion:D"))^).kind == "undefined" and
+        (meaning(alias_state, control_token("tex_luatexversion:D"))^).kind == "undefined";
+    let pdfmap = if (previous is map or not no_pdf_engine) {} else
+        map([for (name in alias_catalog.pdfmap_fallbacks())
+            *["control:" ++ name, meaning(st, control_token("tex_undefined:D"))^]]);
+    // expl3 copies tex_undefined:D when a clock meaning differs from its spelling.
+    let clock_overrides = if (previous is map) {} else map([for (entry in alias_catalog.clock_checks()
+        where clock_alias_redefined(st, entry)^) *["control:" ++ entry.alias, meaning(st, control_token("tex_undefined:D"))^]]);
+    let overrides = if (previous is map) {} else map([for (group in alias_catalog.simple_rebindings(), entry in group.bindings
+        where (meaning(st, control_token(group.guard))^).kind != "undefined")
+        *["control:" ++ entry.alias, meaning(st, control_token(entry.source))^]]);
+    let shipout = if (previous is map) {local:{},global:{}} else shipout_override(st)^;
+    let lua_font = not (previous is map) and (meaning(st, control_token("@@hyph"))^).kind != "undefined" and
+        (meaning(st, control_token("pdftracingfonts"))^).kind == "undefined" and
+        (meaning(alias_state, control_token("tex_directlua:D"))^).kind != "undefined";
+    let font_tracing = if (previous is map or lua_font) {} else font_tracing_override(st)^;
+    let initialized = bootstrap_script_expl3({*:prepared,expl3_pending_aliases:aliases})^;
+    let global_values = assign_global_meanings(initialized,{*:clock_overrides,*:shipout.global});
+    if (initialized.issue != null) initialized else if (lua_font) unsupported(initialized, "expl3 LuaTeX font initialization")
+    else {*:global_values, expl3_aliases:aliases,expl3_pending_aliases:null,
+        definitions:{*:global_values.definitions, *:pdfmap, *:overrides, *:shipout.local, *:font_tracing}}
 }
 
 // tokenize trusted bundled TeX definitions under expl3 category codes.
@@ -7347,16 +7883,23 @@ fn enable_expl_macro_sources(st: State, definitions, index = 0) State^ {
     if (index >= len(definitions)) st
     else {
         let definition = definitions[index];
-        let codes = expl3.syntax_codes({'{': 1, '}': 2, '&': 4, '#': 6, [chr(0)]: 13, '?': if (definition.question_letters == true) 11 else 12});
+        let base_codes = expl3.syntax_codes({'{': 1, '}': 2, '&': 4, '#': 6, [chr(0)]: 13,
+            '?': if (definition.question_letters == true) 11 else 12});
+        let codes = if (definition.at_letters == true) {*:base_codes,'@':11} else base_codes;
         // A marker survives control-word scanning before becoming a delimiter space.
         let source_reader = {*:reader.reader(definition.source, -1), endline: -1,
             catcodes: if (definition.literal_spaces == true) {*:codes, [chr(126)]:12} else codes};
         let raw = expl3_definition_tokens(source_reader)^;
         let scanned = if (definition.literal_spaces == true) [for (token in raw)
             if (token.kind == "char" and token.value == "~") {*:token,value:" ",cat:10} else token] else raw;
+        // upstream uses tl_to_str:n to insert other-category delimiter tokens into definitions.
+        let literals = definition.other_literals;
+        let literal_tokens = if (literals is map) [for (token in scanned, part in
+            (if (token.kind == "control" and literals[token.value] is string)
+                text_tokens(literals[token.value])^ else [token])) part] else scanned;
         // Some expl3 names contain operator characters and are normally made with csname.
         let tokens = if (definition.install_as is string)
-            [{*:scanned[0], value:definition.install_as}, *slice(scanned, 1, len(scanned))^] else scanned;
+            [{*:literal_tokens[0], value:definition.install_as}, *slice(literal_tokens, 1, len(literal_tokens))^] else literal_tokens;
         let name = key(tokens[0]);
         let created = if (st.definitions[name] != null) st else
             define({*:st, input: stream.push(st.input, tokens)}, true, definition.long_ok != false,
@@ -7406,12 +7949,16 @@ fn enable_expl_values(st: State, values, index = 0) State^ {
     else {
         let value = values[index];
         let name = "control:" ++ value.name;
-        let meaning = if (value.kind == "alias") st.definitions["control:" ++ value.value]
+        // Bootstrap aliases copy the captured source meaning, including redefinitions.
+        let resolved = if (value.kind == "primitive" and st.expl3_pending_aliases[value.name] != null)
+                st.expl3_pending_aliases[value.name]
+            else if (value.kind == "alias") st.definitions["control:" ++ value.value]
+            else if (value.kind == "control-meaning") meaning(st, control_token(value.value))^
             else if (value.kind == "primitive")
                 {kind: "primitive", name: value.value, source_mapping_guard: value.source_mapping_guard}
             else if (value.kind == "char") {kind: "char", value: value.value, cat: value.cat}
             else {kind: value.kind, value: value.value};
-        let next = if (st.definitions[name] != null) st else assign_meaning(st, name, meaning, true)^;
+        let next = if (st.definitions[name] != null) st else assign_meaning(st, name, resolved, true)^;
         enable_expl_values(next, values, index + 1)
     }
 }
@@ -7426,15 +7973,34 @@ fn enable_expl_scratch(st: State, names, value, index = 0) State^ {
     }
 }
 
-fn enable_expl_counts(st: State, names, index = 0) State^ {
-    if (index >= len(names)) st
+// Source order matters because immediate constants do not allocate a count register.
+fn enable_expl_format_counts(st: State, entries, arrays, index = 0) State^ {
+    if (st.issue != null or index >= len(entries)) st
     else {
-        let name = "control:" ++ names[index];
+        let entry = entries[index];
+        let matches = if (entry.derived == "array_loop") [for (item in arrays where item.name == entry.array_name) item] else [];
+        let initial = if (entry.derived == "array_loop" and len(matches) == 1) len(matches[0].values)
+            else if (entry.derived == "array_font_count") len(arrays) else entry.initial;
+        let next = if (entry.derived == "array_loop" and len(matches) != 1)
+            unsupported(st, "expl3 register initialization")
+            else if (entry.kind == "immediate") enable_expl_values(st,[{name:entry.name,kind:"mathchardef",value:initial}])^
+            else enable_expl_counts(st,[{name:entry.name,initial:initial}])^;
+        enable_expl_format_counts(next, entries, arrays, index + 1)
+    }
+}
+
+fn enable_expl_counts(st: State, entries, index = 0) State^ {
+    if (index >= len(entries)) st
+    else {
+        let entry = entries[index];
+        let name = "control:" ++ entry.name;
         let next = if (st.definitions[name] != null) st else {
             let allocated = latex_allocate_register(st, 10)^;
-            assign_meaning(allocated.state, name, {kind:"register", index:allocated.index}, true)^
+            let defined = assign_meaning(allocated.state, name, {kind:"register", index:allocated.index}, true)^;
+            // Only constants and initialized scratch registers overwrite prior contents.
+            if (entry.initial is int) save_count(defined, allocated.index, entry.initial, true)^ else defined
         };
-        enable_expl_counts(next, names, index + 1)
+        enable_expl_counts(next, entries, index + 1)
     }
 }
 
@@ -7449,7 +8015,7 @@ fn enable_expl_primitives(st: State, names, index = 0) State^ {
 
 // Continue from a completed preload while retaining its definitions and scoped values.
 pub fn resume(st: State, source: string, name: string = "<input>", budget: int = 20000000,
-        origin: string = "local") State^ {
+        origin: string = "local", capture_checkpoint: bool = false) State^ {
     if (st.issue != null) st
     else if (len(st.groups) != 0 or len(st.conditions) != 0) fail(st, "tex-incomplete-preload")
     else {
@@ -7466,6 +8032,6 @@ pub fn resume(st: State, source: string, name: string = "<input>", budget: int =
             expl3_seq_map_seen:false, expl3_tl_map_seen:false, expl3_replicate_seen:false,
             expl3_exp_args_once_seen: false, expl3_exp_args_value_seen: false, expl3_exp_args_f_seen: false,
             sources: [*st.sources, {id: id, name: name, origin: origin, data: source}]};
-        run(resumed, budget)
+        run(resumed, budget, capture_checkpoint)
     }
 }

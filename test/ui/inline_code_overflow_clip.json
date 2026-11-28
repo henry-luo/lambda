@@ -1,0 +1,12 @@
+{
+  "name": "Rounded inline code stays inside its scroll pane",
+  "html": "test/ui/inline_code_overflow_clip.html",
+  "viewport": { "width": 240, "height": 100 },
+  "events": [
+    { "type": "assert_pixel", "x": 10, "y": 52, "min_r": 204, "max_r": 204, "max_g": 0, "max_b": 0 },
+    { "type": "assert_pixel", "x": 10, "y": 57, "min_r": 255, "min_g": 255, "min_b": 255 },
+    { "type": "scroll", "x": 80, "y": 33, "dx": 0, "dy": -1 },
+    { "type": "assert_pixel", "x": 10, "y": 14, "min_r": 204, "max_r": 204, "max_g": 0, "max_b": 0 },
+    { "type": "assert_pixel", "x": 10, "y": 7, "min_r": 255, "min_g": 255, "min_b": 255 }
+  ]
+}

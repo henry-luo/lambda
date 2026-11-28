@@ -1,0 +1,139 @@
+{
+  "cases": [
+    {
+      "source": "\\ExplSyntaxOn\\meaning\\tex_escapechar:D\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\textbackslash{}escapechar",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\ifx\\tex_escapechar:D\\escapechar Y\\else N\\fi\\ExplSyntaxOff",
+      "tex": {
+        "text": "Y",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tex_escapechar:D=42\\the\\tex_escapechar:D/\\the\\escapechar\\ExplSyntaxOff",
+      "tex": {
+        "text": "/4292",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tex_escapechar:D=42{\\tex_escapechar:D=35\\the\\tex_escapechar:D}/\\the\\tex_escapechar:D\\ExplSyntaxOff",
+      "tex": {
+        "text": "{}/42",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\meaning\\tex_inputlineno:D\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\textbackslash{}inputlineno",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\ifx\\tex_inputlineno:D\\inputlineno Y\\else N\\fi\\ExplSyntaxOff",
+      "tex": {
+        "text": "Y",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\the\\tex_inputlineno:D/\\the\\inputlineno\\ExplSyntaxOff",
+      "tex": {
+        "text": "1/1",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\meaning\\tex_errmessage:D\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\textbackslash{}errmessage",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\ifx\\tex_errmessage:D\\errmessage Y\\else N\\fi\\ExplSyntaxOff",
+      "tex": {
+        "text": "Y",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tex_errmessage:D{short}A\\ExplSyntaxOff",
+      "tex": {
+        "text": "A",
+        "messages": [
+          "! short."
+        ],
+        "diagnostics": [
+          {
+            "code": "tex-errmessage",
+            "message": "short",
+            "offset": 36,
+            "line": 1
+          }
+        ],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\let\\myerror\\tex_errmessage:D\\myerror{saved}B\\ExplSyntaxOff",
+      "tex": {
+        "text": "B",
+        "messages": [
+          "! saved."
+        ],
+        "diagnostics": [
+          {
+            "code": "tex-errmessage",
+            "message": "saved",
+            "offset": 56,
+            "line": 1
+          }
+        ],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\n\\the\\tex_inputlineno:D/\\the\\inputlineno\\ExplSyntaxOff",
+      "tex": {
+        "text": "2/2",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\let\\myline\\tex_inputlineno:D\n\\the\\myline/\\the\\inputlineno\\ExplSyntaxOff",
+      "tex": {
+        "text": "2/2",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    }
+  ]
+}

@@ -3207,19 +3207,17 @@ Item for_window(Array* out, Item offset, Item limit, int64_t flags) {
 // Works for arrays, lists, strings, and binaries
 Item fn_slice(Item vec, Item start_item, Item end_item) {
     GUARD_ERROR3(vec, start_item, end_item);
+    TypeId type = get_type_id(vec);
+    // Text uses the same bounds validation in substring and has no row lifting.
+    if (is_text_type_id(type)) return fn_substring(vec, start_item, end_item);
+
     int64_t start = 0, end = 0;
     if (lambda_slice_offsets(start_item, end_item, &start, &end) != LAMBDA_SLICE_OK)
         return ItemNull;
     VECTOR_NDIM_ROWS(vec, fn_slice(vec, start_item, end_item));
-    TypeId type = get_type_id(vec);
 
     // null slices to null
     if (type == LMD_TYPE_NULL) return ItemNull;
-
-    // Handle strings - delegate to fn_substring
-    if (is_text_type_id(type)) {
-        return fn_substring(vec, start_item, end_item);
-    }
     // binary already has a storage-sharing slice below; text lifting would
     // materialize every source byte and bypass that path for each small slice.
 
