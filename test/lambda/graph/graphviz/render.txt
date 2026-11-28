@@ -2,6 +2,8 @@
   svg: true,
   nodes: [["a", true, true], ["b", true, true]],
   edges: [["a", "b"]],
+  fig6_smooth_bypass: true,
+  return_tangent: true,
   styled: [96, 96, true],
-  records: [true, true, false, true, true, true, false]
+  records: [true, true, true, true, true, true, true]
 }

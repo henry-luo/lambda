@@ -1,0 +1,308 @@
+{
+  "cases": [
+    {
+      "source": "\\ExplSyntaxOn\\tl_new:N\\l_test_tl\\tl_set:Nn\\l_test_tl{O}\\def\\A{X}{\\tl_set:Nx\\l_test_tl{\\A}}\\def\\A{Y}[\\tl_use:N\\l_test_tl]\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\def\\A{X}{}\\def\\A{Y}[O]",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_new:N\\l_test_tl\\tl_set:Nn\\l_test_tl{O}\\def\\A{X}{\\tl_set:Nx\\l_test_tl{\\noexpand\\A}}\\def\\A{Y}[\\tl_use:N\\l_test_tl]\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\def\\A{X}{}\\def\\A{Y}[O]",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_new:N\\l_test_tl\\tl_set:Nn\\l_test_tl{O}\\def\\A{X}{\\tl_set:Nx\\l_test_tl{\\unexpanded{\\A}}}\\def\\A{Y}[\\tl_use:N\\l_test_tl]\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\def\\A{X}{}\\def\\A{Y}[O]",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_new:N\\l_test_tl\\tl_set:Nn\\l_test_tl{O}\\def\\A{X}{\\tl_gset:Nx\\l_test_tl{\\A}}\\def\\A{Y}[\\tl_use:N\\l_test_tl]\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\def\\A{X}{}\\def\\A{Y}[X]",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_new:N\\l_test_tl\\tl_set:Nn\\l_test_tl{O}\\def\\A{X}{\\tl_gset:Nx\\l_test_tl{\\noexpand\\A}}\\def\\A{Y}[\\tl_use:N\\l_test_tl]\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\def\\A{X}{}\\def\\A{Y}[Y]",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_new:N\\l_test_tl\\tl_set:Nn\\l_test_tl{O}\\def\\A{X}{\\tl_gset:Nx\\l_test_tl{\\unexpanded{\\A}}}\\def\\A{Y}[\\tl_use:N\\l_test_tl]\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\def\\A{X}{}\\def\\A{Y}[Y]",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_new:N\\l_test_tl\\tl_set:Nn\\l_test_tl{O}\\def\\A{X}{\\tl_put_left:Nx\\l_test_tl{\\A}}\\def\\A{Y}[\\tl_use:N\\l_test_tl]\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\def\\A{X}{}\\def\\A{Y}[O]",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_new:N\\l_test_tl\\tl_set:Nn\\l_test_tl{O}\\def\\A{X}{\\tl_put_left:Nx\\l_test_tl{\\noexpand\\A}}\\def\\A{Y}[\\tl_use:N\\l_test_tl]\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\def\\A{X}{}\\def\\A{Y}[O]",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_new:N\\l_test_tl\\tl_set:Nn\\l_test_tl{O}\\def\\A{X}{\\tl_put_left:Nx\\l_test_tl{\\unexpanded{\\A}}}\\def\\A{Y}[\\tl_use:N\\l_test_tl]\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\def\\A{X}{}\\def\\A{Y}[O]",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_new:N\\l_test_tl\\tl_set:Nn\\l_test_tl{O}\\def\\A{X}{\\tl_put_right:Nx\\l_test_tl{\\A}}\\def\\A{Y}[\\tl_use:N\\l_test_tl]\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\def\\A{X}{}\\def\\A{Y}[O]",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_new:N\\l_test_tl\\tl_set:Nn\\l_test_tl{O}\\def\\A{X}{\\tl_put_right:Nx\\l_test_tl{\\noexpand\\A}}\\def\\A{Y}[\\tl_use:N\\l_test_tl]\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\def\\A{X}{}\\def\\A{Y}[O]",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_new:N\\l_test_tl\\tl_set:Nn\\l_test_tl{O}\\def\\A{X}{\\tl_put_right:Nx\\l_test_tl{\\unexpanded{\\A}}}\\def\\A{Y}[\\tl_use:N\\l_test_tl]\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\def\\A{X}{}\\def\\A{Y}[O]",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_new:N\\l_test_tl\\tl_set:Nn\\l_test_tl{O}\\def\\A{X}{\\tl_gput_left:Nx\\l_test_tl{\\A}}\\def\\A{Y}[\\tl_use:N\\l_test_tl]\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\def\\A{X}{}\\def\\A{Y}[XO]",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_new:N\\l_test_tl\\tl_set:Nn\\l_test_tl{O}\\def\\A{X}{\\tl_gput_left:Nx\\l_test_tl{\\noexpand\\A}}\\def\\A{Y}[\\tl_use:N\\l_test_tl]\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\def\\A{X}{}\\def\\A{Y}[YO]",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_new:N\\l_test_tl\\tl_set:Nn\\l_test_tl{O}\\def\\A{X}{\\tl_gput_left:Nx\\l_test_tl{\\unexpanded{\\A}}}\\def\\A{Y}[\\tl_use:N\\l_test_tl]\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\def\\A{X}{}\\def\\A{Y}[YO]",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_new:N\\l_test_tl\\tl_set:Nn\\l_test_tl{O}\\def\\A{X}{\\tl_gput_right:Nx\\l_test_tl{\\A}}\\def\\A{Y}[\\tl_use:N\\l_test_tl]\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\def\\A{X}{}\\def\\A{Y}[OX]",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_new:N\\l_test_tl\\tl_set:Nn\\l_test_tl{O}\\def\\A{X}{\\tl_gput_right:Nx\\l_test_tl{\\noexpand\\A}}\\def\\A{Y}[\\tl_use:N\\l_test_tl]\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\def\\A{X}{}\\def\\A{Y}[OY]",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_new:N\\l_test_tl\\tl_set:Nn\\l_test_tl{O}\\def\\A{X}{\\tl_gput_right:Nx\\l_test_tl{\\unexpanded{\\A}}}\\def\\A{Y}[\\tl_use:N\\l_test_tl]\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\def\\A{X}{}\\def\\A{Y}[OY]",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\protected\\long\\def\\f{\\exp_args:NNx\\tl_set:Nn}\\ifx\\f\\tl_set:Nx Y\\else N\\fi\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\protected\\long\\def\\f{\\exp_args:NNx\\tl_set:Nn}Y",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\let\\f\\tl_set:Nx\\ifx\\f\\tl_set:Nx Y\\else N\\fi\\ExplSyntaxOff",
+      "tex": {
+        "text": "Y",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_new:N\\l_test_tl\\let\\f\\tl_set:Nx\\def\\A{X}\\f\\l_test_tl{\\A}\\tl_use:N\\l_test_tl\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\def\\A{X}X",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_new:N\\l_test_tl\\protected\\def\\A{X}\\tl_set:Nx\\l_test_tl{\\A}\\def\\A{Y}\\tl_use:N\\l_test_tl\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\protected\\def\\A{X}\\def\\A{Y}Y",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\use:x{A\\int_eval:n{1+2}B}\\ExplSyntaxOff",
+      "tex": {
+        "text": "A3B",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\def\\A{X}\\use:x{\\exp_not:N\\A}\\def\\A{Y}\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\def\\A{X}X\\def\\A{Y}",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\show\\tl_set:Nx\\ExplSyntaxOff",
+      "tex": {
+        "text": "",
+        "messages": [
+          "> \\tl_set:Nx=\\protected\\long macro:->\\exp_args:NNx \\tl_set:Nn ."
+        ],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\show\\tl_gset:Nx\\ExplSyntaxOff",
+      "tex": {
+        "text": "",
+        "messages": [
+          "> \\tl_gset:Nx=\\protected\\long macro:->\\exp_args:NNx \\tl_gset:Nn ."
+        ],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\show\\tl_put_left:Nx\\ExplSyntaxOff",
+      "tex": {
+        "text": "",
+        "messages": [
+          "> \\tl_put_left:Nx=\\protected\\long macro:->\\exp_args:NNx \\tl_put_left:Nn ."
+        ],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\show\\tl_put_right:Nx\\ExplSyntaxOff",
+      "tex": {
+        "text": "",
+        "messages": [
+          "> \\tl_put_right:Nx=\\protected\\long macro:->\\exp_args:NNx \\tl_put_right:Nn ."
+        ],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\show\\tl_gput_left:Nx\\ExplSyntaxOff",
+      "tex": {
+        "text": "",
+        "messages": [
+          "> \\tl_gput_left:Nx=\\protected\\long macro:->\\exp_args:NNx \\tl_gput_left:Nn ."
+        ],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\show\\tl_gput_right:Nx\\ExplSyntaxOff",
+      "tex": {
+        "text": "",
+        "messages": [
+          "> \\tl_gput_right:Nx=\\protected\\long macro:->\\exp_args:NNx \\tl_gput_right:Nn ."
+        ],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\show\\use:x\\ExplSyntaxOff",
+      "tex": {
+        "text": "",
+        "messages": [
+          "> \\use:x=\\protected\\long macro:#1->\\cs_set_nopar:Npx \\l__exp_internal_tl {#1}\\l__exp_internal_tl ."
+        ],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\show\\exp_args:NNx\\ExplSyntaxOff",
+      "tex": {
+        "text": "",
+        "messages": [
+          "> \\exp_args:NNx=\\protected\\long macro:#1#2#3->\\use:x {\\exp_not:N #1\\exp_not:N #2{#3}}."
+        ],
+        "diagnostics": [],
+        "packages": []
+      }
+    }
+  ]
+}

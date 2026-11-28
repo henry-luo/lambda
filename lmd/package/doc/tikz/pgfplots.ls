@@ -526,7 +526,8 @@ fn render_polar_axis(axis_node, picture) any^ {
     let curves = render_polar_series(series_list, 0, center_x, center_y,
         radius_px, max_radius, [])^
     let total_height = height + title_band;
-    <div class: "tikz-axis tikz-polar-axis",
+    // Validation statements contribute null to functional blocks (S2.5.3v3).
+    return <div class: "tikz-axis tikz-polar-axis",
         style: "position:relative;display:inline-block;width:" ++ string(width) ++
             "px;height:" ++ string(total_height) ++ "px;vertical-align:bottom;",
         <svg xmlns: "http://www.w3.org/2000/svg", width: width,

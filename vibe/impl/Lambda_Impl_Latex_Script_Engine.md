@@ -34,6 +34,716 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Power implementation installed, verification in progress:** The staged
+  source-derived fixed-point path below is installed in `fp.ls` and
+  `fp_fixed.ls`; its logarithm and exponential tables are generated from the
+  bundled source by `utils/generate_latex_fp_constants.py --check`. The new
+  fixture compares 628 finite expressions against TeX Live and 16 public
+  expansion cases against the retired native engine; its initial focused
+  GTest and three trig regressions pass with four explicit domain/range guard
+  checks (`installed-power-focused-gtest.out`). Interpreter forced-GC passes
+  the updated test (`installed-power-interp-gc.out`); the JIT forced-GC run
+  passes the finite and expansion cases before the guard checks were added
+  (`installed-power-jit-gc.out`). The wider native ±10000 exponent domain and non-finite/domain
+  diagnostics remain unsupported (S1.8, S4.6.2, D10.2.2v2).
+
+- **Large-angle trig integrated:** The exact-integer reduction described below
+  is now installed in `fp.ls`, with the pi/2 constant checked by
+  `utils/generate_latex_trig_constant.py --check`. The new native-backed
+  extreme fixture covers 88 numeric and 12 TeX expansion cases. The trig and
+  tangent goldens now expect the previously guarded `1e35` cases to succeed;
+  the timed-out large-trig and three blank/empty token-list fixtures use
+  independent native captures and retain their other checks. Seven focused
+  GTests pass (`installed-trig-promotion-gtest.out`); the new extreme fixture passes
+  interpreter and JIT GC stress with poisoning
+  (`installed-trig-extreme-{interp,jit}-gc.out`). Public TeX input also
+  matches the native `sin(1e35)` result (`trig-public-installed.out`).
+  The completed 427-case corpus below predates this integration. The fresh
+  428-case run with the same two-worker, one-script configuration completed
+  with 378 passes and 50 failures, all status 124 timeouts; completed scripts
+  had no reported golden mismatches (`post-trig-tex-corpus.out`). The run
+  shared the host with other focused work, so the timeout count is not a clean
+  performance measurement (S1.8, S4.6.2, D10.2.2v2).
+
+- **Blank token-list fixture:** The older corpus timed out
+  `test_tex_script_expl3_tl_blank`. Its 17 expansion cases now have native
+  captures in a temporary draft that reuses the immutable preload while
+  retaining the existing document checks. The current engine matches the
+  unchanged golden in both direct and 60-second batch runs
+  (`tl-blank-native.json`, `tl-blank-candidate.out`, `tl-blank-batch.raw`)
+  (S1.8, D10.2.2v2). The draft is now installed. A 19-case native-backed draft for the
+  analogous `tl_blank_v` fixture also matches its golden
+  (`tl-blank-v-native.json`, `tl-blank-v-candidate.out`), including in the
+  60-second batch runner (`tl-blank-v-batch.raw`). The analogous 31 `tl_empty`
+  native captures and draft also match their unchanged golden in direct and
+  60-second batch runs (`tl-empty-native.json`, `tl-empty-batch.raw`). Both
+  are now installed; the focused post-install GTests are running.
+
+- **Power logarithm trace:** TeX Live's internal logarithm conditions the
+  significand before computing a six-limb fixed-point ratio. Twelve traced
+  inputs around one show that a simple ideal-division model is off by one
+  unit in the last limb for two inputs. A staged source-derived long-division
+  model uses the source's input conditioning, shortened leading divisor, and
+  biased quotient estimates; it matches all six ratio limbs in 216 TeX Live
+  traces across the significand range and multiplier boundaries. The Lambda
+  model passes the same captured cases in both
+  interpreter and JIT with forced collection and freed-memory poisoning
+  (`fp-ln-division-{interp,jit}-gc.out`; the recorded tier runs cover the
+  first 168 cases). The staged specialized squaring and logarithm series also
+  match those 168 traces (`fp-ln-{square,series}-{interp,jit}-gc.out`), and
+  the combined significand logarithm matches all 216 traces in both tiers
+  (`fp-ln-significand-{interp,jit}-gc.out`). The power exponent's fixed-point
+  scaling matches the same 216 traces, including base decimal exponents from
+  -200 through 200 (`fp-pow-exponent-{interp,jit}-gc.out`). The staged model
+  now matches TeX Live through the exponential's final fixed-point value for
+  324 cases, including 48 earlier intermediate-boundary cases and 60 new
+  final-boundary candidates, in both
+  tiers under forced GC (`fp-pow-fixed-{interp,jit}-gc.out`). A separate
+  high-precision reciprocal and 16-digit rounding comparison matches all 324
+  final outputs (`check-pow-final-rounding.py`), whose closest intermediate
+  is still 0.00027238 output ulps from a midpoint. Direct low-level probes
+  establish that fixed-to-float ties round upward, and that TeX Live's
+  reciprocal differs from exact reciprocal plus half-up rounding for 69 of
+  240 adversarial fixed-point inputs (`check-fp-conversion-boundaries.py`).
+  The reciprocal is a source-level extended-precision estimate and correction,
+  traced in `texlive-output/fp-inverse-boundary-trace.log`. Its staged
+  specialized multiplication helper matches 375 TeX Live random and edge
+  probes (`fp-mul-short-{interp,jit}-gc.out`); the full staged reciprocal,
+  including normalization and float conversion, now matches 446 TeX Live
+  adversarial, random and boundary probes in both tiers under forced GC
+  (`fp-reciprocal-final-{interp,jit}-gc.out`). With that conversion, the
+  staged positive-base power path matches all 324 TeX Live final outputs in
+  both tiers (`fp-pow-full-{interp,jit}-gc.out`). A separate staged parser
+  now uses the fixed-point model, preserves negative-zero odd powers and
+  reports domain and range cases as unsupported. It matches 400 independent
+  TeX Live expressions, including negative bases with integer exponents, in
+  interpreter and JIT forced-GC runs (`fp-pow-parser-fuzz-{interp,jit}-gc.out`).
+  Of the earlier 324 traces, 228 pass through this parser; the remaining 96
+  encounter the existing ±200 input/result range limits (90 results and six
+  inputs). A 40-case public-expansion comparison passed in JIT with forced GC
+  (`fp-power-public-jit-gc.out`). The tested source-derived model has since
+  been integrated; staged copies remain under
+  `temp/tex-compat-goal/engine_power/` for investigation. Domain handling,
+  native-range support and performance remain open.
+  The original trace and comparison are in
+  `temp/tex-compat-goal/texlive-output/pow-conditioning-trace.log` and
+  `temp/tex-compat-goal/analyze-ln-t-traces.out` (S4.6.2).
+
+- **Initial floating-point power investigation, 2026-11-27 (historical):**
+  Native expl3 supported `^` while the Script expression parser rejected it. Native
+  captures establish right association (`2^3^2 = 512`), tighter binding than
+  a leading minus (`-2^2 = -4`), fractional and negative exponents, and
+  `0^0 = 1`. A separate prototype in `temp/tex-compat-goal/engine_power/fp.ls`
+  initially implemented that precedence and finite power results using decimal
+  power with a rounding interval. It was superseded by the source-derived
+  implementation above; domain and non-finite cases remain unsupported.
+  Eleven finite cases match the native captures, and all 12 previously tested
+  compound trig expressions now match (`fp-power-reference-experiment.out`,
+  `fp-power-mixed-reference.ls`). The other two captured inputs, negative-base
+  fractional power and zero to a negative power, are guarded and do not claim
+  native diagnostic parity. An extreme underflow probe showed that the decimal
+  runtime can return zero before range handling; the prototype now guards that
+  path rather than treating every such result as proven. Native returns `0`
+  without diagnostics for `0.5^1e200`, so this guard is a known compatibility
+  gap (`fp-underflow-native.json`, `fp-power-extreme-probe-v2.out`). The updated
+  native range probes also produce finite results for `10^-201`, `10^-300`,
+  `0.5^1000`, and `2^1000` without diagnostics
+  (`fp-power-range-native.json`), beyond Script's current ±200 magnitude
+  guard. The bundled format declares exponent bounds of 10000; widening that
+  range and reproducing its overflow/underflow semantics remain open work.
+  The updated
+  full-current overlay passes 31 finite evaluator and 12 expansion checks and
+  preserves three domain/underflow guards (`fp-power-regression-public-v3.out`).
+  All 20 additional precedence, sign and fractional cases match native
+  (`fp-power-extra-reference.out`); 100 additional 240-digit decimal
+  comparisons also agree (`fp-power-independent-compare.out`). The combined
+  overlay passes the selected cases with interpreter and JIT GC stress
+  (`fp-power-public-{interp,jit}-gc.out`).
+  **The decimal-power prototype was not installed:** a precision comparison found four
+  silent native mismatches for bases near one raised to large powers, plus one
+  guarded finite result (`fp-power-precision-reference.out`). For example,
+  native returns `2.718281828459045` for `1.000000000000001^1e15`, while
+  direct decimal power returns `2.718281828459044`. Bundled expl3 computes
+  powers through its fixed-point logarithm and exponential path
+  (`__fp_pow_npos_aux:NNnww`, `__fp_ln_significand:NNNNnnnN`), so direct
+  decimal power alone does not establish compatibility. Reproduce that path
+  or prove a domain on which results coincide; do not weaken these cases.
+  The public `ln` and composed `exp(y*ln(x))` results cannot simply substitute
+  for that internal path: for `x=1.000000000000001`, `y=1e15`, native `ln(x)`
+  is `0.000000000000001000000002`, the composition is `2.718281833895609`,
+  and native `x^y` is `2.718281828459045` (`fp-power-ln-native.json`).
+  Another 24 ordinary randomized powers match native
+  (`fp-power-random-reference.out`), but do not resolve the near-one failures.
+  TeX Live 2025 independently reproduces the native near-one outputs for
+  `1.0000000001^1e10`, `0.9999999999^1e10` and the corresponding `1e15`
+  cases, as well as right associativity (`power-texlive-reference.out`). This
+  confirms the difference is also present in the external expl3 reference,
+  not just the retired native engine (S1.8, D10.2.2v2).
+  Its public `ln(1.0000000001)` is `0.000000000099999999995002`, while
+  `exp(1e10*ln(1.0000000001))` gives `2.718281828323186` and the power gives
+  `2.718281828459045` (`power-path-texlive.out`); the internal fixed-point
+  power calculation therefore cannot be replaced by composing public `ln`
+  and `exp` even when both are implemented.
+  A TeX Live sweep for `(1 ± 10^-n)^(10^n)`, `n=2..15`, confirms
+  nontrivial fixed-point effects: simple rounding of a high-precision logarithm
+  to 20 decimal places still disagrees for multiple cases
+  (`pow-conditioning-texlive.out`, `pow-fixed-hypothesis.py`). This rules out
+  substituting that simplified model without a source-faithful derivation.
+  Tracing shows the 20-place rounding occurs after multiplying the logarithm
+  by the exponent significand; that ordering matches the near-one sweep and
+  120 ordinary probes but fails 21 of 48 inputs selected near its intermediate
+  rounding boundary (`pow-scaled-fixed-hypothesis.py`,
+  `pow-texlive-near-boundary-compare.py`). For one such input, TeX's internal
+  `-ln(x/10)` is `2.302585092403579684192315`, about `1.5e-24` below a
+  high-precision value. Subtraction from its fixed-point ln(10) and subsequent
+  multiplication put the 20-place result one unit below the simplified model
+  (`texlive-output/pow-boundary-trace.log`). This identifies the upstream
+  fixed-point logarithm and its cancellation as required parts of a faithful
+  port, not an arbitrary threshold to special-case.
+  A direct TeX Live probe of `\__fp_fixed_mul:wwn` supplies a second concrete
+  constraint: across 240 deterministic six-limb operand pairs, its result
+  differed from the exact product floor by -3, -2, -1, 0, or +1 low units
+  (counts 1, 29, 132, 75, and 3 respectively). Thus neither ordinary exact
+  multiplication nor a single generic rounding mode reproduces the helper
+  (`fixed-mul-probes.tex`, `fixed-mul-probes-analysis.out`); its source-level
+  carry and division sequence needs independent porting and tests before use
+  in power (S1.8, S4.6.2, D10.2.2v2).
+  A temporary Script port of that carry sequence now matches the 240 random
+  products and 113 edge/carry probes, including the source's unusual overwide
+  limb packing (`fp-fixed-mul-{reference,edge-reference}-{interp,jit}-gc.out`).
+  Its companion add and ordered-subtract model matches 200 pairs for each
+  operation (`fp-fixed-add-reference-v2.out`). Reversing the subtraction
+  operands makes TeX Live's internal helper fail rather than produce a signed
+  result (`fixed-sub-negative.out`), so the staged helper explicitly rejects
+  that out-of-domain input. These building blocks were later assembled into
+  the fixed-point logarithm and power operation described above.
+  Previously supported results are unchanged in
+  150 deterministic comparisons (`fp-power-fuzz-compare.out`). The original
+  decimal-power prototype was not installed; the source-derived replacement
+  and its remaining limitations are recorded above (S1.8, S4.6.2, D10.2.2v2).
+
+- **Large-angle trig investigation, 2026-11-27:** The installed evaluator
+  guards `sin(1e35)` because its split pi approximation cannot prove the
+  rounded result. A temporary prototype retains the existing fast reduction,
+  then falls back to exact integer long division against a 240-decimal-place
+  pi/2 bound. The prototype's uncertainty check covers the truncated constant
+  and decimal conversion; the same series and final interval check serve both
+  reductions. The scaled constant is truncated below pi/2; its 240 places
+  leave 40 places beyond the largest allowed input exponent, and the reduction
+  interval also bounds decimal division error. It matches 15 existing trig captures, eight larger-angle
+  captures, six near the evaluator's `1e200` magnitude limit, and 18
+  deterministic signed sin/cos/tan captures from the retired native engine
+  (`trig-v4-reference.out`, `trig-bigint-large-reference.out`,
+  `trig-limit-reference-experiment.out`, `trig-random-reference-experiment.out`)
+  (S1.8, S4.6.2, D10.2.2v2). TeX Live 2025 independently agrees with the
+  six near-limit trig captures (`trig-texlive-reference.out`). A separate
+  300-digit decimal reference calculation
+  agrees on 162 deterministic signed sin/cos/tan inputs across exponents 0–200,
+  including under interpreter and JIT GC stress
+  (`trig-independent-reference.py`, `trig-independent-{interp,jit}-gc.out`).
+  Twenty values chosen closest to 16-digit rounding boundaries from that set
+  also match independent native captures in interpreter and JIT GC-stress runs
+  (`trig-boundary-{interp,jit}-gc.out`). The combined current-alias overlay
+  passes all 52 native numeric and 12 expansion checks
+  (`trig-large-regression-boundary.out`).
+  Of 12 further compound-expression probes, 11 match native; the twelfth,
+  `sin(1e150)^2+cos(1e150)^2`, exposes a separate existing gap: native returns
+  `1` while the Script floating-point expression parser reports unsupported
+  for exponentiation (`trig-mixed-reference-experiment.out`). This is not a
+  passing result and needs a separate parser and semantics investigation.
+  Fourteen small-angle and signed-zero checks match
+  the installed evaluator (`trig-small-equality.ls`); 150 further deterministic
+  small and medium input comparisons have no changes for previously supported
+  results (`trig-fuzz-compare.out`). An early prototype had
+  a `sin(1e-199)` regression from an overlarge absolute error bound, corrected
+  before these results. The six large cases also match through both constructor
+  modes of the temporary TeX expansion path
+  (`trig-large-expansion-experiment.out`). Direct evaluator tests passed in
+  interpreter and JIT with GC every 1,000 allocations and poisoning
+  (`trig-v4-limit-{interp,jit}-gc.out`), as did the 18 deterministic
+  randomized cases (`trig-random-{interp,jit}-gc.out`). Full expansion interpreter stress
+  and JIT stress also pass (`trig-large-expansion-{interp,jit}-gc.out`). A
+  staged regression consolidates 32 source-bound numeric references and 12
+  expansion cases (`trig-large-regression.out`). An isolated overlay combining
+  the current full alias catalog with the trig prototype also passes those
+  cases (`trig-large-regression-public.out`). The same 44-case regression
+  passes the overlay interpreter and JIT with forced GC and poisoning
+  (`trig-public-{interp,jit}-gc.out`).
+  Public TeX input now emits
+  native `0.9575238006716052` for `sin(1e35)` without diagnostics
+  (`trig-public-probe.out`). The existing trig fixture on that overlay has no
+  failures and no guarded cases (`trig-current-overlay.out`); its golden is
+  now updated. Independent captures for the
+  analogous 18-case tangent fixture preserve the existing installed-engine
+  golden (`tan-candidate-control.out`); the full-current overlay matches all
+  native outputs and has no guarded cases (`tan-candidate-overlay.out`). Its
+  golden is now updated. An independent integer
+  Machin-series calculation verifies
+  the 240-place pi/2 constant with 30 guard digits and a conservative truncation
+  bound (`verify-trig-quarter.py`). Two short paired timings on an archived release
+  binary for 40 ordinary trig expressions matched output and ranged 0.09–0.12s
+  (`trig-perf-results.json`); they do not qualify current-release performance.
+  The refined implementation is now installed; post-install focused tests and
+  full-path GC stress pass. Current-release performance and a new
+  full corpus remain to be qualified.
+
+- **Further trig checks:** A 36-case native comparison selected near quadrant
+  boundaries and poles matches the staged evaluator in both GC-stressed tiers
+  (`trig-adversarial-{interp,jit}-gc.out`). Together with prior captures, the
+  combined overlay passes 88 numeric and 12 expansion cases
+  (`trig-large-regression-adversarial.out`). A native-backed draft for the
+  timed-out 20-case `trig_large` fixture matches its unchanged golden in the
+  60-second batch runner (`trig-large-existing-batch.raw`). Both captures
+  overlapped the current corpus, so its individual wall times include this
+  host load (S1.8, S4.6.2, D10.2.2v2).
+
+- **Current corpus completed:** The integrated engine's 427-case
+  `latex_test_tex_script*` GTest run completed with 373 passes and 54 failures,
+  all reporting timeout status 124 (`current-tex-corpus.out`). It used two
+  workers and one script per process (`AST_TUNE_BATCH_CHUNK=1`) with the normal
+  per-script timeout. Some independent native captures overlapped the run, so
+  wall times include that host load. This qualifies the engine state before the
+  pending trig change; it is not a passing full corpus. Investigate the timeout
+  fixtures and retain the individual results (S1.8, D10.2.2v2).
+
+- **Shipout fixture, 2026-11-27:** The older overlay corpus timed out
+  `test_tex_script_shipout`. Its 21 expansion cases now have independent,
+  source-bound captures from the retired native engine; a temporary draft
+  reuses the immutable expl3 preload after the first case and retains the
+  existing message, document-tree, and local-resource checks. Both direct and
+  60-second batch runs against the current engine match the unchanged golden
+  (`shipout-native-auto.json`, `shipout-candidate.out`, `shipout-batch.raw`)
+  (S1.8, D10.2.2v2). The compact capture and fixture are now installed.
+
+- **Optional primitive aliases, 2026-11-27:** The initial catalog contained
+  only Script's built-in primitive names, missing caller-defined sources in
+  expl3's optional declaration phase. For a kernel defining
+  `\XeTeXcharclass`, native output was `identity=Y value=macro:->sentinel`
+  while the integrated Script engine reported `identity=N value=undefined`.
+  The generator now records all 531 unconditional and 468 conditional source
+  declarations in source order; initialization skips undefined conditional
+  sources and applies later defined copies last. The corrected engine matches
+  native for the original case, for an absent source with a preexisting
+  destination, and for two defined sources targeting the same alias
+  (`native-optional-{primitive,absent,order2}.out`,
+  `candidate-optional-{primitive-after,absent,order2}.out`)
+  (S1.8, D10.2.2v2). A separate native comparison confirms that an
+  unconditional alias copies a caller-defined `\beginL` and overwrites a
+  preexisting `\tex_endL:D` when `\endL` is undefined
+  (`native-unconditional-primitive.out`, `candidate-unconditional-primitive.out`);
+  the expanded fixture passes (`full-catalog-unconditional-gtest.out`). The earlier 896-check audit remains unchanged
+  (`integrated-audit-all.out`). The LuaTeX initialization guard now observes
+  aliases captured from their source controls; its source-defined branch
+  reports the existing unsupported result (`candidate-lua-source.out`).
+  `test_tex_script_expl3_optional_aliases` records these cases, and all four
+  focused GTests pass (`full-catalog-focused-gtest.out`). Two paired timings
+  of the identity fixture with an archived release binary and identical output
+  measured the previous catalog at 25.46–25.67 seconds and the expanded
+  catalog at 25.53–25.63 seconds (`optional-benchmark-results.json`). These
+  fixture-level timings were taken while other checks ran and do not qualify
+  current-release or corpus-wide performance. The selected conditional-copy
+  and ordering cases pass interpreter and JIT GC stress with poisoning
+  (`optional-alias-{interp,jit}-gc.out`). Nine mixed expl3 GTests also pass
+  against this expanded catalog (`full-catalog-mixed-gtest.out`). Six altered
+  catalog-source probes are rejected (`check-alias-generator.py`). A different attempted native
+  ordering probe using `\filesize` failed during native initialization with
+  20 diagnostics (`native-optional-order.err`); the valid ordering evidence
+  uses the protrusion controls instead.
+
+- **Primitive aliases integrated, 2026-11-27:** The fourth-overlay alias
+  implementation and the generated primitive alias catalog are now used by
+  the package engine. They capture the source control meanings at bootstrap,
+  preserve global and local assignments and the token-list mapping guard, and
+  implement the source-derived engine-dependent rebindings. The new
+  `test_tex_script_expl3_alias_capture` fixture covers native-checked
+  destination conflicts, redefined primitives, character and register
+  meanings, and the mapping guard (S1.8, D10.2.2v2). The existing primitive
+  identity and alias-capture fixtures pass against the integrated engine
+  (`integrated-identity.out`, `integrated-alias-capture.out`); nine focused
+  public-path GTests pass (`integrated-scope-gtest.out`). The macro and
+  register source-redefinition cases in both constructor modes pass the
+  interpreter and JIT with GC forced every 1,000 allocations and poisoning
+  (`integrated-alias-{interp,jit}-gc.out`). A public
+  TeX-input probe now reports
+  `Y/Y` for the defined status and identity of `\tex_ifnum:D`, where the
+  earlier installed engine reported `N/N` (`public-integrated.out`)
+  (S1.8, D10.2.2v2). The identity regression now includes that case and its
+  18 checks pass (`integrated-identity-expanded.out`). Nine mixed expl3
+  GTests also pass (`integrated-mixed-gtest.out`). The old first-overlay
+  corpus below is an earlier revision
+  and does not qualify this integration.
+
+- **Sequence membership fixture, 2026-11-27:** The older overlay corpus
+  timed out `test_tex_script_expl3_seq_in`. A temporary draft replaces the
+  repeated migrated-parser comparisons with 47 source-bound retired-native
+  captures and reuses the immutable expl3 preload after the first case. It
+  retains the three document-tree checks, the local-resource check, and the
+  unusual-kernel case. The installed engine matches the unchanged golden
+  (`seq-in-native.json`, `seq-in-candidate.out`); the fourth-overlay batch
+  run also matches within the 60-second limit (`seq-in-batch.raw`)
+  (S1.8, D10.2.2v2). The capture and fixture are now installed.
+
+- **Older overlay corpus completed:** Session `35577` ended with 360 passes
+  and 65 failures among 425 tests (`overlay-tex-corpus.out`): 63 timed out,
+  one trig fixture exited with `tex-unsupported-primitive: fp sin`, and the
+  primitive-identity golden changed from 16 to 18 cases while that older run
+  was active, causing its output mismatch. The current 18-case identity test
+  passes separately. The trig test unconditionally calls the migrated public
+  parser even for a case that the fixture expects to be guarded; independent
+  native captures now replace that self-comparison, retaining the same guard
+  and golden; the installed trig fixture passes (`trig-native.json`,
+  `installed-trig-gtest.out`). Seven independently captured timeout-fixture
+  drafts also passed a current-engine batch run and are installed; all seven
+  actual fixture GTests pass (`current-drafts-batch.log`,
+  `installed-recovery-gtest.out`). The integrated
+  alias implementation postdates this older corpus and requires its own corpus
+  and performance qualification (S1.8, D10.2.2v2).
+
+- **Round fixture timeout, 2026-11-27:** The older overlay corpus timed out
+  `test_tex_script_expl3_round`. A temporary draft reuses the immutable expl3
+  preload for 17 of its 18 numeric cases and compares their source-bound output
+  and diagnostics against independently captured retired-native results;
+  the first case still exercises a cold preload. It retains the existing
+  unsupported-case and two document-tree checks. The unchanged golden matches
+  against the installed engine and the fourth overlay (`round-native.json`,
+  `round-candidate{,-v4}.out`); the fourth-overlay batch run also completes
+  within its 60-second limit and matches the golden (`round-batch.raw`)
+  (S1.8, D10.2.2v2). The capture and fixture are now installed.
+
+- **Captured source meanings, 2026-11-27:** A custom kernel that redefines
+  `\inputlineno` to `\relax` before expl3 initialization exposed another
+  staged alias defect: the hardcoded bootstrap values replaced the captured
+  source meaning. The temporary initializer now carries the captured snapshot
+  through bootstrap and clears it afterwards. The native reference and staged
+  result both report `identity=Y relax=Y`. A second native comparison with
+  `\inputlineno` redefined as a macro also agrees on identity and printed
+  meaning (`native-source-macro.out`, `candidate-source-macro.out`). The
+  896-check standard audit and
+  repeat-bootstrap probe remain unchanged (`native-source-redefined.out`,
+  `candidate-source-redefined-after.out`, `candidate-audit-v12.out`)
+  (S1.8, D10.2.2v2). Eight existing public-path scope, assignment and
+  recovery fixtures pass against the resulting fourth overlay
+  (`overlay-v4-scope-gtest.out`). The expanded six-case alias-conflict matrix
+  passes interpreter and JIT with GC every 1,000 allocations and poisoning
+  (`alias-conflict-v4-{interp,jit}-gc.out`); the two constructor modes of the
+  macro-redefinition probe also pass in both tiers under the same GC settings
+  (`alias-source-macro-{interp,jit}-gc.out`).
+  Further native comparisons verify that a source redefined by `\chardef`
+  preserves both identity and numeric value, and that a source redefined by
+  `\countdef` preserves identity and register access (`native-source-char.out`,
+  `candidate-source-char.out`, `native-source-register-safe.out`,
+  `candidate-source-register-safe.out`). After advancing that register through
+  the original control, both native and Script aliases read the new value 28
+  (`native-source-register-mutated.out`, `candidate-source-register-mutated.out`).
+  The character case also passes both
+  constructor modes under the same interpreter and JIT GC stress
+  (`alias-source-char-{interp,jit}-gc.out`). An initial register probe used
+  count 42, which native initialization overwrites; the Script path reports
+  the `expl3 register initialization` guard. The reference comparison uses
+  count 300 instead; its two constructor modes also pass interpreter and JIT
+  under the same GC stress (`alias-source-register-{interp,jit}-gc.out`)
+  (S1.8, D10.2.2v2).
+  This staged revision postdates the running
+  older overlay corpus and is not yet installed.
+
+- **Primitive alias conflicts and group scope, 2026-11-27:** A custom kernel
+  that had already bound `\tex_ifnum:D` to `\relax` exposed a prototype
+  defect: native expl3's first global primitive copy replaces that binding,
+  while the lazy map previously left the old definition in precedence. The
+  staged initializer now replaces conflicting destinations on its first run
+  and preserves caller changes on repeats. A related conflict on
+  `\tex_let:D` initially lost the existing token-list source-mapping guard;
+  captured primitive meanings now retain that guard through a shared constant
+  (`native-alias-conflict.out`, `candidate-alias-conflict-v2.out`,
+  `native-tex-let-conflict.out`, `let-guard-{before,v2}.out`).
+  The first bulk version also failed to update saved group definitions for
+  global primitive copies. The staged revision shares a bulk global-assignment
+  helper with ordinary global assignment, while leaving the format's local
+  rebindings local and applying its explicitly global clock and matched-shipout
+  bindings globally. A direct group-state probe now retains the global alias
+  after group closure, and a separate local-rebinding probe restores the global
+  value after closure. TeX Live reproduces the corresponding global and local
+  assignment behavior (`group-alias-{before,after}.out`,
+  `group-alias-reference.out`, `group-alias-local{,-reference}.out`)
+  (S1.8, D10.2.2v2). Both group probes also match their expected output in
+  interpreter and JIT with GC forced every 1,000 allocations and poisoning
+  (`group-alias{-local}-probe-{interp,jit}-gc.out`). The attempted full native
+  preload across an open group was interrupted after a minute and is not a
+  native parity result. The standard
+  896-check audit and repeat probe remain unchanged (`candidate-audit-v11.out`,
+  `candidate-repeat-v8.out`). Twelve selected mixed-path batch fixtures pass
+  (`staged-batch-global-v2.log`), and the native-backed alias-conflict matrix
+  passes both interpreter and JIT with GC every 1,000 allocations and poisoning
+  (`alias-conflict-{interp,jit}-gc.out`). Seven existing public-path group,
+  assignment and preload-guard fixtures also pass with this revision in a
+  third isolated overlay (`overlay-v3-scope-gtest.out`). Three interleaved
+  release JIT pairs for the unchanged 16-case identity fixture had identical
+  output: control 24.24–24.37s, staged 24.31–24.51s
+  (`benchmark-global-v3-results.json`). These are fixture-level measurements
+  on an archived host while the older corpus ran, not a current-release or
+  corpus-wide performance qualification. This revision is staged only and
+  postdates the running overlay corpus.
+
+- **Non-pdfTeX PDF-map aliases, 2026-11-27:** When both
+  `\tex_pdftexversion:D` and `\tex_luatexversion:D` are undefined, bundled
+  expl3 copies `\tex_undefined:D` into its two PDF-map aliases. The overlay
+  omitted this condition and incorrectly left both aliases defined in a
+  custom non-pdfTeX kernel. The newer temporary prototype and generated
+  catalog now implement the source-derived fallback. It matches the retired
+  native reference both when `\tex_undefined:D` is undefined and when it is a
+  caller-defined macro; the standard 896-check audit and repeat-bootstrap probe
+  remain unchanged (`native-no-pdftex.out`, `candidate-no-pdftex-after.out`,
+  `native-no-pdftex-defined.out`, `candidate-no-pdftex-defined.out`,
+  `candidate-audit-v9.out`, `candidate-repeat-v6.out`) (S1.8, D10.2.2v2).
+  Four combinations of the two fallback cases and constructor modes also
+  pass in interpreter and JIT with GC every 1,000 allocations and poisoning
+  (`pdfmap-matrix-{interp,jit}-gc.out`). A second, separate overlay containing
+  this revision passes three public-path end, integer-comparison and array
+  override GTests (`overlay-v2-focused-gtest.out`). This revision postdates the
+  running overlay corpus and is not installed; it still needs full integration
+  and every-allocation GC qualification.
+
+- **Two corpus timeout investigations, 2026-11-27:** The overlay corpus timed
+  out `test_tex_script_chardef_origin` and `test_tex_script_engine_names` at
+  60 seconds. Both fixtures repeatedly cold-load the engine and compare with
+  the already migrated public TeX parser. Temporary drafts retain the existing
+  document/tree and local-resource checks, reuse the existing expl3 preload,
+  and compare respectively 25 and 33 source-bound text expansions against the
+  retired native engine. Both drafts complete under the original batch limit
+  and match their unchanged goldens (`chardef-origin-auto-batch.out`,
+  `engine-names-candidate-v2-batch.out`) (S1.8, D10.2.2v2). The native
+  capture adapter was corrected to follow the retired public adapter's rule
+  of omitting a zero diagnostic line; before that correction two engine-name
+  records differed only in that field. Both captures and fixture changes are
+  now installed. The `\c_zero_int` native LaTeX-tree oracle
+  limitation recorded below is unchanged; no native tree parity is claimed.
+  The independently timed-out `test_tex_script_expl3_tl_count` has a similar
+  temporary draft with 37 source-bound native captures and the unchanged
+  golden (`tl-count-candidate-batch.out`). All captured message arrays are
+  empty, so its native message comparison preserves the fixture's original
+  empty-message check. Its document-digestion checks remain unchanged; the
+  capture and fixture are now installed.
+  A subsequent overlay `test-batch` run matched all three draft goldens with
+  the staged engine also serving their public-parser calls
+  (`timeout-drafts-overlay-batch.out`).
+  The timed-out `test_tex_script_expl3_nx_meaning` now has a fourth temporary
+  draft. Its 32 generated sources, including the `\show` cases, are captured
+  from the native engine and checked against the unchanged golden. Both the
+  installed-engine and overlay batch drafts pass (`nx-meaning-candidate-batch.out`,
+  `nx-meaning-overlay-batch.out`). The capture and fixture are now installed.
+
+- **Reproducible alias catalog, 2026-11-27:**
+  `utils/generate_latex_primitive_alias_catalog.py` now generates
+  `lambda.doc.latex.tex_engine.primitive_alias_catalog` from the bundled expl3
+  declarations and the Script primitive list. It validates the audited
+  inventory and selected rebinding, clock, shipout and tracing-font shapes
+  rather than silently accepting changes to those shapes (S1.8, D10.2.2v2). The
+  generated initial alias entries match those used in the staged overlay; the
+  newer generated metadata includes the PDF-map fallback above;
+  `--check` accepts the generated file and rejects an altered copy, and the
+  module passes the AST compile check; four changed-source probes are also
+  rejected. The catalog is not imported by the
+  installed engine yet; corpus and remaining qualification continue below.
+
+- **Public-path alias overlay, 2026-11-27:** A temporary `LAMBDA_HOME` overlay
+  copies the staged TeX engine and links the remaining shipped package tree;
+  it leaves the checkout's engine unchanged. On the same public `parse` input,
+  the installed engine reports `N/N` for the presence and identity of
+  `\tex_ifnum:D`, while the overlay reports the native-expected `Y/Y`.
+  Nineteen existing focused GTests pass with the overlay, including their
+  public-parser calls (`overlay-focused-gtest.out`). The public probe also
+  matches in interpreter and JIT with collection forced every 1,000 allocations
+  and poisoning (`public-overlay-{interp,jit}-gc.out`) (S1.8, D10.2.2v2).
+  A two-worker overlay corpus run selecting 425 discovered `tex_script`
+  fixtures is active in exec session `35577`; poll that session rather than
+  restarting it. At the last inspection, 277 records had completed, with twenty-nine
+  60-second timeouts; the final result and golden comparisons are pending.
+  Its uncompleted output is `overlay-tex-corpus.out`. This
+  overlay does not install the prototype or qualify LuaTeX, full-corpus
+  behavior, every-allocation GC or current-release performance.
+
+- **Integer-comparison fixture recovery, 2026-11-27:** The existing
+  `test_tex_script_expl3_int_compare_expr` repeatedly performed 44 cold Script
+  preloads and compared each result to the already migrated public TeX parser.
+  It timed out at 60 seconds in both the staged batch and the installed-engine
+  control, even with the separate GC stress job stopped. The fixture now
+  compares every source, reconstructed text, message and diagnostic against
+  44 source-bound captures from the retired native engine, reusing the shared
+  immutable expl3 preload while retaining one fresh first case. Its three
+  document-digestion checks and local-resource check remain in place; the
+  golden is unchanged (S1.8, D10.2.2v2). The normal, interpreter and JIT
+  harness runs pass (`installed-int-compare.out`, `int-compare-interp.out`,
+  `int-compare-jit.out`); the original failed runs remain recorded in
+  `control-int-compare-{gtest,idle}.out`. Captures and the rebuilt native
+  oracle are documented under `temp/tex-compat-goal/`; the retained reference
+  is `test/lambda/latex/fixtures/tex_expl3_int_compare_native.json`.
+  The JIT run with GC forced every 1,000 allocations and poisoning timed out
+  at the original 60-second limit (`int-compare-jit-gc.out`), so this full
+  fixture's stress configuration remains unqualified.
+  After this fixture repair, a staged `test-batch --no-log --timeout=60` run
+  passed all 12 selected native, integer, sequence, token-list, property,
+  regex, key, constructor, and preload-guard fixtures (`staged-batch.raw`).
+  Those staged fixtures still use the installed public parser for their public
+  API comparisons, so this is not full production-path qualification.
+
+- **Staged alias integration, 2026-11-27:** Six existing native-backed expl3
+  fixtures were copied under `temp/tex-compat-goal/`, with their engine imports
+  directed to the prototype. All six match their goldens in direct CLI runs
+  with the test harness's `--no-log` setting and 60-second limit
+  (`staged-suite.py`, `*.staged-nolog.out`). Public `parse` calls in those
+  fixtures still use the installed engine, so these are mixed-path checks, not
+  a production migration or full test-batch qualification (S1.8, D10.2.2v2).
+  The initial direct runs without `--no-log` timed out in the end, errhelp,
+  and message fixtures; all three installed-engine controls also timed out
+  under that same setup (`*.staged.err`, `*.control.err`). The other three
+  staged fixtures passed. Both timeout sets remain failed runs; the rerun
+  uses the logging setting specified by `test/test_lambda_helpers.hpp`.
+
+- **Expl3 font tracing alias, 2026-11-27:** When `\@@hyph` exists, the
+  bundled format first copies `\tex_undefined:D` into `\tex_tracingfonts:D`,
+  then replaces it with the live `\pdftracingfonts` meaning when defined.
+  The staged alias snapshot skipped that branch. Two custom-kernel probes now
+  match the retired native engine: an undefined PDF control with a defined
+  fallback macro, and a PDF control rebound to `\relax` (S1.8, D10.2.2v2).
+  A defined `\tex_directlua:D` with no PDF tracing control reaches a LuaTeX
+  primitive-enabling path; the prototype explicitly reports it unsupported,
+  so that path is not yet compatible. Evidence:
+  `temp/tex-compat-goal/{native-font.out,candidate-font-before.out,candidate-font-after.out,native-font-defined.out,candidate-font-defined.out,native-directlua-v2.out,candidate-directlua-guard.out}`.
+  The standard alias audit and repeat-bootstrap probe remain unchanged after
+  the staged change (`candidate-audit-v8.out`, `candidate-repeat-v5.out`).
+  The 896-check audit and the defined-font custom-kernel probe both match in
+  interpreter and JIT with collection forced every 1,000 allocations and
+  poisoning (`candidate-audit-{interp,jit}-gc.out`,
+  `candidate-font-{interp,jit}-gc.out`).
+  A separate JIT font probe with collection on every allocation was stopped
+  after more than nine minutes without a result to release resources for the
+  wider fixture run. It is unqualified, not a pass or failure
+  (`candidate-font-jit-gc-every.{out,err}`).
+  Three interleaved JIT pairs of the unchanged 16-case identity fixture on an
+  archived release executable produced identical output: control 23.13–23.65s,
+  staged 23.57–23.64s (`benchmark-results.json`). This bounds only that
+  fixture on the older host, not current-host or corpus performance. This
+  branch is not installed and still needs broader integration, more demanding
+  forced-GC qualification and current release performance assessment.
+
+- **Alias bootstrap idempotence and clock checks, 2026-11-27:** Re-enabling
+  the staged lazy bootstrap after a caller changed `\tex_middle:D` restored
+  the initial `\normalmiddle` meaning, unlike the existing initializer's
+  repeat contract. The staged initializer now applies its generated overrides
+  only on the first bootstrap; the repeat probe changed from `N` to `Y`.
+  The bundled format also undefines `\tex_time:D`, `\tex_day:D`,
+  `\tex_month:D`, and `\tex_year:D` when their copied meanings do not print
+  as the matching primitive. A custom kernel using a different primitive, a
+  macro, an undefined control and `\relax` exposed the omitted rule. The
+  staged generator now extracts those checks and its output matches the native
+  reference for all four; the standard 896-check matrix is unchanged
+  (S1.8, D10.2.2v2). Evidence:
+  `temp/tex-compat-goal/{prototype.py,candidate-repeat-before.out,candidate-repeat-v2.out,native-clocks.out,candidate-clocks.out,candidate-audit-v4.out}`.
+  A further custom-kernel probe defined `\tex_undefined:D` as a macro: native
+  copies that live meaning into `\tex_time:D`, while the first staged version
+  incorrectly made it undefined. The revised staged version copies the
+  control's meaning and matches native (`native-undefined.out`,
+  `candidate-undefined-after.out`). The staged shipout branch initially
+  selected a wrapper when `\shipout` and `\CROP@shipout` shared a macro;
+  native and a TeX Live replay both retained `\@@shipout`. The source compares
+  candidate meanings to the *string spelling* of the original primitive,
+  not the current `\shipout` meaning. After correcting that comparison, the
+  staged branch matches native both for a macro-bound candidate and for a
+  candidate retaining the original primitive (`native-shipout-wrapped-v2.out`,
+  `candidate-shipout-wrapped-v3.out`, `shipout-reference-trace.out`,
+  `native-shipout-original.out`, `candidate-shipout-original.out`). These are
+  staged changes only. The 896-check standard audit and repeat-bootstrap probe
+  remain unchanged after this correction (`candidate-audit-v7.out`,
+  `candidate-repeat-v4.out`). Additional shipout cases, the font branch, complete
+  tier/GC checks and integration and performance qualification remain open.
+
+- **Kernel-dependent end alias, 2026-11-27:** The bundled expl3 source first
+  copies `\end` into `\tex_end:D` and replaces it with `\@@end` only when
+  that control is defined. Script instead installed the frozen primitive
+  unconditionally. In a custom kernel with `\@@end` undefined, the retired
+  native engine reports `\ifx\tex_end:D\end` true while Script reported
+  false; a second native probe binds `\@@end` to `\relax` and confirms that
+  expl3 copies the live meaning. The installed initializer now resolves the
+  applicable control's meaning through the shared alias helper (S1.8,
+  D10.2.2v2). The 16-case primitive identity fixture includes both altered
+  kernels and constructor modes; it and the existing end fixture pass the
+  normal harness, and the identity fixture passes interpreter and JIT.
+  Single-case interpreter and JIT probes of the undefined-kernel path pass
+  with GC every 1,000 allocations and poisoning; the full fixture timed out
+  at 60 seconds under that stress setting. Evidence:
+  `temp/tex-compat-goal/{native-no-end.out,native-relax-end.out,installed-end-gtest.out,installed-end-interp.out,installed-end-jit.out,installed-end-gc-smoke.out,installed-end-interp-gc-smoke.out,installed-end-jit-gc.out}`.
+
+- **Conditional alias prototype, 2026-11-27:** The lazy alias prototype
+  incorrectly ignored expl3's `\normalleft` branch. A custom kernel setting
+  `\normalmiddle` to `\right` made the native engine's
+  `\ifx\tex_middle:D\normalmiddle` true and the prototype's false. The
+  revised temporary generator extracts the simple guarded `\tex_let:D`
+  groups from bundled expl3, including the `\@@end` and `\normalleft`
+  branches. The custom probes now match native, including a kernel without
+  `\@@end`, and the standard 896-check audit remains unchanged
+  (`temp/tex-compat-goal/{prototype.py,native-custom.out,candidate-custom-v2.out,native-no-end.out,candidate-no-end-v2.out,candidate-audit-v3.out}`).
+  The first five bindings of the nested `\@@hyph` branch are also extracted;
+  three custom-kernel identity probes match native (`native-hyph.out`,
+  `candidate-hyph.out`). Later progress and the remaining shipout discrepancy
+  are recorded above; full operation and integration qualification remain open. The earlier prototype
+  retained unsupported guards for `\halign`, `\valign`, and three PDF
+  operations in both constructor modes (`candidate-guards.out`); a separate
+  JIT run of its operation probes passed with GC every 1,000 allocations and
+  poisoning (`candidate-operations-jit-gc.out`). These checks predate the
+  conditional revision and do not qualify that revision.
+
+- **Expanded alias inventory, 2026-11-27:** A fresh lexical inventory of
+  the bundled l3names declaration block intersected with the current Script
+  primitive catalog contains 448 distinct aliases, including control symbols.
+  One Script expansion and a TeX Live 2025 pdfLaTeX run checked presence and
+  identity against the current source control for each alias. Script differs
+  from TeX Live on 427 presence checks and 417 identity checks; the reference
+  defines all 448. This wider TeX Live comparison is not an archived-native
+  parity result and does not establish execution support. The bundled kernel
+  probe finds `\@@end` defined and `\@@input`, `\@@hyph`, `\@@shipout`,
+  `\orieveryjob`, `\oripdfoutput`, `\normalend`,
+  `\normalitaliccorrection`, and `\normalleft` undefined. The source applies
+  conditional rebinding after the catalog; a bulk implementation must retain
+  the meanings copied at initialization and account for those branches
+  (S1.8, D10.2.2v2). Reproducible audit inputs and output are in
+  `temp/tex-compat-goal/{audit.py,aliases.json,aliases.tex,aliases-console.txt,audit.ls,audit.out,bindings.ls,bindings.out}`.
+  The native oracle was rebuilt from input revision
+  `aecf1459731cb18c29297f1db9339686bb59f95c`, using the current bundled expl3
+  sources and release support libraries (`native-oracle.cpp`, `native-src/`).
+  It differs from Script on 426 presence and 426 identity checks and from
+  TeX Live on ten entries (`native-audit.out`). A temporary lazy snapshot
+  prototype under `engine/` matches all 896 native presence and identity
+  checks in both interpreter and JIT, and twelve combined execution, `csname`,
+  scope, `let`, undefined assignment, and source-name redefinition probes
+  match native messages
+  (`candidate-audit.out`, `candidate-operations-v2.out`,
+  `native-operations-v2.out`). Its 448 `\meaning` probes match except ten PDF
+  primitives grouped under shared native codes (`candidate-meanings.out`,
+  `native-meanings.out`). TeX Live's 448-meaning matrix agrees with the
+  prototype on those ten PDF cases; it differs on six mark/font printed
+  meanings and on `\tex_input:D` (`meanings.tex`, `tex-meanings.out`). These
+  reference differences are not yet a decision to change the native profile.
+  The prototype is not installed: conditional kernel
+  rebinding, PDF identities, error guards, tier/GC parity, and integration and
+  release-performance qualification remain open. The attempted direct
+  interpreter forced-GC run of the preceding 12-case fixture was interrupted
+  after several minutes without a result (`interp-gc-direct.*`).
+
+- **Expl3 definition and conditional aliases, 2026-11-27:** Script omitted
+  `\tex_def:D` and `\tex_ifx:D`, although the bundled expl3 declarations and
+  TeX Live define them with the corresponding primitive identities. The
+  existing alias initializer now binds those meanings without copying the
+  caller's potentially redefined controls (S1.8, D10.2.2v2). TeX Live probes
+  cover presence, identity, execution, local alias scope and redefinition of
+  the original controls (`temp/tex-compat-goal/reference.tex`). The new
+  `test_tex_script_expl3_primitive_identity` checks both constructor modes;
+  the normal and interpreter harness runs passed, and a JIT run passed it
+  alongside the existing end and message alias fixtures. The interpreter
+  forced-GC and poisoning run hit the harness's 60-second limit, so that
+  stress configuration remains unqualified (`temp/tex-compat-goal/`). The
+  broader primitive-alias audit and its guarded bulk migration below remain
+  open.
+
 - **Expl3 end binding, 2026-11-27:** Upstream rebinding after the primitive
   catalog copies `\@@end` into `\tex_end:D`; its `\@@input` companion is
   undefined in the archived native kernel but defined in TeX Live

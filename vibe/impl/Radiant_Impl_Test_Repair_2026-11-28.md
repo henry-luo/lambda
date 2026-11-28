@@ -10,24 +10,24 @@ The task checkpoint and local evidence are in `temp/fix-failed-tests/`.
 ## Native document and layout
 
 - An idle counter checkpoint had indeterminate owner fields. Null initialization
-  prevents its destructor from reading an invalid context (**D5.5.1**, RI-270).
+  prevents its destructor from reading an invalid context (**D5.5.1**, RI-272).
 - Edit rollback retained node identities and content but omitted host and child
   attributes. It now snapshots the host and uses the shared restore path for
-  both host and descendants (**D10.2.1 / D5.5.1**, RI-271). Focus delivery also
+  both host and descendants (**D10.2.1 / D5.5.1**, RI-273). Focus delivery also
   retains its pinned detached target and owner state through blur/focusout
   (**D5.5.1**, RI-019).
 - A provisional flex block size no longer establishes a percentage height
   basis. Embedded SVG gets its hidden-overflow default, and a replaced item's
   automatic minimum derives its content suggestion without the preferred main
   size while preserving cross-axis transfers. The auto/definite/auto SVG
-  transition and visible/clip/hidden overflow controls match Chromium (RI-272).
+  transition and visible/clip/hidden overflow controls match Chromium (RI-274).
 - Inline font-box realignment preserves already-applied relative offsets,
-  including ruby annotations with atomic children (RI-273). Flex intrinsic
+  including ruby annotations with atomic children (RI-275). Flex intrinsic
   margins resolve mixed percentage math against a known containing inline size
-  (RI-274); table row minima classify sizes after variable substitution
-  (RI-275); textarea family changes preserve the user-agent font size (RI-276).
+  (RI-276); table row minima classify sizes after variable substitution
+  (RI-277); textarea family changes preserve the user-agent font size (RI-278).
 - Updated native fixtures to exercise device-backed output in offline mode,
-  supply a painter clip, and query their intended sizing contracts (RI-277).
+  supply a painter clip, and query their intended sizing contracts (RI-279).
   The paged table baseline oracle now uses the first line's row-relative baseline
   established by the browser and native controls (RI-052).
 

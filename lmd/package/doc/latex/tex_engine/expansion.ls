@@ -2,6 +2,7 @@
 import stream: .stream
 import reader: .reader
 import primitives: .primitives
+import alias_catalog: .primitive_alias_catalog
 import expl3: .expl3
 import regex: .regex
 import fp: .fp
@@ -15,6 +16,7 @@ import format_count_catalog: .format_count_catalog
 import unicode_array_catalog: .unicode_array_catalog
 import utf8: lambda.io.utf8
 import path: lambda.io.path
+let EXPL_LET_MAPPING_GUARD = "tl_eq"
 
 // Core state fields are common to every expansion outcome; package-specific fields remain open.
 pub type State = {input: map, definitions: map, groups: array, output: map[],
@@ -71,10 +73,15 @@ fn conditional_name(name) => contains(["if", "ifcat", "ifnum", "ifdim", "ifodd",
 fn builtin(st, name) => primitives.exists(name) or (st.latex and primitives.latex_exists(name)) or
     (st.script_expl3 and expl3.exists(name))
 fn meaning(st, t) any^ => if (not is_control(t)) {kind: "char", value: t.value, cat: t.cat}
-    else if (st.definitions[key(t)] != null) st.definitions[key(t)]
-    else if (t.kind == "control" and builtin(st, t.value)) {kind: "primitive", name: t.value}
-    else {kind: "undefined"}
-fn primitive(st, t) any^ => if (is_control(t) and meaning(st, t).kind == "primitive") meaning(st, t).name else null
+    else {
+        let resolved = st.definitions[key(t)];
+        if (resolved != null) resolved
+        else if (t.kind == "control" and st.expl3_aliases[t.value] != null) st.expl3_aliases[t.value]
+        else if (t.kind == "control" and builtin(st, t.value)) {kind: "primitive", name: t.value}
+        else {kind: "undefined"}
+    }
+fn primitive_name(resolved) => if (resolved.kind == "primitive") resolved.name else null
+fn primitive(st, t) any^ => if (is_control(t)) primitive_name(meaning(st, t)) else null
 fn nonspace(input: map) StreamStep^ {
     let read = stream.next(input)^;
     if (charcat(read.token, 10)) nonspace(read.stream)^ else read
@@ -90,23 +97,23 @@ fn body_params(tokens, count, index = 0, output = [], mode = null, errors = []) 
         let t = tokens[index];
         // token lists inserted into an expanded definition bypass parameter parsing.
         if (t.definition_literal_parameter == true)
-            body_params(tokens, count, index + 1, [*output, {*:t, definition_literal_parameter:false}], mode, errors)
-        else if (not charcat(t, 6)) body_params(tokens, count, index + 1, [*output, t], mode, errors)
+            body_params(tokens, count, index + 1, output ++ [{*:t, definition_literal_parameter:false}], mode, errors)
+        else if (not charcat(t, 6)) body_params(tokens, count, index + 1, output ++ [t], mode, errors)
         else if (index + 1 >= len(tokens)) {
             if (mode == null) {tokens: output, issue: "tex-illegal-param"}
-            else body_params(tokens, count, index + 1, [*output, t], mode,
+            else body_params(tokens, count, index + 1, output ++ [t], mode,
                 if (mode == "tex") [*errors, {next:null}] else errors)
         }
         else {
             let n = tokens[index + 1];
             let digit = if (n.kind == "char" and (mode == "latex" or n.cat == 12)) index_of("123456789", n.value) else null;
-            if (charcat(n, 6)) body_params(tokens, count, index + 2, [*output, t], mode, errors)
+            if (charcat(n, 6)) body_params(tokens, count, index + 2, output ++ [t], mode, errors)
             else if (digit == null or digit >= count) {
                 if (mode == null) {tokens: output, issue: "tex-illegal-param"}
-                else body_params(tokens, count, index + 1, [*output, t], mode, [*errors, {next:n}])
+                else body_params(tokens, count, index + 1, output ++ [t], mode, [*errors, {next:n}])
             }
             else body_params(tokens, count, index + 2,
-                [*output, parameter_token(digit, t.start, n.end)], mode, errors)
+                output ++ [parameter_token(digit, t.start, n.end)], mode, errors)
         }
     }
 }
@@ -118,10 +125,14 @@ fn append_delimiter(delimiters, token) any^ {
 
 fn set_definition(definitions, name, value) => {*:definitions, *:map([name, value])}
 
+// Global definitions must also replace each saved group value.
+fn assign_global_meanings(st: State, values: map) State =>
+    if (len(values)==0) st else {*:st,definitions:{*:st.definitions,*:values},groups:[for (scope in st.groups)
+        {*:scope,definitions:{*:scope.definitions,*:values}}]}
+
 fn assign_meaning(st: State, name, value, global) State^ =>
-    {*:st, definitions: set_definition(st.definitions, name, value),
-        groups: if (global) [for (scope in st.groups)
-            {*:scope, definitions: set_definition(scope.definitions, name, value)}] else st.groups}
+    if (global) assign_global_meanings(st, map([name,value]))
+    else {*:st,definitions:set_definition(st.definitions,name,value)}
 
 // native keeps the scanned signature when input ends before the body.
 fn unfinished_signature(input, count, prefix, delimiters, diagnostics) =>
@@ -183,7 +194,7 @@ fn definition_tokens_inner(st, budget, depth = 1, output = [], parameter_count =
         else {state:record_diagnostic(read.state,"tex-runaway","File ended while scanning a text")^,tokens:output}
     else if (xpand and t.direct_toks == true) {
         let stored = {*:t, noexpand: false, direct_toks: false, trace_internal: false};
-        definition_tokens_inner(read.state, budget, depth, [*output, stored], parameter_count, xpand, recover_eof)
+        definition_tokens_inner(read.state, budget, depth, output ++ [stored], parameter_count, xpand, recover_eof)
     }
     else if (charcat(t, 2) and depth == 1) {state: read.state, tokens: output}
     else if (parameter_count != null and charcat(t, 6)) {
@@ -196,15 +207,15 @@ fn definition_tokens_inner(st, budget, depth = 1, output = [], parameter_count =
         if (current.issue != null) {state:current,tokens:output}
         // end of input during parameter lookahead stops before appending #.
         else if (n == null) {state:current,tokens:output}
-        else if (charcat(n,6)) definition_tokens_inner(current,budget,depth,[*output,literal],parameter_count,xpand,recover_eof)
+        else if (charcat(n,6)) definition_tokens_inner(current,budget,depth,output ++ [literal],parameter_count,xpand,recover_eof)
         else if (digit != null and digit < parameter_count)
-            definition_tokens_inner(current,budget,depth,[*output,parameter_token(digit,t.start,n.end)],parameter_count,xpand,recover_eof)
+            definition_tokens_inner(current,budget,depth,output ++ [parameter_token(digit,t.start,n.end)],parameter_count,xpand,recover_eof)
         else {
             // buffered argument tokens use the current reader position for errors.
             let origin = if (not xpand and n.direct == true and
                 stream.raw_reader(read.state.input,n)^ != null) n else null;
             let diagnosed=record_diagnostic(current,"tex-illegal-param","Illegal parameter number in definition",origin)^;
-            definition_tokens_inner(put_back(diagnosed,n),budget,depth,[*output,literal],parameter_count,xpand,recover_eof)
+            definition_tokens_inner(put_back(diagnosed,n),budget,depth,output ++ [literal],parameter_count,xpand,recover_eof)
         }
     }
     else {
@@ -212,7 +223,7 @@ fn definition_tokens_inner(st, budget, depth = 1, output = [], parameter_count =
         let stored = if (xpand) {*:t, noexpand:false, trace_internal:false} else t;
         definition_tokens_inner(read.state, budget,
             depth + if (charcat(t, 1)) 1 else if (charcat(t, 2)) -1 else 0,
-            [*output, stored], parameter_count, xpand, recover_eof)
+            output ++ [stored], parameter_count, xpand, recover_eof)
     }
 }
 
@@ -476,7 +487,7 @@ fn assign_futurelet(st: State, global) State^ {
 }
 
 // aliased expl3 lets require the assignment source-mapping guard.
-fn guarded_expl_let(st: State, token) State^ => if (meaning(st, token).source_mapping_guard == "tl_eq")
+fn guarded_expl_let(st: State, token) State^ => if (meaning(st, token).source_mapping_guard == EXPL_LET_MAPPING_GUARD)
     {*:st, expl3_tl_put_seen: true} else st
 
 fn prefixed(st: State, global, long_ok, protected_flag, budget) State^ {
@@ -578,18 +589,26 @@ fn noexpand(st: State, budget, argument_mode = false) State^ {
     }
 }
 
-fn expandable(st, t) any^ => is_control(t) and t.noexpand != true and
-    (meaning(st, t).kind == "macro" or (primitive(st, t) != null and (primitives.expandable(primitive(st, t)) or (st.latex and primitives.latex_expandable(primitive(st, t))) or
-        (st.script_expl3 and expl3.expandable(primitive(st, t))))))
+fn expandable_meaning(st, t, resolved) any^ {
+    let cmd = primitive_name(resolved);
+    t.noexpand != true and (resolved.kind == "macro" or (cmd != null and
+        (primitives.expandable(cmd) or (st.latex and primitives.latex_expandable(cmd)) or
+            (st.script_expl3 and expl3.expandable(cmd)))))
+}
 
-fn expand_one(st: State, t, budget) State^ {
+fn expandable(st, t) any^ => is_control(t) and expandable_meaning(st, t, meaning(st, t))
+
+fn expand_one(st: State, t, budget, meaning_hint = null) State^ {
+    // reuse the caller's resolution while dispatching the same token.
+    let resolved = if (meaning_hint != null) meaning_hint else if (is_control(t)) meaning(st, t) else null;
+    let cmd = primitive_name(resolved);
     let pending = len(st.conditions) > 0 and st.conditions[len(st.conditions) - 1].kind == "scanning";
-    if (not expandable(st, t)) {*:st, input: stream.push(st.input, [t])}
+    if (meaning_hint == null and not expandable_meaning(st, t, resolved)) {*:st, input: stream.push(st.input, [t])}
     // TeX inserts a relax before a delimiter encountered during an if test.
-    else if (pending and contains(["else", "fi", "or"], primitive(st, t)))
+    else if (pending and contains(["else", "fi", "or"], cmd))
         {*:st, input: stream.push(st.input, [control_token("relax"), t])}
-    else if (meaning(st, t).kind == "macro") {
-        let macro = meaning(st, t)^;
+    else if (resolved.kind == "macro") {
+        let macro = resolved;
         if (st.expansions >= budget) fail(st, "tex-budget")
         else if (macro.source_mapping_guard == "replicate_negative")
             unsupported(st, "expl3 negative replication diagnostic")
@@ -618,68 +637,68 @@ fn expand_one(st: State, t, budget) State^ {
             expand_macro(marked, macro, budget, t)
         }
     }
-    else if (primitive(st, t) == "noexpand") noexpand(st, budget)
-    else if (primitive(st, t) == "expandafter") expand_after(st, budget)
-    else if (primitive(st, t) == "csname") csname(st, budget)
-    else if (primitive(st, t) == "the") expand_the(st, budget)
-    else if (contains(["string", "number", "romannumeral", "meaning"], primitive(st, t)))
-        string_primitive(st, primitive(st, t), budget)
-    else if (primitive(st, t) == "detokenize" or primitive(st, t) == "unexpanded" or primitive(st, t) == "scantokens")
-        token_primitive(st, primitive(st, t), budget)
-    else if (primitive(st, t) == "expanded") expanded_primitive(st, budget)
-    else if (primitive(st, t) == "pdfstrcmp") strcmp_primitive(st, budget)
-    else if (contains(["pdfescapestring", "pdfescapename", "pdfescapehex", "pdfunescapehex", "pdfmdfivesum"], primitive(st, t)))
-        pdf_string_primitive(st, primitive(st, t), budget)
-    else if (primitives.engine_revision(primitive(st, t)) != null)
-        constant_primitive(st, budget, primitives.engine_revision(primitive(st, t)))
-    else if (primitive(st, t) == "pdfuniformdeviate") random_deviate(st, budget)
-    else if (primitive(st, t) == "pdfnormaldeviate")
+    else if (cmd == "noexpand") noexpand(st, budget)
+    else if (cmd == "expandafter") expand_after(st, budget)
+    else if (cmd == "csname") csname(st, budget)
+    else if (cmd == "the") expand_the(st, budget)
+    else if (contains(["string", "number", "romannumeral", "meaning"], cmd))
+        string_primitive(st, cmd, budget)
+    else if (cmd == "detokenize" or cmd == "unexpanded" or cmd == "scantokens")
+        token_primitive(st, cmd, budget)
+    else if (cmd == "expanded") expanded_primitive(st, budget)
+    else if (cmd == "pdfstrcmp") strcmp_primitive(st, budget)
+    else if (contains(["pdfescapestring", "pdfescapename", "pdfescapehex", "pdfunescapehex", "pdfmdfivesum"], cmd))
+        pdf_string_primitive(st, cmd, budget)
+    else if (primitives.engine_revision(cmd) != null)
+        constant_primitive(st, budget, primitives.engine_revision(cmd))
+    else if (cmd == "pdfuniformdeviate") random_deviate(st, budget)
+    else if (cmd == "pdfnormaldeviate")
         constant_primitive({*:st, pdf_random_seen: true}, budget, "0")
-    else if (primitive(st, t) == "jobname") constant_primitive(st, budget, job_name(st.base_path)^)
-    else if (primitive(st, t) == "fontname") font_name_primitive(st, budget)
-    else if (primitive(st, t) == "input") input_primitive(st, budget)
-    else if (primitive(st, t) == "endinput") endinput_primitive(st, budget)
+    else if (cmd == "jobname") constant_primitive(st, budget, job_name(st.base_path)^)
+    else if (cmd == "fontname") font_name_primitive(st, budget)
+    else if (cmd == "input") input_primitive(st, budget)
+    else if (cmd == "endinput") endinput_primitive(st, budget)
     else if (contains(["topmark", "firstmark", "botmark", "splitfirstmark", "splitbotmark",
-        "topmarks", "firstmarks", "botmarks", "splitfirstmarks", "splitbotmarks"], primitive(st, t)))
-        empty_mark_query(st, primitive(st, t), budget)
-    else if (primitive(st, t) == "pdfcreationdate") constant_primitive(st, budget, "D:20000101120000Z")
-    else if (primitive(st, t) == "pdffilesize" or primitive(st, t) == "pdffilemoddate")
-        pdf_file_primitive(st, primitive(st, t), budget)
-    else if (st.latex and contains(["arabic", "roman", "Roman", "alph", "Alph", "fnsymbol", "value"], primitive(st, t)))
-        latex_counter_format(st, t, primitive(st, t), budget)
-    else if (st.script_expl3 and primitive(st, t) == "tl_use:N") expl3_tl_use(st, budget)
-    else if (st.script_expl3 and expl3.keyval_parse(primitive(st, t))) expl3_keyval_parse(st, budget)
-    else if (st.script_expl3 and primitive(st, t) == "__keys_choice_find:n") expl3_key_choice(st, budget)
-    else if (st.script_expl3 and expl3.ior_eof(primitive(st, t))) expl3_ior_eof(st, primitive(st, t))
-    else if (st.script_expl3 and expl3.token_empty(primitive(st, t))) expl3_tl_empty(st, primitive(st, t), budget)
-    else if (st.script_expl3 and expl3.token_equal(primitive(st, t))) expl3_tl_equal(st, primitive(st, t), budget)
-    else if (st.script_expl3 and expl3.token_string(primitive(st, t))) expl3_tl_string(st, primitive(st, t), budget)
-    else if (st.script_expl3 and expl3.token_count(primitive(st, t))) expl3_tl_count(st, primitive(st, t), budget)
-    else if (st.script_expl3 and primitive(st, t) == "int_eval:n") expl3_int_eval(st, budget)
-    else if (st.script_expl3 and expl3.int_math(primitive(st, t))) expl3_int_math(st, primitive(st, t), budget)
-    else if (st.script_expl3 and expl3.int_compare(primitive(st, t))) expl3_int_compare(st, primitive(st, t), budget)
-    else if (st.script_expl3 and expl3.int_compare_expr(primitive(st, t))) expl3_int_compare_expr(st, primitive(st, t), budget)
-    else if (st.script_expl3 and expl3.int_test(primitive(st, t))) expl3_int_test(st, primitive(st, t), budget)
-    else if (st.script_expl3 and primitive(st, t) == "fp_eval:n") expl3_fp_eval(st, budget)
-    else if (st.script_expl3 and contains(["seq_use:Nn", "seq_count:N", "seq_item:Nn"], primitive(st, t)))
-        expl3_seq_expand(st, primitive(st, t), budget)
-    else if (st.script_expl3 and expl3.string_compare(primitive(st, t)))
-        expl3_str_compare(st, primitive(st, t), budget)
-    else if (st.script_expl3 and expl3.token_expandable(primitive(st, t)))
-        expl3_token_expandable(st, primitive(st, t), budget)
-    else if (st.script_expl3 and expl3.text_case(primitive(st, t)))
-        expl3_text_case(st, primitive(st, t), budget)
+        "topmarks", "firstmarks", "botmarks", "splitfirstmarks", "splitbotmarks"], cmd))
+        empty_mark_query(st, cmd, budget)
+    else if (cmd == "pdfcreationdate") constant_primitive(st, budget, "D:20000101120000Z")
+    else if (cmd == "pdffilesize" or cmd == "pdffilemoddate")
+        pdf_file_primitive(st, cmd, budget)
+    else if (st.latex and contains(["arabic", "roman", "Roman", "alph", "Alph", "fnsymbol", "value"], cmd))
+        latex_counter_format(st, t, cmd, budget)
+    else if (st.script_expl3 and cmd == "tl_use:N") expl3_tl_use(st, budget)
+    else if (st.script_expl3 and expl3.keyval_parse(cmd)) expl3_keyval_parse(st, budget)
+    else if (st.script_expl3 and cmd == "__keys_choice_find:n") expl3_key_choice(st, budget)
+    else if (st.script_expl3 and expl3.ior_eof(cmd)) expl3_ior_eof(st, cmd)
+    else if (st.script_expl3 and expl3.token_empty(cmd)) expl3_tl_empty(st, cmd, budget)
+    else if (st.script_expl3 and expl3.token_equal(cmd)) expl3_tl_equal(st, cmd, budget)
+    else if (st.script_expl3 and expl3.token_string(cmd)) expl3_tl_string(st, cmd, budget)
+    else if (st.script_expl3 and expl3.token_count(cmd)) expl3_tl_count(st, cmd, budget)
+    else if (st.script_expl3 and cmd == "int_eval:n") expl3_int_eval(st, budget)
+    else if (st.script_expl3 and expl3.int_math(cmd)) expl3_int_math(st, cmd, budget)
+    else if (st.script_expl3 and expl3.int_compare(cmd)) expl3_int_compare(st, cmd, budget)
+    else if (st.script_expl3 and expl3.int_compare_expr(cmd)) expl3_int_compare_expr(st, cmd, budget)
+    else if (st.script_expl3 and expl3.int_test(cmd)) expl3_int_test(st, cmd, budget)
+    else if (st.script_expl3 and cmd == "fp_eval:n") expl3_fp_eval(st, budget)
+    else if (st.script_expl3 and contains(["seq_use:Nn", "seq_count:N", "seq_item:Nn"], cmd))
+        expl3_seq_expand(st, cmd, budget)
+    else if (st.script_expl3 and expl3.string_compare(cmd))
+        expl3_str_compare(st, cmd, budget)
+    else if (st.script_expl3 and expl3.token_expandable(cmd))
+        expl3_token_expandable(st, cmd, budget)
+    else if (st.script_expl3 and expl3.text_case(cmd))
+        expl3_text_case(st, cmd, budget)
     else if (st.latex and contains(["IfBooleanTF","IfBooleanT","IfBooleanF", "IfNoValueTF","IfNoValueT",
-            "IfNoValueF","IfValueTF","IfValueT","IfValueF"],primitive(st,t)))
-        latex_xparse_conditional(st,primitive(st,t),budget)
-    else if (st.latex and primitive(st, t) == "lambda@xspace") latex_xspace(st, budget)
-    else if (st.latex and (primitive(st, t) == "@ifpackagewith" or primitive(st, t) == "@ifclasswith"))
+            "IfNoValueF","IfValueTF","IfValueT","IfValueF"],cmd))
+        latex_xparse_conditional(st,cmd,budget)
+    else if (st.latex and cmd == "lambda@xspace") latex_xspace(st, budget)
+    else if (st.latex and (cmd == "@ifpackagewith" or cmd == "@ifclasswith"))
         if (st.expansions >= budget) fail(st, "tex-budget") else
-            latex_if_package_with({*:st, expansions: st.expansions + 1}, primitive(st, t) == "@ifclasswith", budget)
-    else if (primitive(st, t) == "unless") unless_conditional(st, budget)
-    else if (conditional_name(primitive(st, t)) or contains(["fi", "else", "or"], primitive(st, t)))
-        condition(st, primitive(st, t), budget)
-    else unsupported(st, primitive(st, t))
+            latex_if_package_with({*:st, expansions: st.expansions + 1}, cmd == "@ifclasswith", budget)
+    else if (cmd == "unless") unless_conditional(st, budget)
+    else if (conditional_name(cmd) or contains(["fi", "else", "or"], cmd))
+        condition(st, cmd, budget)
+    else unsupported(st, cmd)
 }
 
 // an already attempted package cannot replace a self-recursive bootstrap.
@@ -763,24 +782,23 @@ fn expand_after(st: State, budget) State^ {
 }
 
 // document length and counter calls stay visible after package redefinition.
-fn redefined_document_command(st, token) any^ => st.latex and st.math_mode != true and
+fn redefined_document_command(st, token, resolved) any^ => st.latex and st.math_mode != true and
     token != null and token.kind == "control" and token.noexpand != true and
     token.direct == true and token.file == st.main_file and
     contains(["setlength", "addtolength", "setcounter", "addtocounter", "stepcounter"], token.value) and
-    meaning(st, token).kind == "macro"
+    resolved.kind == "macro"
 
 fn expanded_next(st, budget, protect = false, argument_mode = false) any^ {
     let read = stream.next(st.input)^;
     let current = {*:st, input: read.stream};
-    if (read.token == null or (protect and is_control(read.token) and
-        meaning(current, read.token).kind == "macro" and meaning(current, read.token).protected_flag) or
-        (argument_mode and redefined_document_command(current, read.token)^) or
-        (argument_mode and read.token.noexpand != true and is_control(read.token) and
-            meaning(current, read.token).expl3_argument_unqualified == true) or
-        not expandable(current, read.token)) {state: current, token: read.token}
+    let resolved = if (is_control(read.token)) meaning(current, read.token) else null;
+    if (resolved == null or (protect and resolved.kind == "macro" and resolved.protected_flag) or
+        (argument_mode and redefined_document_command(current, read.token, resolved)^) or
+        (argument_mode and read.token.noexpand != true and resolved.expl3_argument_unqualified == true) or
+        not expandable_meaning(current, read.token, resolved)) {state: current, token: read.token}
     else {
-        let expanded = if (argument_mode and primitive(current, read.token) == "noexpand")
-            noexpand(current, budget, true)^ else expand_one(current, read.token, budget);
+        let expanded = if (argument_mode and primitive_name(resolved) == "noexpand")
+            noexpand(current, budget, true)^ else expand_one(current, read.token, budget, resolved);
         if (expanded.issue != null) {state: expanded, token: null} else expanded_next(expanded, budget, protect, argument_mode)
     }
 }
@@ -813,8 +831,7 @@ fn csname(st: State, budget) State^ {
             let token = {kind: "control", value: scanned.name, cat: null, start: -1, end: -1};
             let k = key(token);
             {*:scanned.state, input: stream.push(scanned.state.input, [token]),
-                definitions: if ((scanned.state.definitions[k] == null and not builtin(scanned.state, scanned.name)) or
-                    scanned.state.definitions[k].kind == "undefined")
+                definitions: if (meaning(scanned.state, token).kind == "undefined")
                     set_definition(scanned.state.definitions, k, {kind: "primitive", name: "relax"})
                     else scanned.state.definitions}
         }
@@ -2331,7 +2348,7 @@ fn pdf_string_primitive(st: State, name, budget) State^ {
 fn next_source_id(st) any^ => max(len(st.sources) + abs(st.input.reader.file_id) + 1,
     max([0, *[for (source in st.sources) source.id]]) + 1)
 
-// A host may capture one missing resource and restart from the original source.
+// A host may capture one missing resource and replay the requesting step.
 fn request_resource(st, scope, name) State =>
     {*:st, issue:"tex-resource-needed", resource_request:{scope:scope, name:name}}
 
@@ -6369,12 +6386,12 @@ fn echo_prefixed(st: State, token, cmd, budget) State^ {
     finish_definition_echo(st, after, tracing, after.prefixed_definition == true)
 }
 
-fn direct_package_token(st, token) any^ => token.direct == true and
+fn direct_package_token(st, token) any^ => token.direct == true and token.file != st.main_file and
     any([for (source in st.sources) source.id == token.file and source.package == true])
 
-// generated argument delimiters need the same origin as other emitted tokens.
-fn emission_token(st, input, raw) any^ => if (raw != null and contains(["char", "control", "active"], raw.kind) and
-        (raw.direct != true or raw.file != st.main_file))
+// generated argument delimiters need an origin; direct main-file tokens already have one.
+fn emission_token(st, input, raw) any^ => if (raw != null and
+        (raw.direct != true or raw.file != st.main_file) and contains(["char", "control", "active"], raw.kind))
     {*:raw, read_offset: input.last_main_offset, read_file: st.main_file} else raw
 
 // passthrough environments preserve the original name tokens inside arguments.
@@ -6543,36 +6560,98 @@ fn finish_conditionals(st: State, index) State^ {
     }
 }
 
+// The output serializer needs the reader position at emission, including lookahead.
+fn emit_ordinary(st: State, t) State {
+    var current = st
+    current.output = current.output ++ [{*:t, emit_origin:current.input.last_main_offset}]
+    current
+}
+
+fn unhandled_token(st: State, t, resolved, budget) State^ {
+    if (st.latex and t.kind == "control" and resolved.kind == "undefined" and
+        contains(["directlua", "luaexec"], t.value)) latex_raw_group(st, t)
+    else if (st.script_expl3 and is_control(t) and index_of(t.value, ":") != null)
+        unsupported(st, t.value)
+    else if (st.constructor_argument_mode and st.latex and st.math_mode != true and
+            is_control(t) and resolved.kind == "undefined")
+        constructor_arguments({*:st, output: st.output ++ [t]}, budget)
+    else emit_ordinary(st, t)
+}
+
 fn step(st: State, budget) State^ {
     let read = stream.next(st.input)^;
-    let raw = read.token;
-    let t = emission_token(st, read.stream, raw)^;
-    let current = {*:st, input: read.stream};
-    let cmd = primitive(st, t);
+    let input = read.stream;
+    let t = emission_token(st, input, read.token)^;
+    if (ordinary_character(st, t)^) step_characters(st, input, t, budget)
+    else step_token(st, input, t, budget)
+}
+
+fn ordinary_character(st: State, t) bool^ =>
+    t.kind == "char" and t.noexpand != true and t.cat != 1 and t.cat != 2 and t.cat != 3 and
+    (t.cat != 10 or not direct_package_token(st, t)^)
+
+fn step_characters(st: State, input, first, budget) State^ {
+    // Ordinary text changes only the cursor and emitted tokens. Join a run
+    // once, before handing the first control/structural token its live state.
+    var cursor = input, t = first, tokens = [];
+    while (true) {
+        tokens = tokens ++ [{*:t, emit_origin:cursor.last_main_offset}];
+        let read = stream.next(cursor)^;
+        cursor = read.stream;
+        t = emission_token(st, cursor, read.token)^;
+        if (not ordinary_character(st, t)^) { break }
+    }
+    var current = st
+    current.output = current.output ++ tokens
+    step_token(current, cursor, t, budget)
+}
+
+fn step_token(st: State, input, t, budget) State^ {
+    // Update the cursor through a local snapshot to keep the state shape.
+    var current = st
+    current.input = input
+    if (t.kind != "char") step_control(current, t, budget)
+    else if (t.cat == 10 and direct_package_token(current, t)^) current
+    else if (t.noexpand == true) {*:current, output: st.output ++ [{*:t, noexpand: false}]}
+    else if (t.cat == 3) math_shift(current, t)
+    else if (t.cat == 1) begin_group(current, t, false)
+    else if (t.cat == 2) end_group(current, t, false, false, false, true)
+    else emit_ordinary(current, t)
+}
+
+fn step_control(st: State, t, budget) State^ {
     let resolved = if (is_control(t)) meaning(st, t) else null;
-    let assignment_global = effective_global(st, false)^;
-    if (t == null) if (len(st.conditions) > 0) finish_conditionals(current,len(st.conditions) - 1) else {*:current, finished: true}
-    else if ((charcat(t, 10) or (is_control(t) and t.value == "par")) and direct_package_token(st, t)) current
-    else if (t.kind == "expl3-sort-end") {*:current, expl_sort_done: true}
-    else if (t.kind == "expl3-keys-next") expl3_keys_next(current)
-    else if (t.kind == "counter-value-end") current
-    else if (t.kind == "env-close") end_group(current, null, true, true)
-    else if (t.kind == "package-load") start_package(current, t, budget)
-    else if (t.kind == "package-end") finish_package_hook(current)
-    else if (t.kind == "package-pop") finish_package(current)
+    let cmd = primitive_name(resolved);
+    if (t == null) if (len(st.conditions) > 0) finish_conditionals(st,len(st.conditions) - 1) else {*:st, finished: true}
+    else if (is_control(t) and t.value == "par" and direct_package_token(st, t)) st
+    else if (t.kind == "expl3-sort-end") {*:st, expl_sort_done: true}
+    else if (t.kind == "expl3-keys-next") expl3_keys_next(st)
+    else if (t.kind == "counter-value-end") st
+    else if (t.kind == "env-close") end_group(st, null, true, true)
+    else if (t.kind == "package-load") start_package(st, t, budget)
+    else if (t.kind == "package-end") finish_package_hook(st)
+    else if (t.kind == "package-pop") finish_package(st)
     else if (t.kind == "document-close") {
-        let emitted = environment_output(current, t.original, t.raw, "document", "end", t.echo, t.span)^;
-        {*:current, output: current.output ++ emitted,
-            trailing_source: if (t.root_tail) stream.root_tail(current.input) else null, finished: true}
+        let emitted = environment_output(st, t.original, t.raw, "document", "end", t.echo, t.span)^;
+        {*:st, output: st.output ++ emitted,
+            trailing_source: if (t.root_tail) stream.root_tail(st.input) else null, finished: true}
     }
     // Concatenation preserves the output array's verified element contract.
-    else if (t.noexpand == true) {*:current, output: st.output ++ [{*:t, noexpand: false}]}
-    else if (redefined_document_command(current, t)^) echo_redefined_command(current, t)
+    else if (t.noexpand == true) {*:st, output: st.output ++ [{*:t, noexpand: false}]}
+    else if (redefined_document_command(st, t, resolved)^) echo_redefined_command(st, t)
     else if (st.math_mode and t.kind == "control" and reader.math_raw_group_command(t.value) and resolved.kind != "macro")
-        latex_math_raw_group(current, t)
-    else if (expandable(current, t)) expand_one(current, t, budget)
+        latex_math_raw_group(st, t)
+    else if (expandable_meaning(st, t, resolved)) expand_one(st, t, budget, resolved)
+    // unbound controls cannot dispatch any assignment or primitive.
+    else if (resolved.kind == "undefined") unhandled_token(st, t, resolved, budget)
+    else execute_token(st, t, resolved, cmd, budget)
+}
+
+fn execute_token(current: State, t, resolved, cmd, budget) State^ {
+    let st = current;
+    let assignment_global = effective_global(st, false)^;
     // these native TeX commands remain tokens for the document adapters.
-    else if (contains([" ", "underline", "overline", "indent", "noindent", "hfil", "hfill", "hss", "hfilneg",
+    if (contains([" ", "underline", "overline", "indent", "noindent", "hfil", "hfill", "hss", "hfilneg",
         "vfil", "vfill", "vss", "vfilneg", "noalign", "omit", "span", "cr", "crcr", "-", "/", "noboundary",
         "mathord", "mathop", "mathbin", "mathrel", "mathopen", "mathclose", "mathpunct", "mathinner",
         "displaystyle", "textstyle", "scriptstyle", "scriptscriptstyle", "limits", "nolimits", "displaylimits",
@@ -6701,8 +6780,6 @@ fn step(st: State, budget) State^ {
     else if (st.latex and cmd == "verb") latex_verb(current, t)
     else if (st.latex and raw_inline_command(cmd))
         latex_raw_group(current,t,cmd)
-    else if (st.latex and t.kind == "control" and resolved.kind == "undefined" and
-            contains(["directlua", "luaexec"], t.value)) latex_raw_group(current, t)
     else if (st.latex and cmd == "begin") latex_begin(current, t, budget)
     else if (st.latex and cmd == "end") latex_end(current, t, budget)
     else if (cmd == "newif" and st.latex) latex_newif(current)
@@ -6781,18 +6858,7 @@ fn step(st: State, budget) State^ {
             current.mathchardef_emission_seen == true or mathchardef_name_needs_mapping(t)^}
     else if (cmd == "par") {*:current, output: st.output ++ [t]}
     else if (cmd != null) unsupported(current, cmd)
-    else if (st.script_expl3 and is_control(t) and index_of(t.value, ":") != null)
-        unsupported(current, t.value)
-    else if (current.constructor_argument_mode and current.latex and current.math_mode != true and
-            is_control(t) and resolved.kind == "undefined") {
-        let emitted = {*:current, output: st.output ++ [t]};
-        constructor_arguments(emitted, budget)
-    }
-    else if (charcat(t, 3)) math_shift(current, t)
-    else if (charcat(t, 1)) begin_group(current, t, false)
-    else if (charcat(t, 2)) end_group(current, t, false, false, false, true)
-    // the output serializer needs the reader position at emission, including lookahead.
-    else {*:current, output: st.output ++ [{*:t, emit_origin: current.input.last_main_offset}]}
+    else unhandled_token(current, t, resolved, budget)
 }
 
 // the native LaTeX scanner splits control words at non-letter characters.
@@ -6808,20 +6874,30 @@ fn mathchardef_name_needs_mapping(t) any^ {
     }
 }
 
-fn run(st: State, budget) State^ {
+fn run(st: State, budget, capture_checkpoint: bool = false) State^ {
     // keep document-length stepping off the native call stack.
     var current = st
     while (current.issue == null and current.finished != true) {
-        current = step(current, budget)^
+        let next = step(current, budget)^
+        // retry the whole step so token reads, groups, diagnostics and budgets
+        // are restored together before the host binds this capture.
+        if (capture_checkpoint and next.issue == "tex-resource-needed") {
+            return {*:terminal_flush(next)^, resource_checkpoint:current}
+        }
+        current = next
     }
     return terminal_flush(current)^
 }
 
-pub fn expand(input: map, budget: int = 20000000, options: any ! error = null) State^ {
+pub fn expand(input: map, budget: int = 20000000, options: any ! error = null,
+        capture_checkpoint: bool = false) State^ {
     // Normalize optional external configuration before constructing engine state.
     let normalized = options_map(options);
-    run(result(input, {}, [], [], 0, null, normalized), budget)
+    run(result(input, {}, [], [], 0, null, normalized), budget, capture_checkpoint)
 }
+
+pub fn resume_resource(st: State, resources: map, budget: int) State^ =>
+    run({*:st, resources:resources}, budget, true)
 
 // Compare the live allocator with the bundled kernel definitions, ignoring token locations.
 fn kernel_allocator_macro_matches(st: State, entry) bool^ {
@@ -6842,7 +6918,7 @@ fn kernel_allocator_matches(st: State) bool^ {
 }
 
 // The opt-in script profile replaces the kernel's full-package bootstrap.
-pub fn enable_script_expl3(st: State) State^ {
+fn bootstrap_script_expl3(st: State) State^ {
     let enabled = {*:st, script_expl3: true};
     let names = ["ExplSyntaxOn", "ExplSyntaxOff", "ProvidesExplPackage", "ProvidesExplClass", "ProvidesExplFile"];
     let primitives = enable_expl_primitives(enabled, names)^;
@@ -6925,8 +7001,6 @@ pub fn enable_script_expl3(st: State) State^ {
         {name:"c_term_iow", kind:"mathchardef", value:16},
         // expl3 error help uses the existing TeX token-list parameter.
         {name:"tex_errhelp:D", kind:"primitive", value:"errhelp"},
-        // expl3 copies latex's frozen end primitive, not the end-environment command.
-        {name:"tex_end:D", kind:"primitive", value:"@@end"},
         // the message machinery addresses these TeX primitives through aliases.
         {name:"tex_escapechar:D", kind:"primitive", value:"escapechar"},
         {name:"tex_inputlineno:D", kind:"primitive", value:"inputlineno"},
@@ -6934,7 +7008,10 @@ pub fn enable_script_expl3(st: State) State^ {
         {name:"tex_newlinechar:D", kind:"primitive", value:"newlinechar"},
         {name:"tex_immediate:D", kind:"primitive", value:"immediate"},
         {name:"tex_write:D", kind:"primitive", value:"write"},
-        {name: "tex_let:D", kind: "primitive", value: "let", source_mapping_guard: "tl_eq"},
+        // expl3 retains primitive identities even if their public names are redefined.
+        {name:"tex_ifx:D", kind:"primitive", value:"ifx"},
+        {name:"tex_def:D", kind:"primitive", value:"def"},
+        {name: "tex_let:D", kind: "primitive", value: "let", source_mapping_guard: EXPL_LET_MAPPING_GUARD},
         {name: "tex_global:D", kind: "primitive", value: "global"},
         {name: "tex_chardef:D", kind: "primitive", value: "chardef"},
         {name: "tex_advance:D", kind: "primitive", value: "advance"},
@@ -7650,6 +7727,82 @@ pub fn enable_script_expl3(st: State) State^ {
     }
 }
 
+// Preserve the existing source-mapping guard when the primitive is captured.
+fn capture_expl_alias(st: State, entry) any^ {
+    let value = meaning(st, control_token(entry.source))^;
+    if (entry.alias == "tex_let:D" and value.kind == "primitive" and value.name == "let")
+        {*:value,source_mapping_guard:EXPL_LET_MAPPING_GUARD} else value
+}
+
+fn clock_alias_redefined(st: State, entry) bool^ {
+    let value = meaning(st, control_token(entry.source))^;
+    value.kind != "primitive" or primitives.meaning_name(value.name) != entry.source
+}
+
+// expl3's shipout probe keeps the final control printing as the original primitive.
+fn shipout_override(st: State) map^ {
+    if ((meaning(st, control_token("@@hyph"))^).kind == "undefined") {local:{},global:{}}
+    else {
+        let current = print_meaning(st, control_token("shipout"))^;
+        let original = (escape(st)^) ++ "shipout";
+        let matches = if (current == original) [] else
+            [for (name in alias_catalog.shipout_candidates()
+                where (print_meaning(st, control_token(name))^) == original) name];
+        let fallback = if ((meaning(st, control_token("@@shipout"))^).kind != "undefined") "@@shipout" else null;
+        let chosen = if (len(matches) > 0) matches[len(matches) - 1] else fallback;
+        let values = if (chosen == null) {} else map(["control:tex_shipout:D", meaning(st, control_token(chosen))^]);
+        if (len(matches) > 0) {local:{},global:values} else {local:values,global:{}}
+    }
+}
+
+// expl3 selects the live PDF tracing parameter or its undefined-control fallback.
+fn font_tracing_override(st: State) map^ {
+    if ((meaning(st, control_token("@@hyph"))^).kind == "undefined") {}
+    else {
+        let source = if ((meaning(st, control_token("pdftracingfonts"))^).kind != "undefined")
+            "pdftracingfonts" else "tex_undefined:D";
+        map(["control:tex_tracingfonts:D", meaning(st, control_token(source))^])
+    }
+}
+
+// Capture source meanings once, before documents can redefine them.
+pub fn enable_script_expl3(st: State) State^ {
+    let previous = st.expl3_aliases;
+    // Optional declarations copy only defined sources, in the format's order.
+    let entries = if (previous is map) [] else [for (entry in alias_catalog.prepared()
+        where entry.optional != true or (meaning(st, control_token(entry.source))^).kind != "undefined") entry];
+    let aliases = if (previous is map) previous else map([for (entry in entries)
+        *[entry.alias, capture_expl_alias(st, entry)^]]);
+    // The initial global lets replace prior destination definitions only once.
+    let conflicts = if (previous is map) {} else map([for (entry in entries
+        where st.definitions["control:" ++ entry.alias] != null)
+        *["control:" ++ entry.alias, aliases[entry.alias]]]);
+    let prepared = assign_global_meanings(st,conflicts);
+    let alias_state = {*:prepared, expl3_aliases:aliases};
+    // A non-pdfTeX, non-LuaTeX format copies its undefined control into PDF map aliases.
+    let no_pdf_engine = (meaning(alias_state, control_token("tex_pdftexversion:D"))^).kind == "undefined" and
+        (meaning(alias_state, control_token("tex_luatexversion:D"))^).kind == "undefined";
+    let pdfmap = if (previous is map or not no_pdf_engine) {} else
+        map([for (name in alias_catalog.pdfmap_fallbacks())
+            *["control:" ++ name, meaning(st, control_token("tex_undefined:D"))^]]);
+    // expl3 copies tex_undefined:D when a clock meaning differs from its spelling.
+    let clock_overrides = if (previous is map) {} else map([for (entry in alias_catalog.clock_checks()
+        where clock_alias_redefined(st, entry)^) *["control:" ++ entry.alias, meaning(st, control_token("tex_undefined:D"))^]]);
+    let overrides = if (previous is map) {} else map([for (group in alias_catalog.simple_rebindings(), entry in group.bindings
+        where (meaning(st, control_token(group.guard))^).kind != "undefined")
+        *["control:" ++ entry.alias, meaning(st, control_token(entry.source))^]]);
+    let shipout = if (previous is map) {local:{},global:{}} else shipout_override(st)^;
+    let lua_font = not (previous is map) and (meaning(st, control_token("@@hyph"))^).kind != "undefined" and
+        (meaning(st, control_token("pdftracingfonts"))^).kind == "undefined" and
+        (meaning(alias_state, control_token("tex_directlua:D"))^).kind != "undefined";
+    let font_tracing = if (previous is map or lua_font) {} else font_tracing_override(st)^;
+    let initialized = bootstrap_script_expl3({*:prepared,expl3_pending_aliases:aliases})^;
+    let global_values = assign_global_meanings(initialized,{*:clock_overrides,*:shipout.global});
+    if (initialized.issue != null) initialized else if (lua_font) unsupported(initialized, "expl3 LuaTeX font initialization")
+    else {*:global_values, expl3_aliases:aliases,expl3_pending_aliases:null,
+        definitions:{*:global_values.definitions, *:pdfmap, *:overrides, *:shipout.local, *:font_tracing}}
+}
+
 // tokenize trusted bundled TeX definitions under expl3 category codes.
 fn expl3_definition_tokens(reader_state, output = []) any^ {
     let next = reader.next(reader_state)^;
@@ -7796,12 +7949,16 @@ fn enable_expl_values(st: State, values, index = 0) State^ {
     else {
         let value = values[index];
         let name = "control:" ++ value.name;
-        let meaning = if (value.kind == "alias") st.definitions["control:" ++ value.value]
+        // Bootstrap aliases copy the captured source meaning, including redefinitions.
+        let resolved = if (value.kind == "primitive" and st.expl3_pending_aliases[value.name] != null)
+                st.expl3_pending_aliases[value.name]
+            else if (value.kind == "alias") st.definitions["control:" ++ value.value]
+            else if (value.kind == "control-meaning") meaning(st, control_token(value.value))^
             else if (value.kind == "primitive")
                 {kind: "primitive", name: value.value, source_mapping_guard: value.source_mapping_guard}
             else if (value.kind == "char") {kind: "char", value: value.value, cat: value.cat}
             else {kind: value.kind, value: value.value};
-        let next = if (st.definitions[name] != null) st else assign_meaning(st, name, meaning, true)^;
+        let next = if (st.definitions[name] != null) st else assign_meaning(st, name, resolved, true)^;
         enable_expl_values(next, values, index + 1)
     }
 }
@@ -7858,7 +8015,7 @@ fn enable_expl_primitives(st: State, names, index = 0) State^ {
 
 // Continue from a completed preload while retaining its definitions and scoped values.
 pub fn resume(st: State, source: string, name: string = "<input>", budget: int = 20000000,
-        origin: string = "local") State^ {
+        origin: string = "local", capture_checkpoint: bool = false) State^ {
     if (st.issue != null) st
     else if (len(st.groups) != 0 or len(st.conditions) != 0) fail(st, "tex-incomplete-preload")
     else {
@@ -7875,6 +8032,6 @@ pub fn resume(st: State, source: string, name: string = "<input>", budget: int =
             expl3_seq_map_seen:false, expl3_tl_map_seen:false, expl3_replicate_seen:false,
             expl3_exp_args_once_seen: false, expl3_exp_args_value_seen: false, expl3_exp_args_f_seen: false,
             sources: [*st.sources, {id: id, name: name, origin: origin, data: source}]};
-        run(resumed, budget)
+        run(resumed, budget, capture_checkpoint)
     }
 }

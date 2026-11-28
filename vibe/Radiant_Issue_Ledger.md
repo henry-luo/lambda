@@ -20,37 +20,45 @@ observations still require re-verification. Add new Radiant issues here.
 
 ## Open issues
 
+<a id="ri-279"></a>
+
+- [RI-279 — Native regression fixtures use obsolete output, clipping and sizing inputs](<Radiant_Issue_Ledger (fixed).md#ri-279>).
+
+<a id="ri-278"></a>
+
+- [RI-278 — Textarea family changes lose the user-agent font size](<Radiant_Issue_Ledger (fixed).md#ri-278>).
+
 <a id="ri-277"></a>
 
-- [RI-277 — Native regression fixtures use obsolete output, clipping and sizing inputs](<Radiant_Issue_Ledger (fixed).md#ri-277>).
+- [RI-277 — Table row minimum classifies a substituted length as a percentage](<Radiant_Issue_Ledger (fixed).md#ri-277>).
 
 <a id="ri-276"></a>
 
-- [RI-276 — Textarea family changes lose the user-agent font size](<Radiant_Issue_Ledger (fixed).md#ri-276>).
+- [RI-276 — Flex intrinsic measurement drops the percentage term of mixed margins](<Radiant_Issue_Ledger (fixed).md#ri-276>).
 
 <a id="ri-275"></a>
 
-- [RI-275 — Table row minimum classifies a substituted length as a percentage](<Radiant_Issue_Ledger (fixed).md#ri-275>).
+- [RI-275 — Ruby annotation realignment doubles an atomic child's relative offset](<Radiant_Issue_Ledger (fixed).md#ri-275>).
 
 <a id="ri-274"></a>
 
-- [RI-274 — Flex intrinsic measurement drops the percentage term of mixed margins](<Radiant_Issue_Ledger (fixed).md#ri-274>).
+- [RI-274 — Provisional flex heights and embedded SVG minimums use incorrect constraints](<Radiant_Issue_Ledger (fixed).md#ri-274>).
 
 <a id="ri-273"></a>
 
-- [RI-273 — Ruby annotation realignment doubles an atomic child's relative offset](<Radiant_Issue_Ledger (fixed).md#ri-273>).
+- [RI-273 — Aborted DOM edits leave host and descendant attributes changed](<Radiant_Issue_Ledger (fixed).md#ri-273>).
 
 <a id="ri-272"></a>
 
-- [RI-272 — Provisional flex heights and embedded SVG minimums use incorrect constraints](<Radiant_Issue_Ledger (fixed).md#ri-272>).
+- [RI-272 — Detached layout measurement closes an uninitialized counter checkpoint](<Radiant_Issue_Ledger (fixed).md#ri-272>).
 
 <a id="ri-271"></a>
 
-- [RI-271 — Aborted DOM edits leave host and descendant attributes changed](<Radiant_Issue_Ledger (fixed).md#ri-271>).
+- [RI-271 — Text measurement repeated writing-orientation queries](<Radiant_Issue_Ledger (fixed).md#ri-271>).
 
 <a id="ri-270"></a>
 
-- [RI-270 — Detached layout measurement closes an uninitialized counter checkpoint](<Radiant_Issue_Ledger (fixed).md#ri-270>).
+- [RI-270 — The animation mixer scanned all bindings for each sampled track](<Radiant_Issue_Ledger (fixed).md#ri-270>).
 
 <a id="ri-269"></a>
 

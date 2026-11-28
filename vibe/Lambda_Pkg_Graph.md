@@ -710,6 +710,21 @@ The retained package tests use checked-in references and render selected cases i
 
 **Open items.**
 
+- **Nested compound layout (D9.3.4).** `nested-subgraphs-3.mmd` exposes the
+  flat ranker's inability to lay out each cluster independently: X and Y each
+  occupy multiple global ranks, and their cycle through P makes the outer
+  arrangement a single vertical chain. The Mermaid reference lays out each
+  cluster's internal edge horizontally while placing X, Y and P independently.
+  Add hierarchical cluster measurement and placement, including local
+  directions and compound feedback edges, before routing against the resulting
+  boundaries. Cover the source fixture, nested cycles, explicit directions,
+  cross-cluster edges and existing Graphviz compound layouts.
+- **Mermaid subgraph references (D9.3.4).** In `nested-sg-outgoing-5.mmd`,
+  a reference to the previously declared `container_Beta` occurs inside
+  `container_Alpha`. The pinned reference depicts Beta inside Alpha, while the
+  canonical graph keeps the two declarations as siblings. Establish the
+  source-language membership rule for subgraph references, including repeated
+  references and cycles, before lowering this case and laying out its hierarchy.
 - **Structurizr diagnostics.** Some codes in §11.6.7 are not yet emitted.
 - **Mermaid families.** ER relationship word aliases, exhaustive quoted/Unicode identifiers, Markdown-rich entity names, and multiple shorthand classes; composite states, nested transitions, concurrency regions, history states, richer state descriptions, and `hide empty description`; requirement, architecture, block, and mindmap adapters.
 - **D2.** Nested container declarations, edge arrowhead maps, and advanced layouts such as grids need dedicated coverage and implementation.

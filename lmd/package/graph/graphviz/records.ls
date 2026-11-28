@@ -51,6 +51,9 @@ fn parse_fields(text, i, escaped, stack, valid) any^ {
     }
     else if (ch == "}" and len(stack) > 1)
       parse_fields(text, i + 1, false, close_group(stack), valid)
+    // Whitespace after a completed group is not a new empty field.
+    else if (current.complete and trim(ch) == "")
+      parse_fields(text, i + 1, false, stack, valid)
     else if (current.complete and trim(ch) != "")
       parse_fields(text, i + 1, false, stack, false)
     else parse_fields(text, i + 1, false,
@@ -59,32 +62,39 @@ fn parse_fields(text, i, escaped, stack, valid) any^ {
   }
 }
 
-fn record_cell(field, vertical) =>
+fn record_cell(field, vertical, index, nested) =>
   <td 'data-record-port': field.port,
-      style: "border:1px solid currentColor;padding:4px 6px;vertical-align:middle;",
-    if (field.fields != null) { record_table(field.fields, not vertical) }
+      // The containing cell owns a nested group's perimeter; only add its internal dividers.
+      style: (if (not nested) "border:1px solid currentColor;" else
+        if (index == 0) "border:0;" else if (vertical) "border:0;border-top:1px solid currentColor;"
+        else "border:0;border-left:1px solid currentColor;") ++
+        (if (field.fields != null) "padding:0;" else "padding:4px 6px;") ++
+        "vertical-align:middle;text-align:center;",
+    if (field.fields != null) { record_table(field.fields, not vertical, true) }
     else { field.text }
   >
 
-fn record_rows(fields, vertical) any^ => if (vertical) [
-  for (field in fields) <tr record_cell(field, vertical)>
-] else [<tr for field in fields { record_cell(field, vertical)^ }>]
+fn record_rows(fields, vertical, nested) any^ => if (vertical) [
+  for (i, field in fields) <tr record_cell(field, vertical, i, nested)>
+] else [<tr for (i, field in fields) record_cell(field, vertical, i, nested)^>]
 
-fn record_table(fields, vertical) =>
+fn record_table(fields, vertical, nested = false, width = null, height = null) =>
   <table class: "graphviz-record-table", 'data-record-axis': if (vertical) "vertical" else "horizontal",
-      style: "border-collapse:collapse;border-spacing:0;",
+      style: "border-collapse:collapse;border-spacing:0;" ++ (if (nested) "width:100%;" else "") ++
+        (if (width != null) "width:" ++ string(width) ++ "px;" else "") ++
+        (if (height != null) "height:" ++ string(height) ++ "px;" else ""),
     <tbody
-      for row in ((record_rows(fields, vertical)) ^ { [] }) { row }
+      for row in ((record_rows(fields, vertical, nested)) ^ { [] }) { row }
     >
   >
 
-fn lowered(parsed, vertical) => {
+fn lowered(parsed, vertical, width, height) => {
   valid: parsed.valid,
-  content: record_table(parsed.fields, vertical)
+  content: record_table(parsed.fields, vertical, false, width, height)
 }
 
-pub fn lower(raw, vertical = false) =>
+pub fn lower(raw, vertical = false, width = null, height = null) =>
   // Preserve a renderable, explicitly invalid record when dynamic label text
   // cannot be parsed; callers use valid to decide whether to trust its ports.
-  (lowered(parse_fields(string(raw), 0, false, [frame([], "", false)], true), vertical) ^ { null }) or
+  (lowered(parse_fields(string(raw), 0, false, [frame([], "", false)], true), vertical, width, height) ^ { null }) or
   {valid: false, content: record_table([], vertical)}

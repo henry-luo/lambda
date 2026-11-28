@@ -1,16 +1,18 @@
 import utf8: lambda.io.utf8
 import profile: lambda.doc.latex.tex_engine.profile
 import digest: lambda.doc.latex.tex_engine.digest
+import compare: ._tex_script_recovery
 let kernel = input(sys.lambda.home ++ "/package/doc/latex/tex_engine/kernel.tex", "text")^;
 import reconstruct: lambda.doc.latex.tex_engine.reconstruct
 import digest: lambda.doc.latex.tex_engine.digest
-fn matches(source) any^ {
-    let result = profile.expand_with_kernel(source, kernel,
-        {script_expl3: true, echo_definitions: true, adapters: [], resources: {local: {}, bundled: {}}}, 100000)^;
-    let rebuilt = reconstruct.reconstruct(result)^;
-    let native = parse(source, {type: "tex"})^;
-    {issue: result.issue, reconstruct_issue: rebuilt.issue, matches: rebuilt.text == native.text,
-        diagnostics_match: result.diagnostic_records == native.diagnostics, messages_empty: len(result.messages) == 0}
+// Native source-bound captures keep this comparison independent of public input.
+let native=input("test/lambda/latex/fixtures/tex_expl3_tl_blank_v_native.json","json")^;
+let cached=compare.preload_expl3()^;
+fn matches(source,index) any^ {
+    let entry=native.cases[index];
+    let result=compare.check_expansion(source,{script_expl3:true},entry,if(index==0)null else cached)^;
+    {issue:result.issue,reconstruct_issue:result.reconstruct_issue,matches:result.text_match,
+        diagnostics_match:result.diagnostics_match,messages_empty:result.messages_match}
 }
 let sources = [
  "\\ExplSyntaxOn\\tl_if_blank:VTF\\l_tmpa_tl{T}{F}\\ExplSyntaxOff",
@@ -33,7 +35,7 @@ let sources = [
  "\\protected\\def\\foo{}\\ExplSyntaxOn\\tl_if_blank:VTF\\foo{T}{F}\\ExplSyntaxOff",
  "\\def\\foo{~}\\ExplSyntaxOn\\tl_if_blank:VTF\\foo{T}{F}\\ExplSyntaxOff"
 ];
-[for (source in sources) matches(source)^]
+[for (index,source in sources) matches(source,index)^]
 
 fn safe_digestion(source) any^ {
     let result = profile.expand_with_kernel(source, kernel,

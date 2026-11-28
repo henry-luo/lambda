@@ -1,0 +1,337 @@
+{
+  "cases": [
+    {
+      "source": "\\ExplSyntaxOn\\tl_count:n{}\\ExplSyntaxOff",
+      "tex": {
+        "text": "0",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_count:n{ABC}\\ExplSyntaxOff",
+      "tex": {
+        "text": "3",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_count:n{~A~~B~}\\ExplSyntaxOff",
+      "tex": {
+        "text": "2",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_count:n{{AB}C}\\ExplSyntaxOff",
+      "tex": {
+        "text": "2",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_count:n{{}{}}\\ExplSyntaxOff",
+      "tex": {
+        "text": "2",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_count:n{{{A}B}C}\\ExplSyntaxOff",
+      "tex": {
+        "text": "2",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_count:n{\\foo}\\ExplSyntaxOff",
+      "tex": {
+        "text": "1",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_count:n{\\foo\\bar}\\ExplSyntaxOff",
+      "tex": {
+        "text": "2",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_count:n{\\foo{A}}\\ExplSyntaxOff",
+      "tex": {
+        "text": "2",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_count:n{éα}\\ExplSyntaxOff",
+      "tex": {
+        "text": "2",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_count:n{#}\\ExplSyntaxOff",
+      "tex": {
+        "text": "1",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_count:n{^_&$}\\ExplSyntaxOff",
+      "tex": {
+        "text": "4",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_count:N\\l_tmpa_tl\\ExplSyntaxOff",
+      "tex": {
+        "text": "0",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_set:Nn\\l_tmpa_tl{ABC}\\tl_count:N\\l_tmpa_tl\\ExplSyntaxOff",
+      "tex": {
+        "text": "3",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_set:Nn\\l_tmpa_tl{A{BC}~D}\\tl_count:N\\l_tmpa_tl\\ExplSyntaxOff",
+      "tex": {
+        "text": "3",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\def\\foo{ABC}\\tl_count:N\\foo\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\def\\foo{ABC}3",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\long\\def\\foo{ABC}\\tl_count:N\\foo\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\long\\def\\foo{ABC}3",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\protected\\def\\foo{ABC}\\tl_count:N\\foo\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\protected\\def\\foo{ABC}3",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\def\\foo{ABC}\\tl_count:n{\\foo}\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\def\\foo{ABC}1",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\edef\\x{\\tl_count:n{ABC}}\\x\\ExplSyntaxOff",
+      "tex": {
+        "text": "3",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\edef\\x{\\tl_count:n{}}\\x\\ExplSyntaxOff",
+      "tex": {
+        "text": "0",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_set:Nn\\l_tmpa_tl{ABC}\\edef\\x{\\tl_count:N\\l_tmpa_tl}\\x\\ExplSyntaxOff",
+      "tex": {
+        "text": "3",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\edef\\x{\\tl_count:N\\l_tmpa_tl}\\x\\ExplSyntaxOff",
+      "tex": {
+        "text": "0",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_set:Nn\\l_tmpa_tl{A}{\\tl_set:Nn\\l_tmpa_tl{BC}\\tl_count:N\\l_tmpa_tl}\\tl_count:N\\l_tmpa_tl\\ExplSyntaxOff",
+      "tex": {
+        "text": "{2}1",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_count:n{{~~}~{A~B}}\\ExplSyntaxOff",
+      "tex": {
+        "text": "2",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_count:n{{\\foo{A}}{\\bar}}\\ExplSyntaxOff",
+      "tex": {
+        "text": "2",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_count:n{\\foo~{A}}\\ExplSyntaxOff",
+      "tex": {
+        "text": "2",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_count:n{{A}~{B}}\\ExplSyntaxOff",
+      "tex": {
+        "text": "2",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_count:n{1234567890}\\ExplSyntaxOff",
+      "tex": {
+        "text": "10",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\edef\\x{\\tl_count:n{AB}}\\edef\\y{\\x}\\y\\ExplSyntaxOff",
+      "tex": {
+        "text": "2",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_count:n{~}\\ExplSyntaxOff",
+      "tex": {
+        "text": "0",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_count:n{\\par}\\ExplSyntaxOff",
+      "tex": {
+        "text": "1",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_count:n{{\\foo~A}B~{C}}\\ExplSyntaxOff",
+      "tex": {
+        "text": "3",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_set:Nn\\l_tmpa_tl{\\foo{A}~}\\tl_count:N\\l_tmpa_tl\\ExplSyntaxOff",
+      "tex": {
+        "text": "2",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_count:n{AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA}\\ExplSyntaxOff",
+      "tex": {
+        "text": "64",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_count:n{AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA}\\ExplSyntaxOff",
+      "tex": {
+        "text": "256",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\edef\\x{[\\tl_count:n{{A}~B}]}\\edef\\y{\\x}\\y\\ExplSyntaxOff",
+      "tex": {
+        "text": "[2]",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    }
+  ]
+}

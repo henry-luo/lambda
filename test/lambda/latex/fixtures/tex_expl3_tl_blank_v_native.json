@@ -1,0 +1,175 @@
+{
+  "cases": [
+    {
+      "source": "\\ExplSyntaxOn\\tl_if_blank:VTF\\l_tmpa_tl{T}{F}\\ExplSyntaxOff",
+      "tex": {
+        "text": "T",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_set:Nn\\l_tmpa_tl{~}\\tl_if_blank:VTF\\l_tmpa_tl{T}{F}\\ExplSyntaxOff",
+      "tex": {
+        "text": "T",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_set:Nn\\l_tmpa_tl{~~~}\\tl_if_blank:VTF\\l_tmpa_tl{T}{F}\\ExplSyntaxOff",
+      "tex": {
+        "text": "T",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_set:Nn\\l_tmpa_tl{A}\\tl_if_blank:VTF\\l_tmpa_tl{T}{F}\\ExplSyntaxOff",
+      "tex": {
+        "text": "F",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_set:Nn\\l_tmpa_tl{~A~}\\tl_if_blank:VTF\\l_tmpa_tl{T}{F}\\ExplSyntaxOff",
+      "tex": {
+        "text": "F",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_set:Nn\\l_tmpa_tl{{}}\\tl_if_blank:VTF\\l_tmpa_tl{T}{F}\\ExplSyntaxOff",
+      "tex": {
+        "text": "F",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_if_blank:VT\\l_tmpa_tl{T}\\tl_set:Nn\\l_tmpa_tl{A}\\tl_if_blank:VF\\l_tmpa_tl{F}\\ExplSyntaxOff",
+      "tex": {
+        "text": "TF",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_if_blank:VF\\l_tmpa_tl{F}\\tl_set:Nn\\l_tmpa_tl{A}\\tl_if_blank:VT\\l_tmpa_tl{T}\\ExplSyntaxOff",
+      "tex": {
+        "text": "",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\def\\x{}\\ExplSyntaxOn\\tl_set:Nn\\l_tmpa_tl{\\x}\\tl_if_blank:VTF\\l_tmpa_tl{T}{F}\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\def\\x{}F",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\def\\x{}\\ExplSyntaxOn\\tl_set:Nx\\l_tmpa_tl{\\x}\\tl_if_blank:VTF\\l_tmpa_tl{T}{F}\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\def\\x{}T",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn{\\tl_set:Nn\\l_tmpa_tl{A}\\tl_if_blank:VTF\\l_tmpa_tl{T}{F}}\\tl_if_blank:VTF\\l_tmpa_tl{T}{F}\\ExplSyntaxOff",
+      "tex": {
+        "text": "{F}T",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_if_blank:VTF\\l_tmpa_tl{T}{\\seq_pop_left:NN\\l_missing_seq\\l_tmpb_tl}\\ExplSyntaxOff",
+      "tex": {
+        "text": "T",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\edef\\x{\\tl_if_blank:VTF\\l_tmpa_tl{T}{F}}\\x\\ExplSyntaxOff",
+      "tex": {
+        "text": "T",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\tl_set:Nn\\l_tmpa_tl{A}\\edef\\x{\\tl_if_blank:VTF\\l_tmpa_tl{T}{F}}\\x\\ExplSyntaxOff",
+      "tex": {
+        "text": "F",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\def\\foo{Q}\\ExplSyntaxOn\\edef\\x{\\tl_if_blank:VTF\\l_tmpa_tl{\\noexpand\\foo}{F}}\\def\\foo{Z}\\x\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\def\\foo{Q}\\def\\foo{Z}Z",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\def\\foo{}\\ExplSyntaxOn\\tl_if_blank:VTF\\foo{T}{F}\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\def\\foo{}T",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\long\\def\\foo{}\\ExplSyntaxOn\\tl_if_blank:VTF\\foo{T}{F}\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\long\\def\\foo{}T",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\protected\\def\\foo{}\\ExplSyntaxOn\\tl_if_blank:VTF\\foo{T}{F}\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\protected\\def\\foo{}T",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\def\\foo{~}\\ExplSyntaxOn\\tl_if_blank:VTF\\foo{T}{F}\\ExplSyntaxOff",
+      "tex": {
+        "text": "\\def\\foo{~}F",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    }
+  ]
+}

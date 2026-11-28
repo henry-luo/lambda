@@ -1,13 +1,15 @@
 import profile: lambda.doc.latex.tex_engine.profile
+import compare: ._tex_script_recovery
 import reconstruct: lambda.doc.latex.tex_engine.reconstruct
 import digest: lambda.doc.latex.tex_engine.digest
 let kernel=input(sys.lambda.home ++ "/package/doc/latex/tex_engine/kernel.tex","text")^;
-fn check(source) any^ {
- let r=profile.expand_with_kernel(source,kernel,{script_expl3:true,echo_definitions:true,adapters:[],resources:{local:{},bundled:{}}},100000)^;
- let n=parse(source,{type:"tex"})^;let b=reconstruct.reconstruct(r)^;
- {issue:r.issue,reconstruct_issue:b.issue,text_match:b.text==n.text,messages_match:r.messages==n.messages,diagnostics_match:r.diagnostic_records==n.diagnostics}
+// Compare the same source with captured native results and reuse the immutable preload.
+let native=input("test/lambda/latex/fixtures/tex_expl3_seq_in_native.json","json")^;
+let cached=compare.preload_expl3()^;
+fn check(source,index) any^ {
+ compare.check_expansion(source,{script_expl3:true},native.cases[index],if(index==0)null else cached)
 }
-[for (source in [
+[for (index,source in [
   "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_set_from_clist:Nn\\l_s_seq{a,b,c}\\seq_if_in:NnTF\\l_s_seq{b}{Y}{N}\\ExplSyntaxOff",
   "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_set_from_clist:Nn\\l_s_seq{a,b,c}\\seq_if_in:NnTF\\l_s_seq{d}{Y}{N}\\ExplSyntaxOff",
   "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_set_from_clist:Nn\\l_s_seq{a,b,c}\\seq_if_in:NnT\\l_s_seq{b}{Y}X\\ExplSyntaxOff",
@@ -55,7 +57,7 @@ fn check(source) any^ {
 "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_put_right:Nn\\l_s_seq{a}\\seq_if_in:NnTF\\l_s_seq{a}{Y}{N}\\meaning\\__seq_item:n\\ExplSyntaxOff",
 "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_put_right:Nn\\l_s_seq{a}\\seq_if_in:NnTF\\l_s_seq{a}{Y}{N}\\show\\__seq_item:n\\ExplSyntaxOff",
 "\\ExplSyntaxOn\\seq_new:N\\l_s_seq\\seq_put_right:Nn\\l_s_seq{a}\\globaldefs=1 \\seq_if_in:NnTF\\l_s_seq{a}{Y}{N}\\globaldefs=0 \\seq_if_in:NnTF\\l_s_seq{b}{Y}{N}\\ExplSyntaxOff"
-]) check(source)^]
+]) check(source,index)^]
 
 fn safe_digestion(source) any^ {
  let r=profile.expand_with_kernel(source,kernel,{script_expl3:true,echo_definitions:true,adapters:[],resources:{local:{},bundled:{}}},100000)^;

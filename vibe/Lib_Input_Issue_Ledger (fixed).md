@@ -130,6 +130,11 @@ each matching the golden. These are individual measurements, not a statistical
 benchmark; the separate corpus timeout remains open. Evidence is under
 `temp/latex-retirement/hash-experiment/`.
 
+The 2026-11-27 follow-up combines integer metadata as words too. Pooled
+field names use their IDs to select candidates. Edge admission still checks
+their spelling across name pools, together with contracts, flags and offsets
+(D3.4.3–D3.4.4). The debug viewer profiles are in `temp/radiant-under-five/`.
+
 <a id="li-122"></a>
 
 ### LI-122 — Archive member names were lost during automatic format detection

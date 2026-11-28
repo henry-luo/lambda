@@ -880,6 +880,8 @@ extern "C" {
     Item fn_string_ord_at(Item str, int64_t index);
     uint64_t fn_string_char_word(Item str, int64_t index);
     Item map_get(Map* map, Item key);
+    // The caller supplies a canonical NamePool spelling and its typemap hash.
+    Item map_get_canonical_name(Map* map, const String* name, uint32_t name_hash);
     Item elmt_get(Element *elmt, Item key);
     Item object_get(Object* obj, Item key);
     void object_type_set_method(int64_t type_index, const char* method_name,

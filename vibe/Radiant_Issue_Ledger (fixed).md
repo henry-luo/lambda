@@ -14,12 +14,12 @@ are unchanged. Full evidence is under `../../lambda/temp/kianhup-style/`.
 
 ## Fixed issues
 
-RI-270 through RI-277 are recorded in the
+RI-272 through RI-279 are recorded in the
 [test repair implementation note](impl/Radiant_Impl_Test_Repair_2026-11-28.md).
 
-<a id="ri-277"></a>
+<a id="ri-279"></a>
 
-### RI-277 — Native regression fixtures use obsolete output, clipping and sizing inputs
+### RI-279 — Native regression fixtures use obsolete output, clipping and sizing inputs
 
 **Fixed in the working tree, 2026-11-28.** Four device-loss tests created
 headless virtual submixes, which correctly do not join the physical bus. They
@@ -30,9 +30,9 @@ preferred-size contribution, and the nested-flex replay uses a definite basis
 while retaining its percentage-basis rejection checks (**D9.1.3v2**).
 The full Radiant document binary passes 545/545 with macOS service access.
 
-<a id="ri-276"></a>
+<a id="ri-278"></a>
 
-### RI-276 — Textarea family changes lose the user-agent font size
+### RI-278 — Textarea family changes lose the user-agent font size
 
 **Fixed in the working tree, 2026-11-28.** Changing only a textarea's font
 family made inherited medium size replace its 13.333px user-agent size. Font
@@ -41,9 +41,9 @@ explicit `medium` and `inherit` sizes continue to resolve separately
 (**D9.1.3v2**). The extended `WinningFontFamilyDeterminesTheMonospaceMediumAdjustment`
 case and Chromium controls pass.
 
-<a id="ri-275"></a>
+<a id="ri-277"></a>
 
-### RI-275 — Table row minimum classifies a substituted length as a percentage
+### RI-277 — Table row minimum classifies a substituted length as a percentage
 
 **Fixed in the working tree, 2026-11-28.** The table cell's row-minimum path
 classified `var()` as a possible percentage before substitution, dropping a
@@ -51,9 +51,9 @@ definite length. It now consumes the shared substituted CSS size facts
 (**D9.1.3v2**). `TableCellLengthsUseTheDeclaringFontAndOrientation` passes its
 retained font, writing-mode and `var(--extent)` states.
 
-<a id="ri-274"></a>
+<a id="ri-276"></a>
 
-### RI-274 — Flex intrinsic measurement drops the percentage term of mixed margins
+### RI-276 — Flex intrinsic measurement drops the percentage term of mixed margins
 
 **Fixed in the working tree, 2026-11-28.** Intrinsic flex measurement resolved
 a mixed `calc()` margin against zero even when the containing inline size was
@@ -62,9 +62,9 @@ and keeps zero as the cyclic fallback when no basis exists (**D9.1.3v2**).
 `GridIntrinsicMarginsResolveChildVariablesFontAndPercentageBasis` passes its
 live custom-property states and agrees with Chromium.
 
-<a id="ri-273"></a>
+<a id="ri-275"></a>
 
-### RI-273 — Ruby annotation realignment doubles an atomic child's relative offset
+### RI-275 — Ruby annotation realignment doubles an atomic child's relative offset
 
 **Fixed in the working tree, 2026-11-28.** A later inline font-box alignment
 replaced the wrapper's already-shifted vertical coordinate. Ruby then
@@ -73,9 +73,9 @@ child. Rebased font boxes now retain applied inline-chain offsets
 (**D9.1.3v2**). `RubyRelativeOffsetsSurviveColumnAndLinePlacement` and the
 full document binary pass.
 
-<a id="ri-272"></a>
+<a id="ri-274"></a>
 
-### RI-272 — Provisional flex heights and embedded SVG minimums use incorrect constraints
+### RI-274 — Provisional flex heights and embedded SVG minimums use incorrect constraints
 
 **Fixed in the working tree, 2026-11-28.** A provisional height inherited
 from an auto-sized flex row was treated as a definite percentage basis, so an
@@ -87,9 +87,9 @@ the suggestion still receives a definite cross-size transfer (**D9.1.3v2**).
 The auto/definite/auto height transition, dynamic overflow controls and the
 eight existing image-basis cases pass; Chromium agrees with the tested geometry.
 
-<a id="ri-271"></a>
+<a id="ri-273"></a>
 
-### RI-271 — Aborted DOM edits leave host and descendant attributes changed
+### RI-273 — Aborted DOM edits leave host and descendant attributes changed
 
 **Fixed in the working tree, 2026-11-28.** A rejected editing transaction
 restored its host and descendant content but did not snapshot and restore their
@@ -99,9 +99,9 @@ notifying DOM consumers as restored values are applied (**D10.2.1 / D5.5.1 /
 D9.1.3v2**).
 `RadiantDocumentTest.AbortedEditRestoresHostAndDescendantAttributes` passes.
 
-<a id="ri-270"></a>
+<a id="ri-272"></a>
 
-### RI-270 — Detached layout measurement closes an uninitialized counter checkpoint
+### RI-272 — Detached layout measurement closes an uninitialized counter checkpoint
 
 **Fixed in the working tree, 2026-11-28.** A detached inline measurement can
 create an idle `CounterCheckpoint` without a counter context. Its three
@@ -109,6 +109,30 @@ create an idle `CounterCheckpoint` without a counter context. Its three
 indeterminate owner and crash while returning from scalar-control sizing.
 Initializing the owners to null makes the idle checkpoint safe to close
 (**D5.5.1 / D9.1.3v2**). `RadiantDocumentTest.ScalarControlSizingPreservesContainingFlexContent` passes.
+
+<a id="ri-271"></a>
+
+### RI-271 — Text measurement repeated writing-orientation queries
+
+**Fixed, 2026-11-27.** Intrinsic text measurement resolved orientation
+for every measured cluster without using the layout context's policy cache.
+Text runs now share that cache through their owning DOM node. The resolved
+inherited-declaration mask also proves when `text-orientation` or
+`text-combine-upright` has its default throughout an ancestor chain
+(**D5.5.1**). The debug layout baseline passed 5,632 cases. Profiles and
+case timings are under `temp/radiant-case-tuning/`.
+
+<a id="ri-270"></a>
+
+### RI-270 — The animation mixer scanned all bindings for each sampled track
+
+**Fixed, 2026-11-27.** CPU samples of the Fishing assisted-catch replay showed
+animation sampling walking the mixer's property list for each channel. An
+action now retains one binding per immutable channel when admitted, and the
+existing property reference counts govern the lifetime of those bindings
+(**S12.1.5v2 / D5.5.1**). Sampling and root-motion extraction use the retained
+bindings. Removing an action releases its references before pruning unused
+properties. Evidence is in `temp/radiant-under-five/`.
 
 <a id="ri-269"></a>
 

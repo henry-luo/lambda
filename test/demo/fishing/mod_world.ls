@@ -129,4 +129,7 @@ pub let TUFTS = [for (i in 0 to 89, let p = rim(1600 + i, 1.08, 1.45) ^ { null }
 
 // ---- the boat's world: keep it on water deeper than its draft and off emergent rocks
 pub let DRAFT = 0.32
-pub fn navigable(x: float, z: float) bool^ => depth(x, z)^ > DRAFT and shore(x, z) < 0.985
+pub fn navigable(x: float, z: float) bool^ {
+    let r = shore(x, z)^;
+    (r < 0.985 and floor_y_below(x, z, r, -DRAFT)^ < -DRAFT)
+}

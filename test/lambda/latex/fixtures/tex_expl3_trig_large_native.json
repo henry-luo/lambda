@@ -1,0 +1,184 @@
+{
+  "cases": [
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{sin(1e16)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "0.7796880066069788",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{cos(1e16)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "-0.6261681981330862",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{sin(-1e16)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "-0.7796880066069788",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{cos(-1e16)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "-0.6261681981330862",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{sin(1e17)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "-0.4645301048353727",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{cos(1e17)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "-0.8855573282976307",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{sin(-1e17)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "0.4645301048353727",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{cos(-1e17)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "-0.8855573282976307",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{sin(1e18)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "-0.9929693207404051",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{cos(1e18)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "0.1183719902187107",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{sin(-1e18)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "0.9929693207404051",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{cos(-1e18)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "0.1183719902187107",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{sin(14148475504056880)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "-0.5239925862185167",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{cos(14148475504056880)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "0.851722824390676",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{sin(1e20)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "-0.6452512852657808",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{cos(1e20)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "0.7639704044417283",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{sin(-1e25)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "0.7447898487448298",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{cos(-1e25)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "-0.6672990942648233",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{sin(1e30)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "-0.09011690191213806",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    },
+    {
+      "source": "\\ExplSyntaxOn\\fp_eval:n{cos(1e30)}\\ExplSyntaxOff",
+      "tex": {
+        "text": "-0.9959311944053957",
+        "messages": [],
+        "diagnostics": [],
+        "packages": []
+      }
+    }
+  ]
+}

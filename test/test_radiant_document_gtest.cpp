@@ -3414,6 +3414,47 @@ TEST_F(RadiantDocumentTest, OrthogonalFitContentUsesAtomicInlineContributions) {
     }
 }
 
+TEST_F(RadiantDocumentTest, InlineFlexRatioMinimumUsesBorderBoxAndCentersText) {
+    ASSERT_NE(load_script_source(R"HTML(<!doctype html><style>
+        @font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}
+        body{margin:0;font:10px/10px Ahem}
+        .node{display:inline-flex;align-items:center;justify-content:center;
+            box-sizing:border-box;padding:10px 14px;border:1px solid;
+            aspect-ratio:1;min-width:48px;min-height:48px}
+        #height-only{min-width:0}#ratio{aspect-ratio:2/1;min-width:0}
+        #content{box-sizing:content-box}#ellipse{aspect-ratio:auto;width:80px;height:44px;min-height:0}
+        </style><div id="result"><span id="short" class="node">X</span>
+        <span id="long" class="node">XXXXXXXX</span>
+        <span id="height-only" class="node">X</span>
+        <span id="ratio" class="node">X</span><span id="content" class="node">X</span>
+        <span id="ellipse" class="node">X</span></div>)HTML"), nullptr);
+    ui.viewport_width = ui.window_width = 400;
+    ui.viewport_height = ui.window_height = 200;
+    ui.create_surface(ui.window_width, ui.window_height);
+    layout_html_doc(&ui, document, false);
+    const struct { const char* id; float width; float height; } cases[] = {
+        {"short", 48.0f, 48.0f}, {"long", 110.0f, 110.0f},
+        {"height-only", 48.0f, 48.0f}, {"ratio", 96.0f, 48.0f},
+        {"content", 78.0f, 70.0f}, {"ellipse", 80.0f, 44.0f}
+    };
+    for (const auto& entry : cases) {
+        SCOPED_TRACE(entry.id);
+        DomElement* node = dom_find_element_by_id(document->root->as_element(), entry.id);
+        ASSERT_NE(node, nullptr);
+        ASSERT_NE(node->first_child, nullptr);
+        ASSERT_TRUE(node->first_child->is_text());
+        EXPECT_NEAR(node->width, entry.width, 0.05f);
+        EXPECT_NEAR(node->height, entry.height, 0.05f);
+        float x = 0.0f, y = 0.0f, text_x = 0.0f, text_y = 0.0f;
+        float text_width = 0.0f, text_height = 0.0f;
+        view_get_visual_bounds(node, &x, &y, nullptr, nullptr);
+        view_get_visual_bounds(static_cast<View*>(node->first_child), &text_x, &text_y,
+            &text_width, &text_height);
+        EXPECT_NEAR(text_x - x + text_width / 2.0f, node->width / 2.0f, 0.05f);
+        EXPECT_NEAR(text_y - y + text_height / 2.0f, node->height / 2.0f, 0.05f);
+    }
+}
+
 TEST_F(RadiantDocumentTest, AspectRatioDeterminesOrthogonalAutoInlineSize) {
     for (const char* mode : {"vertical-rl", "vertical-lr"})
         for (bool border_box : {false, true}) for (const char* text : {"", "X X X", "XXXXX"}) {
@@ -9429,6 +9470,36 @@ TEST_F(RadiantDocumentTest, CollapsedTableBordersRetainDashDotDoubleAndColor) {
                     (unsigned)roundf((top+2)*scale),40,100,173);
             } else { EXPECT_GT(ink,20u); EXPECT_GT(gaps,10u); }
         }
+    }
+}
+
+TEST_F(RadiantDocumentTest, TransformedCollapsedTableBordersFollowTheirCells) {
+    ASSERT_NE(load_script_source(R"HTML(<style>
+        body{margin:0;background:white;font:18px sans-serif}
+        .outer{position:absolute;left:200px;display:inline-block;border:2px solid blue;padding:10px}
+        table{border-collapse:collapse;border-spacing:0}td{border:2px solid red;padding:4px 6px}
+        #translated{top:30px;transform:translate(200px,0)}
+        #scaled{top:300px;transform:scale(2);transform-origin:0 0}
+        </style><div id="result"></div><div id="translated" class="outer">
+        <table><tr><td>foo</td><td>x</td><td>bar</td></tr></table></div>
+        <div id="scaled" class="outer"><table><tr><td>foo</td><td>x</td><td>bar</td></tr></table></div>)HTML"), nullptr);
+    for (float scale : {1.0f, 2.0f}) {
+        ui_context_set_device_scale(&ui, scale, scale);
+        ui.viewport_width = 800; ui.viewport_height = 500;
+        ui.window_width = 800 * scale; ui.window_height = 500 * scale;
+        ui.create_surface(ui.window_width, ui.window_height);
+        layout_html_doc(&ui, document, false);
+        render_html_doc(&ui, document->view_tree, nullptr);
+        ASSERT_FALSE(ui.render_failed);
+        // Painted borders must follow translated and scaled content, without ghosts at the old origin.
+        auto pixel = [&](float x, float y, uint8_t red, uint8_t green, uint8_t blue) {
+            test_radiant_expect_surface_pixel(ui.surface, (unsigned)roundf(x * scale),
+                (unsigned)roundf(y * scale), red, green, blue);
+        };
+        pixel(430, 43, 255, 0, 0);
+        pixel(230, 43, 255, 255, 255);
+        pixel(260, 325, 255, 0, 0);
+        pixel(213, 315, 255, 255, 255);
     }
 }
 

@@ -11,7 +11,7 @@ pub fn palette(name) {
   if (dark) {
     {
       graph_background: "#111827",
-      node_background: "#1f2937",
+      node_background: "transparent",
       node_border: "#64748b",
       node_text: "#f8fafc",
       edge: "#94a3b8"
@@ -19,7 +19,7 @@ pub fn palette(name) {
   } else {
     {
       graph_background: "transparent",
-      node_background: "#ffffff",
+      node_background: "transparent",
       node_border: "#64748b",
       node_text: "#172033",
       edge: "#59636e"

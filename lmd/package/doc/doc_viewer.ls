@@ -1086,14 +1086,17 @@ view <document_pane> () any^ state preview_mode: ~.initial_preview_mode or "view
 }
 on render(evt) {
   if (evt.event_phase == 2) {
+    var mount_queued = false
     if (preview_mode == "view" and ~.preview_token != null) {
       let host = dom.query_selector(evt.target, "#rendered-preview,#rtf-preview,#pdf-preview")
       if (host != null and dom.get_attribute(host, "data-preview-token") != ~.preview_token) {
         emit("viewer_mount_preview", {host:host,panel:evt.target,token:~.preview_token})
+        mount_queued = true
       }
     }
     dom.watch_window(evt.target, "resize", true)
-    update_preview_scrollbars(evt.target)^
+    // The mount handler schedules measurement after the fragment is attached.
+    if (not mount_queued) { update_preview_scrollbars(evt.target)^ }
   }
   return 'pass'
 }

@@ -242,8 +242,10 @@ fn node_sizing_css(node) any^ {
 fn node_padding_css(node) any^ {
   let x = source_attr(node, "margin-x", null);
   let y = source_attr(node, "margin-y", null);
-  let padding_y = if (y != null) y else 10;
-  let padding_x = if (x != null) x else 14;
+  let diamond = source_attr(node, "shape", "box") == "diamond" and
+    source_attr(node, "polygon-sides", null) == null;
+  let padding_y = if (y != null) y else if (diamond) 20 else 10;
+  let padding_x = if (x != null) x else if (diamond) 32 else 14;
   let rim = cylinder_rim_radius(node);
   if (rim == 0) "padding:" ++ string(padding_y) ++ "px " ++ string(padding_x) ++ "px;"
   // reserve the lower half of the top oval above the node's content.
@@ -270,9 +272,19 @@ fn node_rim(node, parsed) {
 
 fn node_children(node, parsed, palette, content = []) any^ {
   let shape = source_attr(node, "shape", "box");
+  let diamond = shape == "diamond" and source_attr(node, "polygon-sides", null) == null;
   let count = periphery_count(node, shape)^;
   let color = parsed.stroke or palette.node_border;
-  [*node_rim(node, parsed), *content,
+  [if (diamond)
+      // A clipped rectangular border cannot draw the sloping diamond edges.
+      <svg xmlns:"http://www.w3.org/2000/svg",viewBox:"0 0 100 100",preserveAspectRatio:"none",
+        'aria-hidden':"true",style:"position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;",
+        <polygon points:"50,0.5 99.5,50 50,99.5 0.5,50",fill:(parsed.fill or "none"),
+          stroke:(if (count == 0) "none" else color),'stroke-width':(parsed.stroke_width or 1)>>,
+    *node_rim(node, parsed),
+    if (diamond and len(content) > 0)
+      <span style:"position:relative;z-index:1;",for (child in content) child>
+    else for (child in content) child,
     // Paint circular outlines as borders so SVG retains the text as vector content.
     if ((count > 1 and vector_peripheries(shape))^)
       for (index in 1 to (count - 1))
@@ -283,26 +295,30 @@ fn node_children(node, parsed, palette, content = []) any^ {
 
 fn node_style(node, parsed, palette) any^ {
   let shape = string(source_attr(node, "shape", "box"));
+  let record = source_attr(node, "graphviz-shape", null) == "record";
+  let diamond = shape == "diamond" and source_attr(node, "polygon-sides", null) == null;
   let background = gradient_background(node,
     if (parsed.fill != null) parsed.fill else palette.node_background);
   let effective = {*:palette,
     node_background: if (parsed.fill != null) parsed.fill else palette.node_background,
     node_border: if (parsed.stroke != null) parsed.stroke else palette.node_border};
-  (if (contains(["circle", "doublecircle", "f-circ"], shape))
+  (if (diamond) "position:relative;display:inline-block;" else if (contains(["circle", "doublecircle", "ellipse", "f-circ"], shape))
     "display:inline-flex;align-items:center;justify-content:center;"
     else "display:inline-block;") ++
-    "box-sizing:border-box;" ++ node_padding_css(node) ++
+    "box-sizing:border-box;" ++ (if (record) "padding:0;" else node_padding_css(node)) ++
     node_sizing_css(node) ++
-    "border:1px solid " ++ palette.node_border ++ ";" ++
-    "background:" ++ background ++ ";" ++ shape_css(node, effective) ++
+    (if (diamond) "border:0;background:transparent;" else if (record)
+      "border:0;background:" ++ background ++ ";" else
+      "border:1px solid " ++ palette.node_border ++ ";background:" ++ background ++ ";" ++ shape_css(node, effective)) ++
     periphery_css(node, shape, effective) ++ font_css(node, palette.node_text) ++
     ";white-space:" ++
     (if (graph_content.is_rich(label_format(node))) "normal" else "nowrap") ++
-    ";" ++ graph_style.node_css(parsed)
+    ";" ++ graph_style.node_css(if (diamond) {*:parsed,fill:null} else parsed)
 }
 
 fn fixed_shape_style(node, parsed, palette) any^ {
   let shape = string(source_attr(node, "shape", "box"));
+  let diamond = shape == "diamond" and source_attr(node, "polygon-sides", null) == null;
   let background = gradient_background(node,
     if (parsed.fill != null) parsed.fill else palette.node_background);
   let effective = {*:palette,
@@ -310,10 +326,11 @@ fn fixed_shape_style(node, parsed, palette) any^ {
     node_border: if (parsed.stroke != null) parsed.stroke else palette.node_border};
   "display:block;box-sizing:border-box;grid-area:1/1;width:" ++
     string(source_attr(node, "width", 0)) ++ "px;height:" ++
-    string(source_attr(node, "height", 0)) ++ "px;border:1px solid " ++
-    palette.node_border ++ ";background:" ++ background ++ ";" ++
-    shape_css(node, effective) ++ periphery_css(node, shape, effective) ++
-    graph_style.node_css(parsed)
+    string(source_attr(node, "height", 0)) ++ "px;" ++
+    (if (diamond) "position:relative;border:0;background:transparent;" else
+      "border:1px solid " ++ palette.node_border ++ ";background:" ++ background ++ ";" ++ shape_css(node, effective)) ++
+    periphery_css(node, shape, effective) ++
+    graph_style.node_css(if (diamond) {*:parsed,fill:null} else parsed)
 }
 
 fn fixed_shape_content(content, node) =>
@@ -429,7 +446,7 @@ fn marker_text(value, enabled) {
 }
 
 fn html_edge(edge, index, group, graph_directed, assigned_classes,
-    style_declarations, interaction, graph) {
+    style_declarations, interaction, metadata) {
   let id = string(source_attr(edge, "id", "e" ++ string(index)));
   let source_id = source_attr(edge, "source-id", null);
   let directed = bool_text(source_attr(edge, "directed", null), graph_directed);
@@ -471,9 +488,9 @@ fn html_edge(edge, index, group, graph_directed, assigned_classes,
       'data-callback': source_attr(interaction, "callback", null),
       'data-tooltip': source_attr(interaction, "tooltip", null),
       'data-link-target': source_attr(interaction, "target-window", null),
-      'data-animate': string(model.edge_property(graph, id, source_id, "animate", "false")),
-      'data-animation': model.edge_property(graph, id, source_id, "animation", null),
-      'data-curve': model.edge_property(graph, id, source_id, "curve", null),
+      'data-animate': string(model.edge_property(metadata, id, source_id, "animate", "false")),
+      'data-animation': model.edge_property(metadata, id, source_id, "animation", null),
+      'data-curve': model.edge_property(metadata, id, source_id, "curve", null),
       'data-min-length': string(source_attr(edge, "min-length", source_attr(edge, "min_length", 1))),
       'data-weight': string(source_attr(edge, "weight", 1)),
       'data-constraint': bool_text(source_attr(edge, "constraint", true), true),
@@ -522,8 +539,8 @@ fn html_cluster_label(entry, index, palette) any^ {
 }
 
 fn edge_label_placement(graph, direction) {
-  // Graphviz positions ordinary labels beside the spline, unlike Mermaid's centered labels.
-  if (graph is element and graph.flavor == "dot") {
+  // Graphviz and D2 position ordinary labels beside the connector.
+  if (graph is element and graph.flavor in ["dot", "d2"]) {
     if (direction == "LR" or direction == "RL") "above" else "right"
   } else "center"
 }
@@ -604,7 +621,8 @@ pub fn to_html(graph, opts = null) {
   let edge_entries = if (graph is element) model.edge_entries(graph)
     else [for (edge in ((source_children(graph, "edge")) ^ { [] })) {value: edge, group: null}];
   let subgraph_entries = if (graph is element) model.visual_subgraph_entries(graph) else [];
-  let port_entries = if (graph is element) model.port_entries(graph) else [];
+  let port_entries = if (graph is element) model.ports_for_nodes(node_entries) else [];
+  let metadata = model.presentation_metadata(graph);
   let direction = string(opt(opts, "direction",
     if (graph is element) model.direction(graph)
     else source_attr(graph, "direction", source_attr(graph, "rank-dir", "TB"))));
@@ -619,11 +637,16 @@ pub fn to_html(graph, opts = null) {
   let edge_sep = string(opt(opts, "edge_sep", source_attr(graph, "edge-sep", 10)));
   let directed = graph_directed(graph);
   let theme = string(opt(opts, "theme", "light"));
-  let palette = theme_defaults.palette(theme);
+  let theme_palette = theme_defaults.palette(theme);
+  // Mermaid nodes need an opaque default to cover routes painted underneath.
+  let palette = if (source_attr(graph, "flavor", null) == "mermaid")
+    {*:theme_palette, node_background: if (theme_palette.graph_background == "transparent")
+      "#ffffff" else theme_palette.graph_background} else theme_palette;
   let graph_fill = graph_style.safe_color(source_attr(graph, "fill", null));
   let graph_background = gradient_background(graph,
     if (graph_fill != null) graph_fill else palette.graph_background);
-  let title = if (graph is element and model.title(graph) != null) model.title(graph)
+  let graph_title = if (graph is element) model.title(graph) else null;
+  let title = if (graph_title != null) graph_title
     else if (config.title != null) config.title else source_attr(graph, "title", null);
   let description = if (graph is element) model.description(graph)
     else source_attr(graph, "description", null);
@@ -640,11 +663,10 @@ pub fn to_html(graph, opts = null) {
     for (i, entry in subgraph_entries,
       let label = html_cluster_label(entry, i, palette)
       where ((label != null) ^ { false })) label,
-    for (i, entry in node_entries) html_node(entry.value, i, entry.group,
-      if (graph is element) model.classes_for(graph, node_id(entry.value, i)) else [],
-      if (graph is element) model.node_style_declarations_for(
-        graph, node_id(entry.value, i)) else "",
-      if (graph is element) model.interaction_for(graph, node_id(entry.value, i)) else null,
+    for (i, entry in node_entries, let id = node_id(entry.value, i)) html_node(entry.value, i, entry.group,
+      if (metadata != null) model.classes_for(metadata, id) else [],
+      if (metadata != null) model.node_style_declarations_for(metadata, id) else "",
+      if (metadata != null) model.interaction_for(metadata, id) else null,
       palette),
     for (i, entry in port_entries) html_port(entry, i),
     for (i, entry in edge_entries,
@@ -654,11 +676,10 @@ pub fn to_html(graph, opts = null) {
       let edge_id = string(source_attr(entry.value, "id", "e" ++ string(i))),
       let source_id = source_attr(entry.value, "source-id", null))
       html_edge(entry.value, i, entry.group, directed,
-        if (graph is element) model.edge_classes_for(graph, edge_id, source_id) else [],
-        if (graph is element) model.edge_style_declarations_for(
-          graph, edge_id, source_id, i) else "",
-        if (graph is element) model.interaction_for(graph, edge_id) else null,
-        graph)
+        if (metadata != null) model.edge_classes_for(metadata, edge_id, source_id) else [],
+        if (metadata != null) model.edge_style_declarations_for(metadata, edge_id, source_id, i) else "",
+        if (metadata != null) model.interaction_for(metadata, edge_id) else null,
+        metadata)
   ];
   <'graph' class: "lambda-graph lambda-graph-theme-" ++ theme,
       'data-graph-role': "graph", 'data-radiant-layout': "lambda-graph", 'data-theme': theme,

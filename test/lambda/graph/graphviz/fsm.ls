@@ -41,6 +41,17 @@ let long25 = by_endpoints(routed.edges, "2", "5")
 let html = transform.to_html(graph)
 let circle_html = [for (child in ((model.element_children(html)) ^ { [] })
   where child["data-node-id"] == "2") child][0]
+let heawood = input("test/lambda/graph/upstream/dot/Heawood.gv", {type:"graph",flavor:"dot"})^
+let heawood_scene = transform.render_scene(heawood, 1000, 1000)^.scene
+let heawood_nodes = [for (node in ((model.element_children(heawood_scene)) ^ { [] })
+  where ((model.tag(node) == "node") ^ { false })) node]
+let ellipse_source = parse("digraph { a [shape=ellipse,width=1.5,height=0.5,label=\"x\"] }",
+  {type:"graph",flavor:"dot"})^
+let ellipse_html = [for (child in ((model.element_children(transform.to_html(ellipse_source))) ^ { [] })
+  where ((child["data-node-id"] == "a") ^ { false })) child][0]
+let ellipse_scene = transform.render_scene(ellipse_source, 400, 200)^.scene
+let ellipse_node = [for (node in ((model.element_children(ellipse_scene)) ^ { [] })
+  where ((node.id == "a") ^ { false })) node][0]
 let curve_probe = {route_mode: "curved", points: [
   {x: 0, y: 0}, {x: 10, y: -10}, {x: 20, y: 0}, {x: 30, y: 0}
 ]}
@@ -87,6 +98,10 @@ let measured = layout.from_velmts(
     bottom(long25.points) > bottom(loop6.points),
   circle_style: contains(string(circle_html.style), "display:inline-flex") and
     contains(string(circle_html.style), "aspect-ratio:1"),
+  heawood_circles: len(heawood_nodes) == 14 and not (false in [for (node in heawood_nodes)
+    node.shape == "circle" and abs(node.width - node.height) < 0.01 and node.width >= 48]),
+  ellipse_centered: contains(string(ellipse_html.style), "display:inline-flex") and
+    contains(string(ellipse_html.style), "justify-content:center") and ellipse_node.width > ellipse_node.height,
   curved_terminal: ends_with(route_geometry.path_data(curve_probe),
     "Q 20 0 30 0"),
   curve_samples: len(route_geometry.sample_points(curve_probe)) >= 5,

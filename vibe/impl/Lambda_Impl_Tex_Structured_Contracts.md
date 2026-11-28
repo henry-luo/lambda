@@ -90,6 +90,34 @@ shared `options_map` uses `match` and its narrowed `~` (S11.2.1) to produce a
 clean map; it does not add casts or swallow an incoming error parameter
 (S11.4.3). Byte-oriented checksum/escaping functions retain binary input.
 
+## Document load follow-up — 2026-11-27
+
+The host previously restarted document expansion after every captured TeX
+resource lookup. The Script engine can now pause before the requesting step.
+The host retains that checkpoint with precise GC roots, authorizes and captures
+the resource, then retries the step with the new capture (D10.2.2v2, D6.3.3).
+The checkpoint preserves the source, groups, diagnostics and expansion budget.
+Selecting an expl3 kernel still starts the document with that kernel's state.
+The resource request golden compares resumed output with a fresh parse.
+
+Document preloads omit definition source spans that the handoff discards.
+The scanner keeps the original UTF-8 byte positions. Primitive dispatch
+reuses resolved control meanings. LaTeX callers that request elements skip
+the diagnostic report, which otherwise re-parses aligned cells after rendering.
+The amsmath golden checks that both entry points produce identical HTML.
+Alignment body scans use text subscripts and a short delimiter prefix.
+Native text slicing reuses the indexed ASCII character table for single-byte
+results without changing code-point positions or slice bounds (S2.5.8,
+S7.2.1, S7.10.1v3).
+The reader publishes cursor and token metadata once per emitted token.
+Control words scan ordinary letters directly and decode superscript pairs
+when their category can change the word, retaining the physical byte span.
+The expander collects consecutive ordinary characters before appending to its
+output. It publishes the reader cursor through a local value snapshot
+(S9.1.2). Before the next control or group token executes, it sees the same
+emitted tokens and reader position as token-by-token stepping (D10.2.2v2).
+Host resource retries retain the pre-step checkpoint.
+
 ## Record admission defect exposed by this migration
 
 A sequence comparator stopped returning its chosen result after `step` acquired

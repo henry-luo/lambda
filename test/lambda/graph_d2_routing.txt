@@ -4,6 +4,9 @@
   valid: true,
   labels: ["API Request", "Query", "Results", "Response"],
   html_counts: [3, 4],
+  system_labels_beside_edges: true,
+  thick_arrow_clipping: [true, true, true, true],
+  small_arrow_clipping: [true, true, true, true],
   cylinder_rim: [true, true, true, true, true, true, true],
   directions: [{
       direction: "TB",

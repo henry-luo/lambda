@@ -3,14 +3,22 @@ import scan: lambda.io.source_scan
 let max_depth = 256
 let max_chain = 4096
 let max_token = 1024 * 1024
+let subgraph_keyword = "subgraph"
+let strict_keyword = "strict"
+let graph_keyword = "graph"
+let digraph_keyword = "digraph"
+let ascii_case_offset = ord("a") - ord("A")
 
 fn skip(s, pos) int^ => scan.trivia(s, pos, null, true)^
 fn id_start(b: int) bool => scan.ascii_alpha(b) or b == 95 or b >= 128
 fn id_byte(b: int) bool => id_start(b) or scan.digit(b)
 
-fn at_keyword(s, pos, word: string) bool^ {
+fn at_keyword(s, pos, word: string, initial) bool^ {
     let stop = pos + len(word)
-    return stop <= s.length and not id_byte(scan.byte(s, stop)^) and
+    let b = scan.byte(s, pos)^
+    // Reject ordinary ID prefixes before decoding and folding the keyword.
+    return (b == initial or b == initial - ascii_case_offset) and
+        stop <= s.length and not id_byte(scan.byte(s, stop)^) and
         lower(scan.text(s, pos, stop)^) == word
 }
 
@@ -72,8 +80,7 @@ fn html_id(s, st, start: int) map^ {
     return token(s, st, start, pos, "html", scan.text(s, start, pos)^)^
 }
 
-fn numeric_start(s, pos: int) bool^ {
-    let b = scan.byte(s, pos)^
+fn numeric_start(s, pos: int, b: int) bool^ {
     return scan.digit(b) or (b == 46 and scan.digit(scan.byte(s, pos + 1)^))
 }
 
@@ -88,7 +95,7 @@ fn id(s, st, pos: int) map^ {
     let b = scan.byte(s, pos)^
     if (b == 34) { return quoted_id(s, st, pos)^ }
     if (b == 60) { return html_id(s, st, pos)^ }
-    if (numeric_start(s, pos)^ or (b == 45 and numeric_start(s, pos + 1)^)) {
+    if (numeric_start(s, pos, b)^ or (b == 45 and numeric_start(s, pos + 1, scan.byte(s, pos + 1)^)^)) {
         let integer_stop = digit_end(s, if (b == 45) pos + 1 else pos)^
         let stop = if (scan.byte(s, integer_stop)^ == 46) digit_end(s, integer_stop + 1)^ else integer_stop
         return token(s, st, pos, stop, "numeric", scan.text(s, pos, stop)^)^
@@ -202,7 +209,7 @@ fn attributes(s, initial, start: int) map^ {
 }
 
 fn group(s, initial, start: int, depth: int) map^ {
-    let named = at_keyword(s, start, "subgraph")^
+    let named = at_keyword(s, start, subgraph_keyword, ord(subgraph_keyword))^
     let pos = if (named) skip(s, start + 8)^ else start
     let name = if (named and scan.byte(s, pos)^ != 123) id(s, initial, pos)^
         else {parsed_state:initial, next:pos, value:null}
@@ -236,7 +243,7 @@ fn group(s, initial, start: int, depth: int) map^ {
 }
 
 fn next_endpoint(s, st, pos: int, depth: int, operator: string) map^ {
-    if (scan.byte(s, pos)^ == 123 or at_keyword(s, pos, "subgraph")^) {
+    if (scan.byte(s, pos)^ == 123 or at_keyword(s, pos, subgraph_keyword, ord(subgraph_keyword))^) {
         let parsed = group(s, st, pos, depth)^;
         return {parsed_state:parsed.parsed_state, next:parsed.next,
             value:if (parsed.value == null) null else group_endpoint(s, parsed.value, pos, parsed.next, operator)^}
@@ -276,7 +283,7 @@ fn edge(s, initial, endpoint, start: int, first: int, depth: int) map^ {
 }
 
 fn statement(s, st, start: int, depth: int) map^ {
-    if (scan.byte(s, start)^ == 123 or at_keyword(s, start, "subgraph")^) {
+    if (scan.byte(s, start)^ == 123 or at_keyword(s, start, subgraph_keyword, ord(subgraph_keyword))^) {
         let parsed = group(s, st, start, depth)^
         if (parsed.value == null) { return parsed }
         let pos = skip(s, parsed.next)^
@@ -291,7 +298,7 @@ fn statement(s, st, start: int, depth: int) map^ {
     }
     let pos = skip(s, name.next)^
     let b = scan.byte(s, pos)^
-    let target = if (name.kind == "bare") lower(name.value) else null
+    let target = if (b == 91 and name.kind == "bare") lower(name.value) else null
     if (b == 91 and target in ["graph", "node", "edge"]) {
         let attrs = attributes(s, name.parsed_state, pos)^
         let children = attrs.children;
@@ -345,10 +352,11 @@ pub fn read(bytes: binary?) map^ {
     let s = scan.source(bytes)^
     if (s.length == 0) { return {root:null, errors:[]} }
     let start = skip(s, 0)^
-    let strict = at_keyword(s, start, "strict")^
+    let strict = at_keyword(s, start, strict_keyword, ord(strict_keyword))^
     let pos = if (strict) skip(s, start + 6)^ else start
-    let directed = not at_keyword(s, pos, "graph")^
-    let kind_end = if (directed) (if (at_keyword(s, pos, "digraph")^) pos + 7 else pos)
+    let directed = not at_keyword(s, pos, graph_keyword, ord(graph_keyword))^
+    let kind_end = if (directed)
+        (if (at_keyword(s, pos, digraph_keyword, ord(digraph_keyword))^) pos + len(digraph_keyword) else pos)
         else pos + 5
     let name_start = skip(s, kind_end)^
     var st = {statement_index:0, anonymous_index:0, errors:null}

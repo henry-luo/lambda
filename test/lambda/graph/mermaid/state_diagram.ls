@@ -47,7 +47,7 @@ let processing_note = annotation_for(scene_annotations, "Processing")
     [for (node in ((model.nodes(normalized.graph)) ^ { [] }))
       [node.id, model.tag(model.content_element(node))]]],
   html: [len(html_nodes), len(html_annotations),
-    [for (node in html_nodes) [node["data-node-id"], model.tag(node[0])]]],
+    [for (node in html_nodes) [node["data-node-id"], model.tag(if (node["data-shape"] == "diamond") node[1][0] else node[0])]]],
   render: [rendered.svg is string, len(scene_nodes), len(scene_edges), len(scene_annotations),
     all([for (node in scene_nodes) node.width > 0 and node.height > 0]),
     idle_note.x < idle.x, processing_note.x > processing.x,

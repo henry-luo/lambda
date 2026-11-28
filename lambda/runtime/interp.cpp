@@ -1517,26 +1517,11 @@ static bool interp_bind_declared_value(InterpFrame* f, LambdaAstDeclaratorNode* 
 typedef struct InterpStaticMemberNameEntry {
     const LambdaAstIdentNode* source;
     String* runtime_name;
+    uint32_t name_hash;
 } InterpStaticMemberNameEntry;
 
-static uint64_t interp_static_member_name_hash(const void* item,
-        uint64_t seed0, uint64_t seed1) {
-    const InterpStaticMemberNameEntry* entry =
-        (const InterpStaticMemberNameEntry*)item;
-    return hashmap_hash_xxhash3_bytes(&entry->source, sizeof(entry->source),
-        seed0, seed1);
-}
-
-static int interp_static_member_name_compare(const void* left, const void* right,
-        void* udata) {
-    (void)udata;
-    const InterpStaticMemberNameEntry* lhs =
-        (const InterpStaticMemberNameEntry*)left;
-    const InterpStaticMemberNameEntry* rhs =
-        (const InterpStaticMemberNameEntry*)right;
-    return lhs->source == rhs->source ? 0 :
-        (uintptr_t)lhs->source < (uintptr_t)rhs->source ? -1 : 1;
-}
+HASHMAP_DEFINE_PTRKEY_HASH(interp_static_member_name, InterpStaticMemberNameEntry,
+    source, hashmap_hash_pointer_fast_identity)
 
 static void interp_static_member_names_destroy(InterpState* state) {
     if (!state || !state->static_member_names) return;
@@ -1545,16 +1530,14 @@ static void interp_static_member_names_destroy(InterpState* state) {
 }
 
 // Dotted-member names are source facts, but their pooled runtime identity is
-// EvalContext-owned (D5.6.2). Link once per activation instead of storing a
-// foreign NamePool pointer in a reusable AST image.
-static Item interp_static_member_name_item(InterpFrame* frame,
-        const LambdaAstIdentNode* source) {
-    if (!frame || !frame->st || !source || !source->name) return ItemError;
+// EvalContext-owned (D5.6.2). Cache the normalized name and its shape-table
+// hash together so repeated structural map reads can use the same probe.
+static String* interp_static_member_name(InterpFrame* frame,
+        const LambdaAstIdentNode* source, uint32_t* name_hash = NULL) {
+    if (!frame || !frame->st || !source || !source->name) return NULL;
     InterpState* state = frame->st;
     if (!state->static_member_names) {
-        state->static_member_names = hashmap_new(sizeof(InterpStaticMemberNameEntry),
-            32, 0, 0, interp_static_member_name_hash,
-            interp_static_member_name_compare, NULL, NULL);
+        state->static_member_names = interp_static_member_name_new(32);
     }
     InterpStaticMemberNameEntry probe = {.source = source};
     if (state->static_member_names) {
@@ -1562,17 +1545,26 @@ static Item interp_static_member_name_item(InterpFrame* frame,
             (const InterpStaticMemberNameEntry*)hashmap_get(
                 state->static_member_names, &probe);
         if (cached && cached->runtime_name) {
-            return (Item){.item = s2it(cached->runtime_name)};
+            if (name_hash) *name_hash = cached->name_hash;
+            return cached->runtime_name;
         }
     }
 
     String* runtime_name = heap_create_name(source->name->chars, source->name->len);
-    if (!runtime_name) return ItemError;
+    if (!runtime_name) return NULL;
+    probe.name_hash = typemap_name_hash(runtime_name->chars, (int)runtime_name->len);
+    if (name_hash) *name_hash = probe.name_hash;
     if (state->static_member_names) {
         probe.runtime_name = runtime_name;
         hashmap_set(state->static_member_names, &probe);
     }
-    return (Item){.item = s2it(runtime_name)};
+    return runtime_name;
+}
+
+static Item interp_static_member_name_item(InterpFrame* frame,
+        const LambdaAstIdentNode* source) {
+    String* name = interp_static_member_name(frame, source);
+    return name ? (Item){.item = s2it(name)} : ItemError;
 }
 
 static Item interp_eval_cow_path_key(InterpFrame* f, AstNode* key_node,
@@ -5832,7 +5824,6 @@ static bool interp_const_folded_value(InterpFrame* f, AstNode* node, Item* out) 
     }
     if (node->node_type == AST_NODE_MAP && ((AstMapNode*)node)->interp_destination)
         return false;  // the pooled inferred layout cannot certify the destination
-    if (node->const_kind == AST_CONST_NONE) return false;
     Script* owner = f ? f->module : NULL;
     return interp_const_slot_value(owner, node, out);
 }
@@ -6106,7 +6097,8 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
     }
     // the plan proves these are this function's own slots, so a surrounding
     // view's state overlay cannot shadow them (D7.2.3 / S12.1.3).
-    if (node->node_type == AST_NODE_IDENT && node->const_kind == AST_CONST_NONE &&
+    bool has_const = node->const_kind != AST_CONST_NONE;
+    if (node->node_type == AST_NODE_IDENT && !has_const &&
             ((const LambdaAstIdentNode*)node)->interp_frame_slot_read &&
             f->st->mode == EvalMode::RUNTIME) {
         uint32_t slot = (uint32_t)((const LambdaAstIdentNode*)node)->entry->slot;
@@ -6118,7 +6110,7 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
     // a runtime slot -- the slab is empty at compile time. A fact is only
     // published after passing its own agreement check, so consuming one mid-pass
     // cannot observe a half-formed value (RC9, RC3.3).
-    {
+    if (has_const) {
         Item folded;
         if (interp_const_folded_value(f, node, &folded)) return folded;
     }
@@ -6298,10 +6290,20 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         if (int wildcard = ast_member_wildcard(field)) {
             return wildcard == 1 ? fn_step_items(obj.get()) : fn_step_closure(obj.get());
         }
-        if (field->interp_field && get_type_id(obj.get()) == LMD_TYPE_MAP &&
+        TypeId object_type = get_type_id(obj.get());
+        if (field->interp_field && object_type == LMD_TYPE_MAP &&
                 obj.get().map->type == field->interp_field->shape) {
             // the immutable shape predicts this field; misses keep shared lookup semantics
             return map_shape_field_to_item(obj.get().map->data, field->interp_field->field);
+        }
+        if (object_type == LMD_TYPE_MAP && obj.get().map &&
+                field->field && field->field->node_type == AST_NODE_IDENT &&
+                !lambda_value_nominal(object_type, obj.get().container)) {
+            // use the ordinary shape walk, including spreads and Input-owned maps
+            uint32_t name_hash;
+            String* name = interp_static_member_name(f,
+                (LambdaAstIdentNode*)field->field, &name_hash);
+            if (name) return map_get_canonical_name(obj.get().map, name, name_hash);
         }
         Item key = interp_eval_member_key(f, field->field);
         Scratch key_slot(f);
@@ -6311,7 +6313,7 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         // (transpile_member makes the same split). The runtime type is the
         // authority here, exactly as the JIT's obj_tid check is.
         if (field->field && field->field->node_type == AST_NODE_IDENT &&
-                get_type_id(obj.get()) == LMD_TYPE_PATH) {
+                object_type == LMD_TYPE_PATH) {
             const char* k = ((LambdaAstIdentNode*)field->field)->name->chars;
             if (path_is_property_name(k)) return item_attr(obj.get(), k);
         }

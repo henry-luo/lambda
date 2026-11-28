@@ -4304,6 +4304,15 @@ static int lambda_main_impl(int argc, char *argv[]) {
         return lambda_main_finish(exit_code);
     }
 
+#ifndef LAMBDA_NO_MIR
+    // Repeated layout helpers can queue compiler work while the viewer is
+    // preparing its first frame. Delay promotion until use is sustained (D8.3.2).
+    bool view_command = argc >= 2 && strcmp(argv[1], "view") == 0;
+    if (view_command || (argc >= 2 && strcmp(argv[1], "edit") == 0)) {
+        interp_set_func_jit_threshold_default(view_command ? 80 : 32);
+    }
+#endif
+
     // Handle edit command: open one existing local document in the lambda.edit
     // authoring application. Format selection belongs to the package registry,
     // so the CLI only checks that a local file exists (Radiant_Design_Edit_Mode §1).

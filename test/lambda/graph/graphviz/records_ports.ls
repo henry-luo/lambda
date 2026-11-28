@@ -1,6 +1,8 @@
 import layout: lambda.graph.layout
 import model: lambda.graph.model
 import normalize: lambda.graph.normalize
+import records: lambda.graph.graphviz.records
+import route_geometry: lambda.graph.route_geometry
 import transform: lambda.graph.transform
 
 fn children(value, wanted) => [
@@ -26,7 +28,7 @@ let root_row = model.element_children(model.element_children(root_table)[0])[0]
 let root_cells = model.element_children(root_row)
 let vertical_table = model.element_children(root_cells[0])[0]
 let vertical_rows = model.element_children(model.element_children(vertical_table)[0])
-let middle_cell = model.element_children(vertical_rows[1])[0]
+let middle_cell = model.element_children(vertical_rows[0])[1]
 let horizontal_table = model.element_children(middle_cell)[0]
 let result = layout.compute({
   nodes: [for (node in nodes) {
@@ -89,15 +91,47 @@ let measured_result = layout.from_velmts(
         'data-from-port': "bottom", 'data-directed': "true"}}
   ], null)
 let measured_node = item_by_id(measured_result.nodes, "measured")
+let grouped = records.lower("a | { <f0> foo | x | <f1> bar } | b")
+let grouped_row = model.element_children(model.element_children(grouped.content)[0])[0]
+let grouped_cells = model.element_children(grouped_row)
+let invalid_group_tail = records.lower("{foo|bar} text")
+let hashtable_source = (input("test/lambda/graph/upstream/dot/hashtable.gv",
+  {type:"graph", flavor:"dot"})) ^ { null }
+let hashtable_graph = normalize.normalize(hashtable_source).graph
+let hashtable_node = item_by_id(model.nodes(hashtable_graph), "node0")
+let hashtable_table = model.content_items(hashtable_node)[0]
+// The lower nested field is exposed on the bottom, so the edge must route around the record.
+let exposed = layout.compute({nodes:[
+  {id:"a",width:90,height:34,ports:[{id:"f0",side:"auto",x_offset:0.19,y_offset:0.5,
+    left_offset:0,top_offset:0,right_offset:0.38,bottom_offset:1}]},
+  {id:"b",width:78,height:100,ports:[{id:"f1",side:"auto",x_offset:0.49,y_offset:0.835,
+    left_offset:0.26,top_offset:0.67,right_offset:0.72,bottom_offset:1}]}],
+  edges:[{id:"ab",from:"a",to:"b",from_port:"f0",to_port:"f1"}],
+  direction:"TB",route_mode:"curved"})
+let exposed_a = item_by_id(exposed.nodes, "a")
+let exposed_b = item_by_id(exposed.nodes, "b")
+let exposed_edge = exposed.edges[0]
+let exposed_end = exposed_edge.points[len(exposed_edge.points)-1]
+let samples = route_geometry.sample_points(exposed_edge)
 
 {
   valid: normalized.valid,
   diagnostics: [for (value in normalized.diagnostics) value.code],
   content_tag: model.tag(model.content_items(record)[0]),
+  hashtable_record: [hashtable_table["data-record-axis"] == "vertical",
+    contains(string(hashtable_table.style), "height:192px")],
   nested_axes: [root_table["data-record-axis"], vertical_table["data-record-axis"],
     horizontal_table["data-record-axis"]],
   ports: [for (port in ports) [port.id, port.side, port.offset]],
   nested_ports: [for (port in nested_ports) [port.id, port.side, port.offset]],
+  group_spacing: [grouped.valid, len(grouped_cells),
+    len(model.element_children(grouped_cells[1])), invalid_group_tail.valid],
+  port_exposure: [abs(exposed_edge.points[0].y - exposed_a.y - exposed_a.height / 2) < 0.001,
+    exposed_edge.points[0].x < exposed_a.x,
+    abs(exposed_end.y - exposed_b.y - exposed_b.height / 2) < 0.001,
+    not (true in [for (point in samples) point.x > exposed_b.x - exposed_b.width / 2 and
+      point.x < exposed_b.x + exposed_b.width / 2 and point.y > exposed_b.y - exposed_b.height / 2 and
+      point.y < exposed_b.y + exposed_b.height / 2])],
   html_ports: [for (port in ((children(html, "port")) ^ { [] })) [port["data-node-id"],
     port["data-port-id"], port["data-port-side"], port["data-port-offset"]]],
   starts: [for (edge in ((result.edges) ^ { [] })) [edge.from_port, edge.points[0].x, edge.points[0].y]],

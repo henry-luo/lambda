@@ -165,7 +165,7 @@ pn reconcile_previews(owner,st,previews,previous) {
             if (caption_changed)
                 dom.set_text_content(dom.query_selector(button,".thumb-caption"),v.thumbnail_title(scene)^)
             if ((previous.base!=previews.base or previous.structure.width!=structure.width or
-                previous.structure.height!=structure.height or {*:before,index:scene.index}!=scene)^)
+                previous.structure.height!=structure.height or not v.same_canvas(before,scene,false)^)^)
                 refresh_preview(bank,st,i,key)^
             if (resize) {
                 u.style(dom.query_selector(button,".thumb-paper"),"height",c.px(width*st.plan.height/st.plan.width))^
@@ -233,16 +233,17 @@ pub pn publish(owner,st,canvas=true,opened=false) {
     let previews = {structure:preview_structure,slides:plan.slides,base:st.base}
     let stage = if (canvas) {width:plan.width,height:plan.height,slide:scene,base:st.base} else previous.stage
     let preview_structure_changed = canvas and structure!=preview_structure
-    let stage_changed = canvas and previous.stage!=stage
+    let stage_changed = canvas and (previous.stage.width!=stage.width or previous.stage.height!=stage.height or
+        previous.stage.base!=stage.base or not v.same_canvas(previous.stage.slide,scene)^)
     let thumbnail_focus = canvas and (preview_structure_changed or previous.index!=st.index) and
         any([for (item in dom.query_selector_all(node(owner,"thumbnails"),"[data-slide]")) dom.focused(item)])
-    let spelling_input = {stage:stage,skip:if (st.inline==null) null else st.selected,paused:st.show==true}
+    let spelling_input = {skip:if (st.inline==null) null else st.selected,paused:st.show==true}
     var published_previews = previous.previews;
     if (canvas) {
         if (preview_structure_changed) {
             published_previews = reconcile_previews(owner,st,previews,previous.previews)
         } else if ((previous.previews.base!=st.base or slides_changed)^) {
-            for (i,scene in plan.slides where ((previous.previews.base!=st.base or previous.previews.slides[i]!=scene)^)) {
+            for (i,scene in plan.slides where ((previous.previews.base!=st.base or not v.same_canvas(previous.previews.slides[i],scene)^)^)) {
                 refresh_preview(owner,st,i,previous.previews.keys[i])^
             }
             published_previews = {*:previous.previews,*:previews}
@@ -260,7 +261,8 @@ pub pn publish(owner,st,canvas=true,opened=false) {
     if ((st.published_targets!=scene.targets)^)
         u.markup(node(owner,"object-list"),join([for (option in v.object_options(st)) format(option,'xml')],""))^
     selection(owner,st.selected,obj)^
-    if ((canvas and (replaced or previous.spelling!=spelling_input))^)
+    if ((canvas and (replaced or stage_changed or previous.spelling.skip!=spelling_input.skip or
+        previous.spelling.paused!=spelling_input.paused))^)
         spelling.update_canvas(owner,spelling_input.skip,spelling_input.paused,replaced)^
     for (key,val in {'data-selected':st.selected,'data-x':obj.x,'data-y':obj.y,
         'data-width':obj.width,'data-height':obj.height,'data-editing':editing}) u.attr(owner,string(key),val)
